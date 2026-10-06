@@ -12,6 +12,10 @@ from contextor.core.domain.lineage_facts import (
     build_parameter_value_slot, build_return_slot, build_module_global_slot, ParameterKind,
 )
 from contextor.core.lineage_query.backend import LineageBackendMetadata
+from contextor.core.lineage_query.index import (
+    ReexportLineageHop,
+    ReexportLineageResolution,
+)
 from contextor.core.lineage_query.service import (
     SYMBOL_LINEAGE_SECTION_ORDER, DirectLineageFacts, LexicalScopeFacts,
     LineageAnchorMatch, LineageFlowMatch, LineageInterfaceDescriptorMatch, LineageSurfaceMatch,
@@ -605,7 +609,7 @@ def test_symbol_lineage_renderer_fails_closed_on_selection_plan_mismatch():
         render_symbol_lineage_response(
             selected,
             mode="fetch",
-            sections=("interface",),
+            sections=SYMBOL_LINEAGE_SECTION_ORDER,
             representation="indexed",
         )
 
@@ -739,6 +743,151 @@ def test_symbol_lineage_represented_preview_sizes_candidate_with_freshness():
         mcp_rep.serialized_json_bytes(
             candidate
         )
+    )
+
+
+def test_reexport_chain_is_top_level_and_representation_independent():
+    selected = _selected_lineage_fixture()
+    chain = ReexportLineageResolution(
+        status="resolved",
+        query="c::exported",
+        canonical_target="a::foo",
+        hops=(
+            ReexportLineageHop(
+                "c::exported",
+                "b::public_foo",
+                "binding",
+            ),
+            ReexportLineageHop(
+                "b::public_foo",
+                "a::foo",
+                "binding",
+            ),
+        ),
+    )
+    owner_names = _owner_names_fixture()
+    chain_payload = {
+        "status": "resolved",
+        "query": "c::exported",
+        "canonical_target": "a::foo",
+        "hops": [
+            {
+                "source": "c::exported",
+                "target": "b::public_foo",
+                "kind": "binding",
+            },
+            {
+                "source": "b::public_foo",
+                "target": "a::foo",
+                "kind": "binding",
+            },
+        ],
+    }
+
+    baseline_named = build_symbol_lineage_represented_payload(
+        selected,
+        representation="named",
+        owner_names=owner_names,
+    )
+    baseline_indexed = build_symbol_lineage_represented_payload(
+        selected,
+        representation="indexed",
+        owner_names=owner_names,
+    )
+    named = build_symbol_lineage_represented_payload(
+        selected,
+        representation="named",
+        owner_names=owner_names,
+        reexport_chain=chain,
+    )
+    indexed = build_symbol_lineage_represented_payload(
+        selected,
+        representation="indexed",
+        owner_names=owner_names,
+        reexport_chain=chain,
+    )
+
+    assert "reexport_chain" not in baseline_named
+    assert "reexport_chain" not in baseline_indexed
+    assert named["reexport_chain"] == indexed["reexport_chain"] == (
+        chain_payload
+    )
+    assert named["sections"] == baseline_named["sections"]
+    assert indexed["sections"] == baseline_indexed["sections"]
+    assert "reexport_chain" not in named["sections"]
+    assert "reexport_chain" not in indexed["sections"]
+
+    named_preview = build_symbol_lineage_preview(
+        selected,
+        reexport_chain=chain,
+    )
+    assert named_preview["reexport_chain"] == chain_payload
+
+    rendered_named = json.loads(
+        render_symbol_lineage_response(
+            selected,
+            mode="fetch",
+            sections=SYMBOL_LINEAGE_SECTION_ORDER,
+            representation="named",
+            owner_names=owner_names,
+            reexport_chain=chain,
+        )
+    )
+    rendered_indexed = json.loads(
+        render_symbol_lineage_response(
+            selected,
+            mode="fetch",
+            sections=SYMBOL_LINEAGE_SECTION_ORDER,
+            representation="indexed",
+            owner_names=owner_names,
+            reexport_chain=chain,
+        )
+    )
+    rendered_named_without_chain = json.loads(
+        render_symbol_lineage_response(
+            selected,
+            mode="fetch",
+            sections=SYMBOL_LINEAGE_SECTION_ORDER,
+            representation="named",
+            owner_names=owner_names,
+        )
+    )
+    rendered_indexed_without_chain = json.loads(
+        render_symbol_lineage_response(
+            selected,
+            mode="fetch",
+            sections=SYMBOL_LINEAGE_SECTION_ORDER,
+            representation="indexed",
+            owner_names=owner_names,
+        )
+    )
+    assert rendered_named["reexport_chain"] == (
+        rendered_indexed["reexport_chain"]
+    ) == chain_payload
+    assert rendered_named["sections"] == (
+        rendered_named_without_chain["sections"]
+    )
+    assert rendered_indexed["sections"] == (
+        rendered_indexed_without_chain["sections"]
+    )
+
+    preview = build_symbol_lineage_represented_preview(
+        selected,
+        representation="indexed",
+        owner_names=owner_names,
+        candidate_mode="fetch",
+        reexport_chain=chain,
+    )
+    candidate = build_symbol_lineage_represented_payload(
+        selected,
+        representation="indexed",
+        owner_names=owner_names,
+        reexport_chain=chain,
+    )
+    candidate["mode"] = "fetch"
+    assert preview["reexport_chain"] == chain_payload
+    assert preview["candidate_response_bytes"] == (
+        mcp_rep.serialized_json_bytes(candidate)
     )
 
 

@@ -6,7 +6,7 @@
   ],
   "parameters": [
     "repo_path (string, required): canonical repository root.",
-    "symbol (string, required): active artifact ID or exact module::symbol identity; plain leaves and fuzzy identities are not accepted.",
+    "symbol (string, required): active artifact ID, exact canonical module::symbol identity, exact package façade module::symbol identity, or exact canonical re-export alias module::symbol identity; plain leaves and fuzzy identities are not accepted.",
     "mode (auto|preview|fetch, default \"auto\"): progressive disclosure mode. auto evaluates all canonical lineage sections and returns the complete represented payload only when it fits the 5120-byte auto threshold; preview returns section costs without section payloads; fetch requires an explicit non-empty sections list.",
     "sections (array or null, default null): explicit semantic sections for fetch mode only. Valid names are interface, connections, bindings, parameter_flows, calls_interfaces, returns, state, callbacks, surfaces, and unresolved_dynamic_boundaries.",
     "representation (named|indexed|auto, default \"auto\"): semantic-owner identity representation. named uses canonical module/artifact names when available; indexed retains canonical owner IDs; auto applies exact serialized-size negotiation.",
@@ -19,6 +19,8 @@
     "Semantic sections are selected before transport. auto and preview request the complete canonical section set; fetch sends only the requested sections in canonical section order.",
     "Sections describe the target interface, direct cross-source connections, bindings, parameter flows, calls/interfaces, returns, state access, callbacks, surfaces, and unresolved/dynamic boundaries. get_symbol_lineage does not perform recursive lineage traversal.",
     "Representation applies only to canonical SemanticEndpoint owners. Semantic owners may be module IDs or artifact IDs. Indexed output exposes lookup_index_entries as the resolver for both ID kinds; occurrence and symbolic endpoint identities are not rewritten.",
+    "When an exact re-export alias resolves, the canonical target and semantic sections describe the real origin owner. An optional top-level reexport_chain reports the query identity and each immediate binding or star hop; it is not included in sections or semantic-owner representation conversion.",
+    "A re-export cycle or target outside the repository returns status=unresolved with error=reexport_cycle or error=target_outside_repository and an explanatory reexport_chain.",
     "auto selects indexed representation only when named identities are unavailable or indexed output saves at least 512 serialized bytes; otherwise it emits named output.",
     "For mode=auto, a represented complete candidate above 5120 UTF-8 bytes becomes a representation-aware preview before the general large-output guard runs. A candidate exactly at 5120 bytes may be returned.",
     "The selected final response uses the shared 15360-byte output guard. Explicit fetch above that threshold requires allow_large_output=true.",
@@ -32,6 +34,7 @@
   ],
   "errors": [
     "Invalid mode, section selection, representation, allow_large_output, repository path, or symbol shape returns a controlled error response before lineage execution where applicable.",
+    "Re-export alias cycles and targets that cannot be mapped to a real repository module return status=unresolved; error is reexport_cycle or target_outside_repository, respectively, and reexport_chain carries the attempted alias path.",
     "canonical_live_unavailable means no verified running LIVE authority exists; the tool does not start one automatically.",
     "canonical_live_transport_error and canonical_query_transport_error report authority/IPC transport failure without snapshot fallback.",
     "canonical_query_response_invalid and canonical_query_revision_mismatch fail closed on malformed or cross-revision narrow responses.",

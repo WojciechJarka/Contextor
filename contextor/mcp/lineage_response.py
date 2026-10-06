@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from collections.abc import Mapping
 
 from contextor.core.domain.lineage_facts import MaterializedOccurrenceRef, MaterializedSymbolicRef, SemanticEndpoint
+from contextor.core.lineage_query.index import ReexportLineageResolution
 from contextor.core.lineage_query.service import (
     SYMBOL_LINEAGE_SECTION_ORDER,
     LineageFlowMatch, LineageSurfaceMatch, SelectedSymbolLineageFacts, TargetInterfaceFacts,
@@ -114,6 +115,7 @@ def build_symbol_lineage_payload(
     selected: SelectedSymbolLineageFacts,
     *,
     state_freshness: Mapping[str, object] | None = None,
+    reexport_chain: ReexportLineageResolution | None = None,
 ) -> dict:
     if not isinstance(
         selected,
@@ -158,17 +160,46 @@ def build_symbol_lineage_payload(
     result["sections"] = _section_payloads(
         selected
     )
+    if reexport_chain is not None:
+        result["reexport_chain"] = build_reexport_lineage_payload(
+            reexport_chain
+        )
     return result
+
+
+def build_reexport_lineage_payload(
+    resolution: ReexportLineageResolution,
+) -> dict:
+    if not isinstance(resolution, ReexportLineageResolution):
+        raise TypeError("resolution must be ReexportLineageResolution.")
+    payload = {
+        "status": resolution.status,
+        "query": resolution.query,
+        "canonical_target": resolution.canonical_target,
+        "hops": [
+            {
+                "source": hop.source,
+                "target": hop.target,
+                "kind": hop.kind,
+            }
+            for hop in resolution.hops
+        ],
+    }
+    if resolution.reason is not None:
+        payload["reason"] = resolution.reason
+    return payload
 
 
 def build_symbol_lineage_preview(
     selected: SelectedSymbolLineageFacts,
     *,
     state_freshness: Mapping[str, object] | None = None,
+    reexport_chain: ReexportLineageResolution | None = None,
 ) -> dict:
     payload = build_symbol_lineage_payload(
         selected,
         state_freshness=state_freshness,
+        reexport_chain=reexport_chain,
     )
     result = {
         "status": "resolved",
@@ -203,6 +234,10 @@ def build_symbol_lineage_preview(
         result["state_freshness"] = payload[
             "state_freshness"
         ]
+    if "reexport_chain" in payload:
+        result["reexport_chain"] = payload[
+            "reexport_chain"
+        ]
     return result
 
 
@@ -234,6 +269,7 @@ def build_symbol_lineage_represented_payload(
     representation: str = "auto",
     owner_names: Mapping[str, str] | None = None,
     state_freshness: Mapping[str, object] | None = None,
+    reexport_chain: ReexportLineageResolution | None = None,
 ) -> dict:
     if not isinstance(selected, SelectedSymbolLineageFacts): raise TypeError("selected must be SelectedSymbolLineageFacts.")
     if not isinstance(representation, str): raise TypeError("representation must be a string.")
@@ -245,6 +281,7 @@ def build_symbol_lineage_represented_payload(
     base = build_symbol_lineage_payload(
         selected,
         state_freshness=state_freshness,
+        reexport_chain=reexport_chain,
     )
     missing = tuple(owner for owner in _semantic_owner_ids(base) if owner_names is None or owner not in owner_names)
     indexed = dict(base); indexed.update({"representation": "indexed", "requested_representation": requested, "resolver": {"id_kinds": ["module", "artifact"], "resolve_via": "lookup_index_entries"}})
@@ -274,12 +311,14 @@ def _represented_response_candidate(
     representation: str,
     owner_names: Mapping[str, str] | None,
     state_freshness: Mapping[str, object] | None,
+    reexport_chain: ReexportLineageResolution | None,
 ) -> dict:
     result = build_symbol_lineage_represented_payload(
         selected,
         representation=representation,
         owner_names=owner_names,
         state_freshness=state_freshness,
+        reexport_chain=reexport_chain,
     )
     result["mode"] = mode
     return result
@@ -292,6 +331,7 @@ def build_symbol_lineage_represented_preview(
     owner_names: Mapping[str, str] | None = None,
     state_freshness: Mapping[str, object] | None = None,
     candidate_mode: str = "fetch",
+    reexport_chain: ReexportLineageResolution | None = None,
 ) -> dict:
     if candidate_mode not in {"auto", "fetch"}:
         raise ValueError(
@@ -304,6 +344,7 @@ def build_symbol_lineage_represented_preview(
         representation=representation,
         owner_names=owner_names,
         state_freshness=state_freshness,
+        reexport_chain=reexport_chain,
     )
     sections = candidate["sections"]
 
@@ -350,6 +391,11 @@ def build_symbol_lineage_represented_preview(
             "state_freshness"
         ]
 
+    if "reexport_chain" in candidate:
+        result["reexport_chain"] = candidate[
+            "reexport_chain"
+        ]
+
     if "resolver" in candidate:
         result["resolver"] = candidate["resolver"]
 
@@ -365,6 +411,7 @@ def render_symbol_lineage_response(
     owner_names: Mapping[str, str] | None = None,
     state_freshness: Mapping[str, object] | None = None,
     allow_large_output: bool = False,
+    reexport_chain: ReexportLineageResolution | None = None,
 ) -> str:
     if not isinstance(
         selected,
@@ -399,6 +446,7 @@ def render_symbol_lineage_response(
             owner_names=owner_names,
             state_freshness=state_freshness,
             candidate_mode="fetch",
+            reexport_chain=reexport_chain,
         )
         serialized = json.dumps(
             result,
@@ -425,6 +473,7 @@ def render_symbol_lineage_response(
         representation=representation,
         owner_names=owner_names,
         state_freshness=state_freshness,
+        reexport_chain=reexport_chain,
     )
     candidate_bytes = (
         mcp_rep.serialized_json_bytes(
@@ -444,6 +493,7 @@ def render_symbol_lineage_response(
                 owner_names=owner_names,
                 state_freshness=state_freshness,
                 candidate_mode="auto",
+                reexport_chain=reexport_chain,
             )
         )
         preview["auto_fetch"] = {

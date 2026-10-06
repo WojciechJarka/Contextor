@@ -4,6 +4,10 @@ from types import SimpleNamespace
 import pytest
 
 from contextor.core.lineage_query.live_query import LiveSymbolLineageQueryResult
+from contextor.core.lineage_query.index import (
+    ReexportLineageHop,
+    ReexportLineageResolution,
+)
 from contextor.core.lineage_query.service import (
     SYMBOL_LINEAGE_SECTION_ORDER,
     LineageTargetResolution,
@@ -23,10 +27,10 @@ def _target(artifact_id="A17/2", qualified_name="pkg.mod::handler"):
     return ResolvedLineageTarget(artifact_id=artifact_id, qualified_name=qualified_name, module_name=module_name, symbol_name=symbol_name, resolution="exact_id")
 
 
-def _transport_result(resolution, *, selected=None, owner_names=None, revision=12, unavailable_reason=None):
+def _transport_result(resolution, *, selected=None, owner_names=None, revision=12, unavailable_reason=None, reexport_chain=None):
     return LiveSymbolLineageTransportResult(
         status="ok", revision=revision,
-        result=LiveSymbolLineageQueryResult(resolution=resolution, selected=selected, unavailable_reason=unavailable_reason, owner_names={} if owner_names is None else owner_names, state_freshness=_freshness(revision)),
+        result=LiveSymbolLineageQueryResult(resolution=resolution, selected=selected, unavailable_reason=unavailable_reason, owner_names={} if owner_names is None else owner_names, state_freshness=_freshness(revision), reexport_chain=reexport_chain),
     )
 
 
@@ -44,6 +48,65 @@ def test_get_symbol_lineage_auto_plans_before_one_narrow_query_and_delegates_ren
     assert json.loads(result) == {"status": "resolved"}
     assert observed["narrow"] == {"root": tmp_path.resolve(), "query": "A17/2", "sections": SYMBOL_LINEAGE_SECTION_ORDER}
     assert observed["render"] == {"selected": marker, "mode": "auto", "sections": None, "representation": "named", "owner_names": {"A17/2": "pkg.mod::handler"}, "state_freshness": _freshness(), "allow_large_output": False}
+
+
+def test_get_symbol_lineage_forwards_resolved_reexport_chain_to_renderer(
+    tmp_path,
+    monkeypatch,
+):
+    marker = SimpleNamespace()
+    target = _target("A17/2", "a::foo")
+    chain = ReexportLineageResolution(
+        status="resolved",
+        query="c::exported",
+        canonical_target="a::foo",
+        hops=(
+            ReexportLineageHop(
+                "c::exported",
+                "b::public_foo",
+                "binding",
+            ),
+            ReexportLineageHop(
+                "b::public_foo",
+                "a::foo",
+                "binding",
+            ),
+        ),
+    )
+    observed = {}
+
+    monkeypatch.setattr(
+        mcp_runtime,
+        "query_live_symbol_lineage_narrow",
+        lambda *_args, **_kwargs: _transport_result(
+            LineageTargetResolution(
+                status="resolved",
+                query="c::exported",
+                target=target,
+            ),
+            selected=marker,
+            reexport_chain=chain,
+        ),
+    )
+    monkeypatch.setattr(
+        tool,
+        "render_symbol_lineage_response",
+        lambda selected, **kwargs: observed.update(
+            {"selected": selected, **kwargs}
+        ) or '{"status":"resolved"}',
+    )
+
+    result = json.loads(
+        tool.get_symbol_lineage(
+            str(tmp_path),
+            "c::exported",
+            representation="named",
+        )
+    )
+
+    assert result["status"] == "resolved"
+    assert observed["selected"] is marker
+    assert observed["reexport_chain"] is chain
 
 
 def test_get_symbol_lineage_fetch_sends_canonical_section_order_but_preserves_request_for_renderer(tmp_path, monkeypatch):
@@ -93,6 +156,101 @@ def test_get_symbol_lineage_preserves_ambiguity_candidates_without_guessing(tmp_
     result = json.loads(tool.get_symbol_lineage(str(tmp_path), "pkg.mod::handler"))
     assert result["status"] == "ambiguous"
     assert [candidate["artifact_id"] for candidate in result["candidates"]] == ["A17/2", "A18/1"]
+
+
+def test_get_symbol_lineage_returns_cycle_as_unresolved_without_renderer(
+    tmp_path,
+    monkeypatch,
+):
+    chain = ReexportLineageResolution(
+        status="cycle",
+        query="cycle_a::value",
+        hops=(
+            ReexportLineageHop(
+                "cycle_a::value",
+                "cycle_b::value",
+                "binding",
+            ),
+            ReexportLineageHop(
+                "cycle_b::value",
+                "cycle_a::value",
+                "binding",
+            ),
+        ),
+        reason="reexport_cycle",
+    )
+    monkeypatch.setattr(
+        mcp_runtime,
+        "query_live_symbol_lineage_narrow",
+        lambda *_args, **_kwargs: _transport_result(
+            LineageTargetResolution(
+                status="unresolved",
+                query="cycle_a::value",
+            ),
+            reexport_chain=chain,
+        ),
+    )
+    monkeypatch.setattr(
+        tool,
+        "render_symbol_lineage_response",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("unresolved re-export rendered as resolved")
+        ),
+    )
+
+    result = json.loads(
+        tool.get_symbol_lineage(
+            str(tmp_path),
+            "cycle_a::value",
+        )
+    )
+
+    assert result["status"] == "unresolved"
+    assert result["error"] == "reexport_cycle"
+    assert result["reexport_chain"]["status"] == "cycle"
+    assert result["reexport_chain"]["reason"] == "reexport_cycle"
+    assert result["state_freshness"] == _freshness()
+
+
+def test_get_symbol_lineage_returns_external_reexport_as_unresolved(
+    tmp_path,
+    monkeypatch,
+):
+    chain = ReexportLineageResolution(
+        status="unresolved",
+        query="external_dst::public",
+        reason="target_outside_repository",
+    )
+    monkeypatch.setattr(
+        mcp_runtime,
+        "query_live_symbol_lineage_narrow",
+        lambda *_args, **_kwargs: _transport_result(
+            LineageTargetResolution(
+                status="unresolved",
+                query="external_dst::public",
+            ),
+            reexport_chain=chain,
+        ),
+    )
+    monkeypatch.setattr(
+        tool,
+        "render_symbol_lineage_response",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("external unresolved re-export was rendered")
+        ),
+    )
+
+    result = json.loads(
+        tool.get_symbol_lineage(
+            str(tmp_path),
+            "external_dst::public",
+        )
+    )
+
+    assert result["status"] == "unresolved"
+    assert result["error"] == "target_outside_repository"
+    assert result["reexport_chain"]["status"] == "unresolved"
+    assert result["reexport_chain"]["canonical_target"] is None
 
 
 def test_get_symbol_lineage_rejects_resolved_result_without_selected_facts(tmp_path, monkeypatch):

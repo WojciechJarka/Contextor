@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from contextor.core.lineage_query.index import ReexportLineageResolution
 from contextor.core.lineage_query.service import (
     LineageTargetResolution,
     ResolvedLineageTarget,
@@ -10,6 +11,7 @@ from contextor.core.lineage_query.service import (
 from contextor.mcp import representation as mcp_rep
 from contextor.mcp import runtime as mcp_runtime
 from contextor.mcp.lineage_response import (
+    build_reexport_lineage_payload,
     plan_symbol_lineage_response,
     render_symbol_lineage_response,
 )
@@ -38,6 +40,7 @@ def _resolution_response(
     *,
     state_freshness: dict[str, object],
     unavailable_reason: str | None = None,
+    reexport_chain: ReexportLineageResolution | None = None,
 ) -> str:
     if resolution.status == "unavailable":
         return json.dumps(
@@ -65,6 +68,20 @@ def _resolution_response(
     if resolution.status == "not_found":
         return json.dumps(
             {"status": "not_found", "symbol": resolution.query, "state_freshness": state_freshness},
+            indent=2,
+            ensure_ascii=False,
+        )
+    if resolution.status == "unresolved" and reexport_chain is not None:
+        return json.dumps(
+            {
+                "status": "unresolved",
+                "symbol": resolution.query,
+                "error": reexport_chain.reason,
+                "reexport_chain": build_reexport_lineage_payload(
+                    reexport_chain
+                ),
+                "state_freshness": state_freshness,
+            },
             indent=2,
             ensure_ascii=False,
         )
@@ -148,6 +165,7 @@ def get_symbol_lineage(
             resolution,
             state_freshness=result.state_freshness,
             unavailable_reason=result.unavailable_reason,
+            reexport_chain=result.reexport_chain,
         )
     if result.selected is None:
         return _error(
@@ -155,14 +173,19 @@ def get_symbol_lineage(
             message="Resolved lineage target returned no selected facts.",
         )
     try:
+        render_kwargs = {
+            "mode": plan.mode,
+            "sections": requested_sections,
+            "representation": normalized_representation,
+            "owner_names": result.owner_names,
+            "state_freshness": result.state_freshness,
+            "allow_large_output": allow_large_output,
+        }
+        if result.reexport_chain is not None:
+            render_kwargs["reexport_chain"] = result.reexport_chain
         return render_symbol_lineage_response(
             result.selected,
-            mode=plan.mode,
-            sections=requested_sections,
-            representation=normalized_representation,
-            owner_names=result.owner_names,
-            state_freshness=result.state_freshness,
-            allow_large_output=allow_large_output,
+            **render_kwargs,
         )
     except (TypeError, ValueError) as exc:
         return _error("lineage_response_failed", message=str(exc))

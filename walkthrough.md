@@ -1,352 +1,1999 @@
-# CPA_REEXPORT_LINEAGE_QUERY_INTEGRATION_DISCOVERY
-
-## STATUS
-STATUS=DISCOVERY_COMPLETE
-SCOPE=DISCOVERY_ONLY
-HEAD_BEFORE=239c609beef6bc92ef661024ef014c0b640b215d
-SOURCE_DRIFT=NONE_OBSERVED
-FILES_CHANGED=NONE
-DIFFS=NONE
-TESTS_RUN=NONE
-FULL_REPOSITORY_PYTEST=NOT_RUN
-REPORT_NOTE=walkthrough.md is the requested report and is excluded from FILES_CHANGED.
-
-Evidence labels:
-- DIRECT_EVIDENCE = observed current Contextor response, direct fixture result, or literal persisted/source facts.
-- CODE_PATH_PROVED = current implementation path was retrieved through Contextor and corroborated against source anchors.
-- CONTRACT_PROVED = tool/schema/docs/test contract directly states the behavior.
-- INFERENCE = evidence-based integration implication, not an implemented or certified design.
-- UNKNOWN = not established in this discovery.
-
-## RUNTIME_FRESHNESS
-MCP_RUNTIME_FRESH=YES
-CURRENT_CANONICAL_STATE_FRESH=YES
-RESYNC_REQUIRED=NO
-WORKSPACE_SYNC=verified
-REEXPORT_FACT_DOMAIN_EQUALS_MODULE_DOMAIN=YES
-LIVE_REVISION=1528
-ARCHITECTURE_REPORT_COMMIT=239c609beef6bc92ef661024ef014c0b640b215d
-ARCHITECTURE_REPORT_GENERATED_AT=2026-10-06T17:38:59.679438
-
-DIRECT_EVIDENCE: Contextor LIVE returned retained event revision 1528, latest revision 1528, continuous events, resync_required=false, and DESKTOP_ANALYSIS PUBLISHED. The current architecture report commit equals HEAD. Current source lookups reported revision 1528, canonical_state=fresh, workspace_sync=verified. The current fixture also established set(reexport_facts_by_module) == set(modules).
-
-CODE_PATH_PROVED: These four current source symbols were resolved by Contextor at the fresh revision and their current source anchors were checked:
-- C:\Temp\Contextor_Repo\contextor\core\reference\shared.py::_canonicalize_package_reference_target (lines 41-103)
-- C:\Temp\Contextor_Repo\contextor\core\reference\shared.py::_assemble_module_export_surfaces (lines 434-441)
-- C:\Temp\Contextor_Repo\contextor\core\analysis\refresh_planner.py::_find_dependent_consumers (lines 14-67)
-- C:\Temp\Contextor_Repo\contextor\core\analysis\incremental\plan_executor.py::_rebuild_consumer_slice (lines 401-678)
-
-UNKNOWN/LIMITATION: The older global get_analysis_status record was dated 2026-09-25 / revision 1414. It was treated as historical and was not used as evidence of current runtime freshness. The Contextor tool registry exposed the active 27 mcp__contextor__* tools; no separate deferred-tool inventory lister was exposed in the available tool metadata.
-
-## CANONICAL_LINEAGE_MODEL
-LINEAGE_CANONICAL_OWNER=C:\Temp\Contextor_Repo\contextor\core\analysis\state_manager.py::RepositoryAnalysisState.lineage_facts_by_source (lines 83-168)
-LINEAGE_FULL_MATERIALIZER=C:\Temp\Contextor_Repo\contextor\core\api\facade.py::_materialize_full_analysis_lineage (lines 264-425; state assembly lines 905-980)
-LINEAGE_INCREMENTAL_UPDATER=C:\Temp\Contextor_Repo\contextor\core\analysis\incremental\engine.py::IncrementalAnalysisEngine._update_candidate_lineage_slice (lines 208-390; candidate commit/update path lines 149-196, 956-993)
-LINEAGE_QUERY_INDEX_OWNER=C:\Temp\Contextor_Repo\contextor\core\lineage_query\index.py::build_lineage_query_indexes / patch_lineage_query_indexes (lines 38-112)
-LINEAGE_FRESHNESS_OWNER=C:\Temp\Contextor_Repo\contextor\core\analysis\incremental\engine.py::_update_candidate_lineage_slice plus C:\Temp\Contextor_Repo\contextor\core\live_state\store.py::_normalize_lineage_facts_state / _normalize_lineage_query_index_state (lines 336-465)
-
-DIRECT_EVIDENCE: RepositoryAnalysisState keeps source-keyed canonical materialized lineage slices and separate owner/source indexes, query-index state, semantic anchor completeness, lineage family state/version, modules/artifacts, and reexport_facts_by_module. Full analysis extracts source slices, resolves them against active module/artifact/owner/interface identities, builds query indexes, and assembles state. Incremental update replaces/removes the edited source slice and patches/rebuilds query indexes; identity synchronization can re-resolve retained slices without reparsing unchanged sources.
-
-CODE_PATH_PROVED: The full LineageResolutionContext contains active_module_ids, active_artifact_ids, active_owner_ids, and interface_descriptors. The context does not receive reexport_facts_by_module. Incremental _update_candidate_lineage_slice uses the analogous active identity/descriptor inputs and likewise does not receive the canonical reexport map. Reexport facts are maintained on a separate update/materialization path.
-
-DIRECT_EVIDENCE: Deleted-source invalidation removes that source's lineage slice and rebuilds indexes; changed-source update replaces the slice, then patches/rebuilds indexes. Snapshot hydration normalizes source slices and reconstructs query indexes.
-
-## LINEAGE_FACT_SCHEMA
-Schema source: C:\Temp\Contextor_Repo\contextor\core\domain\lineage_facts.py. Canonical container and index state: C:\Temp\Contextor_Repo\contextor\core\analysis\state_manager.py.
-
-| FULL_PATH / SYMBOL | FIELDS | PERSISTED | CANONICAL | DERIVED |
-|---|---|---:|---:|---:|
-| C:\Temp\Contextor_Repo\contextor\core\domain\lineage_facts.py :: ExtractedLineageSourceFacts (315-333) | source_key, source_fingerprint, anchors, flows, surfaces, status, resource_limit_reason | NO | NO | YES |
-| C:\Temp\Contextor_Repo\contextor\core\domain\lineage_facts.py :: ExtractedOccurrenceRef | local_id | NO | NO | YES, source-slice local identity |
-| C:\Temp\Contextor_Repo\contextor\core\domain\lineage_facts.py :: ExtractedSymbolicRef | kind, module_name, symbol_name, source_local_id | NO | NO | YES, symbolic import/callee/definition target |
-| C:\Temp\Contextor_Repo\contextor\core\domain\lineage_facts.py :: ExtractedAnchorFact | local_id, kind, span, owner_local_id | NO | NO | YES |
-| C:\Temp\Contextor_Repo\contextor\core\domain\lineage_facts.py :: ExtractedFlowFact | local_id, source, target, relation, evidence, resolution_kind, confidence, dynamic_boundary, provider, owner_local_id | NO | NO | YES |
-| C:\Temp\Contextor_Repo\contextor\core\domain\lineage_facts.py :: ExtractedSurfaceFact | local_id, kind, exposed, evidence, resolution_kind, confidence, declared_name, dynamic_boundary, provider, declaration_evidence | NO | NO | YES |
-| C:\Temp\Contextor_Repo\contextor\core\domain\lineage_facts.py :: MaterializedOccurrenceRef | source_key, source_fingerprint, local_id | YES, nested in materialized slice | YES, canonical source-local occurrence | NO |
-| C:\Temp\Contextor_Repo\contextor\core\domain\lineage_facts.py :: ProviderRef | provider_id, provider_version | YES, nested when present | YES, provider provenance | NO |
-| C:\Temp\Contextor_Repo\contextor\core\domain\lineage_facts.py :: SourceLineageManifest (427-465) | source_key, source_fingerprint, semantic_version, status, anchor_count, flow_count, surface_count, resource_limit_reason, semantic_anchor_bindings_materialized, anchor_ownership_materialized, flow_ownership_materialized, interface_descriptors_materialized | YES | YES, as the persisted slice manifest | NO |
-| C:\Temp\Contextor_Repo\contextor\core\domain\lineage_facts.py :: MaterializedLineageSourceFacts (483-596) | manifest, anchors, flows, surfaces, interface_descriptors, semantic_endpoint_origins, semantic_anchors | YES | YES, per source slice | NO |
-| C:\Temp\Contextor_Repo\contextor\core\domain\lineage_facts.py :: MaterializedAnchorFact | local_id, reference, kind, span, owner_local_id | YES | YES, within its source slice | NO |
-| C:\Temp\Contextor_Repo\contextor\core\domain\lineage_facts.py :: MaterializedFlowFact | local_id, source, target, relation, evidence, resolution_kind, confidence, dynamic_boundary, provider, owner_local_id | YES | YES, within its source slice | NO |
-| C:\Temp\Contextor_Repo\contextor\core\domain\lineage_facts.py :: MaterializedSurfaceFact | local_id, kind, exposed, evidence, resolution_kind, confidence, declared_name, dynamic_boundary, provider, declaration_evidence | YES | YES, within its source slice | NO |
-| C:\Temp\Contextor_Repo\contextor\core\domain\lineage_facts.py :: SemanticAnchorBinding | owner_id, qualified_name, reference | YES, nested in materialized slice | YES, within source slice | NO |
-| C:\Temp\Contextor_Repo\contextor\core\domain\lineage_facts.py :: MaterializedSymbolicRef | source_key, source_fingerprint, kind, module_name, symbol_name, source_local_id | YES, nested in materialized slice | YES, symbolic unresolved/local reference | NO |
-| C:\Temp\Contextor_Repo\contextor\core\domain\lineage_facts.py :: SemanticEndpoint | owner_id, slot | YES, nested in materialized slice | YES, canonical identity reference | NO |
-| C:\Temp\Contextor_Repo\contextor\core\domain\lineage_facts.py :: SemanticEndpointOrigin | source_key, source_fingerprint, fact_local_id, endpoint_role, kind, module_name, symbol_name, source_local_id | YES, nested in materialized slice | YES, origin/provenance of a semantic endpoint | NO |
-| C:\Temp\Contextor_Repo\contextor\core\domain\lineage_facts.py :: SemanticInterfaceDescriptor | owner_id, slots, signature_digest | YES, nested in materialized slice | YES, canonical owner interface | NO |
-| C:\Temp\Contextor_Repo\contextor\core\analysis\state_manager.py :: RepositoryAnalysisState.lineage_facts_by_source (83-168) | source_key -> MaterializedLineageSourceFacts | YES | YES | NO |
-| C:\Temp\Contextor_Repo\contextor\core\analysis\state_manager.py :: lineage_owner_source_index / lineage_source_owner_index | owner_id -> source keys; source key -> owner IDs | YES in state snapshot | derived from materialized source slices | YES |
-| C:\Temp\Contextor_Repo\contextor\core\analysis\state_manager.py :: lineage_query_index_state | query-index freshness/version and index coverage state | YES in state snapshot; rebuilt on hydration | derived | YES |
-| C:\Temp\Contextor_Repo\contextor\core\analysis\state_manager.py :: lineage_semantic_anchor_bindings_complete | semantic anchor binding completeness | YES in state snapshot; revalidated on hydration | derived/completeness contract | YES |
-| C:\Temp\Contextor_Repo\contextor\core\lineage_query\index.py :: build_lineage_query_indexes / patch_lineage_query_indexes (38-112) | semantic owner IDs <-> source keys plus index freshness/coverage | index state serialized; recomputed on hydration | NO, derived query projection | YES |
-| C:\Temp\Contextor_Repo\contextor\core\analysis\lineage_materialization.py :: LineageResolutionContext | active module IDs, artifact IDs, owner IDs, interface descriptors | NO | NO | YES, transient resolver input |
-
-CONTRACT_PROVED: ExtractedLineageSourceFacts is parsed-AST output, source-local, and not canonical cross-source data. MaterializedLineageSourceFacts enforces same-slice occurrence references; foreign occurrence references are not accepted. Materialized semantic endpoints are canonical identity boundaries. Extracted facts are transient; materialized lineage slices are persisted, with large lineage state eligible for sidecar storage.
-
-DIRECT_EVIDENCE: The relation enum includes binding/assignment/argument/return/call/state/alias/callback/inheritance/override/exposure/default/public-name relations. It has no import/reexport relation family. Import/reexport appears as surface facts and symbolic references, where extraction/materialization emitted them; there is no general multi-hop reexport chain fact.
-
-## CURRENT_REEXPORT_LINEAGE
-DIRECT_EVIDENCE: Current lineage can expose some one-hop reexport surfaces when the consumer has a materialized REEXPORT surface whose target resolves to a provider SemanticEndpoint. It does not have an authoritative complete graph for multi-hop aliases. In the three-module fixture, b's direct public_foo surface was attached to a.foo; c's exported surface remained a symbolic reference to b.public_foo and did not attach to a.foo's semantic owner.
-
-CODE_PATH_PROVED: Full and incremental lineage resolution receive canonical owner/interface identity inputs but no reexport_facts_by_module. This is the source boundary where current lineage materialization does not consume canonical reexport facts.
-
-| Case | Current result | Classification |
-|---|---|---|
-| from x import y | A one-hop REEXPORT surface may be materialized and visible from the provider query; not a recursive import graph | PARTIAL |
-| from x import y as z | Direct alias can appear as declared_name plus provider SemanticEndpoint; exact query by alias is not generally a catalog target | PARTIAL |
-| from .x import y | Canonical reexport fact resolves package-relative provider identity; lineage/query only exposes a direct surface where materialized | PARTIAL |
-| from x import * | Export-surface/reexport machinery handles visibility; lineage surfaces do not consistently connect importer aliases to target owner | PARTIAL |
-| __all__ | Canonical export surfaces use it; lineage surfaces are only partial and source-dependent | PARTIAL |
-| transitive re-export | Immediate facts are preserved; query lineage does not traverse all hops | PARTIAL |
-| package __init__ façade | Canonical reexport facts normalize façade/exporter and origin; alias query is not represented as an exact lineage target | PARTIAL |
-
-## QUERY_SURFACES
-The active Contextor registry was inspected; applicable MCP documentation was read before tracing. Rows describe direct source of truth at the query surface. "Indirect" means the tool consumes a canonical projection derived using reexports, rather than reading reexport_facts_by_module itself.
-
-| TOOL | CURRENT_SOURCE_OF_TRUTH | USES_LINEAGE | USES_REEXPORT_FACTS | CAN_RETURN_REEXPORT_CHAIN | PACKAGE_INIT_IDENTITY_AWARE | STAR_IMPORT_AWARE |
-|---|---|---:|---:|---:|---:|---:|
-| get_symbol_lineage | canonical lineage slices, semantic anchors, owner/source query indexes | YES | NO directly; may return a materialized one-hop REEXPORT surface | PARTIAL | NO for façade alias query | NO for importer chain |
-| get_symbol_call_context | ModuleUsageFacts.symbol_calls/direct call context | NO | NO directly | NO | NO | NO; wildcard bare call may be ambiguous |
-| get_symbol_implementation | canonical artifact registry and module/source range | NO | NO | NO | NO alias-chain resolution | NO |
-| get_artifact_blast_radius | canonical artifact_consumption and dependent graph | NO | YES, indirectly through artifact-consumption projection | NO semantic hop chain | YES for normalized canonical origin in consumption; no alias node chain | YES for export/consumption projection; no lineage chain |
-| get_module_context | canonical modules and dependency_graph | NO | NO directly | NO | NO alias-chain resolution | NO symbol visibility chain |
-| search_artifacts | canonical artifact registry/modules/dependency projection | NO | NO directly | NO | NO alias-chain resolution | NO symbol visibility chain |
-| get_file_edit_context | modules, dependency_graph and consumer projection | NO | NO directly | NO | NO alias-chain resolution | NO symbol visibility chain |
-| contextor_fact_lineage | supported fact families: artifact_consumption, syntax_diagnostics, symbol_calls | NO for symbol lineage/reexport chain | NO for reexport facts | NO | NO | NO |
-
-DIRECT_EVIDENCE: The registry included 27 Contextor tools. contextor_fact_lineage documents only the three fact families above; it is not the symbol-lineage or reexport-chain API. get_artifact_blast_radius can reflect reexport-aware artifact consumption, but that output is not a lineage edge trace.
-
-CODE_PATH_PROVED: get_symbol_call_context reads module usage symbol_calls; get_symbol_implementation resolves artifacts/modules; get_module_context reads modules/dependency_graph; search_artifacts searches artifact/module projections; get_file_edit_context uses modules/dependency/consumer context. These paths do not directly read the canonical reexport fact map or lineage slices.
-
-## GET_SYMBOL_LINEAGE_TRACE
-MCP entrypoint: C:\Temp\Contextor_Repo\contextor\mcp\tools\get_symbol_lineage.py::get_symbol_lineage (88-168)
-Runtime narrow query: C:\Temp\Contextor_Repo\contextor\core\lineage_query\live_query.py::query_live_symbol_lineage (467-551)
-Exact target catalog: same file, build_live_lineage_target_catalog (334-424)
-Canonical query service: C:\Temp\Contextor_Repo\contextor\core\lineage_query\service.py::LineageQueryService.resolve_target / direct_facts / semantic_sections (485-642, 848-911)
-
-CODE_PATH_PROVED:
-MCP request
--> normalize and validate request/sections
--> validate repository path and canonical exact target
--> mcp_runtime.query_live_symbol_lineage_narrow(root, query, sections)
--> RepositoryStateLineageBackend(state)
--> exact artifact ID or exact module::symbol target catalog
--> LineageQueryService resolves target and selects direct facts from source slices
--> selected facts are rendered as the response.
-The catalog does not include reexport facts and uses exact identity lookup, not fuzzy/recursive alias search. The direct query collects source-slice semantic anchors/flows/surfaces; it does not walk canonical reexport facts recursively. Lexical traversal is a bounded local-scope traversal, not reexport traversal. Query is narrow LIVE canonical RAM; docs/source do not provide snapshot/disk fallback for this tool.
-
-Fixture observations:
-- a::foo resolves. Its selected direct surfaces include b's REEXPORT public_foo, exposed as the canonical foo SemanticEndpoint.
-- c::exported is not_found. c's exported surface refers symbolically to b.public_foo; the chain c.exported -> b.public_foo -> a.foo is not returned.
-- pkg.provider::run resolves and includes the package-init REEXPORT public_run surface.
-- pkg::public_run and pkg.__init__::public_run are not_found.
-- star_src::visible resolves; star_mid::visible and star_dst::visible are not_found.
-- No observed resolved query edge pointed to a wrong canonical target.
-
-CURRENT_LINEAGE_RESULT=provider may expose an immediate REEXPORT surface; reexport aliases are not first-class exact targets and transitive targets are not followed.
-MISSING_RELATIONS=c.exported -> b.public_foo and b.public_foo -> a.foo as a traversable authoritative chain; package facade alias identity -> provider origin as query target; star importer alias -> visible canonical origin.
-WRONG_RELATIONS=NONE_OBSERVED
-AMBIGUOUS_RELATIONS=NONE_OBSERVED_IN_FIXTURE; cyclic aliases are omitted from resolved map rather than arbitrarily selected.
-DIRECT_EVIDENCE: Fixture query results above were observed from the core live query on canonical hydrated/incremental states.
-CONTRACT_PROVED: MCP API narrows to exact canonical target and selected lineage facts; no recursive alias traversal contract is documented.
-
-## CANONICAL_REEXPORT_SOURCE
-REEXPORT_CANONICAL_OWNER=C:\Temp\Contextor_Repo\contextor\core\analysis\state_manager.py::RepositoryAnalysisState.reexport_facts_by_module (lines 83-168)
-REEXPORT_FACT_COMPLETENESS=FULL_DOMAIN_FOR_CURRENT_MODULES
-REEXPORT_FACT_PERSISTENCE=YES
-REEXPORT_FACT_INCREMENTAL_FRESHNESS=YES, on the exercised add/change/delete and downstream propagation paths
-
-DIRECT_EVIDENCE: Each current module ID has a facts entry; each entry contains exporter, explicit_all, bindings, star_sources. The fresh fixture verified exact module/fact key-domain equality. The facts retain immediate bindings such as b.public_foo -> a.foo and c.exported -> b.public_foo.
-
-CODE_PATH_PROVED:
-- contextor\core\reference\shared.py::validate_reexport_facts_by_module checks exact key-domain equality and per-fact shape (154-175).
-- materialize_reexport_facts_by_module builds the full facts map and validates it (176-230).
-- Full facade materializes canonical reexport facts separately from lineage (facade.py:687-700; state assembly 947-969).
-- Incremental plan executor removes entries on deletion and replaces entries on add/change, then validates and assembles the candidate map (plan_executor.py:779-904, 944-960, 1039).
-- Snapshot save validates and persists the state; hydration normalizes/validates reexport facts (store.py:121-153, 1462-1487, 1866-2045).
-- Package relative import normalization uses _canonicalize_package_reference_target (shared.py:41-103); in fixture the package init fact exporter was pkg, target was pkg.provider.run.
-
-CONTRACT_PROVED: Existing add/change/delete and parse-failure LKG tests in tests\test_completeness_freshness_parity_proof.py:1470-1544 exercise incremental facts lifecycle. Existing package and star semantics are covered by tests\test_reexport_reference_semantics.py.
-
-## REEXPORT_GRAPH_CAPABILITY
-CURRENT_REEXPORT_MAP_PRESERVES_INTERMEDIATE_HOPS=NO
-CURRENT_FACTS_CAN_DERIVE_INTERMEDIATE_HOPS=YES
-
-DIRECT_EVIDENCE:
-- _assemble_reexport_map follows raw edges with a visited set and returns only a resolved final target when traversal exits the raw map (shared.py:444-468). For the fixture it returns c.exported -> a.foo, not the intermediate b.public_foo hop.
-- The persisted canonical facts retain immediate source identities: b.public_foo -> a.foo and c.exported -> b.public_foo. Thus the existing facts contain enough edge-by-edge information to derive the intermediate path without AST/source reread. This is an evidence statement about the facts, not a proposal for a new data structure.
-- _assemble_module_export_surfaces consumes reexport facts for visible export surfaces (shared.py:335-441).
-
-## PACKAGE_LINEAGE
-PACKAGE_LINEAGE_CURRENT_STATE=PARTIAL
-PACKAGE_EXTERNAL_IDENTITY_RESOLUTION=canonical reexport facts normalize package façade exporter to pkg and relative provider to pkg.provider.run; exact lineage query for pkg::public_run is not found
-PACKAGE_CANONICAL_OWNER_RESOLUTION=provider pkg.provider::run resolves; pkg.__init__::public_run and pkg::public_run do not resolve as façade aliases
-
-DIRECT_EVIDENCE: Fixture:
-pkg/__init__.py: from .provider import run as public_run, __all__ = ["public_run"].
-Facts record exporter pkg, binding public_run -> pkg.provider.run. The package canonicalizer uses longest real module prefix and package .__init__ fallback. Query of the provider resolves and sees the direct package REEXPORT surface; queries by package façade identity return not_found.
-
-CODE_PATH_PROVED: The MCP lineage target catalog is based on exact artifact IDs or exact module::symbol anchors. It does not consult _canonicalize_package_reference_target or canonical reexport facts. That canonicalizer is used in reference/reexport identity normalization, not in the exact lineage target catalog.
-
-## STAR_IMPORT_LINEAGE
-STAR_IMPORT_LINEAGE=PARTIAL
-STAR_IMPORT_VISIBILITY_USES_EXPLICIT_ALL=YES
-STAR_IMPORT_PRIVATE_FILTER=YES
-
-DIRECT_EVIDENCE: Reexport export-surface assembly applies explicit __all__; when explicit_all is absent it filters names beginning with underscore. In fixture, star_mid and star_dst canonical export surfaces both resolve visible to star_src.visible, while lineage queries for star_mid/star_dst::visible are not_found. A separate no-__all__ fixture confirmed the default underscore filter in canonical export visibility, but b/c/d lineage source slices contained caller facts without REEXPORT surfaces.
-
-CODE_PATH_PROVED: shared.py::_assemble_export_surface_state (335-431) propagates star-visible surfaces iteratively and applies explicit __all__/default private filtering. Incremental _rebuild_consumer_slice uses existing reexport facts and module export surfaces to rebuild affected consumers. Existing parity and AST-forbidden tests demonstrate this consumer/usage path is distinct from lineage query coverage.
-
-BOUNDARY: No canonical artifact c::foo was invented. Current star export visibility is represented by canonical export surfaces and reexport facts, not by a complete importer-owned lineage alias chain.
-
-## ALIAS_LINEAGE
-ALIAS_LINEAGE_INTERMEDIATE_HOPS=NO
-ALIAS_LINEAGE_FINAL_ORIGIN=NO
-
-DIRECT_EVIDENCE: Canonical reexport facts preserve immediate edges, while _assemble_reexport_map flattens to the final origin. Lineage query sees b's direct alias surface from a's provider query, but c's alias remains symbolic and is not attached to a's semantic owner. Querying c's alias does not resolve. Therefore lineage/query currently exposes neither a complete intermediate chain nor consistent final origin for aliases. The underlying reexport facts do retain the individual hops.
-
-## CYCLE_POLICY
-REEXPORT_LINEAGE_CYCLE_POLICY_CURRENT=Cycle-safe reexport resolution; cyclic aliases are omitted from the flattened map and remain unresolved in lineage/query; no arbitrary target or ambiguity is produced.
-
-DIRECT_EVIDENCE: Synthetic a<->b reexport cycle returns no resolved entries from _assemble_reexport_map; existing tests\test_reexport_reference_semantics.py::test_cyclic_reexports_are_not_resolved_arbitrarily asserts that cyclic aliases are not arbitrarily resolved. Canonical facts retain cycle edges. The fixture did not observe a wrong target or an explicit query ambiguity object.
-
-UNKNOWN: The API does not surface a dedicated cycle/unknown lineage result for those aliases; current observed exact query outcome is not_found.
-
-## FULL_LIVE_LINEAGE
-FULL_LINEAGE_RESULT=Fresh full oracle exposes the same direct provider surfaces and the same alias/package/star not_found gaps.
-LIVE_LINEAGE_RESULT=Incrementally updated canonical state exposes the same direct provider surfaces and the same alias/package/star not_found gaps.
-FULL_LIVE_LINEAGE_PARITY=PASS
-
-Fixture protocol and direct output:
-1. Fresh full analysis of a temporary fixture containing a provider a with foo/bar, b re-exporting foo as public_foo, c re-exporting b.public_foo as exported, plus package/star/implicit-export cases.
-2. Hydrate canonical repository state.
-3. Change b's reexport target from a.foo to a.bar and execute engine.update_file(b.py); status UPDATED, affected modules were b and c.
-4. Run fresh full analysis for final files and hydrate the oracle.
-5. Compare ten query_live_symbol_lineage identities across incremental and full states: a::foo, a::bar, b::public_foo, c::exported, pkg.__init__::public_run, pkg.provider::run, pkg::public_run, star_src::visible, star_mid::visible, star_dst::visible. Compare target statuses and semantic payload, normalizing only revision/provenance metadata.
-6. Also compare canonical reexport facts and assembled reexport maps.
-
-DIRECT_EVIDENCE: All ten query results matched; canonical reexport facts and flattened maps also matched. Both analyses returned no validation errors in this main fixture. b::public_foo, c::exported, package façade aliases, star importer aliases were not_found in both. Provider queries that resolve and direct surfaces matched.
-
-LIMITATION: The core query_live_symbol_lineage path was exercised on hydrated/incremental temporary states; the public MCP IPC wrapper was not dispatched against the temporary root. The public wrapper's source path and live runtime contract were traced separately. The fixture's c module was a downstream re-export alias, so evidence is for a three-module provider-to-alias-to-transitive-alias query chain; it does not claim a separate ordinary function-call consumer parity case.
-
-INTERPRETATION: PASS certifies full-vs-incremental parity for queried canonical payloads, not completeness of reexport lineage. This is common-bug parity: both sides omit the same chain/package/star alias targets.
-
-## SEMANTIC_GAP_MATRIX
-Status vocabulary is limited to FULL / PARTIAL / ABSENT / INCORRECT / UNKNOWN.
-
-| Case | CANONICAL_REEXPORT_FACTS | LINEAGE_FACTS | QUERY_VISIBLE | FULL | LIVE | STATUS |
-|---|---|---|---|---|---|---|
-| direct import | FULL: immediate binding retained | PARTIAL: direct REEXPORT surface only where materialized | PARTIAL: provider query can expose surface | PARTIAL | PARTIAL | PARTIAL |
-| aliased import | FULL: declared alias and immediate target | PARTIAL: alias surface can bind to provider | PARTIAL: provider surface visible, alias exact query may not resolve | PARTIAL | PARTIAL | PARTIAL |
-| relative import | FULL: package-relative target normalized | PARTIAL: direct provider surface in tested package fixture | PARTIAL: provider resolves; alias query does not | PARTIAL | PARTIAL | PARTIAL |
-| package __init__ façade | FULL: exporter and provider origin canonicalized | PARTIAL: direct façade surface only | PARTIAL: provider query sees surface; façade exact query not_found | PARTIAL | PARTIAL | PARTIAL |
-| explicit __all__ | FULL: explicit export list retained/applied | PARTIAL: some direct surfaces materialized | PARTIAL: export surfaces exist, exact importer alias queries do not | PARTIAL | PARTIAL | PARTIAL |
-| implicit public export | FULL: public bindings retained, underscore default filter | ABSENT in tested lineage slices for implicit-import consumers | ABSENT for those consumer aliases | ABSENT | ABSENT | ABSENT |
-| star import | FULL: star sources and resolved export surfaces | PARTIAL: importer lineage chain missing | PARTIAL: canonical export visibility works, lineage alias query not_found | PARTIAL | PARTIAL | PARTIAL |
-| transitive re-export | FULL: each immediate hop retained | PARTIAL: first direct hop can bind; downstream remains symbolic | PARTIAL: c alias not_found | PARTIAL | PARTIAL | PARTIAL |
-| multi-hop aliases | FULL: immediate edge facts retain hops | PARTIAL: no traversable lineage path | PARTIAL: no complete alias result | PARTIAL | PARTIAL | PARTIAL |
-| cycles | FULL: cycle edges retained | PARTIAL: no resolved lineage chain | PARTIAL: unresolved/not_found, no wrong target | PARTIAL | PARTIAL | PARTIAL |
-
-DIRECT_EVIDENCE: Matrix reflects fixture facts and query results above. FULL and LIVE columns describe observed analysis/query surfaces, not a claim that either path implements complete reexport lineage.
-
-## INTEGRATION_BOUNDARY
-The following are evidence-derived comparisons only; no architecture is selected or designed.
-
-### A. During lineage materialization
-EXISTING_OWNER_SUPPORT=YES for source-local extraction, cross-source endpoint resolution, semantic surfaces, full materialization, and incremental slice replacement.
-COUPLING=HIGH relative to current contract: both full and incremental materializers currently receive identity/descriptor context but not canonical reexport facts.
-PERSISTENCE_IMPACT=If reexport hops become materialized lineage facts, persisted lineage payload/semantic-version validation is implicated; schema impact is UNKNOWN until exact representation is chosen.
-INCREMENTAL_UPDATE_IMPACT=Changed/affected slices would need refreshed derived materialization; could use current RAM facts, but existing consumer propagation only proves artifact-consumption/export-surface updates.
-QUERY_COST=LOW after materialization.
-RISK=Duplicating authoritative reexport semantics in lineage slices and requiring complete invalidation/version rules.
-
-### B. In derived lineage query index/backend
-EXISTING_OWNER_SUPPORT=YES; owner/source index builder, patcher, query-index freshness state, and hydration rebuild already exist.
-COUPLING=MEDIUM; query backend can combine persisted lineage slices with canonical reexport facts already on RepositoryAnalysisState.
-PERSISTENCE_IMPACT=NO for a pure derived RAM query projection under current persisted inputs; existing indexes are rebuilt on hydration.
-INCREMENTAL_UPDATE_IMPACT=YES in principle using already patched reexport facts and affected canonical state; no unchanged-source AST read is needed by the existing update path.
-QUERY_COST=One-time/revision-scoped index derivation, then bounded query traversal; exact complexity is UNKNOWN pending implementation.
-RISK=Freshness/cycle/ambiguity and package/star identity rules must be explicit; index must invalidate/rebuild when either input domain changes.
-
-### C. Directly in the MCP query tool
-EXISTING_OWNER_SUPPORT=PARTIAL; get_symbol_lineage already validates requests and dispatches the narrow query, but semantic traversal is owned by the core query/backend.
-COUPLING=HIGH to one API surface; other core consumers would remain inconsistent and tool code would need repository semantics.
-PERSISTENCE_IMPACT=NO.
-INCREMENTAL_UPDATE_IMPACT=Reads latest canonical RAM state, but does not itself maintain update freshness.
-QUERY_COST=Repeated traversal per request.
-RISK=API-specific duplicate semantics, incomplete reuse by non-MCP callers, and policy logic at transport boundary.
-
-### D. Existing canonical reexport/reference owner
-EXISTING_OWNER_SUPPORT=YES for immediate bindings, explicit_all, star visibility, package identity normalization, flattening, and cycle-safe export maps.
-COUPLING=MEDIUM/HIGH to reference/export-surface semantics; current owner is not a lineage query service or owner/source lineage index.
-PERSISTENCE_IMPACT=NO for current facts; changing persisted reexport schema is not evidenced as necessary.
-INCREMENTAL_UPDATE_IMPACT=Current reexport facts and export surfaces already patch from candidate RAM facts and consumer propagation.
-QUERY_COST=Low for materialized surfaces/maps; query traversal behavior is not an existing contract here.
-RISK=Serving lineage directly from this owner could bypass lineage ownership/provenance/freshness guarantees and duplicate query target handling.
-
-BEST_EXISTING_INTEGRATION_BOUNDARY=B, the existing derived lineage query index/backend, is the strongest evidence-derived candidate: it already owns query index freshness/build/patch/hydration lifecycle while canonical reexport facts are persisted alongside lineage state. This is a candidate boundary only, not an architecture selection.
-
-INFERENCE: Option B has the least evidence of requiring a persisted schema change while keeping semantics in the core query path. The exact graph representation, traversal policy, and API payload remain undecided.
-
-## PERSISTENCE_IMPACT
-PERSISTENCE_CHANGE_REQUIRED=NO for the evidence-derived pure RAM query-index/backend candidate
-SNAPSHOT_SCHEMA_CHANGE_REQUIRED=NO for that candidate
-
-DIRECT_EVIDENCE: Canonical reexport facts and materialized lineage slices are already persisted. Query indexes are derived from materialized lineage facts and rebuilt on hydration. This discovery found enough immediate-edge facts to derive hops without persisting a second copy.
-
-INFERENCE/BOUNDARY: These NO values apply only to a derived query projection. If a future design instead adds reexport relations to persisted MaterializedLineageSourceFacts, persistence, lineage semantic-version and normalization behavior must be reassessed. No schema design or bump is proposed here.
-
-## INCREMENTAL_IMPACT
-CAN_LINEAGE_REEXPORT_UPDATE_BE_RAM_ONLY=YES
-UNCHANGED_SOURCE_READ_REQUIRED=NO
-UNCHANGED_AST_ACCESS_REQUIRED=NO
-
-DIRECT_EVIDENCE: The incremental reexport patch consumes fresh candidate facts, replaces/deletes the affected module entry, rebuilds export surfaces/consumer slices, and propagates to dependents. Existing focused parity proof covers reexport __all__ changes and an AST-forbidden incremental update; tests\test_completeness_freshness_parity_proof.py::test_reexport_all_only_change_is_ram_only_and_matches_full_oracle plus the adjacent no-AST-access proof demonstrate the existing update path can update these derived facts in RAM without reading unchanged ASTs.
-
-INFERENCE: A derived lineage query view can consume the resulting canonical RAM maps and indexes without reopening unchanged source. Exact invalidation behavior for a future new lineage projection is not implemented/certified by this discovery.
-
-## TEST_LOCATIONS
-No tests were run or changed. Best existing focused locations:
-- Lineage fact schema/extraction: C:\Temp\Contextor_Repo\tests\domain\test_lineage_facts.py; C:\Temp\Contextor_Repo\tests\analysis\test_lineage_extraction.py
-- Lineage materialization: C:\Temp\Contextor_Repo\tests\analysis\test_lineage_materialization.py; C:\Temp\Contextor_Repo\tests\test_full_analysis_lineage_materialization.py
-- Lineage query service/index/live query: C:\Temp\Contextor_Repo\tests\analysis\test_lineage_query_service.py; C:\Temp\Contextor_Repo\tests\analysis\test_lineage_live_query.py; C:\Temp\Contextor_Repo\tests\analysis\test_lineage_query_backend.py
-- MCP get_symbol_lineage contract/response/runtime: C:\Temp\Contextor_Repo\tests\mcp\tools\test_get_symbol_lineage.py; C:\Temp\Contextor_Repo\tests\mcp\test_runtime_lineage_query.py; C:\Temp\Contextor_Repo\tests\mcp\test_lineage_response.py
-- Full/LIVE lineage lifecycle: C:\Temp\Contextor_Repo\tests\test_lineage_state_lifecycle.py; C:\Temp\Contextor_Repo\tests\test_completeness_freshness_parity_proof.py
-- Reexport semantics, package identity, star, alias, cycle: C:\Temp\Contextor_Repo\tests\test_reexport_reference_semantics.py
-Relevant existing node IDs:
-tests/test_reexport_reference_semantics.py::test_transitive_aliased_reexport_resolves_to_original_artifact
-tests/test_reexport_reference_semantics.py::test_relative_package_init_reexport_resolves_to_provider
-tests/test_reexport_reference_semantics.py::test_star_reexport_uses_explicit_all_and_remains_transitive
-tests/test_reexport_reference_semantics.py::test_cyclic_reexports_are_not_resolved_arbitrarily
-tests/test_completeness_freshness_parity_proof.py::test_reexport_all_only_change_is_ram_only_and_matches_full_oracle
-
-## DEFERRED_STAR_BOUND_CALL
-STAR_BOUND_BARE_CALL_BLOCKS_REEXPORT_LINEAGE_INTEGRATION=NO
-
-DIRECT_EVIDENCE: Existing incremental artifact-consumption/export-surface path uses ModuleUsageFacts.reference_evidence for star sources, resolves visible targets using canonical export surfaces/explicit __all__, and handles a bare call from a wildcard importer without unchanged AST access. The focused reexport parity proof and AST-forbidden test cover that path.
-
-BOUNDARY: This is artifact-consumption/reexport propagation evidence, not evidence that get_symbol_lineage understands a wildcard-bound bare call or emits the import-to-provider lineage chain.
-
-DEFERRED_ITEM=FULL AST SEMANTIC COVERAGE AUDIT
-
-## FINAL_ANSWERS
-CURRENT_LINEAGE_HAS_AUTHORITATIVE_REEXPORT_CHAIN=NO
-CURRENT_QUERY_HAS_AUTHORITATIVE_REEXPORT_CHAIN=NO
-CURRENT_REEXPORT_MAP_PRESERVES_INTERMEDIATE_HOPS=NO
-CURRENT_FACTS_CAN_DERIVE_INTERMEDIATE_HOPS=YES
-PACKAGE_REEXPORT_LINEAGE_CORRECT=PARTIAL
-STAR_IMPORT_LINEAGE=PARTIAL
-FULL_LIVE_LINEAGE_PARITY=PASS
+CPA_CANONICAL_REEXPORT_LINEAGE_QUERY_INTEGRATION
+
+STATUS=STEP_PASS
+CLASSIFICATION=CANONICAL_REEXPORT_LINEAGE_QUERY_INTEGRATION_CERTIFIED
+
+HEAD_BEFORE=f65b0a66e0fcb8fbac93efcdeae0aa643ca9c181
+HEAD_AT_REPORT=f65b0a66e0fcb8fbac93efcdeae0aa643ca9c181
+WORKTREE_BEFORE=CLEAN
+SOURCE_DRIFT=NONE; actual Contextor source at HEAD matched the discovered symbols and implementation anchors before the edits.
+
+RUNTIME_DISCOVERY
+- Contextor architectural discovery was used for build_lineage_query_indexes, RepositoryStateLineageBackend, build_live_lineage_target_catalog, query_live_symbol_lineage, render_symbol_lineage_response, and get_symbol_lineage, plus their concrete owners and consumers. The generic CanonicalLineageBackend protocol remains unchanged.
+- Targeted source retrieval initially reported LIVE revision 1528, canonical_state=fresh and workspace_sync=verified for the queried source symbols. The persisted global architecture bundle was older (commit 239c609beef6bc92ef661024ef014c0b640b215d, generated 2026-10-06T17:38:59.679438, workspace_sync=unverified); it was not treated as current source authority.
+- Desktop watcher observed edits from revisions 1529 through 1547. Continuity=continuous, resync_required=false; latest syntax_errors, name_collisions and cycles diagnostics are fresh with count 0 and attention_required=false. No MCP update_file or restart was used.
+- HEAD stayed unchanged; no commit or push was made.
+
+EVIDENCE_LEDGER
+DIRECT_EVIDENCE=Targeted pytest node outputs below; canonical query assertions identify origin owners and hop chains; watcher revisions 1529-1547 are continuous with zero fresh diagnostic counts.
+CODE_PATH_PROVED=Contextor symbol/consumer discovery and literal source inspection establish the path from canonical re-export facts through backend, live query, existing target service, response renderer, MCP tool, and docs.
+CONTRACT_PROVED=Named node gates verify multi-hop, package, star, cycle/external, no-source-I/O, response sizing/representation, and fresh full-oracle parity.
+INFERENCE=The alias index has no persistence path because it is constructed lazily on a backend instance and no persisted model/schema owners were changed.
+UNKNOWN=Post-restart hydration freshness remains unverified; no restart occurred. The deferred bare star-bound call-site resolution remains outside this query integration.
+REEXPORT_QUERY_INDEX
+`build_reexport_lineage_alias_index` derives a per-backend RAM index from validated canonical `reexport_facts_by_module`. It installs named binding edges regardless of `__all__`, excludes self-definition edges, and obtains visible star names from `_assemble_module_export_surfaces`. Star lineage preserves immediate source hops. Query backend validates the full facts/module domain on first use and caches the derived mapping only on that backend instance.
+
+ALIAS_EDGE_CONTRACT
+- Direct edge: `exporter::local -> qualified target`, kind=binding; named direct aliases remain queryable even when excluded from `__all__`.
+- Own definition: no alias edge.
+- Star edge: `exporter::name -> immediate star_source::name`, kind=star, only for canonical visible names.
+- Direct namespace entries take precedence over star imports. Multiple star sources preserve the current export-surface model's deterministic first installer; the focused fixture verifies that the first canonical source wins.
+- The protocol and persisted state are not extended.
+
+CHAIN_RESOLUTION
+Resolution follows immediate edges and canonicalizes only the repository leaf. Multi-hop chains retain intermediate binding and star identities, including a package façade identity when it is itself an intermediate alias. Cycles close the hop list and return status=cycle, reason=reexport_cycle, canonical_target=null. External dotted targets that cannot map to a real indexed module fail closed as status=unresolved, reason=target_outside_repository; no short-name or provider guess is made.
+
+CYCLE_POLICY
+PASS. The cycle query returns unresolved to the live caller, retains a cycle chain ending at the repeated identity, has no selected facts, and does not select an arbitrary origin.
+
+PACKAGE_QUERY_IDENTITY
+PASS. `pkg::LOCAL` resolves through exact package canonicalization to the real `pkg.__init__::LOCAL` owner with resolution=package_alias and no reexport_chain. `pkg::public_run` resolves through the canonical re-export edge to `pkg.provider::run`. A separate chain confirms that `pkg::public_run` remains a traversable intermediate façade identity.
+
+STAR_QUERY_IDENTITY
+PASS. Visible two-hop star aliases resolve to the original `star_src` owner and preserve both immediate star hops. Private `_hidden` is not exported. A named binding with `__all__=[]` remains resolvable. The explicit direct-vs-star precedence and two-source order cases pass.
+STAR_BOUND_BARE_CALL_RESOLUTION=DEFERRED_TO_AST_AUDIT
+
+LIVE_TARGET_RESOLUTION
+Exact canonical/package target resolution remains first. Only exact qualified not_found queries enter alias fallback. not_alias preserves not_found. A resolved chain is handed to the existing exact catalog and LineageQueryService for the origin. Missing canonical origin fails closed as unavailable with `Canonical re-export origin has no available lineage owner.` Cycle and outside-repository results return unresolved without constructing selected facts.
+
+CANONICAL_ORIGIN_SELECTION
+PASS. For `c::exported`, the resolved target is the real `a::foo` artifact (fixture owner `A1/1`), with target.resolution=reexport_alias and original query retained. Existing canonical sections are selected from the origin owner; no synthetic alias artifact or owner was introduced.
+
+MCP_RESPONSE_CONTRACT
+PASS. Resolved payloads add only the optional top-level `reexport_chain`; chain is identical under named/indexed representations and never enters `sections`. Rendered sections match the pre-chain payload for each representation. None omits the field. The represented preview's candidate_response_bytes match the exact serialized candidate including the chain. Cycle/external unresolved tool responses include their required error and chain. Documentation remains contract version 1.0.0; no repository policy requiring an additive-field bump was found.
+
+FULL_LIVE_PARITY
+FULL_LIVE_REEXPORT_LINEAGE_PARITY=PASS. `test_reexport_lineage_query_retarget_matches_full_oracle` establishes fresh full baseline `c::exported -> a::foo`, changes only `b.py` to target `a::bar`, updates incrementally, and compares the live result and a fresh full oracle: status, canonical target, chain and selected semantic payload. Only revision/provenance keys are normalized for selected payload comparison.
+
+SOURCE_IO_PROOF
+REEXPORT_LINEAGE_QUERY_SOURCE_READS=ZERO
+REEXPORT_LINEAGE_QUERY_AST_ACCESSES=ZERO
+The query-only fixture patches `Module.ast_tree`, `_get_cached_ast` and `Path.open` to raise. Multi-hop, one-hop, package, star, direct-binding, cycle, external and missing-origin alias queries pass under these guards. Full oracle construction is outside this guard.
+
+PERSISTENCE_IMPACT
 PERSISTENCE_CHANGE_REQUIRED=NO
 SNAPSHOT_SCHEMA_CHANGE_REQUIRED=NO
-CAN_LINEAGE_REEXPORT_UPDATE_BE_RAM_ONLY=YES
-STAR_BOUND_BARE_CALL_BLOCKS_REEXPORT_LINEAGE_INTEGRATION=NO
-READY_FOR_DESIGN=YES
+No repository state, lineage fact, semantic version, snapshot normalization, persistence, or schema files changed. The alias index is derived and RAM-only.
 
-READY_FOR_DESIGN rationale: DIRECT_EVIDENCE establishes the exact missing relations and the full/incremental query behavior; CODE_PATH_PROVED establishes the existing derived lineage query index/backend lifecycle and the independent canonical reexport facts owner. B is recorded only as the best evidence-derived integration-boundary candidate; no design or implementation has been selected. The deferred bare-star-call audit is not a blocker for the reexport-lineage discovery boundary.
+TARGETED_TESTS
+- `tests/analysis/test_lineage_query_backend.py`: metadata, indexed owner lookup, fail-closed freshness, lazy alias-index build and incomplete-domain gate.
+- `tests/analysis/test_lineage_live_query.py`: exact target, not-found, ambiguity, single-slice lookup and the new package/star/binding/cycle/external/source-I/O integration gate.
+- `tests/mcp/test_lineage_response.py`: no-chain freshness behavior, existing represented preview sizing, and the new top-level chain / named-indexed / preview sizing gate.
+- `tests/mcp/tools/test_get_symbol_lineage.py`: existing direct response contracts plus resolved-chain forwarding and cycle/external unresolved payload gates.
+- Required existing re-export regression nodes: transitive aliased re-export, relative package initializer, star `__all__`, cyclic re-export, RAM-only `__all__` update parity, and package initializer addition propagation.
+- New full/live retarget parity node: `tests/test_completeness_freshness_parity_proof.py::test_reexport_lineage_query_retarget_matches_full_oracle`.
+- Correct named-node batch result: 32 passed and one initially authored response test failed because its fetch request selected only `interface` while the existing fixture had all canonical sections selected. The test setup was corrected to use `SYMBOL_LINEAGE_SECTION_ORDER`; the exact node then passed on rerun. The final post-chain-change focused rerun passed 5/5, including the changed live query, parity, response, cycle and external nodes.
+- Execution-scope deviation: one pytest command accidentally included the positional directory `tests/`; pytest began broad collection and was interrupted at approximately 15% progress. No full-suite completion or result is claimed. The subsequent validation used only explicit node IDs.
+- `git diff --check` over the 11 listed source/test/docs files: exit 0. `get_symbol_lineage.json` parsed successfully.
 
-## FILES_CHANGED
-FILES_CHANGED=NONE
+TEST_RESULTS
+Required targeted regression gates: PASS after the test-fixture correction and the final package-intermediate-chain change. No production behavior failure observed.
+TEST_POLICY_DEVIATION=ACCIDENTAL_BROAD_COLLECTION_STARTED_AND_ABORTED_AT_APPROXIMATELY_15_PERCENT
 
-## DIFFS
-DIFFS=NONE
+FILES_CHANGED
+- contextor/core/lineage_query/index.py
+- contextor/core/lineage_query/backend.py
+- contextor/core/lineage_query/live_query.py
+- contextor/mcp/lineage_response.py
+- contextor/mcp/tools/get_symbol_lineage.py
+- contextor/mcp/docs/get_symbol_lineage.json
+- tests/analysis/test_lineage_live_query.py
+- tests/analysis/test_lineage_query_backend.py
+- tests/test_completeness_freshness_parity_proof.py
+- tests/mcp/test_lineage_response.py
+- tests/mcp/tools/test_get_symbol_lineage.py
+
+MCP_RESTART_REQUIRED=YES_AFTER_STEP
+FULL_ANALYSIS_REQUIRED_AFTER_RESTART=NO, provided post-restart hydration confirms canonical_state=fresh, lineage=fresh, complete reexport fact domain and resync_required=false. That hydration has not yet been checked because no restart was requested or performed.
+
+FULL_DIFFS
+diff --git a/contextor/core/lineage_query/backend.py b/contextor/core/lineage_query/backend.py
+index e0e5a5b..359fddd 100644
+--- a/contextor/core/lineage_query/backend.py
++++ b/contextor/core/lineage_query/backend.py
+@@ -10,6 +10,13 @@ from contextor.core.domain.lineage_facts import (
+     SemanticEndpoint,
+     SourceLineageManifest,
+ )
++from contextor.core.lineage_query.index import (
++    ReexportLineageResolution,
++    build_reexport_lineage_alias_index,
++    canonicalize_lineage_qualified_identity,
++    resolve_reexport_lineage_alias,
++)
++from contextor.core.reference.shared import validate_reexport_facts_by_module
+ 
+ 
+ _MISSING = object()
+@@ -71,6 +78,45 @@ class RepositoryStateLineageBackend:
+ 
+         self._state = state
+         self._sources = raw_sources
++        self._modules = getattr(state, "modules", {})
++        self._reexport_facts_by_module = getattr(
++            state,
++            "reexport_facts_by_module",
++            {},
++        )
++        self._reexport_alias_index = None
++
++    def canonicalize_qualified_identity(
++        self,
++        qualified_name: str,
++    ) -> str:
++        return canonicalize_lineage_qualified_identity(
++            qualified_name,
++            self._modules,
++        )
++
++    def resolve_reexport_alias(
++        self,
++        query: str,
++    ) -> ReexportLineageResolution:
++        if self._reexport_alias_index is None:
++            if not validate_reexport_facts_by_module(
++                self._reexport_facts_by_module,
++                self._modules,
++            ):
++                raise ValueError(
++                    "Canonical re-export facts are unavailable or incomplete."
++                )
++            self._reexport_alias_index = (
++                build_reexport_lineage_alias_index(
++                    self._reexport_facts_by_module
++                )
++            )
++        return resolve_reexport_lineage_alias(
++            query,
++            self._reexport_alias_index,
++            self._modules,
++        )
+ 
+     def metadata(self) -> LineageBackendMetadata:
+         raw_revision = getattr(self._state, "revision", None)
+diff --git a/contextor/core/lineage_query/index.py b/contextor/core/lineage_query/index.py
+index 01482d7..8218469 100644
+--- a/contextor/core/lineage_query/index.py
++++ b/contextor/core/lineage_query/index.py
+@@ -1,11 +1,341 @@
+ from __future__ import annotations
+ 
+ from collections.abc import Mapping
++from dataclasses import dataclass
+ 
+ from contextor.core.domain.lineage_facts import (
+     MaterializedLineageSourceFacts,
+     SemanticEndpoint,
+ )
++from contextor.core.reference.shared import (
++    _canonicalize_package_reference_target,
++    _assemble_module_export_surfaces,
++)
++
++
++@dataclass(frozen=True)
++class ReexportLineageHop:
++    source: str
++    target: str
++    kind: str
++
++    def __post_init__(self) -> None:
++        if not isinstance(self.source, str) or not self.source:
++            raise ValueError("re-export hop source must be a non-empty string.")
++        if not isinstance(self.target, str) or not self.target:
++            raise ValueError("re-export hop target must be a non-empty string.")
++        if self.kind not in {"binding", "star"}:
++            raise ValueError("re-export hop kind must be 'binding' or 'star'.")
++
++
++@dataclass(frozen=True)
++class ReexportLineageResolution:
++    status: str
++    query: str
++    canonical_target: str | None = None
++    hops: tuple[ReexportLineageHop, ...] = ()
++    reason: str | None = None
++
++    def __post_init__(self) -> None:
++        if self.status not in {"not_alias", "resolved", "cycle", "unresolved"}:
++            raise ValueError("re-export lineage resolution status is invalid.")
++        if not isinstance(self.query, str):
++            raise TypeError("re-export lineage query must be a string.")
++        if self.canonical_target is not None and (
++            not isinstance(self.canonical_target, str)
++            or not self.canonical_target
++        ):
++            raise ValueError("canonical_target must be a non-empty string or None.")
++        if not isinstance(self.hops, tuple) or any(
++            not isinstance(hop, ReexportLineageHop) for hop in self.hops
++        ):
++            raise TypeError("re-export lineage hops must be a tuple of hops.")
++        if self.reason is not None and not isinstance(self.reason, str):
++            raise TypeError("re-export lineage reason must be a string or None.")
++
++
++def canonicalize_lineage_qualified_identity(
++    qualified_name: str,
++    modules,
++) -> str:
++    if not isinstance(qualified_name, str):
++        raise TypeError("qualified_name must be a string.")
++    if not isinstance(modules, Mapping):
++        raise TypeError("modules must be a mapping.")
++    if qualified_name.count("::") != 1:
++        return qualified_name
++
++    module_name, symbol_name = qualified_name.split("::", 1)
++    if not module_name or not symbol_name:
++        return qualified_name
++
++    dotted = f"{module_name}.{symbol_name}"
++    canonical_dotted = _canonicalize_package_reference_target(
++        dotted,
++        modules,
++    )
++    if not isinstance(canonical_dotted, str) or not canonical_dotted:
++        return qualified_name
++
++    module_names = set(modules)
++    parts = canonical_dotted.split(".")
++    for split_at in range(len(parts) - 1, 0, -1):
++        candidate_module = ".".join(parts[:split_at])
++        if candidate_module not in module_names:
++            continue
++        candidate_symbol = ".".join(parts[split_at:])
++        if candidate_symbol:
++            return f"{candidate_module}::{candidate_symbol}"
++    return qualified_name
++
++
++def _qualified_reexport_target(
++    target: str,
++    known_modules: set[str],
++) -> str:
++    if target.count("::") == 1:
++        return target
++    parts = target.split(".")
++    for split_at in range(len(parts) - 1, 0, -1):
++        candidate_module = ".".join(parts[:split_at])
++        if candidate_module not in known_modules:
++            continue
++        candidate_symbol = ".".join(parts[split_at:])
++        if candidate_symbol:
++            return f"{candidate_module}::{candidate_symbol}"
++    return target
++
++
++def build_reexport_lineage_alias_index(
++    reexport_facts_by_module,
++) -> dict[str, ReexportLineageHop]:
++    if not isinstance(reexport_facts_by_module, Mapping):
++        raise TypeError("reexport_facts_by_module must be a mapping.")
++
++    facts_by_exporter: dict[str, Mapping[str, object]] = {}
++    known_modules: set[str] = set()
++    for facts in reexport_facts_by_module.values():
++        if not isinstance(facts, Mapping):
++            raise TypeError("canonical re-export fact must be a mapping.")
++        exporter = facts.get("exporter")
++        bindings = facts.get("bindings")
++        star_sources = facts.get("star_sources")
++        if not isinstance(exporter, str) or not exporter:
++            raise ValueError("canonical re-export exporter is invalid.")
++        if not isinstance(bindings, Mapping):
++            raise ValueError("canonical re-export bindings are invalid.")
++        if not isinstance(star_sources, (list, tuple)) or any(
++            not isinstance(source, str) or not source
++            for source in star_sources
++        ):
++            raise ValueError("canonical re-export star_sources are invalid.")
++        if exporter in facts_by_exporter:
++            raise ValueError("canonical re-export exporter identity is duplicated.")
++        facts_by_exporter[exporter] = facts
++        known_modules.add(exporter)
++        known_modules.update(star_sources)
++
++    module_export_surfaces = _assemble_module_export_surfaces(
++        dict(reexport_facts_by_module)
++    )
++    alias_index: dict[str, ReexportLineageHop] = {}
++
++    def install(hop: ReexportLineageHop) -> None:
++        existing = alias_index.get(hop.source)
++        if existing is not None and existing != hop:
++            raise ValueError("canonical re-export alias identity is ambiguous.")
++        alias_index[hop.source] = hop
++
++    for exporter, facts in facts_by_exporter.items():
++        bindings = facts["bindings"]
++        assert isinstance(bindings, Mapping)
++        for local, target in bindings.items():
++            if not isinstance(local, str) or not local:
++                raise ValueError("canonical re-export binding name is invalid.")
++            if not isinstance(target, str) or not target:
++                raise ValueError("canonical re-export binding target is invalid.")
++            source = f"{exporter}::{local}"
++            if f"{exporter}.{local}" == target:
++                continue
++            install(
++                ReexportLineageHop(
++                    source=source,
++                    target=_qualified_reexport_target(target, known_modules),
++                    kind="binding",
++                )
++            )
++
++    # Reproduce the existing export-surface assembler's deterministic
++    # fixed-point ordering to retain the first star source that installs a
++    # visible local. The final visibility set still comes from its canonical
++    # helper above.
++    working_surfaces: dict[str, dict[str, str]] = {}
++    direct_bindings: dict[str, Mapping[str, object]] = {}
++    star_imports: list[tuple[str, str, set[str] | None]] = []
++    for exporter, facts in facts_by_exporter.items():
++        bindings = facts["bindings"]
++        explicit_all = facts.get("explicit_all")
++        if explicit_all is not None and not isinstance(explicit_all, (list, tuple)):
++            raise ValueError("canonical re-export explicit_all is invalid.")
++        allowed = None if explicit_all is None else set(explicit_all)
++        assert isinstance(bindings, Mapping)
++        direct_bindings[exporter] = bindings
++        visible: dict[str, str] = {}
++        for local, target in bindings.items():
++            if not isinstance(local, str) or not isinstance(target, str):
++                raise ValueError("canonical re-export binding is invalid.")
++            if allowed is not None and local not in allowed:
++                continue
++            if allowed is None and local.startswith("_"):
++                continue
++            visible[local] = target
++        working_surfaces[exporter] = visible
++        for source in facts["star_sources"]:
++            star_imports.append((exporter, source, allowed))
++
++    star_winners: dict[tuple[str, str], str] = {}
++    changed = True
++    while changed:
++        changed = False
++        for exporter, source, allowed in star_imports:
++            for local, target in tuple(working_surfaces.get(source, {}).items()):
++                if allowed is not None and local not in allowed:
++                    continue
++                if allowed is None and local.startswith("_"):
++                    continue
++                # A named binding owns its namespace slot even when it is a
++                # self-binding and therefore did not create a binding edge.
++                if local in direct_bindings.get(exporter, {}):
++                    continue
++                winner_key = (exporter, local)
++                if winner_key in star_winners:
++                    continue
++                working_surfaces.setdefault(exporter, {})[local] = target
++                star_winners[winner_key] = source
++                changed = True
++
++    for exporter, visible_bindings in module_export_surfaces.items():
++        facts = facts_by_exporter.get(exporter)
++        if facts is None:
++            continue
++        bindings = facts["bindings"]
++        assert isinstance(bindings, Mapping)
++        for local in visible_bindings:
++            if local in bindings:
++                continue
++            source = star_winners.get((exporter, local))
++            if source is None:
++                continue
++            install(
++                ReexportLineageHop(
++                    source=f"{exporter}::{local}",
++                    target=f"{source}::{local}",
++                    kind="star",
++                )
++            )
++
++    return dict(sorted(alias_index.items()))
++
++
++def resolve_reexport_lineage_alias(
++    query: str,
++    alias_index: Mapping[str, ReexportLineageHop],
++    modules,
++) -> ReexportLineageResolution:
++    if not isinstance(query, str):
++        raise TypeError("query must be a string.")
++    if not isinstance(alias_index, Mapping):
++        raise TypeError("alias_index must be a mapping.")
++    if not isinstance(modules, Mapping):
++        raise TypeError("modules must be a mapping.")
++
++    original = query.strip()
++    if original not in alias_index:
++        return ReexportLineageResolution(
++            status="not_alias",
++            query=original,
++        )
++
++    hops: list[ReexportLineageHop] = []
++    visited: set[str] = set()
++    current = original
++    while True:
++        if current in visited:
++            return ReexportLineageResolution(
++                status="cycle",
++                query=original,
++                hops=tuple(hops),
++                reason="reexport_cycle",
++            )
++        visited.add(current)
++        hop = alias_index.get(current)
++        if hop is None:
++            canonical_target = canonicalize_lineage_qualified_identity(
++                current,
++                modules,
++            )
++            if canonical_target.count("::") != 1:
++                return ReexportLineageResolution(
++                    status="unresolved",
++                    query=original,
++                    hops=tuple(hops),
++                    reason="target_outside_repository",
++                )
++            module_name = canonical_target.split("::", 1)[0]
++            if module_name not in modules:
++                return ReexportLineageResolution(
++                    status="unresolved",
++                    query=original,
++                    hops=tuple(hops),
++                    reason="target_outside_repository",
++                )
++            return ReexportLineageResolution(
++                status="resolved",
++                query=original,
++                canonical_target=canonical_target,
++                hops=tuple(hops),
++            )
++
++        if hop.target in alias_index:
++            # Keep a package façade alias in its re-export identity form long
++            # enough to follow the next edge. Canonicalizing it to
++            # pkg.__init__::name here would skip the alias-index key pkg::name.
++            canonical_target = hop.target
++        else:
++            canonical_target = canonicalize_lineage_qualified_identity(
++                hop.target,
++                modules,
++            )
++            if canonical_target.count("::") != 1:
++                return ReexportLineageResolution(
++                    status="unresolved",
++                    query=original,
++                    hops=tuple(hops),
++                    reason="target_outside_repository",
++                )
++            module_name = canonical_target.split("::", 1)[0]
++            if module_name not in modules:
++                return ReexportLineageResolution(
++                    status="unresolved",
++                    query=original,
++                    hops=tuple(hops),
++                    reason="target_outside_repository",
++                )
++
++        resolved_hop = ReexportLineageHop(
++            source=current,
++            target=canonical_target,
++            kind=hop.kind,
++        )
++        hops.append(resolved_hop)
++        if canonical_target in visited:
++            return ReexportLineageResolution(
++                status="cycle",
++                query=original,
++                hops=tuple(hops),
++                reason="reexport_cycle",
++            )
++        current = canonical_target
+ 
+ 
+ def lineage_owner_ids_for_source(
+diff --git a/contextor/core/lineage_query/live_query.py b/contextor/core/lineage_query/live_query.py
+index b34a5c1..793f54b 100644
+--- a/contextor/core/lineage_query/live_query.py
++++ b/contextor/core/lineage_query/live_query.py
+@@ -1,6 +1,6 @@
+ from __future__ import annotations
+ 
+-from dataclasses import dataclass, field
++from dataclasses import dataclass, field, replace
+ from collections.abc import Mapping
+ 
+ from contextor.core.analysis.state_manager import (
+@@ -9,6 +9,9 @@ from contextor.core.analysis.state_manager import (
+ from contextor.core.lineage_query.backend import (
+     RepositoryStateLineageBackend,
+ )
++from contextor.core.lineage_query.index import (
++    ReexportLineageResolution,
++)
+ from contextor.core.domain.lineage_facts import (
+     ExtractedSymbolicKind,
+     SemanticEndpoint,
+@@ -48,6 +51,7 @@ class LiveSymbolLineageQueryResult:
+     unavailable_reason: str | None = None
+     owner_names: dict[str, str] = field(default_factory=dict)
+     state_freshness: dict[str, object] = field(default_factory=dict)
++    reexport_chain: ReexportLineageResolution | None = None
+ 
+ 
+ def _selected_lineage_flow_matches(
+@@ -472,6 +476,7 @@ def query_live_symbol_lineage(
+     if not isinstance(query, str):
+         raise TypeError("query must be a string.")
+ 
++    raw_query = query.strip()
+     canonical_sections = (
+         _canonical_lineage_sections(sections)
+     )
+@@ -480,10 +485,13 @@ def query_live_symbol_lineage(
+     )
+ 
+     try:
++        canonical_query = backend.canonicalize_qualified_identity(
++            raw_query
++        )
+         catalog = build_live_lineage_target_catalog(
+             state,
+             backend,
+-            query,
++            canonical_query,
+         )
+     except ValueError as exc:
+         if str(exc) != _UNAVAILABLE_MESSAGE:
+@@ -491,7 +499,7 @@ def query_live_symbol_lineage(
+         return LiveSymbolLineageQueryResult(
+             resolution=LineageTargetResolution(
+                 status="unavailable",
+-                query=query.strip(),
++                query=raw_query,
+             ),
+             unavailable_reason=str(exc),
+             state_freshness=(
+@@ -507,9 +515,134 @@ def query_live_symbol_lineage(
+         catalog,
+     )
+     resolution = service.resolve_target(
+-        query
++        canonical_query
+     )
+ 
++    reexport_chain: ReexportLineageResolution | None = None
++    if resolution.status == "resolved" and resolution.target is not None:
++        if canonical_query != raw_query:
++            package_target = replace(
++                resolution.target,
++                resolution="package_alias",
++            )
++            resolution = LineageTargetResolution(
++                status="resolved",
++                query=raw_query,
++                target=package_target,
++            )
++    elif resolution.status == "not_found" and raw_query.count("::") == 1:
++        try:
++            reexport_chain = backend.resolve_reexport_alias(
++                raw_query
++            )
++        except ValueError as exc:
++            if str(exc) != (
++                "Canonical re-export facts are unavailable or incomplete."
++            ):
++                raise
++            return LiveSymbolLineageQueryResult(
++                resolution=LineageTargetResolution(
++                    status="unavailable",
++                    query=raw_query,
++                ),
++                unavailable_reason=str(exc),
++                state_freshness=(
++                    build_live_lineage_state_freshness(
++                        state,
++                        backend,
++                    )
++                ),
++            )
++
++        if reexport_chain.status == "not_alias":
++            reexport_chain = None
++            resolution = LineageTargetResolution(
++                status="not_found",
++                query=raw_query,
++            )
++        elif reexport_chain.status in {"cycle", "unresolved"}:
++            return LiveSymbolLineageQueryResult(
++                resolution=LineageTargetResolution(
++                    status="unresolved",
++                    query=raw_query,
++                ),
++                state_freshness=(
++                    build_live_lineage_state_freshness(
++                        state,
++                        backend,
++                    )
++                ),
++                reexport_chain=reexport_chain,
++            )
++        elif reexport_chain.status == "resolved":
++            assert reexport_chain.canonical_target is not None
++            try:
++                origin_catalog = build_live_lineage_target_catalog(
++                    state,
++                    backend,
++                    reexport_chain.canonical_target,
++                )
++            except ValueError as exc:
++                if str(exc) != _UNAVAILABLE_MESSAGE:
++                    raise
++                origin_catalog = None
++
++            if origin_catalog is None:
++                return LiveSymbolLineageQueryResult(
++                    resolution=LineageTargetResolution(
++                        status="unavailable",
++                        query=raw_query,
++                    ),
++                    unavailable_reason=(
++                        "Canonical re-export origin has no available lineage owner."
++                    ),
++                    state_freshness=(
++                        build_live_lineage_state_freshness(
++                            state,
++                            backend,
++                        )
++                    ),
++                    reexport_chain=reexport_chain,
++                )
++
++            origin_service = LineageQueryService(
++                backend,
++                origin_catalog,
++            )
++            origin_resolution = origin_service.resolve_target(
++                reexport_chain.canonical_target
++            )
++            if (
++                origin_resolution.status != "resolved"
++                or origin_resolution.target is None
++            ):
++                return LiveSymbolLineageQueryResult(
++                    resolution=LineageTargetResolution(
++                        status="unavailable",
++                        query=raw_query,
++                    ),
++                    unavailable_reason=(
++                        "Canonical re-export origin has no available lineage owner."
++                    ),
++                    state_freshness=(
++                        build_live_lineage_state_freshness(
++                            state,
++                            backend,
++                        )
++                    ),
++                    reexport_chain=reexport_chain,
++                )
++
++            resolution = LineageTargetResolution(
++                status="resolved",
++                query=raw_query,
++                target=replace(
++                    origin_resolution.target,
++                    resolution="reexport_alias",
++                ),
++            )
++            service = origin_service
++
+     if (
+         resolution.status != "resolved"
+         or resolution.target is None
+@@ -548,4 +681,5 @@ def query_live_symbol_lineage(
+         selected=selected,
+         owner_names=owner_names,
+         state_freshness=state_freshness,
++        reexport_chain=reexport_chain,
+     )
+diff --git a/contextor/mcp/docs/get_symbol_lineage.json b/contextor/mcp/docs/get_symbol_lineage.json
+index a94852e..2b5a78c 100644
+--- a/contextor/mcp/docs/get_symbol_lineage.json
++++ b/contextor/mcp/docs/get_symbol_lineage.json
+@@ -6,7 +6,7 @@
+   ],
+   "parameters": [
+     "repo_path (string, required): canonical repository root.",
+-    "symbol (string, required): active artifact ID or exact module::symbol identity; plain leaves and fuzzy identities are not accepted.",
++    "symbol (string, required): active artifact ID, exact canonical module::symbol identity, exact package façade module::symbol identity, or exact canonical re-export alias module::symbol identity; plain leaves and fuzzy identities are not accepted.",
+     "mode (auto|preview|fetch, default \"auto\"): progressive disclosure mode. auto evaluates all canonical lineage sections and returns the complete represented payload only when it fits the 5120-byte auto threshold; preview returns section costs without section payloads; fetch requires an explicit non-empty sections list.",
+     "sections (array or null, default null): explicit semantic sections for fetch mode only. Valid names are interface, connections, bindings, parameter_flows, calls_interfaces, returns, state, callbacks, surfaces, and unresolved_dynamic_boundaries.",
+     "representation (named|indexed|auto, default \"auto\"): semantic-owner identity representation. named uses canonical module/artifact names when available; indexed retains canonical owner IDs; auto applies exact serialized-size negotiation.",
+@@ -19,6 +19,8 @@
+     "Semantic sections are selected before transport. auto and preview request the complete canonical section set; fetch sends only the requested sections in canonical section order.",
+     "Sections describe the target interface, direct cross-source connections, bindings, parameter flows, calls/interfaces, returns, state access, callbacks, surfaces, and unresolved/dynamic boundaries. get_symbol_lineage does not perform recursive lineage traversal.",
+     "Representation applies only to canonical SemanticEndpoint owners. Semantic owners may be module IDs or artifact IDs. Indexed output exposes lookup_index_entries as the resolver for both ID kinds; occurrence and symbolic endpoint identities are not rewritten.",
++    "When an exact re-export alias resolves, the canonical target and semantic sections describe the real origin owner. An optional top-level reexport_chain reports the query identity and each immediate binding or star hop; it is not included in sections or semantic-owner representation conversion.",
++    "A re-export cycle or target outside the repository returns status=unresolved with error=reexport_cycle or error=target_outside_repository and an explanatory reexport_chain.",
+     "auto selects indexed representation only when named identities are unavailable or indexed output saves at least 512 serialized bytes; otherwise it emits named output.",
+     "For mode=auto, a represented complete candidate above 5120 UTF-8 bytes becomes a representation-aware preview before the general large-output guard runs. A candidate exactly at 5120 bytes may be returned.",
+     "The selected final response uses the shared 15360-byte output guard. Explicit fetch above that threshold requires allow_large_output=true.",
+@@ -32,6 +34,7 @@
+   ],
+   "errors": [
+     "Invalid mode, section selection, representation, allow_large_output, repository path, or symbol shape returns a controlled error response before lineage execution where applicable.",
++    "Re-export alias cycles and targets that cannot be mapped to a real repository module return status=unresolved; error is reexport_cycle or target_outside_repository, respectively, and reexport_chain carries the attempted alias path.",
+     "canonical_live_unavailable means no verified running LIVE authority exists; the tool does not start one automatically.",
+     "canonical_live_transport_error and canonical_query_transport_error report authority/IPC transport failure without snapshot fallback.",
+     "canonical_query_response_invalid and canonical_query_revision_mismatch fail closed on malformed or cross-revision narrow responses.",
+diff --git a/contextor/mcp/lineage_response.py b/contextor/mcp/lineage_response.py
+index 30a9ac5..c9bfc43 100644
+--- a/contextor/mcp/lineage_response.py
++++ b/contextor/mcp/lineage_response.py
+@@ -5,6 +5,7 @@ from dataclasses import dataclass
+ from collections.abc import Mapping
+ 
+ from contextor.core.domain.lineage_facts import MaterializedOccurrenceRef, MaterializedSymbolicRef, SemanticEndpoint
++from contextor.core.lineage_query.index import ReexportLineageResolution
+ from contextor.core.lineage_query.service import (
+     SYMBOL_LINEAGE_SECTION_ORDER,
+     LineageFlowMatch, LineageSurfaceMatch, SelectedSymbolLineageFacts, TargetInterfaceFacts,
+@@ -114,6 +115,7 @@ def build_symbol_lineage_payload(
+     selected: SelectedSymbolLineageFacts,
+     *,
+     state_freshness: Mapping[str, object] | None = None,
++    reexport_chain: ReexportLineageResolution | None = None,
+ ) -> dict:
+     if not isinstance(
+         selected,
+@@ -158,17 +160,46 @@ def build_symbol_lineage_payload(
+     result["sections"] = _section_payloads(
+         selected
+     )
++    if reexport_chain is not None:
++        result["reexport_chain"] = build_reexport_lineage_payload(
++            reexport_chain
++        )
+     return result
+ 
+ 
++def build_reexport_lineage_payload(
++    resolution: ReexportLineageResolution,
++) -> dict:
++    if not isinstance(resolution, ReexportLineageResolution):
++        raise TypeError("resolution must be ReexportLineageResolution.")
++    payload = {
++        "status": resolution.status,
++        "query": resolution.query,
++        "canonical_target": resolution.canonical_target,
++        "hops": [
++            {
++                "source": hop.source,
++                "target": hop.target,
++                "kind": hop.kind,
++            }
++            for hop in resolution.hops
++        ],
++    }
++    if resolution.reason is not None:
++        payload["reason"] = resolution.reason
++    return payload
++
++
+ def build_symbol_lineage_preview(
+     selected: SelectedSymbolLineageFacts,
+     *,
+     state_freshness: Mapping[str, object] | None = None,
++    reexport_chain: ReexportLineageResolution | None = None,
+ ) -> dict:
+     payload = build_symbol_lineage_payload(
+         selected,
+         state_freshness=state_freshness,
++        reexport_chain=reexport_chain,
+     )
+     result = {
+         "status": "resolved",
+@@ -203,6 +234,10 @@ def build_symbol_lineage_preview(
+         result["state_freshness"] = payload[
+             "state_freshness"
+         ]
++    if "reexport_chain" in payload:
++        result["reexport_chain"] = payload[
++            "reexport_chain"
++        ]
+     return result
+ 
+ 
+@@ -234,6 +269,7 @@ def build_symbol_lineage_represented_payload(
+     representation: str = "auto",
+     owner_names: Mapping[str, str] | None = None,
+     state_freshness: Mapping[str, object] | None = None,
++    reexport_chain: ReexportLineageResolution | None = None,
+ ) -> dict:
+     if not isinstance(selected, SelectedSymbolLineageFacts): raise TypeError("selected must be SelectedSymbolLineageFacts.")
+     if not isinstance(representation, str): raise TypeError("representation must be a string.")
+@@ -245,6 +281,7 @@ def build_symbol_lineage_represented_payload(
+     base = build_symbol_lineage_payload(
+         selected,
+         state_freshness=state_freshness,
++        reexport_chain=reexport_chain,
+     )
+     missing = tuple(owner for owner in _semantic_owner_ids(base) if owner_names is None or owner not in owner_names)
+     indexed = dict(base); indexed.update({"representation": "indexed", "requested_representation": requested, "resolver": {"id_kinds": ["module", "artifact"], "resolve_via": "lookup_index_entries"}})
+@@ -274,12 +311,14 @@ def _represented_response_candidate(
+     representation: str,
+     owner_names: Mapping[str, str] | None,
+     state_freshness: Mapping[str, object] | None,
++    reexport_chain: ReexportLineageResolution | None,
+ ) -> dict:
+     result = build_symbol_lineage_represented_payload(
+         selected,
+         representation=representation,
+         owner_names=owner_names,
+         state_freshness=state_freshness,
++        reexport_chain=reexport_chain,
+     )
+     result["mode"] = mode
+     return result
+@@ -292,6 +331,7 @@ def build_symbol_lineage_represented_preview(
+     owner_names: Mapping[str, str] | None = None,
+     state_freshness: Mapping[str, object] | None = None,
+     candidate_mode: str = "fetch",
++    reexport_chain: ReexportLineageResolution | None = None,
+ ) -> dict:
+     if candidate_mode not in {"auto", "fetch"}:
+         raise ValueError(
+@@ -304,6 +344,7 @@ def build_symbol_lineage_represented_preview(
+         representation=representation,
+         owner_names=owner_names,
+         state_freshness=state_freshness,
++        reexport_chain=reexport_chain,
+     )
+     sections = candidate["sections"]
+ 
+@@ -350,6 +391,11 @@ def build_symbol_lineage_represented_preview(
+             "state_freshness"
+         ]
+ 
++    if "reexport_chain" in candidate:
++        result["reexport_chain"] = candidate[
++            "reexport_chain"
++        ]
++
+     if "resolver" in candidate:
+         result["resolver"] = candidate["resolver"]
+ 
+@@ -365,6 +411,7 @@ def render_symbol_lineage_response(
+     owner_names: Mapping[str, str] | None = None,
+     state_freshness: Mapping[str, object] | None = None,
+     allow_large_output: bool = False,
++    reexport_chain: ReexportLineageResolution | None = None,
+ ) -> str:
+     if not isinstance(
+         selected,
+@@ -399,6 +446,7 @@ def render_symbol_lineage_response(
+             owner_names=owner_names,
+             state_freshness=state_freshness,
+             candidate_mode="fetch",
++            reexport_chain=reexport_chain,
+         )
+         serialized = json.dumps(
+             result,
+@@ -425,6 +473,7 @@ def render_symbol_lineage_response(
+         representation=representation,
+         owner_names=owner_names,
+         state_freshness=state_freshness,
++        reexport_chain=reexport_chain,
+     )
+     candidate_bytes = (
+         mcp_rep.serialized_json_bytes(
+@@ -444,6 +493,7 @@ def render_symbol_lineage_response(
+                 owner_names=owner_names,
+                 state_freshness=state_freshness,
+                 candidate_mode="auto",
++                reexport_chain=reexport_chain,
+             )
+         )
+         preview["auto_fetch"] = {
+diff --git a/contextor/mcp/tools/get_symbol_lineage.py b/contextor/mcp/tools/get_symbol_lineage.py
+index 7a1e171..1ac32fb 100644
+--- a/contextor/mcp/tools/get_symbol_lineage.py
++++ b/contextor/mcp/tools/get_symbol_lineage.py
+@@ -3,6 +3,7 @@ from __future__ import annotations
+ import json
+ from pathlib import Path
+ 
++from contextor.core.lineage_query.index import ReexportLineageResolution
+ from contextor.core.lineage_query.service import (
+     LineageTargetResolution,
+     ResolvedLineageTarget,
+@@ -10,6 +11,7 @@ from contextor.core.lineage_query.service import (
+ from contextor.mcp import representation as mcp_rep
+ from contextor.mcp import runtime as mcp_runtime
+ from contextor.mcp.lineage_response import (
++    build_reexport_lineage_payload,
+     plan_symbol_lineage_response,
+     render_symbol_lineage_response,
+ )
+@@ -38,6 +40,7 @@ def _resolution_response(
+     *,
+     state_freshness: dict[str, object],
+     unavailable_reason: str | None = None,
++    reexport_chain: ReexportLineageResolution | None = None,
+ ) -> str:
+     if resolution.status == "unavailable":
+         return json.dumps(
+@@ -68,6 +71,20 @@ def _resolution_response(
+             indent=2,
+             ensure_ascii=False,
+         )
++    if resolution.status == "unresolved" and reexport_chain is not None:
++        return json.dumps(
++            {
++                "status": "unresolved",
++                "symbol": resolution.query,
++                "error": reexport_chain.reason,
++                "reexport_chain": build_reexport_lineage_payload(
++                    reexport_chain
++                ),
++                "state_freshness": state_freshness,
++            },
++            indent=2,
++            ensure_ascii=False,
++        )
+     if resolution.status == "ambiguous":
+         return json.dumps(
+             {
+@@ -148,6 +165,7 @@ def get_symbol_lineage(
+             resolution,
+             state_freshness=result.state_freshness,
+             unavailable_reason=result.unavailable_reason,
++            reexport_chain=result.reexport_chain,
+         )
+     if result.selected is None:
+         return _error(
+@@ -155,14 +173,19 @@ def get_symbol_lineage(
+             message="Resolved lineage target returned no selected facts.",
+         )
+     try:
++        render_kwargs = {
++            "mode": plan.mode,
++            "sections": requested_sections,
++            "representation": normalized_representation,
++            "owner_names": result.owner_names,
++            "state_freshness": result.state_freshness,
++            "allow_large_output": allow_large_output,
++        }
++        if result.reexport_chain is not None:
++            render_kwargs["reexport_chain"] = result.reexport_chain
+         return render_symbol_lineage_response(
+             result.selected,
+-            mode=plan.mode,
+-            sections=requested_sections,
+-            representation=normalized_representation,
+-            owner_names=result.owner_names,
+-            state_freshness=result.state_freshness,
+-            allow_large_output=allow_large_output,
++            **render_kwargs,
+         )
+     except (TypeError, ValueError) as exc:
+         return _error("lineage_response_failed", message=str(exc))
+diff --git a/tests/analysis/test_lineage_live_query.py b/tests/analysis/test_lineage_live_query.py
+index 5c75f4f..b1060af 100644
+--- a/tests/analysis/test_lineage_live_query.py
++++ b/tests/analysis/test_lineage_live_query.py
+@@ -1,5 +1,7 @@
+ from dataclasses import replace
+ from types import SimpleNamespace
++from pathlib import Path
++from unittest.mock import patch
+ 
+ import pytest
+ 
+@@ -21,6 +23,7 @@ from contextor.core.domain.lineage_facts import (
+     SourceSpan,
+     build_module_global_slot,
+ )
++from contextor.core.domain.module import Module
+ from contextor.core.lineage_query.backend import (
+     RepositoryStateLineageBackend,
+ )
+@@ -143,6 +146,20 @@ def _fixture():
+         lineage_semantic_anchor_bindings_complete=(
+             anchor_complete
+         ),
++        reexport_facts_by_module={
++            "pkg.mod": {
++                "exporter": "pkg.mod",
++                "explicit_all": None,
++                "bindings": {},
++                "star_sources": [],
++            },
++            "pkg.other": {
++                "exporter": "pkg.other",
++                "explicit_all": None,
++                "bindings": {},
++                "star_sources": [],
++            },
++        },
+     )
+     return (
+         state,
+@@ -150,6 +167,45 @@ def _fixture():
+     )
+ 
+ 
++def _reexport_query_fixture(module_paths, reexport_facts, definitions):
++    modules = {
++        module_id: Module(
++            module_id,
++            path,
++            str(Path(path).resolve()),
++            [],
++        )
++        for module_id, path in module_paths.items()
++    }
++    sources = {
++        path: _source(
++            path,
++            f"{index + 1:064x}",
++            definitions.get(module_id, ()),
++        )
++        for index, (module_id, path) in enumerate(module_paths.items())
++    }
++    (
++        owner_source_index,
++        source_owner_index,
++        anchor_complete,
++    ) = build_lineage_query_indexes(sources)
++    state = SimpleNamespace(
++        revision=19,
++        provenance="live",
++        modules=modules,
++        reexport_facts_by_module=reexport_facts,
++        lineage_facts_state="fresh",
++        lineage_facts_semantic_version="1",
++        lineage_facts_by_source=sources,
++        lineage_owner_source_index=owner_source_index,
++        lineage_source_owner_index=source_owner_index,
++        lineage_query_index_state="fresh",
++        lineage_semantic_anchor_bindings_complete=anchor_complete,
++    )
++    return state
++
++
+ def test_live_target_catalog_resolves_artifact_id_only_through_owner_index(
+     monkeypatch,
+ ):
+@@ -475,6 +531,319 @@ def test_live_symbol_lineage_query_resolves_exact_qualified_identity():
+     )
+ 
+ 
++def test_live_symbol_lineage_query_resolves_reexports_without_source_io(
++    monkeypatch,
++):
++    module_paths = {
++        "a": "a.py",
++        "b": "b.py",
++        "c": "c.py",
++        "d": "d.py",
++        "pkg.__init__": "pkg/__init__.py",
++        "pkg.provider": "pkg/provider.py",
++        "star_src": "star_src.py",
++        "star_src_second": "star_src_second.py",
++        "star_mid": "star_mid.py",
++        "star_dst": "star_dst.py",
++        "direct_src": "direct_src.py",
++        "direct_dst": "direct_dst.py",
++        "direct_override": "direct_override.py",
++        "cycle_a": "cycle_a.py",
++        "cycle_b": "cycle_b.py",
++        "external_dst": "external_dst.py",
++    }
++
++    def facts(exporter, *, bindings=None, explicit_all=None, star_sources=()):
++        return {
++            "exporter": exporter,
++            "explicit_all": explicit_all,
++            "bindings": {} if bindings is None else bindings,
++            "star_sources": list(star_sources),
++        }
++
++    reexport_facts = {
++        "a": facts("a", bindings={"foo": "a.foo"}),
++        "b": facts("b", bindings={"public_foo": "a.foo"}),
++        "c": facts("c", bindings={"exported": "b.public_foo"}),
++        "d": facts("d", bindings={"exported_run": "pkg.public_run"}),
++        "pkg.__init__": facts(
++            "pkg",
++            bindings={
++                "LOCAL": "pkg.LOCAL",
++                "public_run": "pkg.provider.run",
++            },
++            explicit_all=["public_run"],
++        ),
++        "pkg.provider": facts(
++            "pkg.provider",
++            bindings={"run": "pkg.provider.run"},
++        ),
++        "star_src": facts(
++            "star_src",
++            bindings={
++                "visible": "star_src.visible",
++                "_hidden": "star_src._hidden",
++                "shared": "star_src.shared",
++            },
++            explicit_all=["visible", "shared"],
++        ),
++        "star_src_second": facts(
++            "star_src_second",
++            bindings={"shared": "star_src_second.shared"},
++            explicit_all=["shared"],
++        ),
++        "star_mid": facts(
++            "star_mid",
++            star_sources=["star_src", "star_src_second"],
++        ),
++        "star_dst": facts("star_dst", star_sources=["star_mid"]),
++        "direct_src": facts(
++            "direct_src",
++            bindings={"foo": "direct_src.foo"},
++        ),
++        "direct_dst": facts(
++            "direct_dst",
++            bindings={"hidden": "direct_src.foo"},
++            explicit_all=[],
++        ),
++        "direct_override": facts(
++            "direct_override",
++            bindings={"visible": "a.foo"},
++            explicit_all=["visible"],
++            star_sources=["star_src"],
++        ),
++        "cycle_a": facts(
++            "cycle_a",
++            bindings={"value": "cycle_b.value"},
++            explicit_all=["value"],
++        ),
++        "cycle_b": facts(
++            "cycle_b",
++            bindings={"value": "cycle_a.value"},
++            explicit_all=["value"],
++        ),
++        "external_dst": facts(
++            "external_dst",
++            bindings={"public": "thirdparty.api.foo"},
++        ),
++    }
++    definitions = {
++        "a": (("A1/1", "a::foo"),),
++        "pkg.__init__": (("A2/1", "pkg.__init__::LOCAL"),),
++        "pkg.provider": (("A3/1", "pkg.provider::run"),),
++        "star_src": (
++            ("A4/1", "star_src::visible"),
++            ("A4/2", "star_src::_hidden"),
++            ("A4/3", "star_src::shared"),
++        ),
++        "star_src_second": (("A6/1", "star_src_second::shared"),),
++        "direct_src": (("A5/1", "direct_src::foo"),),
++    }
++    state = _reexport_query_fixture(
++        module_paths,
++        reexport_facts,
++        definitions,
++    )
++    missing_origin_state = _reexport_query_fixture(
++        module_paths,
++        reexport_facts,
++        definitions={
++            key: value
++            for key, value in definitions.items()
++            if key != "a"
++        },
++    )
++
++    import contextor.core.domain.module as module_domain
++
++    def fail_source_access(*_args, **_kwargs):
++        raise AssertionError("re-export lineage query accessed source or AST")
++
++    with (
++        patch.object(
++            Module,
++            "ast_tree",
++            new=property(fail_source_access),
++        ),
++        patch.object(
++            module_domain,
++            "_get_cached_ast",
++            side_effect=fail_source_access,
++        ),
++        patch.object(
++            Path,
++            "open",
++            side_effect=fail_source_access,
++        ),
++    ):
++        multi_hop = query_live_symbol_lineage(
++            state,
++            "c::exported",
++            ("interface",),
++        )
++        one_hop = query_live_symbol_lineage(
++            state,
++            "b::public_foo",
++            ("interface",),
++        )
++        package_alias = query_live_symbol_lineage(
++            state,
++            "pkg::public_run",
++            ("interface",),
++        )
++        package_alias_chain = query_live_symbol_lineage(
++            state,
++            "d::exported_run",
++            ("interface",),
++        )
++        package_local = query_live_symbol_lineage(
++            state,
++            "pkg::LOCAL",
++            ("interface",),
++        )
++        star_alias = query_live_symbol_lineage(
++            state,
++            "star_dst::visible",
++            ("interface",),
++        )
++        star_private = query_live_symbol_lineage(
++            state,
++            "star_dst::_hidden",
++            ("interface",),
++        )
++        star_multiple = query_live_symbol_lineage(
++            state,
++            "star_dst::shared",
++            ("interface",),
++        )
++        direct_alias = query_live_symbol_lineage(
++            state,
++            "direct_dst::hidden",
++            ("interface",),
++        )
++        direct_override = query_live_symbol_lineage(
++            state,
++            "direct_override::visible",
++            ("interface",),
++        )
++        cycle = query_live_symbol_lineage(
++            state,
++            "cycle_a::value",
++            ("interface",),
++        )
++        external = query_live_symbol_lineage(
++            state,
++            "external_dst::public",
++            ("interface",),
++        )
++        missing_origin = query_live_symbol_lineage(
++            missing_origin_state,
++            "c::exported",
++            ("interface",),
++        )
++
++    assert multi_hop.resolution.status == "resolved"
++    assert multi_hop.resolution.target is not None
++    assert multi_hop.resolution.target.qualified_name == "a::foo"
++    assert multi_hop.resolution.target.resolution == "reexport_alias"
++    assert multi_hop.resolution.target.artifact_id == "A1/1"
++    assert [
++        (hop.source, hop.target, hop.kind)
++        for hop in multi_hop.reexport_chain.hops
++    ] == [
++        ("c::exported", "b::public_foo", "binding"),
++        ("b::public_foo", "a::foo", "binding"),
++    ]
++
++    assert one_hop.resolution.target is not None
++    assert one_hop.resolution.target.qualified_name == "a::foo"
++    assert len(one_hop.reexport_chain.hops) == 1
++
++    assert package_alias.resolution.target is not None
++    assert package_alias.resolution.target.qualified_name == (
++        "pkg.provider::run"
++    )
++    assert package_alias.resolution.target.resolution == "reexport_alias"
++    assert [
++        (hop.source, hop.target, hop.kind)
++        for hop in package_alias.reexport_chain.hops
++    ] == [("pkg::public_run", "pkg.provider::run", "binding")]
++    assert package_alias_chain.resolution.target is not None
++    assert package_alias_chain.resolution.target.qualified_name == (
++        "pkg.provider::run"
++    )
++    assert [
++        (hop.source, hop.target, hop.kind)
++        for hop in package_alias_chain.reexport_chain.hops
++    ] == [
++        ("d::exported_run", "pkg::public_run", "binding"),
++        ("pkg::public_run", "pkg.provider::run", "binding"),
++    ]
++
++    assert package_local.resolution.target is not None
++    assert package_local.resolution.target.qualified_name == (
++        "pkg.__init__::LOCAL"
++    )
++    assert package_local.resolution.target.resolution == "package_alias"
++    assert package_local.reexport_chain is None
++
++    assert star_alias.resolution.target is not None
++    assert star_alias.resolution.target.qualified_name == (
++        "star_src::visible"
++    )
++    assert [
++        (hop.source, hop.target, hop.kind)
++        for hop in star_alias.reexport_chain.hops
++    ] == [
++        ("star_dst::visible", "star_mid::visible", "star"),
++        ("star_mid::visible", "star_src::visible", "star"),
++    ]
++    assert star_private.resolution.status == "not_found"
++    assert star_private.reexport_chain is None
++    assert star_multiple.resolution.target is not None
++    assert star_multiple.resolution.target.qualified_name == (
++        "star_src::shared"
++    )
++    assert [
++        (hop.source, hop.target, hop.kind)
++        for hop in star_multiple.reexport_chain.hops
++    ] == [
++        ("star_dst::shared", "star_mid::shared", "star"),
++        ("star_mid::shared", "star_src::shared", "star"),
++    ]
++
++    assert direct_alias.resolution.target is not None
++    assert direct_alias.resolution.target.qualified_name == (
++        "direct_src::foo"
++    )
++    assert direct_alias.reexport_chain.hops[0].kind == "binding"
++    assert direct_override.resolution.target is not None
++    assert direct_override.resolution.target.qualified_name == "a::foo"
++    assert direct_override.reexport_chain.hops[0].kind == "binding"
++
++    assert cycle.resolution.status == "unresolved"
++    assert cycle.selected is None
++    assert cycle.reexport_chain.status == "cycle"
++    assert cycle.reexport_chain.reason == "reexport_cycle"
++    assert cycle.reexport_chain.canonical_target is None
++    assert [
++        (hop.source, hop.target, hop.kind)
++        for hop in cycle.reexport_chain.hops
++    ] == [
++        ("cycle_a::value", "cycle_b::value", "binding"),
++        ("cycle_b::value", "cycle_a::value", "binding"),
++    ]
++    assert external.resolution.status == "unresolved"
++    assert external.reexport_chain.status == "unresolved"
++    assert external.reexport_chain.reason == "target_outside_repository"
++    assert external.reexport_chain.canonical_target is None
++
++    assert missing_origin.resolution.status == "unavailable"
++    assert missing_origin.unavailable_reason == (
++        "Canonical re-export origin has no available lineage owner."
++    )
++
++
+ @pytest.mark.parametrize(
+     ("query", "expected_status"),
+     (
+diff --git a/tests/analysis/test_lineage_query_backend.py b/tests/analysis/test_lineage_query_backend.py
+index 8d524df..ba646c1 100644
+--- a/tests/analysis/test_lineage_query_backend.py
++++ b/tests/analysis/test_lineage_query_backend.py
+@@ -13,6 +13,7 @@ from contextor.core.lineage_query import (
+     LineageBackendMetadata,
+     RepositoryStateLineageBackend,
+ )
++from contextor.core.lineage_query import backend as backend_module
+ 
+ 
+ def _slice(source_key: str) -> MaterializedLineageSourceFacts:
+@@ -69,6 +70,74 @@ def test_repository_state_backend_exposes_canonical_metadata():
+     )
+ 
+ 
++def test_repository_state_backend_builds_reexport_alias_index_lazily(
++    monkeypatch,
++):
++    modules = {
++        "pkg.a": SimpleNamespace(path="pkg/a.py"),
++        "pkg.b": SimpleNamespace(path="pkg/b.py"),
++    }
++    reexport_facts = {
++        "pkg.a": {
++            "exporter": "pkg.a",
++            "explicit_all": None,
++            "bindings": {"foo": "pkg.a.foo"},
++            "star_sources": [],
++        },
++        "pkg.b": {
++            "exporter": "pkg.b",
++            "explicit_all": None,
++            "bindings": {"public": "pkg.a.foo"},
++            "star_sources": [],
++        },
++    }
++    state = SimpleNamespace(
++        **{
++            **vars(_state()[0]),
++            "modules": modules,
++            "reexport_facts_by_module": reexport_facts,
++        }
++    )
++    backend = RepositoryStateLineageBackend(state)
++    assert backend._modules is modules
++    assert backend._reexport_facts_by_module is reexport_facts
++    assert backend._reexport_alias_index is None
++
++    original_builder = backend_module.build_reexport_lineage_alias_index
++    builds = []
++
++    def build_spy(facts):
++        builds.append(facts)
++        return original_builder(facts)
++
++    monkeypatch.setattr(
++        backend_module,
++        "build_reexport_lineage_alias_index",
++        build_spy,
++    )
++    first = backend.resolve_reexport_alias("pkg.b::public")
++    second = backend.resolve_reexport_alias("pkg.b::public")
++
++    assert first == second
++    assert first.status == "resolved"
++    assert first.canonical_target == "pkg.a::foo"
++    assert len(first.hops) == 1
++    assert builds == [reexport_facts]
++
++
++def test_repository_state_backend_reexport_alias_resolution_fails_closed():
++    state, _, _ = _state()
++    state.modules = {"pkg.a": SimpleNamespace(path="pkg/a.py")}
++    state.reexport_facts_by_module = {}
++    backend = RepositoryStateLineageBackend(state)
++
++    with pytest.raises(
++        ValueError,
++        match="Canonical re-export facts are unavailable or incomplete",
++    ):
++        backend.resolve_reexport_alias("pkg.a::missing")
++
++
+ def test_repository_state_backend_preserves_slice_identity_and_order():
+     state, source_a, source_b = _state()
+     backend = RepositoryStateLineageBackend(state)
+diff --git a/tests/mcp/test_lineage_response.py b/tests/mcp/test_lineage_response.py
+index b64426c..ddcb207 100644
+--- a/tests/mcp/test_lineage_response.py
++++ b/tests/mcp/test_lineage_response.py
+@@ -12,6 +12,10 @@ from contextor.core.domain.lineage_facts import (
+     build_parameter_value_slot, build_return_slot, build_module_global_slot, ParameterKind,
+ )
+ from contextor.core.lineage_query.backend import LineageBackendMetadata
++from contextor.core.lineage_query.index import (
++    ReexportLineageHop,
++    ReexportLineageResolution,
++)
+ from contextor.core.lineage_query.service import (
+     SYMBOL_LINEAGE_SECTION_ORDER, DirectLineageFacts, LexicalScopeFacts,
+     LineageAnchorMatch, LineageFlowMatch, LineageInterfaceDescriptorMatch, LineageSurfaceMatch,
+@@ -605,7 +609,7 @@ def test_symbol_lineage_renderer_fails_closed_on_selection_plan_mismatch():
+         render_symbol_lineage_response(
+             selected,
+             mode="fetch",
+-            sections=("interface",),
++            sections=SYMBOL_LINEAGE_SECTION_ORDER,
+             representation="indexed",
+         )
+ 
+@@ -742,6 +746,151 @@ def test_symbol_lineage_represented_preview_sizes_candidate_with_freshness():
+     )
+ 
+ 
++def test_reexport_chain_is_top_level_and_representation_independent():
++    selected = _selected_lineage_fixture()
++    chain = ReexportLineageResolution(
++        status="resolved",
++        query="c::exported",
++        canonical_target="a::foo",
++        hops=(
++            ReexportLineageHop(
++                "c::exported",
++                "b::public_foo",
++                "binding",
++            ),
++            ReexportLineageHop(
++                "b::public_foo",
++                "a::foo",
++                "binding",
++            ),
++        ),
++    )
++    owner_names = _owner_names_fixture()
++    chain_payload = {
++        "status": "resolved",
++        "query": "c::exported",
++        "canonical_target": "a::foo",
++        "hops": [
++            {
++                "source": "c::exported",
++                "target": "b::public_foo",
++                "kind": "binding",
++            },
++            {
++                "source": "b::public_foo",
++                "target": "a::foo",
++                "kind": "binding",
++            },
++        ],
++    }
++
++    baseline_named = build_symbol_lineage_represented_payload(
++        selected,
++        representation="named",
++        owner_names=owner_names,
++    )
++    baseline_indexed = build_symbol_lineage_represented_payload(
++        selected,
++        representation="indexed",
++        owner_names=owner_names,
++    )
++    named = build_symbol_lineage_represented_payload(
++        selected,
++        representation="named",
++        owner_names=owner_names,
++        reexport_chain=chain,
++    )
++    indexed = build_symbol_lineage_represented_payload(
++        selected,
++        representation="indexed",
++        owner_names=owner_names,
++        reexport_chain=chain,
++    )
++
++    assert "reexport_chain" not in baseline_named
++    assert "reexport_chain" not in baseline_indexed
++    assert named["reexport_chain"] == indexed["reexport_chain"] == (
++        chain_payload
++    )
++    assert named["sections"] == baseline_named["sections"]
++    assert indexed["sections"] == baseline_indexed["sections"]
++    assert "reexport_chain" not in named["sections"]
++    assert "reexport_chain" not in indexed["sections"]
++
++    named_preview = build_symbol_lineage_preview(
++        selected,
++        reexport_chain=chain,
++    )
++    assert named_preview["reexport_chain"] == chain_payload
++
++    rendered_named = json.loads(
++        render_symbol_lineage_response(
++            selected,
++            mode="fetch",
++            sections=SYMBOL_LINEAGE_SECTION_ORDER,
++            representation="named",
++            owner_names=owner_names,
++            reexport_chain=chain,
++        )
++    )
++    rendered_indexed = json.loads(
++        render_symbol_lineage_response(
++            selected,
++            mode="fetch",
++            sections=SYMBOL_LINEAGE_SECTION_ORDER,
++            representation="indexed",
++            owner_names=owner_names,
++            reexport_chain=chain,
++        )
++    )
++    rendered_named_without_chain = json.loads(
++        render_symbol_lineage_response(
++            selected,
++            mode="fetch",
++            sections=SYMBOL_LINEAGE_SECTION_ORDER,
++            representation="named",
++            owner_names=owner_names,
++        )
++    )
++    rendered_indexed_without_chain = json.loads(
++        render_symbol_lineage_response(
++            selected,
++            mode="fetch",
++            sections=SYMBOL_LINEAGE_SECTION_ORDER,
++            representation="indexed",
++            owner_names=owner_names,
++        )
++    )
++    assert rendered_named["reexport_chain"] == (
++        rendered_indexed["reexport_chain"]
++    ) == chain_payload
++    assert rendered_named["sections"] == (
++        rendered_named_without_chain["sections"]
++    )
++    assert rendered_indexed["sections"] == (
++        rendered_indexed_without_chain["sections"]
++    )
++
++    preview = build_symbol_lineage_represented_preview(
++        selected,
++        representation="indexed",
++        owner_names=owner_names,
++        candidate_mode="fetch",
++        reexport_chain=chain,
++    )
++    candidate = build_symbol_lineage_represented_payload(
++        selected,
++        representation="indexed",
++        owner_names=owner_names,
++        reexport_chain=chain,
++    )
++    candidate["mode"] = "fetch"
++    assert preview["reexport_chain"] == chain_payload
++    assert preview["candidate_response_bytes"] == (
++        mcp_rep.serialized_json_bytes(candidate)
++    )
++
++
+ def test_symbol_lineage_auto_threshold_includes_freshness_envelope():
+     selected = _with_empty_selected_sections(
+         _selected_lineage_fixture()
+diff --git a/tests/mcp/tools/test_get_symbol_lineage.py b/tests/mcp/tools/test_get_symbol_lineage.py
+index e5fc4c7..419cde6 100644
+--- a/tests/mcp/tools/test_get_symbol_lineage.py
++++ b/tests/mcp/tools/test_get_symbol_lineage.py
+@@ -4,6 +4,10 @@ from types import SimpleNamespace
+ import pytest
+ 
+ from contextor.core.lineage_query.live_query import LiveSymbolLineageQueryResult
++from contextor.core.lineage_query.index import (
++    ReexportLineageHop,
++    ReexportLineageResolution,
++)
+ from contextor.core.lineage_query.service import (
+     SYMBOL_LINEAGE_SECTION_ORDER,
+     LineageTargetResolution,
+@@ -23,10 +27,10 @@ def _target(artifact_id="A17/2", qualified_name="pkg.mod::handler"):
+     return ResolvedLineageTarget(artifact_id=artifact_id, qualified_name=qualified_name, module_name=module_name, symbol_name=symbol_name, resolution="exact_id")
+ 
+ 
+-def _transport_result(resolution, *, selected=None, owner_names=None, revision=12, unavailable_reason=None):
++def _transport_result(resolution, *, selected=None, owner_names=None, revision=12, unavailable_reason=None, reexport_chain=None):
+     return LiveSymbolLineageTransportResult(
+         status="ok", revision=revision,
+-        result=LiveSymbolLineageQueryResult(resolution=resolution, selected=selected, unavailable_reason=unavailable_reason, owner_names={} if owner_names is None else owner_names, state_freshness=_freshness(revision)),
++        result=LiveSymbolLineageQueryResult(resolution=resolution, selected=selected, unavailable_reason=unavailable_reason, owner_names={} if owner_names is None else owner_names, state_freshness=_freshness(revision), reexport_chain=reexport_chain),
+     )
+ 
+ 
+@@ -46,6 +50,65 @@ def test_get_symbol_lineage_auto_plans_before_one_narrow_query_and_delegates_ren
+     assert observed["render"] == {"selected": marker, "mode": "auto", "sections": None, "representation": "named", "owner_names": {"A17/2": "pkg.mod::handler"}, "state_freshness": _freshness(), "allow_large_output": False}
+ 
+ 
++def test_get_symbol_lineage_forwards_resolved_reexport_chain_to_renderer(
++    tmp_path,
++    monkeypatch,
++):
++    marker = SimpleNamespace()
++    target = _target("A17/2", "a::foo")
++    chain = ReexportLineageResolution(
++        status="resolved",
++        query="c::exported",
++        canonical_target="a::foo",
++        hops=(
++            ReexportLineageHop(
++                "c::exported",
++                "b::public_foo",
++                "binding",
++            ),
++            ReexportLineageHop(
++                "b::public_foo",
++                "a::foo",
++                "binding",
++            ),
++        ),
++    )
++    observed = {}
++
++    monkeypatch.setattr(
++        mcp_runtime,
++        "query_live_symbol_lineage_narrow",
++        lambda *_args, **_kwargs: _transport_result(
++            LineageTargetResolution(
++                status="resolved",
++                query="c::exported",
++                target=target,
++            ),
++            selected=marker,
++            reexport_chain=chain,
++        ),
++    )
++    monkeypatch.setattr(
++        tool,
++        "render_symbol_lineage_response",
++        lambda selected, **kwargs: observed.update(
++            {"selected": selected, **kwargs}
++        ) or '{"status":"resolved"}',
++    )
++
++    result = json.loads(
++        tool.get_symbol_lineage(
++            str(tmp_path),
++            "c::exported",
++            representation="named",
++        )
++    )
++
++    assert result["status"] == "resolved"
++    assert observed["selected"] is marker
++    assert observed["reexport_chain"] is chain
++
++
+ def test_get_symbol_lineage_fetch_sends_canonical_section_order_but_preserves_request_for_renderer(tmp_path, monkeypatch):
+     marker, target, observed = SimpleNamespace(), _target(), {}
+     def narrow(_root, *, query, sections):
+@@ -95,6 +158,101 @@ def test_get_symbol_lineage_preserves_ambiguity_candidates_without_guessing(tmp_
+     assert [candidate["artifact_id"] for candidate in result["candidates"]] == ["A17/2", "A18/1"]
+ 
+ 
++def test_get_symbol_lineage_returns_cycle_as_unresolved_without_renderer(
++    tmp_path,
++    monkeypatch,
++):
++    chain = ReexportLineageResolution(
++        status="cycle",
++        query="cycle_a::value",
++        hops=(
++            ReexportLineageHop(
++                "cycle_a::value",
++                "cycle_b::value",
++                "binding",
++            ),
++            ReexportLineageHop(
++                "cycle_b::value",
++                "cycle_a::value",
++                "binding",
++            ),
++        ),
++        reason="reexport_cycle",
++    )
++    monkeypatch.setattr(
++        mcp_runtime,
++        "query_live_symbol_lineage_narrow",
++        lambda *_args, **_kwargs: _transport_result(
++            LineageTargetResolution(
++                status="unresolved",
++                query="cycle_a::value",
++            ),
++            reexport_chain=chain,
++        ),
++    )
++    monkeypatch.setattr(
++        tool,
++        "render_symbol_lineage_response",
++        lambda *_args, **_kwargs: (_ for _ in ()).throw(
++            AssertionError("unresolved re-export rendered as resolved")
++        ),
++    )
++
++    result = json.loads(
++        tool.get_symbol_lineage(
++            str(tmp_path),
++            "cycle_a::value",
++        )
++    )
++
++    assert result["status"] == "unresolved"
++    assert result["error"] == "reexport_cycle"
++    assert result["reexport_chain"]["status"] == "cycle"
++    assert result["reexport_chain"]["reason"] == "reexport_cycle"
++    assert result["state_freshness"] == _freshness()
++
++
++def test_get_symbol_lineage_returns_external_reexport_as_unresolved(
++    tmp_path,
++    monkeypatch,
++):
++    chain = ReexportLineageResolution(
++        status="unresolved",
++        query="external_dst::public",
++        reason="target_outside_repository",
++    )
++    monkeypatch.setattr(
++        mcp_runtime,
++        "query_live_symbol_lineage_narrow",
++        lambda *_args, **_kwargs: _transport_result(
++            LineageTargetResolution(
++                status="unresolved",
++                query="external_dst::public",
++            ),
++            reexport_chain=chain,
++        ),
++    )
++    monkeypatch.setattr(
++        tool,
++        "render_symbol_lineage_response",
++        lambda *_args, **_kwargs: (_ for _ in ()).throw(
++            AssertionError("external unresolved re-export was rendered")
++        ),
++    )
++
++    result = json.loads(
++        tool.get_symbol_lineage(
++            str(tmp_path),
++            "external_dst::public",
++        )
++    )
++
++    assert result["status"] == "unresolved"
++    assert result["error"] == "target_outside_repository"
++    assert result["reexport_chain"]["status"] == "unresolved"
++    assert result["reexport_chain"]["canonical_target"] is None
++
++
+ def test_get_symbol_lineage_rejects_resolved_result_without_selected_facts(tmp_path, monkeypatch):
+     target = _target()
+     monkeypatch.setattr(mcp_runtime, "query_live_symbol_lineage_narrow", lambda *_args, **_kwargs: _transport_result(LineageTargetResolution(status="resolved", query="A17/2", target=target), selected=None))
+diff --git a/tests/test_completeness_freshness_parity_proof.py b/tests/test_completeness_freshness_parity_proof.py
+index 56f2f0c..66faef5 100644
+--- a/tests/test_completeness_freshness_parity_proof.py
++++ b/tests/test_completeness_freshness_parity_proof.py
+@@ -5,6 +5,7 @@ Stage 3C.2a — Execution Completeness, Freshness & Full-State Parity Proof Test
+ """
+ 
+ from copy import deepcopy
++from dataclasses import asdict
+ from pathlib import Path
+ from unittest.mock import patch, MagicMock
+ 
+@@ -20,6 +21,7 @@ from contextor.core.domain.module import Module
+ from contextor.core.domain.refresh_plan import RefreshPlan
+ from contextor.core.domain.usage_facts import ModuleUsageFacts, UsageDelta
+ from contextor.core.live_state.hydration import hydrate_repository_engine
++from contextor.core.lineage_query.live_query import query_live_symbol_lineage
+ from contextor.core.reference.engine import extract_module_usage_facts
+ from contextor.core.reporting_engine.graph_analytics import (
+     _CALL_USAGE_CHANNELS,
+@@ -1340,6 +1342,115 @@ def test_reexport_retarget_matches_full_oracle(tmp_path):
+     )
+ 
+ 
++def test_reexport_lineage_query_retarget_matches_full_oracle(tmp_path):
++    provider = tmp_path / "a.py"
++    reexporter = tmp_path / "b.py"
++    consumer = tmp_path / "c.py"
++    provider.write_text(
++        "def foo():\n"
++        "    return 'foo'\n"
++        "\n"
++        "def bar():\n"
++        "    return 'bar'\n",
++        encoding="utf-8",
++    )
++    reexporter.write_text(
++        "from a import foo as public_value\n"
++        "__all__ = ['public_value']\n",
++        encoding="utf-8",
++    )
++    consumer.write_text(
++        "from b import public_value as exported\n"
++        "__all__ = ['exported']\n",
++        encoding="utf-8",
++    )
++
++    errors, _ = ContextorFacade().analyze_project(str(tmp_path))
++    assert not errors, errors
++    hydrated = hydrate_repository_engine(tmp_path)
++    assert hydrated is not None
++    engine = hydrated.engine
++
++    baseline = query_live_symbol_lineage(
++        engine.state,
++        "c::exported",
++        ("interface", "connections", "bindings"),
++    )
++    assert baseline.resolution.status == "resolved"
++    assert baseline.resolution.target is not None
++    assert baseline.resolution.target.qualified_name == "a::foo"
++    assert baseline.reexport_chain is not None
++    assert [
++        (hop.source, hop.target, hop.kind)
++        for hop in baseline.reexport_chain.hops
++    ] == [
++        ("c::exported", "b::public_value", "binding"),
++        ("b::public_value", "a::foo", "binding"),
++    ]
++
++    reexporter.write_text(
++        "from a import bar as public_value\n"
++        "__all__ = ['public_value']\n",
++        encoding="utf-8",
++    )
++    engine.update_file(str(reexporter))
++    incremental = query_live_symbol_lineage(
++        engine.state,
++        "c::exported",
++        ("interface", "connections", "bindings"),
++    )
++    oracle_state = _build_full_static_state(tmp_path)
++    full = query_live_symbol_lineage(
++        oracle_state,
++        "c::exported",
++        ("interface", "connections", "bindings"),
++    )
++
++    assert incremental.resolution.status == full.resolution.status == (
++        "resolved"
++    )
++    assert incremental.resolution.target is not None
++    assert full.resolution.target is not None
++    assert incremental.resolution.target.qualified_name == "a::bar"
++    assert incremental.resolution.target.qualified_name == (
++        full.resolution.target.qualified_name
++    )
++    assert incremental.reexport_chain == full.reexport_chain
++    assert incremental.reexport_chain is not None
++    assert [
++        (hop.source, hop.target, hop.kind)
++        for hop in incremental.reexport_chain.hops
++    ] == [
++        ("c::exported", "b::public_value", "binding"),
++        ("b::public_value", "a::bar", "binding"),
++    ]
++
++    def without_revision_provenance(value):
++        if isinstance(value, dict):
++            return {
++                key: without_revision_provenance(item)
++                for key, item in value.items()
++                if key not in {"revision", "provenance"}
++            }
++        if isinstance(value, tuple):
++            return tuple(
++                without_revision_provenance(item)
++                for item in value
++            )
++        if isinstance(value, list):
++            return [
++                without_revision_provenance(item)
++                for item in value
++            ]
++        return value
++
++    assert incremental.selected is not None
++    assert full.selected is not None
++    assert without_revision_provenance(
++        asdict(incremental.selected)
++    ) == without_revision_provenance(asdict(full.selected))
++
++
+ def test_reexport_all_only_change_is_ram_only_and_matches_full_oracle(
+     tmp_path,
+     monkeypatch,
+
+

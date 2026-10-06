@@ -1,5 +1,7 @@
 from dataclasses import replace
 from types import SimpleNamespace
+from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -21,6 +23,7 @@ from contextor.core.domain.lineage_facts import (
     SourceSpan,
     build_module_global_slot,
 )
+from contextor.core.domain.module import Module
 from contextor.core.lineage_query.backend import (
     RepositoryStateLineageBackend,
 )
@@ -143,11 +146,64 @@ def _fixture():
         lineage_semantic_anchor_bindings_complete=(
             anchor_complete
         ),
+        reexport_facts_by_module={
+            "pkg.mod": {
+                "exporter": "pkg.mod",
+                "explicit_all": None,
+                "bindings": {},
+                "star_sources": [],
+            },
+            "pkg.other": {
+                "exporter": "pkg.other",
+                "explicit_all": None,
+                "bindings": {},
+                "star_sources": [],
+            },
+        },
     )
     return (
         state,
         RepositoryStateLineageBackend(state),
     )
+
+
+def _reexport_query_fixture(module_paths, reexport_facts, definitions):
+    modules = {
+        module_id: Module(
+            module_id,
+            path,
+            str(Path(path).resolve()),
+            [],
+        )
+        for module_id, path in module_paths.items()
+    }
+    sources = {
+        path: _source(
+            path,
+            f"{index + 1:064x}",
+            definitions.get(module_id, ()),
+        )
+        for index, (module_id, path) in enumerate(module_paths.items())
+    }
+    (
+        owner_source_index,
+        source_owner_index,
+        anchor_complete,
+    ) = build_lineage_query_indexes(sources)
+    state = SimpleNamespace(
+        revision=19,
+        provenance="live",
+        modules=modules,
+        reexport_facts_by_module=reexport_facts,
+        lineage_facts_state="fresh",
+        lineage_facts_semantic_version="1",
+        lineage_facts_by_source=sources,
+        lineage_owner_source_index=owner_source_index,
+        lineage_source_owner_index=source_owner_index,
+        lineage_query_index_state="fresh",
+        lineage_semantic_anchor_bindings_complete=anchor_complete,
+    )
+    return state
 
 
 def test_live_target_catalog_resolves_artifact_id_only_through_owner_index(
@@ -472,6 +528,319 @@ def test_live_symbol_lineage_query_resolves_exact_qualified_identity():
     assert result.selected is not None
     assert result.selected.selected_sections == (
         "connections",
+    )
+
+
+def test_live_symbol_lineage_query_resolves_reexports_without_source_io(
+    monkeypatch,
+):
+    module_paths = {
+        "a": "a.py",
+        "b": "b.py",
+        "c": "c.py",
+        "d": "d.py",
+        "pkg.__init__": "pkg/__init__.py",
+        "pkg.provider": "pkg/provider.py",
+        "star_src": "star_src.py",
+        "star_src_second": "star_src_second.py",
+        "star_mid": "star_mid.py",
+        "star_dst": "star_dst.py",
+        "direct_src": "direct_src.py",
+        "direct_dst": "direct_dst.py",
+        "direct_override": "direct_override.py",
+        "cycle_a": "cycle_a.py",
+        "cycle_b": "cycle_b.py",
+        "external_dst": "external_dst.py",
+    }
+
+    def facts(exporter, *, bindings=None, explicit_all=None, star_sources=()):
+        return {
+            "exporter": exporter,
+            "explicit_all": explicit_all,
+            "bindings": {} if bindings is None else bindings,
+            "star_sources": list(star_sources),
+        }
+
+    reexport_facts = {
+        "a": facts("a", bindings={"foo": "a.foo"}),
+        "b": facts("b", bindings={"public_foo": "a.foo"}),
+        "c": facts("c", bindings={"exported": "b.public_foo"}),
+        "d": facts("d", bindings={"exported_run": "pkg.public_run"}),
+        "pkg.__init__": facts(
+            "pkg",
+            bindings={
+                "LOCAL": "pkg.LOCAL",
+                "public_run": "pkg.provider.run",
+            },
+            explicit_all=["public_run"],
+        ),
+        "pkg.provider": facts(
+            "pkg.provider",
+            bindings={"run": "pkg.provider.run"},
+        ),
+        "star_src": facts(
+            "star_src",
+            bindings={
+                "visible": "star_src.visible",
+                "_hidden": "star_src._hidden",
+                "shared": "star_src.shared",
+            },
+            explicit_all=["visible", "shared"],
+        ),
+        "star_src_second": facts(
+            "star_src_second",
+            bindings={"shared": "star_src_second.shared"},
+            explicit_all=["shared"],
+        ),
+        "star_mid": facts(
+            "star_mid",
+            star_sources=["star_src", "star_src_second"],
+        ),
+        "star_dst": facts("star_dst", star_sources=["star_mid"]),
+        "direct_src": facts(
+            "direct_src",
+            bindings={"foo": "direct_src.foo"},
+        ),
+        "direct_dst": facts(
+            "direct_dst",
+            bindings={"hidden": "direct_src.foo"},
+            explicit_all=[],
+        ),
+        "direct_override": facts(
+            "direct_override",
+            bindings={"visible": "a.foo"},
+            explicit_all=["visible"],
+            star_sources=["star_src"],
+        ),
+        "cycle_a": facts(
+            "cycle_a",
+            bindings={"value": "cycle_b.value"},
+            explicit_all=["value"],
+        ),
+        "cycle_b": facts(
+            "cycle_b",
+            bindings={"value": "cycle_a.value"},
+            explicit_all=["value"],
+        ),
+        "external_dst": facts(
+            "external_dst",
+            bindings={"public": "thirdparty.api.foo"},
+        ),
+    }
+    definitions = {
+        "a": (("A1/1", "a::foo"),),
+        "pkg.__init__": (("A2/1", "pkg.__init__::LOCAL"),),
+        "pkg.provider": (("A3/1", "pkg.provider::run"),),
+        "star_src": (
+            ("A4/1", "star_src::visible"),
+            ("A4/2", "star_src::_hidden"),
+            ("A4/3", "star_src::shared"),
+        ),
+        "star_src_second": (("A6/1", "star_src_second::shared"),),
+        "direct_src": (("A5/1", "direct_src::foo"),),
+    }
+    state = _reexport_query_fixture(
+        module_paths,
+        reexport_facts,
+        definitions,
+    )
+    missing_origin_state = _reexport_query_fixture(
+        module_paths,
+        reexport_facts,
+        definitions={
+            key: value
+            for key, value in definitions.items()
+            if key != "a"
+        },
+    )
+
+    import contextor.core.domain.module as module_domain
+
+    def fail_source_access(*_args, **_kwargs):
+        raise AssertionError("re-export lineage query accessed source or AST")
+
+    with (
+        patch.object(
+            Module,
+            "ast_tree",
+            new=property(fail_source_access),
+        ),
+        patch.object(
+            module_domain,
+            "_get_cached_ast",
+            side_effect=fail_source_access,
+        ),
+        patch.object(
+            Path,
+            "open",
+            side_effect=fail_source_access,
+        ),
+    ):
+        multi_hop = query_live_symbol_lineage(
+            state,
+            "c::exported",
+            ("interface",),
+        )
+        one_hop = query_live_symbol_lineage(
+            state,
+            "b::public_foo",
+            ("interface",),
+        )
+        package_alias = query_live_symbol_lineage(
+            state,
+            "pkg::public_run",
+            ("interface",),
+        )
+        package_alias_chain = query_live_symbol_lineage(
+            state,
+            "d::exported_run",
+            ("interface",),
+        )
+        package_local = query_live_symbol_lineage(
+            state,
+            "pkg::LOCAL",
+            ("interface",),
+        )
+        star_alias = query_live_symbol_lineage(
+            state,
+            "star_dst::visible",
+            ("interface",),
+        )
+        star_private = query_live_symbol_lineage(
+            state,
+            "star_dst::_hidden",
+            ("interface",),
+        )
+        star_multiple = query_live_symbol_lineage(
+            state,
+            "star_dst::shared",
+            ("interface",),
+        )
+        direct_alias = query_live_symbol_lineage(
+            state,
+            "direct_dst::hidden",
+            ("interface",),
+        )
+        direct_override = query_live_symbol_lineage(
+            state,
+            "direct_override::visible",
+            ("interface",),
+        )
+        cycle = query_live_symbol_lineage(
+            state,
+            "cycle_a::value",
+            ("interface",),
+        )
+        external = query_live_symbol_lineage(
+            state,
+            "external_dst::public",
+            ("interface",),
+        )
+        missing_origin = query_live_symbol_lineage(
+            missing_origin_state,
+            "c::exported",
+            ("interface",),
+        )
+
+    assert multi_hop.resolution.status == "resolved"
+    assert multi_hop.resolution.target is not None
+    assert multi_hop.resolution.target.qualified_name == "a::foo"
+    assert multi_hop.resolution.target.resolution == "reexport_alias"
+    assert multi_hop.resolution.target.artifact_id == "A1/1"
+    assert [
+        (hop.source, hop.target, hop.kind)
+        for hop in multi_hop.reexport_chain.hops
+    ] == [
+        ("c::exported", "b::public_foo", "binding"),
+        ("b::public_foo", "a::foo", "binding"),
+    ]
+
+    assert one_hop.resolution.target is not None
+    assert one_hop.resolution.target.qualified_name == "a::foo"
+    assert len(one_hop.reexport_chain.hops) == 1
+
+    assert package_alias.resolution.target is not None
+    assert package_alias.resolution.target.qualified_name == (
+        "pkg.provider::run"
+    )
+    assert package_alias.resolution.target.resolution == "reexport_alias"
+    assert [
+        (hop.source, hop.target, hop.kind)
+        for hop in package_alias.reexport_chain.hops
+    ] == [("pkg::public_run", "pkg.provider::run", "binding")]
+    assert package_alias_chain.resolution.target is not None
+    assert package_alias_chain.resolution.target.qualified_name == (
+        "pkg.provider::run"
+    )
+    assert [
+        (hop.source, hop.target, hop.kind)
+        for hop in package_alias_chain.reexport_chain.hops
+    ] == [
+        ("d::exported_run", "pkg::public_run", "binding"),
+        ("pkg::public_run", "pkg.provider::run", "binding"),
+    ]
+
+    assert package_local.resolution.target is not None
+    assert package_local.resolution.target.qualified_name == (
+        "pkg.__init__::LOCAL"
+    )
+    assert package_local.resolution.target.resolution == "package_alias"
+    assert package_local.reexport_chain is None
+
+    assert star_alias.resolution.target is not None
+    assert star_alias.resolution.target.qualified_name == (
+        "star_src::visible"
+    )
+    assert [
+        (hop.source, hop.target, hop.kind)
+        for hop in star_alias.reexport_chain.hops
+    ] == [
+        ("star_dst::visible", "star_mid::visible", "star"),
+        ("star_mid::visible", "star_src::visible", "star"),
+    ]
+    assert star_private.resolution.status == "not_found"
+    assert star_private.reexport_chain is None
+    assert star_multiple.resolution.target is not None
+    assert star_multiple.resolution.target.qualified_name == (
+        "star_src::shared"
+    )
+    assert [
+        (hop.source, hop.target, hop.kind)
+        for hop in star_multiple.reexport_chain.hops
+    ] == [
+        ("star_dst::shared", "star_mid::shared", "star"),
+        ("star_mid::shared", "star_src::shared", "star"),
+    ]
+
+    assert direct_alias.resolution.target is not None
+    assert direct_alias.resolution.target.qualified_name == (
+        "direct_src::foo"
+    )
+    assert direct_alias.reexport_chain.hops[0].kind == "binding"
+    assert direct_override.resolution.target is not None
+    assert direct_override.resolution.target.qualified_name == "a::foo"
+    assert direct_override.reexport_chain.hops[0].kind == "binding"
+
+    assert cycle.resolution.status == "unresolved"
+    assert cycle.selected is None
+    assert cycle.reexport_chain.status == "cycle"
+    assert cycle.reexport_chain.reason == "reexport_cycle"
+    assert cycle.reexport_chain.canonical_target is None
+    assert [
+        (hop.source, hop.target, hop.kind)
+        for hop in cycle.reexport_chain.hops
+    ] == [
+        ("cycle_a::value", "cycle_b::value", "binding"),
+        ("cycle_b::value", "cycle_a::value", "binding"),
+    ]
+    assert external.resolution.status == "unresolved"
+    assert external.reexport_chain.status == "unresolved"
+    assert external.reexport_chain.reason == "target_outside_repository"
+    assert external.reexport_chain.canonical_target is None
+
+    assert missing_origin.resolution.status == "unavailable"
+    assert missing_origin.unavailable_reason == (
+        "Canonical re-export origin has no available lineage owner."
     )
 
 

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from collections.abc import Mapping
 
 from contextor.core.analysis.state_manager import (
@@ -8,6 +8,9 @@ from contextor.core.analysis.state_manager import (
 )
 from contextor.core.lineage_query.backend import (
     RepositoryStateLineageBackend,
+)
+from contextor.core.lineage_query.index import (
+    ReexportLineageResolution,
 )
 from contextor.core.domain.lineage_facts import (
     ExtractedSymbolicKind,
@@ -48,6 +51,7 @@ class LiveSymbolLineageQueryResult:
     unavailable_reason: str | None = None
     owner_names: dict[str, str] = field(default_factory=dict)
     state_freshness: dict[str, object] = field(default_factory=dict)
+    reexport_chain: ReexportLineageResolution | None = None
 
 
 def _selected_lineage_flow_matches(
@@ -472,6 +476,7 @@ def query_live_symbol_lineage(
     if not isinstance(query, str):
         raise TypeError("query must be a string.")
 
+    raw_query = query.strip()
     canonical_sections = (
         _canonical_lineage_sections(sections)
     )
@@ -480,10 +485,13 @@ def query_live_symbol_lineage(
     )
 
     try:
+        canonical_query = backend.canonicalize_qualified_identity(
+            raw_query
+        )
         catalog = build_live_lineage_target_catalog(
             state,
             backend,
-            query,
+            canonical_query,
         )
     except ValueError as exc:
         if str(exc) != _UNAVAILABLE_MESSAGE:
@@ -491,7 +499,7 @@ def query_live_symbol_lineage(
         return LiveSymbolLineageQueryResult(
             resolution=LineageTargetResolution(
                 status="unavailable",
-                query=query.strip(),
+                query=raw_query,
             ),
             unavailable_reason=str(exc),
             state_freshness=(
@@ -507,8 +515,133 @@ def query_live_symbol_lineage(
         catalog,
     )
     resolution = service.resolve_target(
-        query
+        canonical_query
     )
+
+    reexport_chain: ReexportLineageResolution | None = None
+    if resolution.status == "resolved" and resolution.target is not None:
+        if canonical_query != raw_query:
+            package_target = replace(
+                resolution.target,
+                resolution="package_alias",
+            )
+            resolution = LineageTargetResolution(
+                status="resolved",
+                query=raw_query,
+                target=package_target,
+            )
+    elif resolution.status == "not_found" and raw_query.count("::") == 1:
+        try:
+            reexport_chain = backend.resolve_reexport_alias(
+                raw_query
+            )
+        except ValueError as exc:
+            if str(exc) != (
+                "Canonical re-export facts are unavailable or incomplete."
+            ):
+                raise
+            return LiveSymbolLineageQueryResult(
+                resolution=LineageTargetResolution(
+                    status="unavailable",
+                    query=raw_query,
+                ),
+                unavailable_reason=str(exc),
+                state_freshness=(
+                    build_live_lineage_state_freshness(
+                        state,
+                        backend,
+                    )
+                ),
+            )
+
+        if reexport_chain.status == "not_alias":
+            reexport_chain = None
+            resolution = LineageTargetResolution(
+                status="not_found",
+                query=raw_query,
+            )
+        elif reexport_chain.status in {"cycle", "unresolved"}:
+            return LiveSymbolLineageQueryResult(
+                resolution=LineageTargetResolution(
+                    status="unresolved",
+                    query=raw_query,
+                ),
+                state_freshness=(
+                    build_live_lineage_state_freshness(
+                        state,
+                        backend,
+                    )
+                ),
+                reexport_chain=reexport_chain,
+            )
+        elif reexport_chain.status == "resolved":
+            assert reexport_chain.canonical_target is not None
+            try:
+                origin_catalog = build_live_lineage_target_catalog(
+                    state,
+                    backend,
+                    reexport_chain.canonical_target,
+                )
+            except ValueError as exc:
+                if str(exc) != _UNAVAILABLE_MESSAGE:
+                    raise
+                origin_catalog = None
+
+            if origin_catalog is None:
+                return LiveSymbolLineageQueryResult(
+                    resolution=LineageTargetResolution(
+                        status="unavailable",
+                        query=raw_query,
+                    ),
+                    unavailable_reason=(
+                        "Canonical re-export origin has no available lineage owner."
+                    ),
+                    state_freshness=(
+                        build_live_lineage_state_freshness(
+                            state,
+                            backend,
+                        )
+                    ),
+                    reexport_chain=reexport_chain,
+                )
+
+            origin_service = LineageQueryService(
+                backend,
+                origin_catalog,
+            )
+            origin_resolution = origin_service.resolve_target(
+                reexport_chain.canonical_target
+            )
+            if (
+                origin_resolution.status != "resolved"
+                or origin_resolution.target is None
+            ):
+                return LiveSymbolLineageQueryResult(
+                    resolution=LineageTargetResolution(
+                        status="unavailable",
+                        query=raw_query,
+                    ),
+                    unavailable_reason=(
+                        "Canonical re-export origin has no available lineage owner."
+                    ),
+                    state_freshness=(
+                        build_live_lineage_state_freshness(
+                            state,
+                            backend,
+                        )
+                    ),
+                    reexport_chain=reexport_chain,
+                )
+
+            resolution = LineageTargetResolution(
+                status="resolved",
+                query=raw_query,
+                target=replace(
+                    origin_resolution.target,
+                    resolution="reexport_alias",
+                ),
+            )
+            service = origin_service
 
     if (
         resolution.status != "resolved"
@@ -548,4 +681,5 @@ def query_live_symbol_lineage(
         selected=selected,
         owner_names=owner_names,
         state_freshness=state_freshness,
+        reexport_chain=reexport_chain,
     )

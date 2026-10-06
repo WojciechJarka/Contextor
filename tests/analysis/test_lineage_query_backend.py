@@ -13,6 +13,7 @@ from contextor.core.lineage_query import (
     LineageBackendMetadata,
     RepositoryStateLineageBackend,
 )
+from contextor.core.lineage_query import backend as backend_module
 
 
 def _slice(source_key: str) -> MaterializedLineageSourceFacts:
@@ -67,6 +68,74 @@ def test_repository_state_backend_exposes_canonical_metadata():
         query_index_state="fresh",
         semantic_anchor_bindings_complete=True,
     )
+
+
+def test_repository_state_backend_builds_reexport_alias_index_lazily(
+    monkeypatch,
+):
+    modules = {
+        "pkg.a": SimpleNamespace(path="pkg/a.py"),
+        "pkg.b": SimpleNamespace(path="pkg/b.py"),
+    }
+    reexport_facts = {
+        "pkg.a": {
+            "exporter": "pkg.a",
+            "explicit_all": None,
+            "bindings": {"foo": "pkg.a.foo"},
+            "star_sources": [],
+        },
+        "pkg.b": {
+            "exporter": "pkg.b",
+            "explicit_all": None,
+            "bindings": {"public": "pkg.a.foo"},
+            "star_sources": [],
+        },
+    }
+    state = SimpleNamespace(
+        **{
+            **vars(_state()[0]),
+            "modules": modules,
+            "reexport_facts_by_module": reexport_facts,
+        }
+    )
+    backend = RepositoryStateLineageBackend(state)
+    assert backend._modules is modules
+    assert backend._reexport_facts_by_module is reexport_facts
+    assert backend._reexport_alias_index is None
+
+    original_builder = backend_module.build_reexport_lineage_alias_index
+    builds = []
+
+    def build_spy(facts):
+        builds.append(facts)
+        return original_builder(facts)
+
+    monkeypatch.setattr(
+        backend_module,
+        "build_reexport_lineage_alias_index",
+        build_spy,
+    )
+    first = backend.resolve_reexport_alias("pkg.b::public")
+    second = backend.resolve_reexport_alias("pkg.b::public")
+
+    assert first == second
+    assert first.status == "resolved"
+    assert first.canonical_target == "pkg.a::foo"
+    assert len(first.hops) == 1
+    assert builds == [reexport_facts]
+
+
+def test_repository_state_backend_reexport_alias_resolution_fails_closed():
+    state, _, _ = _state()
+    state.modules = {"pkg.a": SimpleNamespace(path="pkg/a.py")}
+    state.reexport_facts_by_module = {}
+    backend = RepositoryStateLineageBackend(state)
+
+    with pytest.raises(
+        ValueError,
+        match="Canonical re-export facts are unavailable or incomplete",
+    ):
+        backend.resolve_reexport_alias("pkg.a::missing")
 
 
 def test_repository_state_backend_preserves_slice_identity_and_order():

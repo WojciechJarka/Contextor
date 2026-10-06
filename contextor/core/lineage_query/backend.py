@@ -10,6 +10,13 @@ from contextor.core.domain.lineage_facts import (
     SemanticEndpoint,
     SourceLineageManifest,
 )
+from contextor.core.lineage_query.index import (
+    ReexportLineageResolution,
+    build_reexport_lineage_alias_index,
+    canonicalize_lineage_qualified_identity,
+    resolve_reexport_lineage_alias,
+)
+from contextor.core.reference.shared import validate_reexport_facts_by_module
 
 
 _MISSING = object()
@@ -71,6 +78,45 @@ class RepositoryStateLineageBackend:
 
         self._state = state
         self._sources = raw_sources
+        self._modules = getattr(state, "modules", {})
+        self._reexport_facts_by_module = getattr(
+            state,
+            "reexport_facts_by_module",
+            {},
+        )
+        self._reexport_alias_index = None
+
+    def canonicalize_qualified_identity(
+        self,
+        qualified_name: str,
+    ) -> str:
+        return canonicalize_lineage_qualified_identity(
+            qualified_name,
+            self._modules,
+        )
+
+    def resolve_reexport_alias(
+        self,
+        query: str,
+    ) -> ReexportLineageResolution:
+        if self._reexport_alias_index is None:
+            if not validate_reexport_facts_by_module(
+                self._reexport_facts_by_module,
+                self._modules,
+            ):
+                raise ValueError(
+                    "Canonical re-export facts are unavailable or incomplete."
+                )
+            self._reexport_alias_index = (
+                build_reexport_lineage_alias_index(
+                    self._reexport_facts_by_module
+                )
+            )
+        return resolve_reexport_lineage_alias(
+            query,
+            self._reexport_alias_index,
+            self._modules,
+        )
 
     def metadata(self) -> LineageBackendMetadata:
         raw_revision = getattr(self._state, "revision", None)

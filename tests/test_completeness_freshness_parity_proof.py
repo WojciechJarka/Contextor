@@ -5,6 +5,7 @@ Stage 3C.2a — Execution Completeness, Freshness & Full-State Parity Proof Test
 """
 
 from copy import deepcopy
+from dataclasses import asdict
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
@@ -20,6 +21,7 @@ from contextor.core.domain.module import Module
 from contextor.core.domain.refresh_plan import RefreshPlan
 from contextor.core.domain.usage_facts import ModuleUsageFacts, UsageDelta
 from contextor.core.live_state.hydration import hydrate_repository_engine
+from contextor.core.lineage_query.live_query import query_live_symbol_lineage
 from contextor.core.reference.engine import extract_module_usage_facts
 from contextor.core.reporting_engine.graph_analytics import (
     _CALL_USAGE_CHANNELS,
@@ -1338,6 +1340,115 @@ def test_reexport_retarget_matches_full_oracle(tmp_path):
         engine.state,
         oracle,
     )
+
+
+def test_reexport_lineage_query_retarget_matches_full_oracle(tmp_path):
+    provider = tmp_path / "a.py"
+    reexporter = tmp_path / "b.py"
+    consumer = tmp_path / "c.py"
+    provider.write_text(
+        "def foo():\n"
+        "    return 'foo'\n"
+        "\n"
+        "def bar():\n"
+        "    return 'bar'\n",
+        encoding="utf-8",
+    )
+    reexporter.write_text(
+        "from a import foo as public_value\n"
+        "__all__ = ['public_value']\n",
+        encoding="utf-8",
+    )
+    consumer.write_text(
+        "from b import public_value as exported\n"
+        "__all__ = ['exported']\n",
+        encoding="utf-8",
+    )
+
+    errors, _ = ContextorFacade().analyze_project(str(tmp_path))
+    assert not errors, errors
+    hydrated = hydrate_repository_engine(tmp_path)
+    assert hydrated is not None
+    engine = hydrated.engine
+
+    baseline = query_live_symbol_lineage(
+        engine.state,
+        "c::exported",
+        ("interface", "connections", "bindings"),
+    )
+    assert baseline.resolution.status == "resolved"
+    assert baseline.resolution.target is not None
+    assert baseline.resolution.target.qualified_name == "a::foo"
+    assert baseline.reexport_chain is not None
+    assert [
+        (hop.source, hop.target, hop.kind)
+        for hop in baseline.reexport_chain.hops
+    ] == [
+        ("c::exported", "b::public_value", "binding"),
+        ("b::public_value", "a::foo", "binding"),
+    ]
+
+    reexporter.write_text(
+        "from a import bar as public_value\n"
+        "__all__ = ['public_value']\n",
+        encoding="utf-8",
+    )
+    engine.update_file(str(reexporter))
+    incremental = query_live_symbol_lineage(
+        engine.state,
+        "c::exported",
+        ("interface", "connections", "bindings"),
+    )
+    oracle_state = _build_full_static_state(tmp_path)
+    full = query_live_symbol_lineage(
+        oracle_state,
+        "c::exported",
+        ("interface", "connections", "bindings"),
+    )
+
+    assert incremental.resolution.status == full.resolution.status == (
+        "resolved"
+    )
+    assert incremental.resolution.target is not None
+    assert full.resolution.target is not None
+    assert incremental.resolution.target.qualified_name == "a::bar"
+    assert incremental.resolution.target.qualified_name == (
+        full.resolution.target.qualified_name
+    )
+    assert incremental.reexport_chain == full.reexport_chain
+    assert incremental.reexport_chain is not None
+    assert [
+        (hop.source, hop.target, hop.kind)
+        for hop in incremental.reexport_chain.hops
+    ] == [
+        ("c::exported", "b::public_value", "binding"),
+        ("b::public_value", "a::bar", "binding"),
+    ]
+
+    def without_revision_provenance(value):
+        if isinstance(value, dict):
+            return {
+                key: without_revision_provenance(item)
+                for key, item in value.items()
+                if key not in {"revision", "provenance"}
+            }
+        if isinstance(value, tuple):
+            return tuple(
+                without_revision_provenance(item)
+                for item in value
+            )
+        if isinstance(value, list):
+            return [
+                without_revision_provenance(item)
+                for item in value
+            ]
+        return value
+
+    assert incremental.selected is not None
+    assert full.selected is not None
+    assert without_revision_provenance(
+        asdict(incremental.selected)
+    ) == without_revision_provenance(asdict(full.selected))
 
 
 def test_reexport_all_only_change_is_ram_only_and_matches_full_oracle(
