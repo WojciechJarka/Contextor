@@ -7,6 +7,9 @@ from contextor.core.reference.index import (
     SinglePassConsumerVisitor,
     extract_compact_reference_facts,
 )
+from contextor.core.reference.shared import (
+    _build_reexport_map,
+)
 from contextor.core.symbol_engine.indexer import index_repository
 
 
@@ -141,3 +144,46 @@ def test_compact_build_rejects_missing_module_facts(tmp_path):
         RepositoryReferenceIndex.from_compact_facts(
             modules, str(tmp_path), compact
         )
+
+
+
+def test_compact_and_ast_reexport_maps_are_identical_for_repeated_all(
+    tmp_path,
+):
+    (tmp_path / "provider.py").write_text(
+        "def first():\n"
+        "    return 1\n"
+        "\n"
+        "def second():\n"
+        "    return 2\n",
+        encoding="utf-8",
+    )
+
+    (tmp_path / "facade.py").write_text(
+        "from provider import first, second\n"
+        "__all__ = ['first']\n"
+        "__all__ = ['second']\n",
+        encoding="utf-8",
+    )
+
+    modules = index_repository(
+        str(tmp_path)
+    ).modules
+
+    compact = {
+        module_id: extract_compact_reference_facts(
+            module_id,
+            module,
+        )
+        for module_id, module in modules.items()
+    }
+
+    compact_index = RepositoryReferenceIndex.from_compact_facts(
+        modules,
+        str(tmp_path),
+        compact,
+    )
+
+    assert _build_reexport_map(
+        modules
+    ) == compact_index.reexports

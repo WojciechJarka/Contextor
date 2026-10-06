@@ -31,7 +31,9 @@ from .resolution import (
     _resolve_reexport,
 )
 from .shared import (
+    _assemble_reexport_map,
     _empty_reference,
+    _extract_reexport_facts,
     _normalize_references,
 )
 from .visitor import _is_event_binding_call
@@ -302,61 +304,6 @@ class SinglePassConsumerVisitor(ast.NodeVisitor):
         self.class_stack.pop()
 
 
-def _extract_reexport_facts(
-    module_id: str,
-    tree: ast.AST,
-) -> dict[str, Any]:
-    """Extract JSON-safe, source-local inputs for global re-export assembly."""
-    exporter = module_id.removesuffix(".__init__")
-    explicit_all: list[str] | None = None
-    bindings: dict[str, str] = {}
-    star_sources: list[str] = []
-
-    for node in getattr(tree, "body", []):
-        if isinstance(node, ast.Assign) and any(
-            isinstance(target, ast.Name) and target.id == "__all__"
-            for target in node.targets
-        ):
-            if isinstance(node.value, (ast.List, ast.Tuple, ast.Set)):
-                explicit_all = [
-                    item.value
-                    for item in node.value.elts
-                    if isinstance(item, ast.Constant)
-                    and isinstance(item.value, str)
-                ]
-            else:
-                explicit_all = []
-
-        if isinstance(node, ast.ImportFrom):
-            source = _absolute_import_module(
-                module_id, node.module, node.level or 0
-            )
-            for item in node.names:
-                if item.name == "*":
-                    star_sources.append(source)
-                else:
-                    bindings[item.asname or item.name] = f"{source}.{item.name}"
-        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            bindings[node.name] = f"{exporter}.{node.name}"
-        elif isinstance(node, (ast.Assign, ast.AnnAssign)):
-            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-            value = node.value
-            for target in targets:
-                if not isinstance(target, ast.Name) or target.id == "__all__":
-                    continue
-                if isinstance(value, ast.Name) and value.id in bindings:
-                    bindings[target.id] = bindings[value.id]
-                else:
-                    bindings[target.id] = f"{exporter}.{target.id}"
-
-    return {
-        "exporter": exporter,
-        "explicit_all": explicit_all,
-        "bindings": bindings,
-        "star_sources": star_sources,
-    }
-
-
 def extract_compact_reference_facts(
     module_id: str,
     module: Any = None,
@@ -410,60 +357,6 @@ def extract_compact_reference_facts(
             "error_type": type(exc).__name__,
             "message": str(exc),
         }
-
-
-def _assemble_reexport_map(compact_facts: dict[str, dict[str, Any]]) -> dict[str, str]:
-    """Assemble cycle-safe transitive re-exports from source-local facts."""
-    raw: dict[str, str] = {}
-    module_exports: dict[str, dict[str, str]] = {}
-    star_imports: list[tuple[str, str, set[str] | None]] = []
-
-    for envelope in compact_facts.values():
-        if envelope["status"] != "available":
-            continue
-        reexport = envelope["facts"]["reexports"]
-        exporter = reexport["exporter"]
-        explicit_all = reexport["explicit_all"]
-        allowed = None if explicit_all is None else set(explicit_all)
-        visible_bindings: dict[str, str] = {}
-        for local, target in reexport["bindings"].items():
-            if allowed is not None and local not in allowed:
-                continue
-            if allowed is None and local.startswith("_"):
-                continue
-            visible_bindings[local] = target
-            key = f"{exporter}.{local}"
-            if key != target:
-                raw[key] = target
-        module_exports[exporter] = visible_bindings
-        for source in reexport["star_sources"]:
-            star_imports.append((exporter, source, allowed))
-
-    changed = True
-    while changed:
-        changed = False
-        for exporter, source, allowed in star_imports:
-            for local, target in list(module_exports.get(source, {}).items()):
-                if allowed is not None and local not in allowed:
-                    continue
-                if allowed is None and local.startswith("_"):
-                    continue
-                key = f"{exporter}.{local}"
-                if key not in raw:
-                    raw[key] = target
-                    module_exports.setdefault(exporter, {})[local] = target
-                    changed = True
-
-    resolved: dict[str, str] = {}
-    for key, initial in raw.items():
-        target = initial
-        visited = {key}
-        while target in raw and target not in visited:
-            visited.add(target)
-            target = raw[target]
-        if target not in visited:
-            resolved[key] = target
-    return resolved
 
 
 class RepositoryReferenceIndex:
@@ -544,7 +437,22 @@ class RepositoryReferenceIndex:
             )
             raise RuntimeError(f"Compact reference extraction failed: {details}")
 
-        reexports = _assemble_reexport_map(compact_facts)
+        reexport_facts_by_module = {
+            module_id: envelope["facts"]["reexports"]
+            for module_id, envelope in compact_facts.items()
+            if (
+                module_id in modules
+                and envelope.get("status") == "available"
+                and isinstance(
+                    envelope.get("facts"),
+                    dict,
+                )
+            )
+        }
+
+        reexports = _assemble_reexport_map(
+            reexport_facts_by_module
+        )
 
         direct_calls_by_target: dict[str, list[tuple[str, Optional[int], Optional[str]]]] = defaultdict(list)
         instance_calls_by_target: dict[str, list[tuple[str, Optional[int], Optional[str]]]] = defaultdict(list)

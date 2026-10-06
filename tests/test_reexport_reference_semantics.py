@@ -163,3 +163,70 @@ def test_compact_artifact_pipeline_attributes_reexport_consumers_to_origin(
     assert not failures
     assert artifacts["provider::run"]["consumers"] == ["consumer", "facade"]
     assert artifacts["provider::run"]["consumer_count"] == 2
+
+
+
+def test_repeated_all_uses_last_assignment_consistently(
+    tmp_path,
+):
+    (tmp_path / "provider.py").write_text(
+        "def first():\n"
+        "    return 1\n"
+        "\n"
+        "def second():\n"
+        "    return 2\n",
+        encoding="utf-8",
+    )
+
+    (tmp_path / "facade.py").write_text(
+        "from provider import first, second\n"
+        "__all__ = ['first']\n"
+        "__all__ = ['second']\n",
+        encoding="utf-8",
+    )
+
+    modules = index_repository(
+        str(tmp_path)
+    ).modules
+
+    legacy_mapping = _build_reexport_map(
+        modules
+    )
+
+    assert (
+        "facade.first"
+        not in legacy_mapping
+    )
+    assert (
+        legacy_mapping["facade.second"]
+        == "provider.second"
+    )
+
+
+def test_repeated_all_dynamic_then_literal_uses_last_assignment(
+    tmp_path,
+):
+    (tmp_path / "provider.py").write_text(
+        "def run():\n"
+        "    return 1\n",
+        encoding="utf-8",
+    )
+
+    (tmp_path / "facade.py").write_text(
+        "from provider import run\n"
+        "__all__ = make_exports()\n"
+        "__all__ = ['run']\n",
+        encoding="utf-8",
+    )
+
+    modules = index_repository(
+        str(tmp_path)
+    ).modules
+
+    mapping = _build_reexport_map(
+        modules
+    )
+
+    assert mapping["facade.run"] == (
+        "provider.run"
+    )
