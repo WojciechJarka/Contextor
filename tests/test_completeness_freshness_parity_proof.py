@@ -1105,9 +1105,24 @@ def test_transitive_propagation_cycle_terminates_without_duplicate_recompute(
         str(f_a)
     )
 
-    oracle = _build_full_static_state(
+    facade = ContextorFacade()
+    errors, _ = facade.analyze_project(
+        str(tmp_path)
+    )
+
+    assert errors
+    assert {
+        getattr(error, "kind", None)
+        for error in errors
+    } == {
+        "ArchitectureCycle"
+    }
+
+    hydrated = hydrate_repository_engine(
         tmp_path
     )
+    assert hydrated is not None
+    oracle = hydrated.engine.state
 
     recomputed = result.execution_trace[
         "recompute_modules"
