@@ -1138,6 +1138,279 @@ def test_transitive_propagation_cycle_terminates_without_duplicate_recompute(
     )
 
 
+def test_transitive_reexport_symbol_remove_matches_full_oracle(tmp_path):
+    f_provider = tmp_path / "a.py"
+    f_reexport = tmp_path / "b.py"
+    f_consumer = tmp_path / "c.py"
+
+    f_provider.write_text(
+        "def foo():\n"
+        "    return 1\n"
+        "\n"
+        "def keep():\n"
+        "    return 2\n",
+        encoding="utf-8",
+    )
+    f_reexport.write_text(
+        "from a import foo\n",
+        encoding="utf-8",
+    )
+    f_consumer.write_text(
+        "import b\n"
+        "\n"
+        "def run():\n"
+        "    return b.foo()\n",
+        encoding="utf-8",
+    )
+
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir()
+
+    engine = IncrementalAnalysisEngine(
+        RepositoryAnalysisState(modules={}),
+        PersistentIdentityRegistry(str(tmp_path)),
+        FileStateManager(str(cache_dir)),
+        str(tmp_path),
+    )
+
+    engine.update_file(str(f_provider))
+    engine.update_file(str(f_reexport))
+    engine.update_file(str(f_consumer))
+
+    assert "b" in engine.state.artifact_consumption[
+        "a::foo"
+    ]["consumers"]
+    assert "c" in engine.state.artifact_consumption[
+        "a::foo"
+    ]["consumers"]
+
+    f_provider.write_text(
+        "def keep():\n"
+        "    return 2\n",
+        encoding="utf-8",
+    )
+
+    result = engine.update_file(
+        str(f_provider)
+    )
+
+    oracle = _build_full_static_state(
+        tmp_path
+    )
+
+    assert result.shadow_plan.recompute_modules == (
+        "b",
+    )
+    assert result.execution_trace[
+        "recompute_modules"
+    ] == (
+        "b",
+        "c",
+    )
+
+    assert "a::foo" not in engine.state.artifact_consumption
+    assert "a::foo" not in oracle.artifact_consumption
+
+    _assert_full_parity(
+        engine.state,
+        oracle,
+    )
+
+
+def test_reexport_retarget_matches_full_oracle(tmp_path):
+    f_a = tmp_path / "a.py"
+    f_d = tmp_path / "d.py"
+    f_reexport = tmp_path / "b.py"
+    f_consumer = tmp_path / "c.py"
+
+    f_a.write_text(
+        "def foo():\n"
+        "    return 'a'\n",
+        encoding="utf-8",
+    )
+    f_d.write_text(
+        "def foo():\n"
+        "    return 'd'\n",
+        encoding="utf-8",
+    )
+    f_reexport.write_text(
+        "from a import foo\n",
+        encoding="utf-8",
+    )
+    f_consumer.write_text(
+        "import b\n"
+        "\n"
+        "def run():\n"
+        "    return b.foo()\n",
+        encoding="utf-8",
+    )
+
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir()
+
+    engine = IncrementalAnalysisEngine(
+        RepositoryAnalysisState(modules={}),
+        PersistentIdentityRegistry(str(tmp_path)),
+        FileStateManager(str(cache_dir)),
+        str(tmp_path),
+    )
+
+    engine.update_file(str(f_a))
+    engine.update_file(str(f_d))
+    engine.update_file(str(f_reexport))
+    engine.update_file(str(f_consumer))
+
+    assert set(
+        engine.state.artifact_consumption[
+            "a::foo"
+        ]["consumers"]
+    ) == {
+        "b",
+        "c",
+    }
+
+    f_reexport.write_text(
+        "from d import foo\n",
+        encoding="utf-8",
+    )
+
+    result = engine.update_file(
+        str(f_reexport)
+    )
+
+    oracle = _build_full_static_state(
+        tmp_path
+    )
+
+    assert result.shadow_plan.recompute_modules == (
+        "c",
+    )
+    assert result.execution_trace[
+        "recompute_modules"
+    ] == (
+        "c",
+    )
+
+    assert "b" not in engine.state.artifact_consumption[
+        "a::foo"
+    ]["consumers"]
+    assert "c" not in engine.state.artifact_consumption[
+        "a::foo"
+    ]["consumers"]
+
+    assert set(
+        engine.state.artifact_consumption[
+            "d::foo"
+        ]["consumers"]
+    ) == {
+        "b",
+        "c",
+    }
+
+    _assert_full_parity(
+        engine.state,
+        oracle,
+    )
+
+
+def test_natural_ambiguity_transition_matches_full_oracle_state(
+    tmp_path,
+):
+    pkg_dir = tmp_path / "pkg"
+    pkg_dir.mkdir()
+
+    sub_pkg = pkg_dir / "a"
+    sub_pkg.mkdir()
+
+    f_original = pkg_dir / "a.py"
+    f_original.write_text(
+        "class B:\n"
+        "    def foo(self):\n"
+        "        return 1\n",
+        encoding="utf-8",
+    )
+
+    f_consumer = tmp_path / "consumer.py"
+    f_consumer.write_text(
+        "import pkg.a\n"
+        "pkg.a.B.foo()\n",
+        encoding="utf-8",
+    )
+
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir()
+
+    engine = IncrementalAnalysisEngine(
+        RepositoryAnalysisState(modules={}),
+        PersistentIdentityRegistry(str(tmp_path)),
+        FileStateManager(str(cache_dir)),
+        str(tmp_path),
+    )
+
+    engine.update_file(str(f_original))
+    engine.update_file(str(f_consumer))
+
+    f_late = sub_pkg / "B.py"
+    f_late.write_text(
+        "def foo():\n"
+        "    return 2\n",
+        encoding="utf-8",
+    )
+
+    result = engine.update_file(
+        str(f_late)
+    )
+
+    facade = ContextorFacade()
+    errors, _ = facade.analyze_project(
+        str(tmp_path)
+    )
+
+    hydrated = hydrate_repository_engine(
+        tmp_path
+    )
+    assert hydrated is not None
+    oracle = hydrated.engine.state
+
+    for target_key in (
+        "pkg.a::B.foo",
+        "pkg.a.B::foo",
+    ):
+        incremental_entry = engine.state.artifact_consumption.get(
+            target_key,
+            {},
+        )
+        oracle_entry = oracle.artifact_consumption.get(
+            target_key,
+            {},
+        )
+
+        assert (
+            incremental_entry
+            == oracle_entry
+        ), (
+            "ambiguity canonical entry differs from fresh full oracle: "
+            f"target={target_key!r}, "
+            f"incremental={incremental_entry!r}, "
+            f"full={oracle_entry!r}, "
+            f"errors={errors!r}"
+        )
+
+    assert (
+        engine.state.artifact_consumption_state
+        == oracle.artifact_consumption_state
+    ), (
+        "ambiguity freshness differs from fresh full oracle: "
+        f"incremental={engine.state.artifact_consumption_state!r}, "
+        f"full={oracle.artifact_consumption_state!r}, "
+        f"errors={errors!r}"
+    )
+
+    assert result.artifact_consumption_state == (
+        engine.state.artifact_consumption_state
+    )
+
+
 def test_full_canonical_parity_module_add_and_delete(tmp_path):
     f_target = tmp_path / "target.py"
     f_target.write_text("def foo(): pass\n", encoding="utf-8")
