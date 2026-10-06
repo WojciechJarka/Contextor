@@ -2267,6 +2267,68 @@ def test_package_init_star_visibility_changes_match_full_oracle(
     )
 
 
+def test_package_init_module_addition_recomputes_existing_consumer(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("CONTEXTOR_DISABLE_PROCESS_POOL", "1")
+    package = tmp_path / "pkg"
+    package.mkdir()
+    (package / "provider.py").write_text(
+        "OTHER = 1\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "consumer.py").write_text(
+        "from pkg import public\n"
+        "\n"
+        "def use():\n"
+        "    return public()\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "provider_consumer.py").write_text(
+        "from pkg.provider import OTHER\n",
+        encoding="utf-8",
+    )
+
+    errors, _ = ContextorFacade().analyze_project(str(tmp_path))
+    assert not errors, errors
+    hydrated = hydrate_repository_engine(tmp_path)
+    assert hydrated is not None
+    engine = hydrated.engine
+    assert "pkg.__init__" not in engine.state.modules
+
+    package_init = package / "__init__.py"
+    package_init.write_text(
+        "def public():\n"
+        "    return 1\n",
+        encoding="utf-8",
+    )
+    added = engine.update_file(str(package_init))
+    target = "pkg.__init__::public"
+
+    assert added.status == "UPDATED"
+    assert "consumer" in added.execution_trace["recompute_modules"]
+    assert "provider_consumer" not in added.execution_trace[
+        "recompute_modules"
+    ]
+    assert target in engine.state.artifact_consumption
+    assert set(
+        engine.state.artifact_consumption[target]["channels"]["consumer"]
+    ) == {"api_imports", "direct_calls"}
+    add_oracle = _build_full_static_state(tmp_path)
+    _assert_full_parity(engine.state, add_oracle)
+
+    package_init.unlink()
+    deleted = engine.update_file(str(package_init))
+
+    assert deleted.status == "DELETED"
+    assert "consumer" in deleted.execution_trace["recompute_modules"]
+    assert "pkg.__init__" not in engine.state.modules
+    assert target not in engine.state.artifact_consumption
+    delete_oracle = _build_full_static_state(tmp_path)
+    _assert_full_parity(engine.state, delete_oracle)
+
+
 def test_named_package_local_import_update_matches_full_oracle(
     tmp_path,
     monkeypatch,

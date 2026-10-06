@@ -30,6 +30,10 @@ def _find_dependent_consumers(
     if not usages:
         return recompute_set
 
+    module_domain = set(usages)
+    if module_path:
+        module_domain.add(module_path)
+
     for c_path, c_facts in usages.items():
         if c_path == module_path:
             continue
@@ -50,7 +54,7 @@ def _find_dependent_consumers(
             resolved = _resolve_alias(ref, c_aliases)
             resolved = _canonicalize_package_reference_target(
                 resolved,
-                usages,
+                module_domain,
             )
             if (
                 resolved == module_path
