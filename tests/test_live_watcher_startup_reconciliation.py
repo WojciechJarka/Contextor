@@ -12,6 +12,7 @@ from contextor.core.analysis.state_manager import (
     RepositoryAnalysisState,
 )
 from contextor.core.analysis.incremental_engine import IncrementalAnalysisEngine
+from contextor.core.reference.shared import materialize_reexport_facts_by_module
 from contextor.core.api.facade import exclude_state_file
 from contextor.core.graph.graph import build_graph, build_trie, detect_package_root
 from contextor.core.live_state.ipc import CanonicalLiveServer, LiveStateClient
@@ -119,11 +120,15 @@ def _real_watcher_runtime(tmp_path, updater):
 
 def _bootstrap_state(repo):
     registry = PersistentIdentityRegistry(str(repo))
-    modules = index_repository(str(repo)).modules
+    repo_index = index_repository(str(repo))
+    modules = repo_index.modules
     artifacts, _ = collect_module_artifacts(modules, str(repo))
     trie = build_trie(modules)
     state = RepositoryAnalysisState(
         modules=dict(modules),
+        reexport_facts_by_module=materialize_reexport_facts_by_module(
+            modules, repo_index.reference_facts_by_module
+        ),
         artifacts=artifacts,
         dependency_graph=build_graph(modules),
         trie=trie,

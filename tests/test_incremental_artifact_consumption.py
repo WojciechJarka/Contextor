@@ -17,6 +17,7 @@ from contextor.core.domain.graph import ProjectGraph
 from contextor.core.domain.module import Module
 from contextor.core.domain.usage_facts import ModuleUsageFacts
 from contextor.core.reference.engine import extract_module_usage_facts
+from contextor.core.reference.shared import materialize_reexport_facts_by_module
 
 from contextor.core.reference.engine import _build_reexport_map
 from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
@@ -61,8 +62,10 @@ def test_case_1_add_consumer(tmp_path):
     imp_c = ImportRef(module="target", level=0, names=["foo"], is_from_import=True)
     m_consumer = Module(module_id="consumer", path="consumer.py", absolute_path=str(f_consumer), imports=[imp_c])
 
+    modules = {"target": m_target}
     state = RepositoryAnalysisState(
-        modules={"target": m_target},
+        modules=modules,
+        reexport_facts_by_module=materialize_reexport_facts_by_module(modules),
         artifacts={"target": {"symbols": {"functions": ["foo"]}, "own_symbols": ["foo"]}},
     )
     cache_dir = tmp_path / "cache"

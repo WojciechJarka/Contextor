@@ -13,6 +13,7 @@ from contextor.core.reporting_engine.persistent_registry import PersistentIdenti
 from contextor.core.symbol_engine.indexer import index_repository
 from contextor.core.graph.graph import build_graph, build_trie, detect_package_root
 from contextor.core.reporting_layer.artifact_usage_report import collect_module_artifacts, build_artifact_index
+from contextor.core.reference.shared import materialize_reexport_facts_by_module
 
 pytestmark = pytest.mark.live
 
@@ -38,6 +39,9 @@ def bootstrap_fresh_state(root_path: Path) -> RepositoryAnalysisState:
     
     return RepositoryAnalysisState(
         modules=dict(modules),
+        reexport_facts_by_module=materialize_reexport_facts_by_module(
+            modules, repo_index.reference_facts_by_module
+        ),
         artifacts=module_artifacts,
         dependency_graph=graph,
         trie=trie,

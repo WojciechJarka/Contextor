@@ -21,6 +21,7 @@ from contextor.core.domain import usage_facts as usage_facts_module
 from contextor.core.live_state import store as live_store
 from contextor.core.live_state.store import load_snapshot, save_snapshot
 from contextor.core.reference.engine import extract_module_usage_facts
+from contextor.core.reference.shared import materialize_reexport_facts_by_module
 from contextor.core.reference.visitor import SymbolReferenceVisitor
 from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
 
@@ -415,8 +416,10 @@ def test_legacy_existing_usage_is_backfilled_once_and_unrelated_is_preserved(tmp
 def test_materialized_empty_symbol_calls_survive_snapshot_without_rebuild(tmp_path):
     source = tmp_path / "empty.py"
     source.write_text("def empty():\n    pass\n", encoding="utf-8")
+    modules = {"empty": Module("empty", "empty.py", str(source), [])}
     state = RepositoryAnalysisState(
-        modules={"empty": Module("empty", "empty.py", str(source), [])},
+        modules=modules,
+        reexport_facts_by_module=materialize_reexport_facts_by_module(modules),
         module_usages={
             "empty": extract_module_usage_facts("empty", "def empty():\n    pass\n")
         },

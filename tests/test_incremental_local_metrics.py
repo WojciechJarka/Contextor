@@ -21,6 +21,7 @@ from contextor.core.reporting_layer.artifact_usage_report import (
     collect_qualified_artifact_identities,
 )
 from contextor.core.symbol_engine.indexer import index_repository
+from contextor.core.reference.shared import materialize_reexport_facts_by_module
 from contextor import mcp_server
 from contextor.mcp import runtime as mcp_runtime
 
@@ -357,7 +358,8 @@ def _setup_engine(tmp_path):
     target = tmp_path / "target.py"
     target.write_text("def target_fn():\n    return 2\n", encoding="utf-8")
 
-    modules = index_repository(str(tmp_path)).modules
+    repo_index = index_repository(str(tmp_path))
+    modules = repo_index.modules
     artifacts, _ = collect_module_artifacts(modules, str(tmp_path))
     trie = build_trie(modules)
     package_root = detect_package_root(modules, trie)
@@ -367,6 +369,9 @@ def _setup_engine(tmp_path):
 
     state = RepositoryAnalysisState(
         modules=dict(modules),
+        reexport_facts_by_module=materialize_reexport_facts_by_module(
+            modules, repo_index.reference_facts_by_module
+        ),
         artifacts=artifacts,
         dependency_graph=graph,
         trie=trie,

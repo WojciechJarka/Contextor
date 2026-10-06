@@ -11,6 +11,7 @@ import pytest
 from contextor.core.analysis.incremental_engine import IncrementalAnalysisEngine
 from contextor.core.analysis.state_manager import FileStateManager, RepositoryAnalysisState
 from contextor.core.domain.module import Module
+from contextor.core.reference.shared import materialize_reexport_facts_by_module
 from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
 
 
@@ -52,7 +53,11 @@ class ChildClass(BaseClass):
 """, encoding="utf-8")
 
     m_target = Module(module_id="target", path="target.py", absolute_path=str(f_target), imports=[])
-    state = RepositoryAnalysisState(modules={"target": m_target})
+    modules = {"target": m_target}
+    state = RepositoryAnalysisState(
+        modules=modules,
+        reexport_facts_by_module=materialize_reexport_facts_by_module(modules),
+    )
     cache_dir = tmp_path / "cache"
     cache_dir.mkdir()
 

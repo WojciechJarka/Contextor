@@ -12,6 +12,7 @@ from contextor.core.reporting_layer.artifact_usage_report import (
 )
 from contextor.core.domain.graph import ProjectGraph
 from contextor.core.symbol_engine.indexer import index_repository
+from contextor.core.reference.shared import materialize_reexport_facts_by_module
 
 pytestmark = pytest.mark.live
 
@@ -19,13 +20,17 @@ pytestmark = pytest.mark.live
 def test_new_importing_file_immediately_updates_forward_and_reverse_graph(tmp_path):
     provider = tmp_path / "provider.py"
     provider.write_text("def run():\n    return 1\n", encoding="utf-8")
-    modules = index_repository(str(tmp_path)).modules
+    repo_index = index_repository(str(tmp_path))
+    modules = repo_index.modules
     artifacts, failures = collect_module_artifacts(modules, str(tmp_path))
     assert not failures
     trie = build_trie(modules)
     package_root = detect_package_root(modules, trie)
     state = RepositoryAnalysisState(
         modules=dict(modules),
+        reexport_facts_by_module=materialize_reexport_facts_by_module(
+            modules, repo_index.reference_facts_by_module
+        ),
         artifacts=artifacts,
         dependency_graph=build_graph(modules, trie=trie, package_root=package_root),
         trie=trie,

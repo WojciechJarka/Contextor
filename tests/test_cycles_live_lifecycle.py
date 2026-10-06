@@ -25,6 +25,7 @@ from contextor.core.domain.imports import ImportRef
 from contextor.core.domain.usage_facts import ModuleUsageFacts
 from contextor.core.graph.cycles import detect_cycles
 from contextor.core.live_state.store import save_snapshot, load_snapshot
+from contextor.core.reference.shared import materialize_reexport_facts_by_module
 from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
 
 
@@ -222,6 +223,7 @@ def test_persisted_fresh_cycles_preserved_across_restart(tmp_path):
 
     state = RepositoryAnalysisState(
         modules=modules,
+        reexport_facts_by_module=materialize_reexport_facts_by_module(modules),
         dependency_graph=graph,
         cycles=cycles_expected,
         cycles_state="fresh",

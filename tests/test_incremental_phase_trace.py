@@ -41,7 +41,8 @@ class FakeStateManager:
 
 def _candidate():
     return SimpleNamespace(
-        modules={}, artifacts={}, module_parse_freshness={},
+        modules={}, reexport_facts_by_module={},
+        artifacts={}, module_parse_freshness={},
         syntax_diagnostics_by_path={}, syntax_diagnostics_state="fresh",
         dependency_graph=None, metrics={}, topology_analytics={},
         cached_analytics={}, dependency_matrix={}, dependency_matrix_state="deferred",

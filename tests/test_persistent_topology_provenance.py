@@ -26,6 +26,7 @@ from contextor.core.domain.imports import ImportRef
 from contextor.core.graph.metrics import compute_graph_metrics
 from contextor.core.live_state.store import save_snapshot, load_snapshot
 from contextor.core.reporting_engine.graph_analytics import compute_topology_analytics
+from contextor.core.reference.shared import materialize_reexport_facts_by_module
 from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
 from contextor.mcp_server import get_module_context
 from contextor.mcp.runtime import _live_engines
@@ -71,6 +72,7 @@ def test_stale_non_empty_snapshot_restart_and_consumer_guard(tmp_path):
     # State has non-empty topology analytics, but is explicitly marked STALE
     state = RepositoryAnalysisState(
         modules=modules,
+        reexport_facts_by_module=materialize_reexport_facts_by_module(modules),
         dependency_graph=graph,
         metrics=metrics,
         topology_analytics=topo,

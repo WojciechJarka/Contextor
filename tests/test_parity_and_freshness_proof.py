@@ -14,6 +14,7 @@ from contextor.core.analysis.state_manager import FileStateManager, RepositoryAn
 from contextor.core.domain.imports import ImportRef
 from contextor.core.domain.module import Module
 from contextor.core.reference.engine import extract_module_usage_facts
+from contextor.core.reference.shared import materialize_reexport_facts_by_module
 from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
 
 
@@ -38,7 +39,11 @@ def test_scenario_a_add_consumer(tmp_path):
     m_target = Module(module_id="target", path="target.py", absolute_path=str(f_target), imports=[])
     m_consumer = Module(module_id="consumer", path="consumer.py", absolute_path=str(f_consumer), imports=[])
 
-    state = RepositoryAnalysisState(modules={"target": m_target})
+    modules = {"target": m_target}
+    state = RepositoryAnalysisState(
+        modules=modules,
+        reexport_facts_by_module=materialize_reexport_facts_by_module(modules),
+    )
     cache_dir = tmp_path / "cache"
     cache_dir.mkdir()
 
