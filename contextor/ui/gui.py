@@ -39,6 +39,8 @@ from contextor.core.repository_identity import (
 from contextor.core.paths import prune_startup_caches
 from contextor.repo_generator import run_repo_generator
 from contextor.mcp_backend_control import (
+    BackendOwnerInstanceRevoked,
+    claim_backend_owner,
     get_backend_status,
     start_backend,
     stop_backend,
@@ -116,6 +118,10 @@ class ContextorGUI:
         self.parser_win = None
         self.owner_token = uuid.uuid4().hex
         self.desktop_instance_id = uuid.uuid4().hex
+        self.backend_owner_token = uuid.uuid4().hex
+        self.backend_owner_claim = None
+        self._backend_owner_claim_error = None
+        self._backend_owner_claim_thread = None
         self.live_client = None
         self.live_clients = {}
         self.live_watcher = None
@@ -138,9 +144,123 @@ class ContextorGUI:
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
         self.root.after(50, self._start_post_paint_tasks)
 
+    def _claim_current_backend_for_desktop(self):
+        claim = claim_backend_owner(
+            host_owner_identity=self.desktop_instance_id,
+            host_kind="desktop",
+            owner_token=self.backend_owner_token,
+            probe_timeout=2.0,
+            lock_timeout=5.0,
+        )
+
+        self.backend_owner_claim = claim
+        self._backend_owner_claim_error = None
+
+        return claim
+
+    def _claim_backend_owner_on_startup(self):
+        status = start_backend(
+            timeout=20.0,
+            probe_timeout=2.0,
+        )
+
+        if (
+            not status.ready
+            or status.record is None
+        ):
+            raise RuntimeError(
+                "persistent MCP backend did not become authenticated and ready"
+            )
+
+        try:
+            claim = self._claim_current_backend_for_desktop()
+
+        except BackendOwnerInstanceRevoked:
+            deadline = time.monotonic() + 5.0
+
+            while time.monotonic() < deadline:
+                current = get_backend_status(
+                    probe_timeout=0.5,
+                )
+
+                if (
+                    current.state == "stopped"
+                    and current.ready is False
+                    and current.record is None
+                ):
+                    break
+
+                time.sleep(0.05)
+
+            else:
+                raise RuntimeError(
+                    "revoked persistent MCP backend did not self-terminate before timeout"
+                )
+
+            replacement = start_backend(
+                timeout=20.0,
+                probe_timeout=2.0,
+            )
+
+            if (
+                not replacement.ready
+                or replacement.record is None
+            ):
+                raise RuntimeError(
+                    "replacement persistent MCP backend did not become authenticated and ready"
+                )
+
+            claim = self._claim_current_backend_for_desktop()
+
+            if claim.backend_instance_id != replacement.record.instance_id:
+                raise RuntimeError(
+                    "Desktop backend owner claim does not match replacement backend instance"
+                )
+
+            return claim
+
+        if claim.backend_instance_id != status.record.instance_id:
+            raise RuntimeError(
+                "Desktop backend owner claim does not match active backend instance"
+            )
+
+        return claim
+
+    def _start_backend_owner_claim(self):
+        if getattr(self, "_closing", False):
+            return
+
+        current_thread = getattr(
+            self,
+            "_backend_owner_claim_thread",
+            None,
+        )
+
+        if (
+            current_thread is not None
+            and current_thread.is_alive()
+        ):
+            return
+
+        def worker():
+            try:
+                self._claim_backend_owner_on_startup()
+            except Exception as exc:
+                self._backend_owner_claim_error = exc
+
+        thread = threading.Thread(
+            target=worker,
+            name="contextor-backend-owner-claim",
+            daemon=True,
+        )
+
+        self._backend_owner_claim_thread = thread
+        thread.start()
+
     def _start_post_paint_tasks(self):
         if getattr(self, "_closing", False):
             return
+        self._start_backend_owner_claim()
         self._set_live_status("LIVE: initializing in background")
         def cleanup_worker():
             try:
@@ -741,10 +861,26 @@ class ContextorGUI:
                     "backend restart returned the previous backend process identity"
                 )
 
-            return before, after
+            new_owner_claim = claim_backend_owner(
+                host_owner_identity=self.desktop_instance_id,
+                host_kind="desktop",
+                owner_token=self.backend_owner_token,
+                probe_timeout=2.0,
+                lock_timeout=5.0,
+            )
+
+            if new_owner_claim.backend_instance_id != after.record.instance_id:
+                raise RuntimeError(
+                    "Desktop backend owner claim does not match restarted backend instance"
+                )
+
+            return before, after, new_owner_claim
 
         def on_success(result):
-            before, after = result
+            before, after, new_owner_claim = result
+
+            self.backend_owner_claim = new_owner_claim
+            self._backend_owner_claim_error = None
 
             old_pid = (
                 "none"

@@ -30,6 +30,10 @@ def _controller():
         log_box=object(),
         cpu_indicator=object(),
         stop_btn=object(),
+        desktop_instance_id="desktop-instance",
+        backend_owner_token="backend-owner-token",
+        backend_owner_claim=None,
+        _backend_owner_claim_error=RuntimeError("previous claim error"),
         _busy_buttons=lambda: busy_buttons,
     )
     return controller, busy_buttons
@@ -66,6 +70,7 @@ def test_restart_runs_lifecycle_in_progress_task_and_confirms_new_identity(
     )
     events = []
     statuses = iter((before, stopped))
+    new_owner_claim = SimpleNamespace(backend_instance_id="new-instance")
 
     def get_status(*, probe_timeout):
         events.append(("status", probe_timeout))
@@ -78,9 +83,21 @@ def test_restart_runs_lifecycle_in_progress_task_and_confirms_new_identity(
         events.append(("start", timeout, probe_timeout))
         return after
 
+    def claim_backend_owner(**kwargs):
+        events.append(("claim", kwargs))
+        return new_owner_claim
+
     monkeypatch.setattr(gui, "get_backend_status", get_status)
     monkeypatch.setattr(gui, "stop_backend", stop_backend)
     monkeypatch.setattr(gui, "start_backend", start_backend)
+    monkeypatch.setattr(gui, "claim_backend_owner", claim_backend_owner)
+    release_calls = []
+    monkeypatch.setattr(
+        gui,
+        "release_backend_owner",
+        lambda *args, **kwargs: release_calls.append((args, kwargs)),
+        raising=False,
+    )
     captured = _capture_progress(monkeypatch)
     controller, busy_buttons = _controller()
     messages = []
@@ -99,15 +116,28 @@ def test_restart_runs_lifecycle_in_progress_task_and_confirms_new_identity(
 
     result = captured["task"]()
 
-    assert result == (before, after)
+    assert result == (before, after, new_owner_claim)
     assert events == [
         ("status", 2.0),
         ("stop", 5.0),
         ("status", 0.5),
         ("start", 20.0, 2.0),
+        (
+            "claim",
+            {
+                "host_owner_identity": "desktop-instance",
+                "host_kind": "desktop",
+                "owner_token": "backend-owner-token",
+                "probe_timeout": 2.0,
+                "lock_timeout": 5.0,
+            },
+        ),
     ]
 
     captured["on_success"](result)
+    assert controller.backend_owner_claim is new_owner_claim
+    assert controller._backend_owner_claim_error is None
+    assert release_calls == []
     assert len(messages) == 1
     assert "Old PID: 123" in messages[0][1]
     assert "New instance: new-instance" in messages[0][1]
@@ -188,6 +218,7 @@ def test_restart_starts_backend_when_initial_status_has_no_record(monkeypatch):
     )
     statuses = iter((before, stopped))
     events = []
+    new_owner_claim = SimpleNamespace(backend_instance_id="fresh-instance")
 
     def get_status(*, probe_timeout):
         events.append(("status", probe_timeout))
@@ -196,14 +227,93 @@ def test_restart_starts_backend_when_initial_status_has_no_record(monkeypatch):
     monkeypatch.setattr(gui, "get_backend_status", get_status)
     monkeypatch.setattr(gui, "stop_backend", lambda **_: events.append(("stop",)))
     monkeypatch.setattr(gui, "start_backend", lambda **_: after)
+    monkeypatch.setattr(
+        gui,
+        "claim_backend_owner",
+        lambda **kwargs: events.append(("claim", kwargs)) or new_owner_claim,
+    )
     captured = _capture_progress(monkeypatch)
     controller, _ = _controller()
 
     gui.ContextorGUI._restart_backend(controller)
     result = captured["task"]()
 
-    assert result == (before, after)
-    assert events == [("status", 2.0), ("stop",), ("status", 0.5)]
+    assert result == (before, after, new_owner_claim)
+    assert events == [
+        ("status", 2.0),
+        ("stop",),
+        ("status", 0.5),
+        (
+            "claim",
+            {
+                "host_owner_identity": "desktop-instance",
+                "host_kind": "desktop",
+                "owner_token": "backend-owner-token",
+                "probe_timeout": 2.0,
+                "lock_timeout": 5.0,
+            },
+        ),
+    ]
+
+
+def test_restart_owner_claim_mismatch_fails_without_rollback(monkeypatch):
+    before = _status("running", ready=True, record=_record("old", 123, 1000))
+    stopped = _status("stopped")
+    after = _status("running", ready=True, record=_record("new", 456, 2000))
+    statuses = iter((before, stopped))
+    stop_calls = []
+    errors = []
+    monkeypatch.setattr(gui, "get_backend_status", lambda **_: next(statuses))
+    monkeypatch.setattr(gui, "stop_backend", lambda **kwargs: stop_calls.append(kwargs))
+    monkeypatch.setattr(gui, "start_backend", lambda **_: after)
+    monkeypatch.setattr(
+        gui,
+        "claim_backend_owner",
+        lambda **_: SimpleNamespace(backend_instance_id="foreign-instance"),
+    )
+    captured = _capture_progress(monkeypatch)
+    controller, _ = _controller()
+    monkeypatch.setattr(gui.messagebox, "showerror", lambda *args: errors.append(args))
+
+    gui.ContextorGUI._restart_backend(controller)
+
+    with pytest.raises(RuntimeError, match="does not match restarted backend instance") as exc_info:
+        captured["task"]()
+    captured["on_error"](exc_info.value)
+
+    assert len(stop_calls) == 1
+    assert errors and "does not match restarted backend instance" in errors[0][1]
+
+
+def test_restart_owner_claim_failure_reaches_on_error_without_rollback(monkeypatch):
+    before = _status("running", ready=True, record=_record("old", 123, 1000))
+    stopped = _status("stopped")
+    after = _status("running", ready=True, record=_record("new", 456, 2000))
+    statuses = iter((before, stopped))
+    stop_calls = []
+    errors = []
+    claim_error = RuntimeError("owner claim denied")
+    monkeypatch.setattr(gui, "get_backend_status", lambda **_: next(statuses))
+    monkeypatch.setattr(gui, "stop_backend", lambda **kwargs: stop_calls.append(kwargs))
+    monkeypatch.setattr(gui, "start_backend", lambda **_: after)
+
+    def fail_claim(**_kwargs):
+        raise claim_error
+
+    monkeypatch.setattr(gui, "claim_backend_owner", fail_claim)
+    captured = _capture_progress(monkeypatch)
+    controller, _ = _controller()
+    monkeypatch.setattr(gui.messagebox, "showerror", lambda *args: errors.append(args))
+
+    gui.ContextorGUI._restart_backend(controller)
+
+    with pytest.raises(RuntimeError, match="owner claim denied") as exc_info:
+        captured["task"]()
+    captured["on_error"](exc_info.value)
+
+    assert exc_info.value is claim_error
+    assert len(stop_calls) == 1
+    assert errors and "owner claim denied" in errors[0][1]
 
 
 def test_restart_backend_button_is_in_shared_busy_buttons():

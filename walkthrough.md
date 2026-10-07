@@ -1,680 +1,805 @@
-STATUS=IMPLEMENTATION_PASS
-HEAD=770e3c9ae9d1444a3eb0ba5a7da55fbf7801ef26
+# CPA_BACKEND_OWNER_O3_DESKTOP_OWNER_ADAPTER
+
+STATUS=IMPLEMENTATION_PASS_TARGETED_TESTS
+HEAD=161cc30073e785837ee1477565d6824abab9dae0
 
 FILES_CHANGED:
-- contextor/mcp_backend_control.py
-- contextor/mcp_server.py
-- tests/test_mcp_backend_owner.py
-- tests/test_mcp_persistent_http_runner.py
-- tests/test_mcp_shared_backend_server_mode.py
+- contextor/ui/gui.py
+- tests/test_gui_backend_owner.py
+- tests/test_gui_backend_restart.py
+- tests/test_gui_live_startup.py
 
 LITERAL_IMPLEMENTATION_MATCH=YES
-The existing claim_backend_owner stale-owner branch, O2A controlled runner, and main persistent-backend dispatch matched the supplied anchors. Added only the requested O2B control-plane exception, owner evaluation/watchdog, runner lifecycle, and tests.
+DESKTOP_OWNER_IDENTITY=PASS
+STARTUP_OWNER_ACQUIRE=PASS
+REVOKED_INSTANCE_RELAUNCH=PASS
+RESTART_OWNER_PRESERVATION=PASS
+DESKTOP_CLOSE_OWNER_RELEASE=NO
+DESKTOP_CLOSE_STOP_BACKEND=NO
+LIVE_SHUTDOWN_SEMANTICS_UNCHANGED=YES
+TARGETED_TESTS=PASS
+CONTEXTOR_POST_EDIT=PASS
+IMPLEMENTATION_RESULT=PASS_IMPLEMENTATION; DESKTOP_CLOSE_RUNTIME_CONFIRMATION_PENDING_DESKTOP_RESTART
 
-STALE_SAME_INSTANCE_POLICY=PASS
-For the current backend_instance_id, MATCH with the same logical owner returns the current claim; MATCH with another logical owner raises BackendOwnerAlreadyClaimed; UNKNOWN raises BackendOwnerLivenessUnknown; STALE raises BackendOwnerInstanceRevoked before candidate creation or owner.json write. The focused stale test verifies owner.json bytes remain unchanged. A claim for an older backend_instance_id remains replaceable, and the existing regression still passes. The existing same-instance UNKNOWN test already covered fail-closed/no-write behavior.
+DISCOVERY
+- Pre-edit get_file_edit_context: contextor.ui.gui, canonical_state=fresh, workspace_sync=verified, canonical_revision=1628; syntax diagnostics checked_and_none.
+- Pre-edit module blast radius: 45 artifacts; direct consumers included tests.test_gui_backend_restart, tests.test_gui_live_startup, and tests.test_live_desktop_integration. Module direct/downstream consumer evidence was read from canonical LIVE.
+- Pre-edit artifact blast radius was queried for __init__, _start_post_paint_tasks, _restart_backend, and on_closing. Static artifact-consumer evidence identified tests.test_gui_live_startup and tests.test_live_desktop_integration for close/startup paths. These results are canonical static evidence and do not claim dynamic Python completeness.
+- Pre-edit get_symbol_call_context was read for all four methods. It reports intra-module edges only. get_symbol_lineage for _restart_backend resolved complete at revision 1628; nested run_with_progress was a dynamic boundary and one surrounding call result was unresolved, so no broader caller claim is inferred from that lineage.
+- contextor_fact_lineage documentation was considered. Its supported families are Contextor canonical fact pipelines (artifact_consumption, syntax_diagnostics, symbol_calls), not this Desktop backend-owner adapter; it was not used as application-code ownership evidence.
+- Literal local source anchors at HEAD matched the prompt: control import block; adjacent owner_token/desktop_instance_id assignments; _start_post_paint_tasks closing guard; existing restart lifecycle through identity verification; on_closing boundary. test_gui_backend_owner.py did not exist at HEAD. No source drift was found.
 
-OWNER_WATCH_STATE_MACHINE:
-UNARMED + no claim or a claim for another backend instance -> remain unarmed.
-UNARMED + exact current-instance MATCH -> pin that exact claim.
-UNARMED + exact current-instance STALE -> revoke the instance.
-UNARMED + UNKNOWN or BackendOwnerClaimError -> retry without revocation.
-ARMED + exact pinned MATCH or UNKNOWN -> keep the pin and continue.
-ARMED + stale exact pin, missing claim, or any exact claim replacement -> revoke the instance.
-The watchdog polls every 0.75 seconds by default and does not use a heartbeat.
+IMPLEMENTATION
+- Added BackendOwnerInstanceRevoked and claim_backend_owner to the existing mcp_backend_control import; did not import release_backend_owner.
+- Kept owner_token as the LIVE token. Added an independent backend_owner_token, claim state/error/thread fields after desktop_instance_id.
+- Added the exact desktop claim helper and startup acquisition flow. Revoked instances are only polled for normal self-termination; the replacement is then started and claimed by exact instance identity. This recovery path does not call stop_backend.
+- Added the startup owner claim worker as a daemon thread; exceptions are stored in _backend_owner_claim_error and no Tk widget is accessed by that worker.
+- Started the owner claim from _start_post_paint_tasks after the closing guard, before cache cleanup and LIVE startup.
+- Restart now claims the verified replacement backend using Desktop identity/token, checks exact instance match, returns the claim with before/after status, and stores it on success. Claim exceptions go to existing on_error; no rollback or release was added.
+- ContextorGUI.on_closing was not modified. The existing LIVE close path, including its LIVE claim/shutdown behavior, remains unchanged. The NO fields above refer specifically to the persistent backend owner claim and backend instance.
+- Runtime confirmation of Desktop process exit and backend watchdog shutdown remains pending a later Desktop restart/close certification; this implementation turn did not restart Desktop or MCP.
 
-SELF_TERMINATE_MECHANISM=On proven revocation the watchdog sets server.should_exit=True; Uvicorn performs its normal shutdown. Production code does not cancel server.serve(), call shutdown directly, kill a process, or remove owner.json.
-SERVE_TASK_CANCELLATION=NO
-OWNER_CLAIM_REMOVED_ON_REVOKE=NO
-FINALIZATION_ORDER=owner watchdog -> server.should_exit=True -> Uvicorn serve normal shutdown -> asyncio.run(_run()) returns -> _shutdown_cleanup() -> PersistentBackendLease.release()
+TARGETED_TESTS
+Command:
+.\.venv\Scripts\python.exe -m pytest tests\test_gui_backend_owner.py tests\test_gui_backend_restart.py tests\test_gui_live_startup.py tests\test_live_desktop_integration.py -q
 
-EPHEMERAL_SELF_TERMINATE=PASS
-A real FastMCP/Uvicorn server ran on an ephemeral localhost port. The patched evaluation returned non-revoked first and revoked only after server.started; the watchdog set should_exit, serve_task completed without cancellation, and the same port rebound successfully. Port 8765 was not used.
+Final result: 55 passed, 1 AuthlibDeprecationWarning, 9.26s.
+The initial run had 4 test-harness failures because the SimpleNamespace controller omitted the bound helper method; the fixture was corrected to call the production helper and the same exact targeted command then passed. No production change was made in response to those failures.
+No full repository pytest suite was run.
 
-TARGETED_TESTS:
-Command: .venv\Scripts\python.exe -m pytest -q tests/test_mcp_backend_owner.py tests/test_mcp_persistent_http_runner.py tests/test_mcp_shared_backend_server_mode.py
-Result: 88 passed, 1 AuthlibDeprecationWarning. No other test modules or full suite were run.
-git diff --check for the five implementation/test files before report generation: PASS.
+CONTEXTOR_POST_EDIT
+- All seven requested symbols were fetched after the edit: ContextorGUI.__init__, _claim_current_backend_for_desktop, _claim_backend_owner_on_startup, _start_backend_owner_claim, _start_post_paint_tasks, _restart_backend, and on_closing.
+- Each fetch returned canonical_state=fresh and workspace_sync=verified at canonical_revision=1633.
+- Desktop watcher update events: gui.py revision 1629; test_gui_backend_owner.py revisions 1630 and 1633; test_gui_backend_restart.py revision 1631; test_gui_live_startup.py revision 1632. The second owner-test event reflects the test-fixture correction.
+- get_live_events(after_revision=1632): latest_revision=1633, continuity=continuous, resync_required=false.
+- No manual update_file was called.
+- git diff --check passed for the changed tracked source/test files.
+- No test was added for on_closing source-string absence, per instruction.
 
-CONTEXTOR_POST_EDIT:
-Fetched BackendOwnerInstanceRevoked, claim_backend_owner, _evaluate_persistent_backend_owner, _watch_persistent_backend_owner, _run_persistent_http_server, and main. All six returned canonical_state=fresh and workspace_sync=verified at canonical_revision=1628.
-LIVE events: revisions 1623-1628; all six were desktop_watcher UPDATED events covering both production files and all three changed test files.
-continuity=continuous
-resync_required=false
+EVIDENCE_CLASSIFICATION
+DIRECT_EVIDENCE:
+- Exact Contextor implementation fetches at revision 1633 with verified workspace sync.
+- Watcher events and continuity/resync metadata listed above.
+- Targeted pytest output: 55 passed.
+CODE_PATH_PROVED:
+- Startup owner claim and replacement relaunch are performed by the worker and public backend lifecycle APIs as specified.
+- Restart claims only after readiness and identity verification; error propagation does not add another stop or rollback.
+- on_closing has no backend owner release or backend stop change in this diff.
+INFERENCE:
+- No runtime Desktop-close behavior is claimed from source inspection alone.
+UNKNOWN:
+- Post-Desktop-restart runtime confirmation of owner-lost self-termination.
 
-IMPLEMENTATION_RESULT=PASS
+FILES_CHANGED=4 source/test files listed above (walkthrough.md is the required report and is excluded)
+DIFFS=FULL_DIFFS_BELOW
+TESTS_RUN=ONLY_THE_FOUR_TARGETED_FILES_ABOVE
 
 FULL_DIFFS
-BEGIN_ACTUAL_DIFFS
-diff --git a/contextor/mcp_backend_control.py b/contextor/mcp_backend_control.py
-index 2df4ab9..69e9ecd 100644
---- a/contextor/mcp_backend_control.py
-+++ b/contextor/mcp_backend_control.py
-@@ -67,6 +67,10 @@ class BackendOwnerLivenessUnknown(BackendControlError):
-     """The current backend host-owner process cannot be classified safely."""
+
+### contextor/ui/gui.py
+
+FULL_DIFF_BEGIN
+--- a/contextor/ui/gui.py
++++ b/contextor/ui/gui.py
+@@ -39,6 +39,8 @@
+ from contextor.core.paths import prune_startup_caches
+ from contextor.repo_generator import run_repo_generator
+ from contextor.mcp_backend_control import (
++    BackendOwnerInstanceRevoked,
++    claim_backend_owner,
+     get_backend_status,
+     start_backend,
+     stop_backend,
+@@ -116,6 +118,10 @@
+         self.parser_win = None
+         self.owner_token = uuid.uuid4().hex
+         self.desktop_instance_id = uuid.uuid4().hex
++        self.backend_owner_token = uuid.uuid4().hex
++        self.backend_owner_claim = None
++        self._backend_owner_claim_error = None
++        self._backend_owner_claim_thread = None
+         self.live_client = None
+         self.live_clients = {}
+         self.live_watcher = None
+@@ -138,9 +144,123 @@
+         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+         self.root.after(50, self._start_post_paint_tasks)
  
- 
-+class BackendOwnerInstanceRevoked(BackendControlError):
-+    """The current backend instance lost its exact lifecycle owner and must terminate."""
-+
-+
- @dataclass(
-     frozen=True,
-     slots=True,
-@@ -301,6 +305,10 @@ def claim_backend_owner(
-                 raise BackendOwnerLivenessUnknown(
-                     "current backend host owner liveness is unknown"
-                 )
-+            if owner_state == "stale":
-+                raise BackendOwnerInstanceRevoked(
-+                    "backend instance lost its lifecycle owner and must be replaced"
-+                )
-             if owner_state != "stale":
-                 raise BackendOwnerLivenessUnknown(
-                     "current backend host owner state is invalid"
-@@ -1089,6 +1097,7 @@ __all__ = [
-     "BACKEND_SERVER_NAME",
-     "BackendControlError",
-     "BackendOwnerAlreadyClaimed",
-+    "BackendOwnerInstanceRevoked",
-     "BackendOwnerLivenessUnknown",
-     "BackendStatus",
-     "backend_control_lock_path",
-diff --git a/contextor/mcp_server.py b/contextor/mcp_server.py
-index 6e7d342..06173d3 100644
---- a/contextor/mcp_server.py
-+++ b/contextor/mcp_server.py
-@@ -193,7 +193,11 @@ from contextor.mcp_process_registry import (
-     terminate_registered_process,
- )
- from contextor.mcp_backend_state import (
-+    BackendHostOwnerClaim,
-+    BackendOwnerClaimError,
-     PersistentBackendLease,
-+    classify_backend_owner_process,
-+    read_backend_owner_claim,
- )
- from contextor.mcp.documentation import short_description
- from contextor.mcp.tools.get_artifact_blast_radius import (
-@@ -982,6 +986,70 @@ def _register_server_root(
-     )
- 
- 
-+_PERSISTENT_BACKEND_OWNER_POLL_INTERVAL = 0.75
-+
-+
-+def _evaluate_persistent_backend_owner(
-+    *,
-+    backend_instance_id: str,
-+    pinned_claim: BackendHostOwnerClaim | None,
-+) -> tuple[BackendHostOwnerClaim | None, bool]:
-+    try:
-+        current = read_backend_owner_claim()
-+    except BackendOwnerClaimError:
-+        return pinned_claim, False
-+
-+    if pinned_claim is None:
-+        if (
-+            current is None
-+            or current.backend_instance_id != backend_instance_id
-+        ):
-+            return None, False
-+
-+        owner_state = classify_backend_owner_process(current)
-+
-+        if owner_state == "match":
-+            return current, False
-+
-+        if owner_state == "stale":
-+            return None, True
-+
-+        return None, False
-+
-+    if current != pinned_claim:
-+        return pinned_claim, True
-+
-+    owner_state = classify_backend_owner_process(pinned_claim)
-+
-+    if owner_state == "stale":
-+        return pinned_claim, True
-+
-+    return pinned_claim, False
-+
-+
-+async def _watch_persistent_backend_owner(
-+    server: uvicorn.Server,
-+    *,
-+    backend_instance_id: str,
-+    poll_interval: float = _PERSISTENT_BACKEND_OWNER_POLL_INTERVAL,
-+) -> None:
-+    pinned_claim = None
-+
-+    while not server.should_exit:
-+        pinned_claim, instance_revoked = (
-+            _evaluate_persistent_backend_owner(
-+                backend_instance_id=backend_instance_id,
-+                pinned_claim=pinned_claim,
-+            )
++    def _claim_current_backend_for_desktop(self):
++        claim = claim_backend_owner(
++            host_owner_identity=self.desktop_instance_id,
++            host_kind="desktop",
++            owner_token=self.backend_owner_token,
++            probe_timeout=2.0,
++            lock_timeout=5.0,
 +        )
 +
-+        if instance_revoked:
-+            server.should_exit = True
++        self.backend_owner_claim = claim
++        self._backend_owner_claim_error = None
++
++        return claim
++
++    def _claim_backend_owner_on_startup(self):
++        status = start_backend(
++            timeout=20.0,
++            probe_timeout=2.0,
++        )
++
++        if (
++            not status.ready
++            or status.record is None
++        ):
++            raise RuntimeError(
++                "persistent MCP backend did not become authenticated and ready"
++            )
++
++        try:
++            claim = self._claim_current_backend_for_desktop()
++
++        except BackendOwnerInstanceRevoked:
++            deadline = time.monotonic() + 5.0
++
++            while time.monotonic() < deadline:
++                current = get_backend_status(
++                    probe_timeout=0.5,
++                )
++
++                if (
++                    current.state == "stopped"
++                    and current.ready is False
++                    and current.record is None
++                ):
++                    break
++
++                time.sleep(0.05)
++
++            else:
++                raise RuntimeError(
++                    "revoked persistent MCP backend did not self-terminate before timeout"
++                )
++
++            replacement = start_backend(
++                timeout=20.0,
++                probe_timeout=2.0,
++            )
++
++            if (
++                not replacement.ready
++                or replacement.record is None
++            ):
++                raise RuntimeError(
++                    "replacement persistent MCP backend did not become authenticated and ready"
++                )
++
++            claim = self._claim_current_backend_for_desktop()
++
++            if claim.backend_instance_id != replacement.record.instance_id:
++                raise RuntimeError(
++                    "Desktop backend owner claim does not match replacement backend instance"
++                )
++
++            return claim
++
++        if claim.backend_instance_id != status.record.instance_id:
++            raise RuntimeError(
++                "Desktop backend owner claim does not match active backend instance"
++            )
++
++        return claim
++
++    def _start_backend_owner_claim(self):
++        if getattr(self, "_closing", False):
 +            return
 +
-+        await asyncio.sleep(poll_interval)
-+
-+
- def _create_persistent_http_server(
-     *,
-     host: str,
-@@ -1008,8 +1076,26 @@ def _create_persistent_http_server(
- 
- async def _run_persistent_http_server(
-     server: uvicorn.Server,
-+    *,
-+    backend_instance_id: str,
-+    owner_poll_interval: float = _PERSISTENT_BACKEND_OWNER_POLL_INTERVAL,
- ) -> None:
--    await server.serve()
-+    watchdog_task = asyncio.create_task(
-+        _watch_persistent_backend_owner(
-+            server,
-+            backend_instance_id=backend_instance_id,
-+            poll_interval=owner_poll_interval,
++        current_thread = getattr(
++            self,
++            "_backend_owner_claim_thread",
++            None,
 +        )
-+    )
 +
-+    try:
-+        await server.serve()
-+    finally:
-+        watchdog_task.cancel()
-+        try:
-+            await watchdog_task
-+        except asyncio.CancelledError:
-+            pass
- 
- 
- def main():
-@@ -1143,7 +1229,8 @@ def main():
-                     port=http_port,
-                 )
-                 await _run_persistent_http_server(
--                    server
-+                    server,
-+                    backend_instance_id=backend_lease.record.instance_id,
-                 )
-             elif transport in _HTTP_TRANSPORTS:
-                 await mcp.run_http_async(
-diff --git a/tests/test_mcp_backend_owner.py b/tests/test_mcp_backend_owner.py
-index 63cc2c6..897b9b4 100644
---- a/tests/test_mcp_backend_owner.py
-+++ b/tests/test_mcp_backend_owner.py
-@@ -428,7 +428,7 @@ def test_claim_backend_owner_rejects_live_foreign_owner(
-         ProcessIdentityProbe("alive", sys.executable, 333),
-     ],
- )
--def test_claim_backend_owner_takes_over_stale_owner(
-+def test_claim_backend_owner_revokes_same_instance_stale_owner_without_write(
-     tmp_path,
-     monkeypatch,
-     probe_for_existing,
-@@ -443,17 +443,20 @@ def test_claim_backend_owner_takes_over_stale_owner(
-         return ProcessIdentityProbe("alive", sys.executable, 123456789)
- 
-     monkeypatch.setattr(state, "probe_process_identity", probe)
-+    before = state.backend_owner_claim_path().read_bytes()
- 
--    replacement = control.claim_backend_owner(
--        host_owner_identity="replacement-host",
--        host_kind="desktop",
--        owner_token="replacement-token",
--    )
-+    with pytest.raises(
-+        control.BackendOwnerInstanceRevoked,
-+        match="backend instance lost its lifecycle owner and must be replaced",
-+    ):
-+        control.claim_backend_owner(
-+            host_owner_identity="replacement-host",
-+            host_kind="desktop",
-+            owner_token="replacement-token",
++        if (
++            current_thread is not None
++            and current_thread.is_alive()
++        ):
++            return
++
++        def worker():
++            try:
++                self._claim_backend_owner_on_startup()
++            except Exception as exc:
++                self._backend_owner_claim_error = exc
++
++        thread = threading.Thread(
++            target=worker,
++            name="contextor-backend-owner-claim",
++            daemon=True,
 +        )
- 
--    assert replacement.backend_instance_id == record.instance_id
--    assert replacement.host_owner_identity == "replacement-host"
--    assert replacement != existing
--    assert state.read_backend_owner_claim() == replacement
-+    assert existing.backend_instance_id == record.instance_id
-+    assert state.backend_owner_claim_path().read_bytes() == before
- 
- 
- def test_claim_backend_owner_unknown_liveness_fails_without_write(
-diff --git a/tests/test_mcp_persistent_http_runner.py b/tests/test_mcp_persistent_http_runner.py
-index 8945c3d..f70e3e8 100644
---- a/tests/test_mcp_persistent_http_runner.py
-+++ b/tests/test_mcp_persistent_http_runner.py
-@@ -1,9 +1,14 @@
- import asyncio
- import socket
-+from types import SimpleNamespace
- 
- import pytest
- 
- from contextor import mcp_server
-+from contextor.mcp_backend_state import (
-+    BackendHostOwnerClaim,
-+    BackendOwnerClaimError,
-+)
- 
- 
- def _configure_main(
-@@ -76,6 +81,24 @@ def _configure_main(
-     )
- 
- 
-+def _owner_claim(
-+    backend_instance_id="backend-current",
-+    *,
-+    owner_token="owner-token",
-+):
-+    return BackendHostOwnerClaim(
-+        schema_version=1,
-+        backend_instance_id=backend_instance_id,
-+        host_owner_identity="host-owner",
-+        host_kind="desktop",
-+        host_pid=123,
-+        host_executable="python.exe",
-+        host_creation_time=456,
-+        owner_token=owner_token,
-+        claimed_at=1.0,
-+    )
 +
++        self._backend_owner_claim_thread = thread
++        thread.start()
 +
- def test_create_persistent_http_server_uses_exact_fastmcp_and_uvicorn_config(
-     monkeypatch,
- ):
-@@ -162,7 +185,8 @@ def test_run_persistent_http_server_awaits_serve_once():
+     def _start_post_paint_tasks(self):
+         if getattr(self, "_closing", False):
+             return
++        self._start_backend_owner_claim()
+         self._set_live_status("LIVE: initializing in background")
+         def cleanup_worker():
+             try:
+@@ -741,10 +861,26 @@
+                     "backend restart returned the previous backend process identity"
+                 )
  
-     asyncio.run(
-         mcp_server._run_persistent_http_server(
--            server
-+            server,
-+            backend_instance_id="backend-runner-test",
-         )
-     )
- 
-@@ -180,7 +204,8 @@ def test_run_persistent_http_server_propagates_serve_exception():
-     ):
-         asyncio.run(
-             mcp_server._run_persistent_http_server(
--                FakeServer()
-+                FakeServer(),
-+                backend_instance_id="backend-runner-test",
-             )
-         )
- 
-@@ -197,8 +222,14 @@ def test_persistent_backend_main_uses_controlled_runner_and_finalizes_lease(
-         role="persistent-backend",
-         transport="streamable-http",
-     )
-+    backend_instance_id = "active-backend-instance"
- 
-     class FakeLease:
-+        def __init__(self):
-+            self.record = SimpleNamespace(
-+                instance_id=backend_instance_id
+-            return before, after
++            new_owner_claim = claim_backend_owner(
++                host_owner_identity=self.desktop_instance_id,
++                host_kind="desktop",
++                owner_token=self.backend_owner_token,
++                probe_timeout=2.0,
++                lock_timeout=5.0,
 +            )
 +
-         @classmethod
-         def acquire(cls, **kwargs):
-             events.append(
-@@ -223,9 +254,14 @@ def test_persistent_backend_main_uses_controlled_runner_and_finalizes_lease(
-         )
-         return server
++            if new_owner_claim.backend_instance_id != after.record.instance_id:
++                raise RuntimeError(
++                    "Desktop backend owner claim does not match restarted backend instance"
++                )
++
++            return before, after, new_owner_claim
  
--    async def fake_run_server(actual_server):
-+    async def fake_run_server(
-+        actual_server,
-+        *,
-+        backend_instance_id,
-+    ):
-         assert actual_server is server
--        events.append(("serve",))
-+        assert backend_instance_id == "active-backend-instance"
-+        events.append(("serve", backend_instance_id))
+         def on_success(result):
+-            before, after = result
++            before, after, new_owner_claim = result
++
++            self.backend_owner_claim = new_owner_claim
++            self._backend_owner_claim_error = None
  
-     async def fail_http(**_kwargs):
-         pytest.fail(
-@@ -265,7 +301,7 @@ def test_persistent_backend_main_uses_controlled_runner_and_finalizes_lease(
- 
-     mcp_server.main()
- 
--    assert events.index(("serve",)) < events.index(("shutdown",))
-+    assert events.index(("serve", backend_instance_id)) < events.index(("shutdown",))
-     assert events.index(("shutdown",)) < events.index(("lease_release",))
- 
- 
-@@ -375,7 +411,187 @@ def test_stdio_main_keeps_fastmcp_runner(
-     assert events.count(("stdio",)) == 1
- 
- 
--def test_persistent_http_server_exits_normally_and_releases_ephemeral_port():
-+@pytest.mark.parametrize(
-+    ("case", "expected_pinned", "expected_revoked"),
-+    [
-+        ("unarmed_no_claim", None, False),
-+        ("unarmed_other_instance", None, False),
-+        ("unarmed_match", "current", False),
-+        ("unarmed_unknown", None, False),
-+        ("unarmed_stale", None, True),
-+        ("armed_match", "pinned", False),
-+        ("armed_unknown", "pinned", False),
-+        ("armed_stale", "pinned", True),
-+        ("armed_missing", "pinned", True),
-+        ("armed_replaced", "pinned", True),
-+        ("unarmed_read_error", None, False),
-+        ("armed_read_error", "pinned", False),
-+    ],
-+    ids=[
-+        "unarmed-no-claim",
-+        "unarmed-other-instance",
-+        "unarmed-current-match",
-+        "unarmed-current-unknown",
-+        "unarmed-current-stale",
-+        "armed-exact-match",
-+        "armed-exact-unknown",
-+        "armed-exact-stale",
-+        "armed-claim-missing",
-+        "armed-claim-replaced",
-+        "unarmed-claim-read-error",
-+        "armed-claim-read-error",
-+    ],
-+)
-+def test_evaluate_persistent_backend_owner_state_machine(
-+    case,
-+    expected_pinned,
-+    expected_revoked,
-+    monkeypatch,
-+):
-+    pinned_claim = (
-+        _owner_claim()
-+        if expected_pinned == "pinned"
-+        or case.startswith("armed_")
-+        else None
+             old_pid = (
+                 "none"
+
+FULL_DIFF_END
+
+### tests/test_gui_backend_owner.py
+
+FULL_DIFF_BEGIN
+--- a/tests/test_gui_backend_owner.py
++++ b/tests/test_gui_backend_owner.py
+@@ -0,0 +1,331 @@
++import threading
++import time
++from types import SimpleNamespace
++
++import pytest
++
++from contextor.mcp_backend_control import BackendOwnerInstanceRevoked
++from contextor.ui import gui
++
++
++def _record(instance_id, pid=100, creation_time=1000):
++    return SimpleNamespace(
++        instance_id=instance_id,
++        pid=pid,
++        creation_time=creation_time,
 +    )
-+    if case in {
-+        "unarmed_no_claim",
-+        "armed_missing",
-+        "unarmed_read_error",
-+        "armed_read_error",
-+    }:
-+        current_claim = None
-+    elif case == "unarmed_other_instance":
-+        current_claim = _owner_claim("backend-other")
-+    elif case == "armed_replaced":
-+        current_claim = _owner_claim(owner_token="replacement-token")
-+    elif case.startswith("armed_"):
-+        current_claim = pinned_claim
-+    else:
-+        current_claim = _owner_claim()
 +
-+    owner_state = {
-+        "unarmed_match": "match",
-+        "unarmed_unknown": "unknown",
-+        "unarmed_stale": "stale",
-+        "armed_match": "match",
-+        "armed_unknown": "unknown",
-+        "armed_stale": "stale",
-+    }.get(case)
-+    classified_claims = []
 +
-+    def fake_read_claim():
-+        if case in {"unarmed_read_error", "armed_read_error"}:
-+            raise BackendOwnerClaimError("malformed owner claim")
-+        return current_claim
++def _status(state, ready=False, record=None):
++    return SimpleNamespace(
++        state=state,
++        ready=ready,
++        record=record,
++    )
 +
-+    def fake_classify(claim):
-+        classified_claims.append(claim)
-+        return owner_state
 +
++def _controller():
++    controller = SimpleNamespace(
++        desktop_instance_id="desktop-instance",
++        backend_owner_token="backend-owner-token",
++        backend_owner_claim=None,
++        _backend_owner_claim_error=None,
++        _backend_owner_claim_thread=None,
++        _closing=False,
++    )
++    controller._claim_current_backend_for_desktop = lambda: (
++        gui.ContextorGUI._claim_current_backend_for_desktop(controller)
++    )
++    return controller
++
++
++class _FakeVar:
++    def __init__(self, value=""):
++        self.value = value
++
++    def get(self):
++        return self.value
++
++    def trace_add(self, *_args):
++        return "trace-id"
++
++
++class _FakeRoot:
++    def title(self, *_args):
++        pass
++
++    def minsize(self, *_args):
++        pass
++
++    def geometry(self, *_args):
++        pass
++
++    def protocol(self, *_args):
++        pass
++
++    def after(self, *_args):
++        pass
++
++
++def test_init_creates_separate_live_and_backend_owner_identities(monkeypatch):
 +    monkeypatch.setattr(
-+        mcp_server,
-+        "read_backend_owner_claim",
-+        fake_read_claim,
++        gui,
++        "load_state",
++        lambda: {
++            "gui_pos": "",
++            "theme": "light",
++            "repository": "",
++            "layer": "",
++            "python_file": "",
++        },
 +    )
-+    monkeypatch.setattr(
-+        mcp_server,
-+        "classify_backend_owner_process",
-+        fake_classify,
-+    )
++    monkeypatch.setattr(gui.tk, "StringVar", _FakeVar)
++    monkeypatch.setattr(gui, "apply_theme", lambda *_args: None)
++    monkeypatch.setattr(gui.ContextorGUI, "_build_ui", lambda _self: None)
 +
-+    result = mcp_server._evaluate_persistent_backend_owner(
-+        backend_instance_id="backend-current",
-+        pinned_claim=pinned_claim,
-+    )
++    controller = gui.ContextorGUI(_FakeRoot())
 +
-+    expected_claim = {
-+        "current": current_claim,
-+        "pinned": pinned_claim,
-+    }.get(expected_pinned)
-+    assert result == (expected_claim, expected_revoked)
-+
-+    if case in {
-+        "unarmed_no_claim",
-+        "unarmed_other_instance",
-+        "armed_missing",
-+        "armed_replaced",
-+        "unarmed_read_error",
-+        "armed_read_error",
-+    }:
-+        assert classified_claims == []
-+    else:
-+        assert classified_claims == [
-+            pinned_claim if case.startswith("armed_") else current_claim
-+        ]
++    assert controller.owner_token
++    assert controller.backend_owner_token
++    assert controller.desktop_instance_id
++    assert len(
++        {
++            controller.owner_token,
++            controller.backend_owner_token,
++            controller.desktop_instance_id,
++        }
++    ) == 3
++    assert controller.backend_owner_claim is None
++    assert controller._backend_owner_claim_error is None
++    assert controller._backend_owner_claim_thread is None
 +
 +
-+def test_watchdog_revokes_server_without_cancelling_serve_task(monkeypatch):
-+    class FakeServer:
-+        should_exit = False
-+
-+    async def exercise_watchdog():
-+        server = FakeServer()
-+        serve_finished = asyncio.Event()
-+
-+        async def fake_serve():
-+            await serve_finished.wait()
-+
-+        serve_task = asyncio.create_task(fake_serve())
-+        await asyncio.sleep(0)
-+
-+        monkeypatch.setattr(
-+            mcp_server,
-+            "_evaluate_persistent_backend_owner",
-+            lambda **_kwargs: (None, True),
-+        )
-+
-+        await mcp_server._watch_persistent_backend_owner(
-+            server,
-+            backend_instance_id="backend-watchdog-test",
-+            poll_interval=0.001,
-+        )
-+
-+        assert server.should_exit is True
-+        assert serve_task.cancelled() is False
-+        serve_finished.set()
-+        await serve_task
-+
-+    asyncio.run(exercise_watchdog())
-+
-+
-+def test_watchdog_continues_polling_until_instance_is_revoked(monkeypatch):
-+    class FakeServer:
-+        should_exit = False
-+
-+    server = FakeServer()
++def test_claim_current_backend_uses_exact_desktop_owner_contract(monkeypatch):
++    controller = _controller()
++    claim = SimpleNamespace(backend_instance_id="instance-1")
 +    calls = []
 +
-+    def evaluate(**_kwargs):
-+        calls.append(None)
-+        return None, len(calls) > 1
++    def claim_backend_owner(**kwargs):
++        calls.append(kwargs)
++        return claim
++
++    monkeypatch.setattr(gui, "claim_backend_owner", claim_backend_owner)
++
++    result = gui.ContextorGUI._claim_current_backend_for_desktop(controller)
++
++    assert result is claim
++    assert controller.backend_owner_claim is claim
++    assert controller._backend_owner_claim_error is None
++    assert calls == [
++        {
++            "host_owner_identity": "desktop-instance",
++            "host_kind": "desktop",
++            "owner_token": "backend-owner-token",
++            "probe_timeout": 2.0,
++            "lock_timeout": 5.0,
++        }
++    ]
++
++
++def test_startup_claims_the_ready_backend_instance(monkeypatch):
++    controller = _controller()
++    status = _status("running", True, _record("instance-1"))
++    claim = SimpleNamespace(backend_instance_id="instance-1")
++    start_calls = []
++    claim_calls = []
 +
 +    monkeypatch.setattr(
-+        mcp_server,
-+        "_evaluate_persistent_backend_owner",
-+        evaluate,
++        gui,
++        "start_backend",
++        lambda **kwargs: start_calls.append(kwargs) or status,
++    )
++    monkeypatch.setattr(
++        gui,
++        "claim_backend_owner",
++        lambda **kwargs: claim_calls.append(kwargs) or claim,
 +    )
 +
-+    asyncio.run(
-+        mcp_server._watch_persistent_backend_owner(
-+            server,
-+            backend_instance_id="backend-watchdog-test",
-+            poll_interval=0.001,
-+        )
++    result = gui.ContextorGUI._claim_backend_owner_on_startup(controller)
++
++    assert result is claim
++    assert controller.backend_owner_claim is claim
++    assert start_calls == [{"timeout": 20.0, "probe_timeout": 2.0}]
++    assert claim_calls == [
++        {
++            "host_owner_identity": "desktop-instance",
++            "host_kind": "desktop",
++            "owner_token": "backend-owner-token",
++            "probe_timeout": 2.0,
++            "lock_timeout": 5.0,
++        }
++    ]
++
++
++def test_startup_rejects_claim_for_another_instance(monkeypatch):
++    controller = _controller()
++    status = _status("running", True, _record("active-instance"))
++    claim = SimpleNamespace(backend_instance_id="different-instance")
++    monkeypatch.setattr(gui, "start_backend", lambda **_kwargs: status)
++    monkeypatch.setattr(gui, "claim_backend_owner", lambda **_kwargs: claim)
++
++    with pytest.raises(RuntimeError, match="active backend instance"):
++        gui.ContextorGUI._claim_backend_owner_on_startup(controller)
++
++
++def test_revoked_startup_waits_then_claims_replacement_without_stopping_old_backend(
++    monkeypatch,
++):
++    controller = _controller()
++    initial = _status("running", True, _record("old-instance"))
++    replacement = _status("running", True, _record("new-instance", 200, 2000))
++    stopped = _status("stopped", False, None)
++    replacement_claim = SimpleNamespace(backend_instance_id="new-instance")
++    starts = iter((initial, replacement))
++    start_calls = []
++    claim_calls = []
++    status_calls = []
++    stops = []
++
++    def start_backend(**kwargs):
++        start_calls.append(kwargs)
++        return next(starts)
++
++    def claim_backend_owner(**kwargs):
++        claim_calls.append(kwargs)
++        if len(claim_calls) == 1:
++            raise BackendOwnerInstanceRevoked("old instance is revoked")
++        return replacement_claim
++
++    monkeypatch.setattr(gui, "start_backend", start_backend)
++    monkeypatch.setattr(gui, "claim_backend_owner", claim_backend_owner)
++    monkeypatch.setattr(
++        gui,
++        "get_backend_status",
++        lambda **kwargs: status_calls.append(kwargs) or stopped,
++    )
++    monkeypatch.setattr(gui, "stop_backend", lambda **kwargs: stops.append(kwargs))
++    monkeypatch.setattr(gui.time, "monotonic", lambda: 0.0)
++    monkeypatch.setattr(gui.time, "sleep", lambda _seconds: None)
++
++    result = gui.ContextorGUI._claim_backend_owner_on_startup(controller)
++
++    assert result is replacement_claim
++    assert controller.backend_owner_claim is replacement_claim
++    assert start_calls == [
++        {"timeout": 20.0, "probe_timeout": 2.0},
++        {"timeout": 20.0, "probe_timeout": 2.0},
++    ]
++    assert status_calls == [{"probe_timeout": 0.5}]
++    assert len(claim_calls) == 2
++    assert all(
++        call
++        == {
++            "host_owner_identity": "desktop-instance",
++            "host_kind": "desktop",
++            "owner_token": "backend-owner-token",
++            "probe_timeout": 2.0,
++            "lock_timeout": 5.0,
++        }
++        for call in claim_calls
++    )
++    assert stops == []
++
++
++def test_revoked_startup_timeout_never_stops_backend(monkeypatch):
++    controller = _controller()
++    initial = _status("running", True, _record("old-instance"))
++    active = _status("running", True, _record("old-instance"))
++    clock = [0.0]
++    status_calls = []
++    stops = []
++
++    def get_status(**kwargs):
++        status_calls.append(kwargs)
++        clock[0] += 1.0
++        return active
++
++    monkeypatch.setattr(gui, "start_backend", lambda **_kwargs: initial)
++    monkeypatch.setattr(
++        gui,
++        "claim_backend_owner",
++        lambda **_kwargs: (_ for _ in ()).throw(
++            BackendOwnerInstanceRevoked("old instance is revoked")
++        ),
++    )
++    monkeypatch.setattr(gui, "get_backend_status", get_status)
++    monkeypatch.setattr(gui, "stop_backend", lambda **kwargs: stops.append(kwargs))
++    monkeypatch.setattr(gui.time, "monotonic", lambda: clock[0])
++    monkeypatch.setattr(gui.time, "sleep", lambda seconds: clock.__setitem__(0, clock[0] + seconds + 1.0))
++
++    with pytest.raises(RuntimeError, match="did not self-terminate before timeout"):
++        gui.ContextorGUI._claim_backend_owner_on_startup(controller)
++
++    assert status_calls
++    assert stops == []
++
++
++def test_start_backend_owner_claim_runs_in_nonblocking_daemon_thread():
++    controller = _controller()
++    entered = threading.Event()
++    release = threading.Event()
++
++    def claim_on_startup():
++        entered.set()
++        release.wait(timeout=2.0)
++
++    controller._claim_backend_owner_on_startup = claim_on_startup
++    started = time.monotonic()
++
++    gui.ContextorGUI._start_backend_owner_claim(controller)
++
++    assert time.monotonic() - started < 0.25
++    assert entered.wait(timeout=1.0)
++    thread = controller._backend_owner_claim_thread
++    assert thread.is_alive()
++    assert thread.daemon is True
++    assert thread.name == "contextor-backend-owner-claim"
++    release.set()
++    thread.join(timeout=1.0)
++    assert not thread.is_alive()
++
++
++def test_start_backend_owner_claim_stores_worker_exception():
++    controller = _controller()
++    expected = RuntimeError("claim failed")
++
++    def fail_claim():
++        raise expected
++
++    controller._claim_backend_owner_on_startup = fail_claim
++
++    gui.ContextorGUI._start_backend_owner_claim(controller)
++
++    controller._backend_owner_claim_thread.join(timeout=1.0)
++    assert controller._backend_owner_claim_thread.is_alive() is False
++    assert controller._backend_owner_claim_error is expected
++
++
++def test_post_paint_starts_backend_claim_before_cleanup_and_live(monkeypatch, tmp_path):
++    events = []
++    cleanup_done = threading.Event()
++    controller = SimpleNamespace(
++        _closing=False,
++        _start_backend_owner_claim=lambda: events.append("owner"),
++        _set_live_status=lambda _message: None,
++        _check_stale_excludes=lambda: events.append("stale-excludes"),
++        repo_path_var=SimpleNamespace(get=lambda: str(tmp_path)),
++        _start_live_watcher=lambda _path: events.append("live"),
 +    )
 +
-+    assert len(calls) == 2
-+    assert server.should_exit is True
++    def cleanup():
++        events.append("cache-cleanup")
++        cleanup_done.set()
++        return {"cache": {"errors": []}}
 +
++    monkeypatch.setattr(gui, "prune_startup_caches", cleanup)
 +
-+def test_persistent_http_server_exits_normally_and_releases_ephemeral_port(
-+    monkeypatch,
-+):
-     host = "127.0.0.1"
-     with socket.socket() as probe:
-         probe.bind((host, 0))
-@@ -386,9 +602,15 @@ def test_persistent_http_server_exits_normally_and_releases_ephemeral_port():
-             host=host,
-             port=port,
-         )
-+        monkeypatch.setattr(
-+            mcp_server,
-+            "_evaluate_persistent_backend_owner",
-+            lambda **_kwargs: (None, False),
-+        )
-         serve_task = asyncio.create_task(
-             mcp_server._run_persistent_http_server(
--                server
-+                server,
-+                backend_instance_id="backend-runner-test",
-             )
-         )
- 
-@@ -430,3 +652,76 @@ def test_persistent_http_server_exits_normally_and_releases_ephemeral_port():
-     with socket.socket() as rebound:
-         rebound.bind((host, port))
-         rebound.listen()
++    gui.ContextorGUI._start_post_paint_tasks(controller)
 +
-+
-+def test_persistent_http_server_self_terminates_on_owner_revocation(
-+    monkeypatch,
-+):
-+    host = "127.0.0.1"
-+    with socket.socket() as probe:
-+        probe.bind((host, 0))
-+        port = probe.getsockname()[1]
-+
-+    async def exercise_server():
-+        server = mcp_server._create_persistent_http_server(
-+            host=host,
-+            port=port,
-+        )
-+        evaluations = []
-+
-+        def evaluate(
-+            *,
-+            backend_instance_id,
-+            pinned_claim,
-+        ):
-+            assert backend_instance_id == "backend-watchdog-test"
-+            evaluations.append(server.started)
-+            if len(evaluations) == 1 or not server.started:
-+                return pinned_claim, False
-+            return pinned_claim, True
-+
-+        monkeypatch.setattr(
-+            mcp_server,
-+            "_evaluate_persistent_backend_owner",
-+            evaluate,
-+        )
-+        serve_task = asyncio.create_task(
-+            mcp_server._run_persistent_http_server(
-+                server,
-+                backend_instance_id="backend-watchdog-test",
-+                owner_poll_interval=0.01,
-+            )
-+        )
-+
-+        async def wait_until_started():
-+            loop = asyncio.get_running_loop()
-+            deadline = loop.time() + 10
-+            while not server.started:
-+                if serve_task.done():
-+                    await serve_task
-+                if loop.time() >= deadline:
-+                    raise AssertionError(
-+                        "Uvicorn server did not start before timeout"
-+                    )
-+                await asyncio.sleep(0.01)
-+
-+        await asyncio.wait_for(
-+            wait_until_started(),
-+            timeout=10,
-+        )
-+        done, _pending = await asyncio.wait(
-+            {serve_task},
-+            timeout=10,
-+        )
-+        assert serve_task in done
-+        await serve_task
-+        assert serve_task.cancelled() is False
-+        assert server.should_exit is True
-+        assert evaluations[0] is False
-+        assert any(evaluations[1:])
-+
-+    asyncio.run(exercise_server())
-+
-+    with socket.socket() as rebound:
-+        rebound.bind((host, port))
-+        rebound.listen()
-diff --git a/tests/test_mcp_shared_backend_server_mode.py b/tests/test_mcp_shared_backend_server_mode.py
-index 2640243..395c4b4 100644
---- a/tests/test_mcp_shared_backend_server_mode.py
-+++ b/tests/test_mcp_shared_backend_server_mode.py
-@@ -585,7 +585,11 @@ def test_persistent_http_main_uses_shared_registry_without_root_registration(
-         )
-         return server
- 
--    async def fake_run_server(actual_server):
-+    async def fake_run_server(
-+        actual_server,
-+        *,
-+        backend_instance_id,
-+    ):
-         assert actual_server is server
-         record = read_backend_record()
-         assert record is not None
-@@ -595,10 +599,12 @@ def test_persistent_http_main_uses_shared_registry_without_root_registration(
-         assert record.host == "127.0.0.1"
-         assert record.port == 8765
-         assert Path(record.process_registry) == registry.resolve()
-+        assert backend_instance_id == record.instance_id
-         events.append(
-             (
-                 "http",
-                 actual_server,
-+                backend_instance_id,
-             )
-         )
- 
-@@ -644,6 +650,7 @@ def test_persistent_http_main_uses_shared_registry_without_root_registration(
-     assert len(http_events) == 1
- 
-     assert http_events[0][1] is server
-+    assert http_events[0][2]
- 
-     create_events = [
-         event
-END_ACTUAL_DIFFS
++    assert cleanup_done.wait(timeout=1.0)
++    assert events.index("owner") < events.index("cache-cleanup")
++    assert events.index("owner") < events.index("live")
 
-FILES_CHANGED_NOTE:
-walkthrough.md is the requested report and is not included in FILES_CHANGED or in its own diff. It contains the full raw diffs above.
+FULL_DIFF_END
+
+### tests/test_gui_backend_restart.py
+
+FULL_DIFF_BEGIN
+--- a/tests/test_gui_backend_restart.py
++++ b/tests/test_gui_backend_restart.py
+@@ -30,6 +30,10 @@
+         log_box=object(),
+         cpu_indicator=object(),
+         stop_btn=object(),
++        desktop_instance_id="desktop-instance",
++        backend_owner_token="backend-owner-token",
++        backend_owner_claim=None,
++        _backend_owner_claim_error=RuntimeError("previous claim error"),
+         _busy_buttons=lambda: busy_buttons,
+     )
+     return controller, busy_buttons
+@@ -66,6 +70,7 @@
+     )
+     events = []
+     statuses = iter((before, stopped))
++    new_owner_claim = SimpleNamespace(backend_instance_id="new-instance")
+ 
+     def get_status(*, probe_timeout):
+         events.append(("status", probe_timeout))
+@@ -78,9 +83,21 @@
+         events.append(("start", timeout, probe_timeout))
+         return after
+ 
++    def claim_backend_owner(**kwargs):
++        events.append(("claim", kwargs))
++        return new_owner_claim
++
+     monkeypatch.setattr(gui, "get_backend_status", get_status)
+     monkeypatch.setattr(gui, "stop_backend", stop_backend)
+     monkeypatch.setattr(gui, "start_backend", start_backend)
++    monkeypatch.setattr(gui, "claim_backend_owner", claim_backend_owner)
++    release_calls = []
++    monkeypatch.setattr(
++        gui,
++        "release_backend_owner",
++        lambda *args, **kwargs: release_calls.append((args, kwargs)),
++        raising=False,
++    )
+     captured = _capture_progress(monkeypatch)
+     controller, busy_buttons = _controller()
+     messages = []
+@@ -99,15 +116,28 @@
+ 
+     result = captured["task"]()
+ 
+-    assert result == (before, after)
++    assert result == (before, after, new_owner_claim)
+     assert events == [
+         ("status", 2.0),
+         ("stop", 5.0),
+         ("status", 0.5),
+         ("start", 20.0, 2.0),
++        (
++            "claim",
++            {
++                "host_owner_identity": "desktop-instance",
++                "host_kind": "desktop",
++                "owner_token": "backend-owner-token",
++                "probe_timeout": 2.0,
++                "lock_timeout": 5.0,
++            },
++        ),
+     ]
+ 
+     captured["on_success"](result)
++    assert controller.backend_owner_claim is new_owner_claim
++    assert controller._backend_owner_claim_error is None
++    assert release_calls == []
+     assert len(messages) == 1
+     assert "Old PID: 123" in messages[0][1]
+     assert "New instance: new-instance" in messages[0][1]
+@@ -188,6 +218,7 @@
+     )
+     statuses = iter((before, stopped))
+     events = []
++    new_owner_claim = SimpleNamespace(backend_instance_id="fresh-instance")
+ 
+     def get_status(*, probe_timeout):
+         events.append(("status", probe_timeout))
+@@ -196,14 +227,93 @@
+     monkeypatch.setattr(gui, "get_backend_status", get_status)
+     monkeypatch.setattr(gui, "stop_backend", lambda **_: events.append(("stop",)))
+     monkeypatch.setattr(gui, "start_backend", lambda **_: after)
++    monkeypatch.setattr(
++        gui,
++        "claim_backend_owner",
++        lambda **kwargs: events.append(("claim", kwargs)) or new_owner_claim,
++    )
+     captured = _capture_progress(monkeypatch)
+     controller, _ = _controller()
+ 
+     gui.ContextorGUI._restart_backend(controller)
+     result = captured["task"]()
+ 
+-    assert result == (before, after)
+-    assert events == [("status", 2.0), ("stop",), ("status", 0.5)]
++    assert result == (before, after, new_owner_claim)
++    assert events == [
++        ("status", 2.0),
++        ("stop",),
++        ("status", 0.5),
++        (
++            "claim",
++            {
++                "host_owner_identity": "desktop-instance",
++                "host_kind": "desktop",
++                "owner_token": "backend-owner-token",
++                "probe_timeout": 2.0,
++                "lock_timeout": 5.0,
++            },
++        ),
++    ]
++
++
++def test_restart_owner_claim_mismatch_fails_without_rollback(monkeypatch):
++    before = _status("running", ready=True, record=_record("old", 123, 1000))
++    stopped = _status("stopped")
++    after = _status("running", ready=True, record=_record("new", 456, 2000))
++    statuses = iter((before, stopped))
++    stop_calls = []
++    errors = []
++    monkeypatch.setattr(gui, "get_backend_status", lambda **_: next(statuses))
++    monkeypatch.setattr(gui, "stop_backend", lambda **kwargs: stop_calls.append(kwargs))
++    monkeypatch.setattr(gui, "start_backend", lambda **_: after)
++    monkeypatch.setattr(
++        gui,
++        "claim_backend_owner",
++        lambda **_: SimpleNamespace(backend_instance_id="foreign-instance"),
++    )
++    captured = _capture_progress(monkeypatch)
++    controller, _ = _controller()
++    monkeypatch.setattr(gui.messagebox, "showerror", lambda *args: errors.append(args))
++
++    gui.ContextorGUI._restart_backend(controller)
++
++    with pytest.raises(RuntimeError, match="does not match restarted backend instance") as exc_info:
++        captured["task"]()
++    captured["on_error"](exc_info.value)
++
++    assert len(stop_calls) == 1
++    assert errors and "does not match restarted backend instance" in errors[0][1]
++
++
++def test_restart_owner_claim_failure_reaches_on_error_without_rollback(monkeypatch):
++    before = _status("running", ready=True, record=_record("old", 123, 1000))
++    stopped = _status("stopped")
++    after = _status("running", ready=True, record=_record("new", 456, 2000))
++    statuses = iter((before, stopped))
++    stop_calls = []
++    errors = []
++    claim_error = RuntimeError("owner claim denied")
++    monkeypatch.setattr(gui, "get_backend_status", lambda **_: next(statuses))
++    monkeypatch.setattr(gui, "stop_backend", lambda **kwargs: stop_calls.append(kwargs))
++    monkeypatch.setattr(gui, "start_backend", lambda **_: after)
++
++    def fail_claim(**_kwargs):
++        raise claim_error
++
++    monkeypatch.setattr(gui, "claim_backend_owner", fail_claim)
++    captured = _capture_progress(monkeypatch)
++    controller, _ = _controller()
++    monkeypatch.setattr(gui.messagebox, "showerror", lambda *args: errors.append(args))
++
++    gui.ContextorGUI._restart_backend(controller)
++
++    with pytest.raises(RuntimeError, match="owner claim denied") as exc_info:
++        captured["task"]()
++    captured["on_error"](exc_info.value)
++
++    assert exc_info.value is claim_error
++    assert len(stop_calls) == 1
++    assert errors and "owner claim denied" in errors[0][1]
+ 
+ 
+ def test_restart_backend_button_is_in_shared_busy_buttons():
+
+FULL_DIFF_END
+
+### tests/test_gui_live_startup.py
+
+FULL_DIFF_BEGIN
+--- a/tests/test_gui_live_startup.py
++++ b/tests/test_gui_live_startup.py
+@@ -81,6 +81,7 @@
+         live_clients={},
+         live_client=None,
+         owner_token="test-owner-token",
++        _start_backend_owner_claim=MagicMock(),
+         _live_start_retry_attempt=0,
+         _live_start_retry_after_id=None,
+         _closing=False,
+@@ -218,6 +219,7 @@
+     started = time.monotonic()
+     ContextorGUI._start_post_paint_tasks(controller)
+     assert time.monotonic() - started < 0.25
++    controller._start_backend_owner_claim.assert_called_once_with()
+     assert entered.wait(timeout=2)
+     assert thread_ids[0] != main_id
+     allow.set()
+
+FULL_DIFF_END

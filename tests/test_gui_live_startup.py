@@ -81,6 +81,7 @@ def _make_controller(repo_path, root=None):
         live_clients={},
         live_client=None,
         owner_token="test-owner-token",
+        _start_backend_owner_claim=MagicMock(),
         _live_start_retry_attempt=0,
         _live_start_retry_after_id=None,
         _closing=False,
@@ -218,6 +219,7 @@ def test_post_paint_tasks_do_not_wait_for_cache_cleanup(tmp_path, monkeypatch):
     started = time.monotonic()
     ContextorGUI._start_post_paint_tasks(controller)
     assert time.monotonic() - started < 0.25
+    controller._start_backend_owner_claim.assert_called_once_with()
     assert entered.wait(timeout=2)
     assert thread_ids[0] != main_id
     allow.set()
