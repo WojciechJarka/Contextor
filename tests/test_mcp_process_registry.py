@@ -86,6 +86,16 @@ def test_windows_wait_failure_is_unknown_and_closes_handle(monkeypatch):
     assert kernel32.closed_handles == [1]
 
 
+def test_windows_signaled_process_is_dead_and_closes_handle(monkeypatch):
+    kernel32 = _FakeKernel32(wait_result=0)
+    _patch_windows_probe(monkeypatch, kernel32)
+
+    result = registry._windows_process_identity_probe(1234)
+
+    assert result.state == "dead"
+    assert kernel32.closed_handles == [1]
+
+
 @pytest.mark.parametrize(
     ("image_result", "times_result", "expected_image", "expected_creation_time"),
     [

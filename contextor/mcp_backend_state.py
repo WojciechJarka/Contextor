@@ -12,13 +12,17 @@ import uuid
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Literal, Mapping
 
 from contextor.core.paths import state_dir
-from contextor.mcp_process_registry import process_identity
+from contextor.mcp_process_registry import (
+    probe_process_identity,
+    process_identity,
+)
 
 
 BACKEND_RECORD_SCHEMA_VERSION = 1
+BACKEND_OWNER_CLAIM_SCHEMA_VERSION = 1
 BACKEND_SERVER_ROLE = "persistent-backend"
 BACKEND_TRANSPORT = "streamable-http"
 
@@ -36,6 +40,18 @@ _RECORD_FIELDS = {
     "started_at",
 }
 
+_OWNER_CLAIM_FIELDS = {
+    "schema_version",
+    "backend_instance_id",
+    "host_owner_identity",
+    "host_kind",
+    "host_pid",
+    "host_executable",
+    "host_creation_time",
+    "owner_token",
+    "claimed_at",
+}
+
 
 class BackendStateError(RuntimeError):
     """Base error for persistent MCP backend ownership state."""
@@ -49,6 +65,10 @@ class BackendRecordError(BackendStateError):
     """The durable backend record is malformed or violates its schema."""
 
 
+class BackendOwnerClaimError(BackendStateError):
+    """The durable backend host-owner claim is malformed or unsafe."""
+
+
 def _text(value: Any, field: str) -> str:
     if not isinstance(value, str) or not value.strip() or value != value.strip():
         raise BackendRecordError(
@@ -60,6 +80,22 @@ def _text(value: Any, field: str) -> str:
 def _positive_int(value: Any, field: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
         raise BackendRecordError(
+            f"{field} must be a positive integer"
+        )
+    return value
+
+
+def _owner_text(value: Any, field: str) -> str:
+    if not isinstance(value, str) or not value.strip() or value != value.strip():
+        raise BackendOwnerClaimError(
+            f"{field} must be non-empty without surrounding whitespace"
+        )
+    return value
+
+
+def _owner_positive_int(value: Any, field: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise BackendOwnerClaimError(
             f"{field} must be a positive integer"
         )
     return value
@@ -268,6 +304,177 @@ class PersistentBackendRecord:
         )
 
 
+@dataclass(
+    frozen=True,
+    slots=True,
+)
+class BackendHostOwnerClaim:
+    schema_version: int
+    backend_instance_id: str
+    host_owner_identity: str
+    host_kind: str
+    host_pid: int
+    host_executable: str
+    host_creation_time: int | None
+    owner_token: str
+    claimed_at: float
+
+    def __post_init__(self) -> None:
+        schema_version = _owner_positive_int(
+            self.schema_version,
+            "schema_version",
+        )
+        if schema_version != BACKEND_OWNER_CLAIM_SCHEMA_VERSION:
+            raise BackendOwnerClaimError(
+                "unsupported backend owner claim schema_version"
+            )
+
+        for field in (
+            "backend_instance_id",
+            "host_owner_identity",
+            "host_kind",
+            "host_executable",
+            "owner_token",
+        ):
+            object.__setattr__(
+                self,
+                field,
+                _owner_text(getattr(self, field), field),
+            )
+
+        object.__setattr__(
+            self,
+            "host_pid",
+            _owner_positive_int(self.host_pid, "host_pid"),
+        )
+
+        if self.host_creation_time is not None:
+            object.__setattr__(
+                self,
+                "host_creation_time",
+                _owner_positive_int(
+                    self.host_creation_time,
+                    "host_creation_time",
+                ),
+            )
+
+        if (
+            isinstance(self.claimed_at, bool)
+            or not isinstance(self.claimed_at, (int, float))
+        ):
+            raise BackendOwnerClaimError(
+                "claimed_at must be a timestamp"
+            )
+
+        try:
+            claimed_at = float(self.claimed_at)
+        except (OverflowError, ValueError) as exc:
+            raise BackendOwnerClaimError(
+                "claimed_at must be a finite non-negative timestamp"
+            ) from exc
+        if not math.isfinite(claimed_at) or claimed_at < 0:
+            raise BackendOwnerClaimError(
+                "claimed_at must be a finite non-negative timestamp"
+            )
+        object.__setattr__(self, "claimed_at", claimed_at)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": self.schema_version,
+            "backend_instance_id": self.backend_instance_id,
+            "host_owner_identity": self.host_owner_identity,
+            "host_kind": self.host_kind,
+            "host_pid": self.host_pid,
+            "host_executable": self.host_executable,
+            "host_creation_time": self.host_creation_time,
+            "owner_token": self.owner_token,
+            "claimed_at": self.claimed_at,
+        }
+
+    @classmethod
+    def from_dict(
+        cls,
+        payload: Mapping[str, Any],
+    ) -> "BackendHostOwnerClaim":
+        if (
+            not isinstance(payload, Mapping)
+            or set(payload) != _OWNER_CLAIM_FIELDS
+        ):
+            raise BackendOwnerClaimError(
+                "backend owner claim fields do not match schema"
+            )
+        return cls(**dict(payload))
+
+    @classmethod
+    def for_current_process(
+        cls,
+        *,
+        backend_instance_id: str,
+        host_owner_identity: str,
+        host_kind: str,
+        owner_token: str,
+    ) -> "BackendHostOwnerClaim":
+        probe = probe_process_identity(os.getpid())
+        if probe.state != "alive":
+            raise BackendOwnerClaimError(
+                "current host process liveness is not confirmed"
+            )
+        if probe.creation_time is None:
+            raise BackendOwnerClaimError(
+                "current host process start identity is unavailable"
+            )
+
+        executable = probe.image
+        if not isinstance(executable, str) or not executable.strip():
+            executable = sys.executable
+
+        return cls(
+            schema_version=BACKEND_OWNER_CLAIM_SCHEMA_VERSION,
+            backend_instance_id=backend_instance_id,
+            host_owner_identity=host_owner_identity,
+            host_kind=host_kind,
+            host_pid=os.getpid(),
+            host_executable=executable,
+            host_creation_time=probe.creation_time,
+            owner_token=owner_token,
+            claimed_at=time.time(),
+        )
+
+
+BackendHostOwnerProcessState = Literal[
+    "match",
+    "stale",
+    "unknown",
+]
+
+
+def classify_backend_owner_process(
+    claim: BackendHostOwnerClaim,
+) -> BackendHostOwnerProcessState:
+    probe = probe_process_identity(claim.host_pid)
+    if probe.state == "dead":
+        return "stale"
+    if probe.state != "alive":
+        return "unknown"
+    if (
+        claim.host_creation_time is None
+        or isinstance(probe.creation_time, bool)
+        or not isinstance(probe.creation_time, int)
+        or probe.creation_time <= 0
+    ):
+        return "unknown"
+    if claim.host_creation_time != probe.creation_time:
+        return "stale"
+    if (
+        isinstance(probe.image, str)
+        and probe.image.strip()
+        and os.path.basename(probe.image).casefold()
+        != os.path.basename(claim.host_executable).casefold()
+    ):
+        return "stale"
+    return "match"
+
+
 def backend_state_dir() -> Path:
     return (
         state_dir()
@@ -279,6 +486,13 @@ def backend_record_path() -> Path:
     return (
         backend_state_dir()
         / "backend.json"
+    )
+
+
+def backend_owner_claim_path() -> Path:
+    return (
+        backend_state_dir()
+        / "owner.json"
     )
 
 
@@ -334,6 +548,37 @@ def _write_record(
             pass
 
 
+def _write_backend_owner_claim(
+    claim: BackendHostOwnerClaim,
+) -> None:
+    if not isinstance(claim, BackendHostOwnerClaim):
+        raise BackendOwnerClaimError(
+            "backend owner claim must be a BackendHostOwnerClaim"
+        )
+
+    target = backend_owner_claim_path()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temporary = target.with_name(
+        f".{target.name}.{uuid.uuid4().hex}.tmp"
+    )
+    try:
+        with temporary.open("w", encoding="utf-8", newline="\n") as stream:
+            json.dump(
+                claim.to_dict(),
+                stream,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, target)
+    finally:
+        try:
+            temporary.unlink()
+        except FileNotFoundError:
+            pass
+
+
 def read_backend_record(
 ) -> PersistentBackendRecord | None:
     try:
@@ -371,6 +616,25 @@ def read_backend_record(
     )
 
 
+def read_backend_owner_claim() -> BackendHostOwnerClaim | None:
+    try:
+        payload = json.loads(
+            backend_owner_claim_path().read_text(encoding="utf-8")
+        )
+    except FileNotFoundError:
+        return None
+    except (OSError, TypeError, ValueError) as exc:
+        raise BackendOwnerClaimError(
+            "persistent backend owner claim is malformed"
+        ) from exc
+
+    if not isinstance(payload, Mapping):
+        raise BackendOwnerClaimError(
+            "persistent backend owner claim must be an object"
+        )
+    return BackendHostOwnerClaim.from_dict(payload)
+
+
 def remove_backend_record_if_exact(
     expected: PersistentBackendRecord,
 ) -> bool:
@@ -389,6 +653,19 @@ def remove_backend_record_if_exact(
     except FileNotFoundError:
         return False
 
+    return True
+
+
+def remove_backend_owner_claim_if_exact(
+    expected: BackendHostOwnerClaim,
+) -> bool:
+    current = read_backend_owner_claim()
+    if current != expected:
+        return False
+    try:
+        backend_owner_claim_path().unlink()
+    except FileNotFoundError:
+        return False
     return True
 
 
@@ -688,17 +965,25 @@ class PersistentBackendLease:
 
 
 __all__ = [
+    "BACKEND_OWNER_CLAIM_SCHEMA_VERSION",
     "BACKEND_RECORD_SCHEMA_VERSION",
     "BACKEND_SERVER_ROLE",
     "BACKEND_TRANSPORT",
     "BackendAlreadyRunning",
+    "BackendHostOwnerClaim",
+    "BackendOwnerClaimError",
+    "BackendHostOwnerProcessState",
     "BackendRecordError",
     "BackendStateError",
     "PersistentBackendLease",
     "PersistentBackendRecord",
+    "backend_owner_claim_path",
     "backend_lock_path",
     "backend_record_path",
     "backend_state_dir",
+    "classify_backend_owner_process",
+    "read_backend_owner_claim",
     "read_backend_record",
+    "remove_backend_owner_claim_if_exact",
     "remove_backend_record_if_exact",
 ]

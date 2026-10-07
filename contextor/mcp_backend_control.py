@@ -22,9 +22,14 @@ from contextor.mcp_backend_secret import (
 )
 from contextor.mcp_backend_state import (
     BACKEND_TRANSPORT as _BACKEND_TRANSPORT,
+    BackendHostOwnerClaim,
     PersistentBackendRecord,
+    _write_backend_owner_claim,
     backend_state_dir,
+    classify_backend_owner_process,
     read_backend_record,
+    read_backend_owner_claim,
+    remove_backend_owner_claim_if_exact,
     remove_backend_record_if_exact,
 )
 from contextor.mcp_process_registry import (
@@ -52,6 +57,14 @@ BackendState = Literal[
 
 class BackendControlError(RuntimeError):
     """Persistent backend lifecycle control failed."""
+
+
+class BackendOwnerAlreadyClaimed(BackendControlError):
+    """Another live host owner already claims this backend instance."""
+
+
+class BackendOwnerLivenessUnknown(BackendControlError):
+    """The current backend host-owner process cannot be classified safely."""
 
 
 @dataclass(
@@ -242,6 +255,77 @@ def get_backend_status(
         ),
         record=record,
     )
+
+
+def claim_backend_owner(
+    *,
+    host_owner_identity: str,
+    host_kind: str,
+    owner_token: str,
+    probe_timeout: float = 2.0,
+    lock_timeout: float = 5.0,
+) -> BackendHostOwnerClaim:
+    with _BackendControlLock(
+        backend_control_lock_path(),
+        timeout=lock_timeout,
+    ):
+        status = get_backend_status(
+            probe_timeout=probe_timeout,
+        )
+        if (
+            status.state != "running"
+            or status.ready is not True
+            or status.record is None
+        ):
+            raise BackendControlError(
+                "backend owner claim requires an authenticated-ready backend"
+            )
+
+        current = read_backend_owner_claim()
+        if (
+            current is not None
+            and current.backend_instance_id == status.record.instance_id
+        ):
+            owner_state = classify_backend_owner_process(current)
+            if owner_state == "match":
+                if (
+                    current.host_owner_identity == host_owner_identity
+                    and current.host_kind == host_kind
+                    and current.owner_token == owner_token
+                ):
+                    return current
+                raise BackendOwnerAlreadyClaimed(
+                    "backend instance already has a live host owner"
+                )
+            if owner_state == "unknown":
+                raise BackendOwnerLivenessUnknown(
+                    "current backend host owner liveness is unknown"
+                )
+            if owner_state != "stale":
+                raise BackendOwnerLivenessUnknown(
+                    "current backend host owner state is invalid"
+                )
+
+        candidate = BackendHostOwnerClaim.for_current_process(
+            backend_instance_id=status.record.instance_id,
+            host_owner_identity=host_owner_identity,
+            host_kind=host_kind,
+            owner_token=owner_token,
+        )
+        _write_backend_owner_claim(candidate)
+        return candidate
+
+
+def release_backend_owner(
+    expected: BackendHostOwnerClaim,
+    *,
+    lock_timeout: float = 5.0,
+) -> bool:
+    with _BackendControlLock(
+        backend_control_lock_path(),
+        timeout=lock_timeout,
+    ):
+        return remove_backend_owner_claim_if_exact(expected)
 
 
 _THREAD_LOCKS: dict[
@@ -1004,10 +1088,14 @@ __all__ = [
     "BACKEND_PORT",
     "BACKEND_SERVER_NAME",
     "BackendControlError",
+    "BackendOwnerAlreadyClaimed",
+    "BackendOwnerLivenessUnknown",
     "BackendStatus",
     "backend_control_lock_path",
     "backend_process_registry_dir",
+    "claim_backend_owner",
     "get_backend_status",
+    "release_backend_owner",
     "start_backend",
     "stop_backend",
 ]
