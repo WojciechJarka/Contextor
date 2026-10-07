@@ -1,501 +1,447 @@
-STATUS=IMPLEMENTED_TARGETED_TESTS_PASS_RUNTIME_CERTIFICATION_PENDING
-HEAD_BEFORE=b2c1855d7aa55c1e80d34725f7b9c64f338da557
-HEAD_AFTER=b2c1855d7aa55c1e80d34725f7b9c64f338da557
-WORKTREE_STATE_BEFORE=CLEAN
-WORKTREE_STATE_AFTER=only the four listed production/test files and walkthrough.md modified
+# CPA_GUI_RESTART_BACKEND_BUTTON_IMPLEMENTATION
 
-LIVE_REVISION_BEFORE=1599
-LIVE_REVISION_AFTER=1604
-LIVE_EVENT_CONTINUITY=continuous; resync_required=false
-LIVE_WATCHER_EVENTS=1600 persistent_registry.py UPDATED; 1601 runtime.py UPDATED; 1602 test_persistent_registry.py UPDATED; 1603 test_live_mutation_coordinator.py UPDATED; 1604 test_live_mutation_coordinator.py UNCHANGED
-MCP_UPDATE_FILE_CALLED=NO
+STATUS=IMPLEMENTED_TARGETED_TESTS_PASS
+HEAD=e9ab1c88bc9369efe9c85e46aa2b074e9b6de84d
 
-IMPLEMENTATION_RESULT
-- PersistentIdentityRegistry.create_checkpoint returns a detached deepcopy of every registry family. restore_checkpoint validates the domain and family shapes, then restores the exact snapshot through the existing transaction.
-- The production updater creates the registry and checkpoint before the real incremental engine update, retains both in adapter_holder through a successful updater return, and restores/clears them if updater raises.
-- The production persister restores the checkpoint only when save_snapshot raises before durable commit. SnapshotRevisionConflict keeps its existing CanonicalPersistenceConflict mapping. A rollback failure propagates with current_revision=exact_revision-1.
-- After save_snapshot returns and the exact revision is verified, the checkpoint is discarded before persisted_state and trace publication. A post-save revision mismatch also clears the transient checkpoint without rolling back a committed snapshot.
-- No IPC, snapshot-store, revision, ID-allocation, or schema code was changed.
+## IMPLEMENTATION_RESULT
 
-ROOT_CAUSE
-- Before this change, _apply_delta_and_commit committed PersistentIdentityRegistry before _repository_persister called save_snapshot. A generic save failure left the registry at the new generation while CanonicalLiveServer retained the old canonical state/revision and emitted no resync gate. The earlier temporary-repository probe proved that durable mismatch.
-- The compensating checkpoint spans that existing updater/persister boundary without moving the snapshot commit or changing CanonicalLiveServer.
+- Added `Restart Backend` immediately after `MCP Logs` in `ContextorGUI._setup_header`, using the shared `HeaderTooltipManager` and the specified tooltip.
+- Added `ContextorGUI._restart_backend`; it delegates lifecycle work to `run_with_progress`, independently verifies the stopped state, requires authenticated readiness, and compares `(instance_id, pid, creation_time)` before reporting success.
+- Added the restart button to `_busy_buttons`, so it participates in the existing mutual exclusion for long-running GUI actions.
+- `start_backend`, `stop_backend`, backend ownership/schema, transport/auth, autostart, and `on_closing` were not changed.
 
-FILES_CHANGED
-- contextor/core/reporting_engine/persistent_registry.py
-- contextor/core/live_state/runtime.py
-- tests/test_persistent_registry.py
-- tests/test_live_mutation_coordinator.py
-- walkthrough.md is the report and is excluded from the production/test file list.
+## EVIDENCE
 
-NEW_TESTS
-- tests/test_persistent_registry.py::test_checkpoint_restore_persists_exact_registry_state
-- tests/test_live_mutation_coordinator.py::test_generic_snapshot_failure_restores_committed_registry_and_old_canonical_state
+- DIRECT_EVIDENCE: Before edits, Contextor returned canonical revision 1604, `canonical_state=fresh`, `workspace_sync=verified` for `gui.py`, `mcp_backend_control.py`, and relevant existing test modules.
+- CODE_PATH_PROVED: Contextor identified `_setup_header` as the toolbar owner; `_busy_buttons` callers were `_run_test_suite`, `analyze`, `analyze_layer`, and `analyze_single`. Existing `run_with_progress` starts a daemon worker and schedules terminal UI callbacks through `root.after`.
+- DIRECT_EVIDENCE: After edits, `get_live_events(after_revision=1604)` returned `continuity=continuous`, `resync_required=false`, and `desktop_watcher` `UPDATED` events for `contextor/ui/gui.py` at revision 1605 and `tests/test_gui_backend_restart.py` at revision 1606.
+- DIRECT_EVIDENCE: Contextor fetched `_setup_header`, `_busy_buttons`, and `_restart_backend` at canonical revision 1606 with `canonical_state=fresh`, `workspace_sync=verified`, and complete implementations.
+- TARGETED_TEST_RESULT: 12 passed, 1 warning. The warning is the installed Authlib `authlib.jose` deprecation notice.
+- No full repository pytest suite was run.
 
-TARGETED_TEST_RESULTS
-- Exact seven requested node IDs ran in one focused pytest command; result: 7 passed in 3.43s, exit code 0.
-- New registry checkpoint/restore test: PASS.
-- New real updater + real registry + CanonicalLiveServer generic snapshot failure regression: PASS.
-- tests/test_persistent_registry.py::test_identity_preservation: PASS.
-- tests/test_persistent_registry.py::test_write_transaction_allocates_and_persists_missing_ids: PASS.
-- tests/test_lineage_state_lifecycle.py::test_identity_sync_revalidation_failure_rolls_back_registry_and_canonical_state: PASS.
-- tests/test_live_mutation_coordinator.py::test_persistence_failure_leaves_canonical_state_revision_journal_and_diagnostics_unchanged: PASS.
-- tests/test_live_mutation_coordinator.py::test_candidate_is_invisible_during_slow_persistence: PASS.
-- Full repository pytest suite was not run.
-- git diff --check passed.
+## TARGETED_TESTS
 
-CROSS_STORE_DIVERGENCE_REGRESSION=PASS
-ON_GENERIC_SNAPSHOT_FAILURE: canonical=OLD (revision 1; modules ["seed"]); registry=OLD (added module/artifact inactive); event=NONE (activity_seq 0; no update event).
-- The regression observes identity_sync_required=True and sees the added module/artifact IDs durably active when save_snapshot is entered, before its injected OSError. It then verifies fresh disk registry state equals the baseline after rollback.
-- The new test would fail against the prior implementation because added remained active in the registry after the generic persistence failure.
+Command:
 
-REGISTRY_EXACT_ROLLBACK=PASS
-- Fresh registry after rollback has unchanged seed IDs and no added module or artifact ID.
-- module_registry, artifact_registry, module_recovery, artifact_recovery, module_slots, artifact_slots, and output_references equal the deep-copied baseline exactly.
-- The registry unit test mutates both slot-generation maps and output references after checkpoint creation, then proves exact restoration from a newly constructed registry.
+```powershell
+& .\.venv\Scripts\python.exe -m pytest tests/test_gui_backend_restart.py tests/test_mcp_backend_control.py::test_status_without_record_is_stopped tests/test_mcp_backend_control.py::test_status_stale_record_never_probes_http tests/test_mcp_backend_control.py::test_status_live_owner_requires_authenticated_readiness tests/test_mcp_backend_control.py::test_start_returns_existing_ready_backend_without_spawn tests/test_mcp_backend_control.py::test_stop_without_record_is_idempotent tests/test_mcp_backend_control.py::test_windows_stop_uses_exact_backend_record_for_termination
+```
 
-FRESH_HYDRATION_RESULT=PASS
-- A separate Python process hydrated the persisted snapshot and a fresh PersistentIdentityRegistry from the temporary repository.
-- Snapshot source and canonical modules=["seed"]; fresh registry lookup for added module ID and added artifact ID both returned null.
-- This proves OLD canonical + OLD registry for the tested failure boundary.
+New focused tests:
 
-CONTEXTOR_POST_EDIT_SOURCE_VERIFICATION
-- Contextor LIVE revision 1604 reported canonical_state=fresh for both production modules.
-- get_symbol_implementation returned create_checkpoint, restore_checkpoint, _clear_registry_checkpoint, _restore_registry_checkpoint, _repository_updater, and _repository_persister from current source with workspace_sync=verified at revision 1604.
-- get_module_blast_radius reported 25 registry artifacts (23 before) and 41 runtime artifacts (39 before). get_file_edit_context reported no warnings and retained direct/transitive consumer counts of 58/190 and 15/68 respectively.
-- These results verify current indexed source and architecture. They do not certify that the already running LIVE/MCP backend loaded the edited runtime code.
+- `test_restart_runs_lifecycle_in_progress_task_and_confirms_new_identity`
+- `test_restart_rejects_reused_complete_backend_identity`
+- `test_restart_requires_independently_confirmed_stopped_state`
+- `test_restart_requires_new_backend_to_be_authenticated_and_ready`
+- `test_restart_starts_backend_when_initial_status_has_no_record`
+- `test_restart_backend_button_is_in_shared_busy_buttons`
 
-MCP_SERVER_RESTART_REQUIRED=YES
-DESKTOP_RUNTIME_RESTART_REQUIRED=YES
+## FILES_CHANGED
 
-UNKNOWN
-- Fresh-runtime behavior after the user manually restarts Contextor remains uncertified; the running backend predates the runtime.py edit.
-- No full-suite certification was requested or run.
-- No restart was performed.
+- `contextor/ui/gui.py`
+- `tests/test_gui_backend_restart.py`
 
-FULL_DIFFS_BEGIN
-diff --git a/contextor/core/live_state/runtime.py b/contextor/core/live_state/runtime.py
-index 506d3ce..a617e30 100644
---- a/contextor/core/live_state/runtime.py
-+++ b/contextor/core/live_state/runtime.py
-@@ -1075,6 +1075,30 @@ def _repository_canonical_query_handler(
-     )
- 
- 
-+def _clear_registry_checkpoint(
-+    holder: dict[str, object] | None,
-+) -> None:
-+    if holder is None:
-+        return
-+    holder.pop("registry", None)
-+    holder.pop("registry_checkpoint", None)
-+
-+
-+def _restore_registry_checkpoint(
-+    holder: dict[str, object] | None,
-+) -> None:
-+    if holder is None:
-+        return
-+
-+    registry = holder.get("registry")
-+    checkpoint = holder.get("registry_checkpoint")
-+
-+    if registry is None or checkpoint is None:
-+        return
-+
-+    registry.restore_checkpoint(checkpoint)
-+
-+
- def _repository_updater(root: Path, holder: dict[str, object] | None = None):
-     identity = require_repository_identity(root)
-     cache = repo_cache_dir(root)
-@@ -1088,15 +1112,29 @@ def _repository_updater(root: Path, holder: dict[str, object] | None = None):
-         from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
- 
-         manager = FileStateManager(str(cache))
-+        registry = PersistentIdentityRegistry(str(root))
-+        registry_checkpoint = registry.create_checkpoint()
-+
-+        if holder is not None:
-+            holder["registry"] = registry
-+            holder["registry_checkpoint"] = registry_checkpoint
-+
-         engine = IncrementalAnalysisEngine(
-             state,
--            PersistentIdentityRegistry(str(root)),
-+            registry,
-             manager,
-             str(root),
+The report file `walkthrough.md` is the required task report and is excluded from implementation-file diffs.
+
+## FULL_DIFFS
+
+### `contextor/ui/gui.py`
+
+```diff
+diff --git a/contextor/ui/gui.py b/contextor/ui/gui.py
+index e551d69..3533ef2 100644
+--- a/contextor/ui/gui.py
++++ b/contextor/ui/gui.py
+@@ -38,6 +38,11 @@ from contextor.core.repository_identity import (
+ )
+ from contextor.core.paths import prune_startup_caches
+ from contextor.repo_generator import run_repo_generator
++from contextor.mcp_backend_control import (
++    get_backend_status,
++    start_backend,
++    stop_backend,
++)
+ from contextor.ui import theme
+ from contextor.ui.exclude_check import check_stale_excludes
+ from contextor.ui.exclude_gui import run_exclude_window
+@@ -283,6 +288,14 @@ class ContextorGUI:
          )
-         _safe_trace_event("LIVE", "ENGINE_READY", op=op, repo=str(root), elapsed_ms=(time.monotonic() - started) * 1000.0)
-         incremental_started = time.monotonic()
--        delta = engine.update_file(file_path)
-+        try:
-+            delta = engine.update_file(file_path)
-+        except Exception:
-+            try:
-+                registry.restore_checkpoint(registry_checkpoint)
-+            finally:
-+                _clear_registry_checkpoint(holder)
-+            raise
-         _safe_trace_event("LIVE", "INCREMENTAL_END", op=op, repo=str(root), elapsed_ms=(time.monotonic() - incremental_started) * 1000.0, status=getattr(delta, "status", None))
-         if holder is not None:
-             holder["manager"] = manager
-@@ -1159,35 +1197,18 @@ def _repository_persister(
-                 ),
-                 previous_state=persisted_state,
-             )
--
--            if meta.revision != exact_revision:
--                raise ValueError(
--                    "Exact LIVE persistence revision mismatch."
--                )
--
--            persisted_state = state
--
--            _safe_trace_event(
--                "LIVE",
--                "SNAPSHOT_SAVE_END",
--                op=op,
--                repo=str(root),
--                elapsed_ms=(
--                    time.monotonic()
--                    - snapshot_started
-+        except Exception as exc:
-+            try:
-+                _restore_registry_checkpoint(holder)
-+            except Exception as rollback_exc:
-+                failure = RuntimeError(
-+                    "Canonical snapshot persistence failed and registry rollback failed."
-                 )
--                * 1000.0,
--            )
--
--            _safe_trace_event(
--                "LIVE",
--                "FILE_STATE_SAVE_END",
--                op=op,
--                repo=str(root),
--                elapsed_ms=0.0,
--            )
-+                failure.current_revision = exact_revision - 1
-+                raise failure from rollback_exc
-+            finally:
-+                _clear_registry_checkpoint(holder)
+         self.mcp_logs_btn.pack(side="left", padx=(PAD_SM, 0))
  
--        except Exception as exc:
-             from contextor.core.live_state.store import SnapshotRevisionConflict
- 
-             if isinstance(exc, SnapshotRevisionConflict):
-@@ -1198,6 +1219,36 @@ def _repository_persister(
- 
-             raise
- 
-+        try:
-+            if meta.revision != exact_revision:
-+                raise ValueError(
-+                    "Exact LIVE persistence revision mismatch."
-+                )
-+        finally:
-+            _clear_registry_checkpoint(holder)
-+
-+        persisted_state = state
-+
-+        _safe_trace_event(
-+            "LIVE",
-+            "SNAPSHOT_SAVE_END",
-+            op=op,
-+            repo=str(root),
-+            elapsed_ms=(
-+                time.monotonic()
-+                - snapshot_started
-+            )
-+            * 1000.0,
++        self.restart_backend_btn = ttk.Button(
++            title_frame,
++            text="Restart Backend",
++            style="Ghost.TButton",
++            command=self._restart_backend,
 +        )
++        self.restart_backend_btn.pack(side="left", padx=(PAD_SM, 0))
 +
-+        _safe_trace_event(
-+            "LIVE",
-+            "FILE_STATE_SAVE_END",
-+            op=op,
-+            repo=str(root),
-+            elapsed_ms=0.0,
+         sub_label = ttk.Label(
+             header, text="Static architecture analysis Â· Read-only mode", style="Sub.TLabel"
+         )
+@@ -302,6 +315,10 @@ class ContextorGUI:
+             self.mcp_logs_btn,
+             "Open the folder containing LIVE and MCP operation logs.",
+         )
++        self.tooltip.bind_tooltip(
++            self.restart_backend_btn,
++            "Stop the current persistent MCP backend and start a fresh instance using the current code on disk.",
 +        )
-+
-         return meta
+         self.tooltip.bind_tooltip(
+             self.theme_btn,
+             "Switch between light and dark appearance.",
+@@ -660,8 +677,118 @@ class ContextorGUI:
+             self.analyze_layer_btn,
+             self.analyze_single_btn,
+             self.test_suite_btn,
++            self.restart_backend_btn,
+         ]
  
-     return persist
-diff --git a/contextor/core/reporting_engine/persistent_registry.py b/contextor/core/reporting_engine/persistent_registry.py
-index d4e90d9..c7644a5 100644
---- a/contextor/core/reporting_engine/persistent_registry.py
-+++ b/contextor/core/reporting_engine/persistent_registry.py
-@@ -3,6 +3,7 @@ import json
- import sys
- import uuid
- import datetime
-+from copy import deepcopy
- from contextlib import contextmanager
- from pathlib import Path
- from typing import Dict, Any, List, Set, Optional
-@@ -261,6 +262,56 @@ class PersistentIdentityRegistry:
-             self._in_transaction = False
-             self._unlock()
- 
-+    def create_checkpoint(self) -> Dict[str, Any]:
++    def _restart_backend(self):
 +        """
-+        Capture the exact currently loaded persistent registry state for
-+        compensating rollback by the canonical mutation coordinator.
++        Restart the persistent MCP backend without blocking the Tk main loop.
++        """
 +
-+        The checkpoint is a detached deep copy and includes active mappings,
-+        recovery maps, slot generations, and output references.
-+        """
-+        if self._in_transaction:
-+            raise RuntimeError(
-+                "Cannot create registry checkpoint inside an active transaction."
++        operation_title = "Restart Backend"
++
++        def _identity(status):
++            record = status.record
++            if record is None:
++                return None
++
++            return (
++                record.instance_id,
++                record.pid,
++                record.creation_time,
 +            )
 +
-+        return deepcopy(self._state)
++        def task(log=None, progress_callback=None):
++            before = get_backend_status(
++                probe_timeout=2.0,
++            )
++            before_identity = _identity(before)
 +
-+    def restore_checkpoint(
-+        self,
-+        checkpoint: Dict[str, Any],
-+    ) -> None:
-+        """
-+        Restore an exact previously captured registry state transactionally.
-+        """
-+        if self._in_transaction:
-+            raise RuntimeError(
-+                "Cannot restore registry checkpoint inside an active transaction."
++            stop_backend(
++                timeout=5.0,
 +            )
 +
-+        if not isinstance(checkpoint, dict):
-+            raise TypeError("Registry checkpoint must be a dictionary.")
-+
-+        expected_keys = set(self.files)
-+        if set(checkpoint) != expected_keys:
-+            raise ValueError(
-+                "Registry checkpoint does not match the persistent registry domain."
++            stopped = get_backend_status(
++                probe_timeout=0.5,
 +            )
 +
-+        restored = deepcopy(checkpoint)
-+
-+        for key in expected_keys:
-+            if not isinstance(restored.get(key), dict):
-+                raise ValueError(
-+                    f"Registry checkpoint family '{key}' must be a dictionary."
++            if (
++                stopped.state != "stopped"
++                or stopped.ready
++                or stopped.record is not None
++            ):
++                raise RuntimeError(
++                    "persistent MCP backend did not reach a confirmed stopped state"
 +                )
 +
-+        if self._state == restored:
-+            return
++            after = start_backend(
++                timeout=20.0,
++                probe_timeout=2.0,
++            )
 +
-+        with self.transaction():
-+            self._state = restored
++            if not after.ready or after.record is None:
++                raise RuntimeError(
++                    "new persistent MCP backend did not become authenticated and ready"
++                )
 +
-     @contextmanager
-     def read_transaction(self):
-         """Load one recovered registry generation without committing it."""
-diff --git a/tests/test_live_mutation_coordinator.py b/tests/test_live_mutation_coordinator.py
-index f2829e0..9f28934 100644
---- a/tests/test_live_mutation_coordinator.py
-+++ b/tests/test_live_mutation_coordinator.py
-@@ -564,6 +564,147 @@ def test_persistence_failure_leaves_canonical_state_revision_journal_and_diagnos
-         )
- 
- 
-+def test_generic_snapshot_failure_restores_committed_registry_and_old_canonical_state(
-+    tmp_path, monkeypatch
++            after_identity = _identity(after)
++
++            if (
++                before_identity is not None
++                and after_identity == before_identity
++            ):
++                raise RuntimeError(
++                    "backend restart returned the previous backend process identity"
++                )
++
++            return before, after
++
++        def on_success(result):
++            before, after = result
++
++            old_pid = (
++                "none"
++                if before.record is None
++                else str(before.record.pid)
++            )
++            old_instance = (
++                "none"
++                if before.record is None
++                else before.record.instance_id
++            )
++
++            messagebox.showinfo(
++                "MCP backend restarted",
++                (
++                    "Persistent MCP backend restarted successfully.\n\n"
++                    f"Old PID: {old_pid}\n"
++                    f"Old instance: {old_instance}\n"
++                    f"New PID: {after.record.pid}\n"
++                    f"New instance: {after.record.instance_id}\n"
++                    f"Endpoint: {after.endpoint}"
++                ),
++            )
++
++        def on_error(exc):
++            messagebox.showerror(
++                operation_title,
++                f"Backend restart failed.\n\n{exc}",
++            )
++
++        self.progress_bar.is_cancelled = False
++
++        run_with_progress(
++            self.root,
++            self.progress_bar,
++            task,
++            on_success=on_success,
++            on_error=on_error,
++            buttons=self._busy_buttons(),
++            log_box=self.log_box,
++            cpu_indicator=self.cpu_indicator,
++            stop_button=self.stop_btn,
++        )
++
+     def _run_test_suite(self):
+         """
+         Runs the selected Contextor test suite and reports the outcome.
+```
+
+### `tests/test_gui_backend_restart.py`
+
+```diff
+diff --git a/tests/test_gui_backend_restart.py b/tests/test_gui_backend_restart.py
+new file mode 100644
+index 0000000..b5243b1
+--- /dev/null
++++ b/tests/test_gui_backend_restart.py
+@@ -0,0 +1,224 @@
++from types import SimpleNamespace
++
++import pytest
++
++from contextor.ui import gui
++
++
++def _record(instance_id, pid, creation_time):
++    return SimpleNamespace(
++        instance_id=instance_id,
++        pid=pid,
++        creation_time=creation_time,
++    )
++
++
++def _status(state, ready=False, record=None):
++    return SimpleNamespace(
++        state=state,
++        ready=ready,
++        record=record,
++        endpoint="http://127.0.0.1:8765/mcp",
++    )
++
++
++def _controller():
++    busy_buttons = [object(), object(), object()]
++    controller = SimpleNamespace(
++        root=object(),
++        progress_bar=SimpleNamespace(is_cancelled=True),
++        log_box=object(),
++        cpu_indicator=object(),
++        stop_btn=object(),
++        _busy_buttons=lambda: busy_buttons,
++    )
++    return controller, busy_buttons
++
++
++def _capture_progress(monkeypatch):
++    captured = {}
++
++    def capture(root, progress_bar, task, **kwargs):
++        captured.update(
++            root=root,
++            progress_bar=progress_bar,
++            task=task,
++            **kwargs,
++        )
++
++    monkeypatch.setattr(gui, "run_with_progress", capture)
++    return captured
++
++
++def test_restart_runs_lifecycle_in_progress_task_and_confirms_new_identity(
++    monkeypatch,
 +):
-+    import copy
-+    import json
-+    import os
-+    import subprocess
-+    import sys
-+    from pathlib import Path
++    before = _status(
++        "ready",
++        ready=True,
++        record=_record("old-instance", 123, 1000),
++    )
++    stopped = _status("stopped")
++    after = _status(
++        "ready",
++        ready=True,
++        record=_record("new-instance", 123, 2000),
++    )
++    events = []
++    statuses = iter((before, stopped))
 +
-+    import contextor.core.analysis.incremental.engine as incremental_module
-+    import contextor.core.live_state.runtime as runtime_module
-+    from contextor.core.analysis.state_manager import RepositoryAnalysisState
-+    from contextor.core.live_state.runtime import _repository_persister, _repository_updater
-+    from contextor.core.live_state.store import read_metadata
-+    from contextor.core.paths import repo_cache_dir
-+    from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
++    def get_status(*, probe_timeout):
++        events.append(("status", probe_timeout))
++        return next(statuses)
 +
-+    repo = tmp_path / "repo"
-+    repo.mkdir()
-+    monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(tmp_path / "cache"))
-+    monkeypatch.setenv("CONTEXTOR_REGISTRY_DIR", str(tmp_path / "registry"))
-+    PersistentIdentityRegistry(str(repo))
++    def stop_backend(*, timeout):
++        events.append(("stop", timeout))
 +
-+    seed_path = repo / "seed.py"
-+    seed_path.write_text("SEED_VALUE = 1\n", encoding="utf-8")
-+    state = RepositoryAnalysisState()
-+    holder = {}
-+    updater = _repository_updater(repo, holder)
-+    assert updater(state, str(seed_path)).status == "UPDATED"
-+    state.revision = 1
-+    assert _repository_persister(repo, holder)(state, 1).revision == 1
-+    assert "registry" not in holder
-+    assert "registry_checkpoint" not in holder
++    def start_backend(*, timeout, probe_timeout):
++        events.append(("start", timeout, probe_timeout))
++        return after
 +
-+    baseline = copy.deepcopy(PersistentIdentityRegistry(str(repo))._state)
-+    added_path = repo / "added.py"
-+    added_path.write_text("ADDED_VALUE = 2\n", encoding="utf-8")
++    monkeypatch.setattr(gui, "get_backend_status", get_status)
++    monkeypatch.setattr(gui, "stop_backend", stop_backend)
++    monkeypatch.setattr(gui, "start_backend", start_backend)
++    captured = _capture_progress(monkeypatch)
++    controller, busy_buttons = _controller()
++    messages = []
++    monkeypatch.setattr(gui.messagebox, "showinfo", lambda *args: messages.append(args))
 +
-+    plan_results = []
++    gui.ContextorGUI._restart_backend(controller)
 +
-+    def capture_incremental_phase(name, **fields):
-+        if name == "INCREMENTAL_EXECUTE_PLAN_END":
-+            plan_results.append(fields.get("result"))
++    assert events == []
++    assert controller.progress_bar.is_cancelled is False
++    assert captured["root"] is controller.root
++    assert captured["progress_bar"] is controller.progress_bar
++    assert captured["buttons"] is busy_buttons
++    assert captured["log_box"] is controller.log_box
++    assert captured["cpu_indicator"] is controller.cpu_indicator
++    assert captured["stop_button"] is controller.stop_btn
 +
-+    monkeypatch.setattr(
-+        incremental_module, "_trace_incremental_phase", capture_incremental_phase
++    result = captured["task"]()
++
++    assert result == (before, after)
++    assert events == [
++        ("status", 2.0),
++        ("stop", 5.0),
++        ("status", 0.5),
++        ("start", 20.0, 2.0),
++    ]
++
++    captured["on_success"](result)
++    assert len(messages) == 1
++    assert "Old PID: 123" in messages[0][1]
++    assert "New instance: new-instance" in messages[0][1]
++    assert "http://127.0.0.1:8765/mcp" in messages[0][1]
++
++
++def test_restart_rejects_reused_complete_backend_identity(monkeypatch):
++    old_record = _record("same-instance", 123, 1000)
++    before = _status("ready", ready=True, record=old_record)
++    after = _status(
++        "ready",
++        ready=True,
++        record=_record("same-instance", 123, 1000),
++    )
++    statuses = iter((before, _status("stopped")))
++    monkeypatch.setattr(gui, "get_backend_status", lambda **_: next(statuses))
++    monkeypatch.setattr(gui, "stop_backend", lambda **_: None)
++    monkeypatch.setattr(gui, "start_backend", lambda **_: after)
++    captured = _capture_progress(monkeypatch)
++    controller, _ = _controller()
++
++    gui.ContextorGUI._restart_backend(controller)
++
++    with pytest.raises(RuntimeError, match="previous backend process identity"):
++        captured["task"]()
++
++
++def test_restart_requires_independently_confirmed_stopped_state(monkeypatch):
++    before = _status("ready", ready=True, record=_record("old", 123, 1000))
++    not_stopped = _status("unready", record=None)
++    statuses = iter((before, not_stopped))
++    events = []
++    monkeypatch.setattr(gui, "get_backend_status", lambda **_: next(statuses))
++    monkeypatch.setattr(gui, "stop_backend", lambda **_: events.append("stop"))
++    monkeypatch.setattr(gui, "start_backend", lambda **_: events.append("start"))
++    captured = _capture_progress(monkeypatch)
++    controller, _ = _controller()
++
++    gui.ContextorGUI._restart_backend(controller)
++
++    with pytest.raises(RuntimeError, match="confirmed stopped state"):
++        captured["task"]()
++    assert events == ["stop"]
++
++
++def test_restart_requires_new_backend_to_be_authenticated_and_ready(monkeypatch):
++    before = _status("ready", ready=True, record=_record("old", 123, 1000))
++    stopped = _status("stopped")
++    unready = _status(
++        "unready",
++        ready=False,
++        record=_record("new", 456, 2000),
++    )
++    statuses = iter((before, stopped))
++    monkeypatch.setattr(gui, "get_backend_status", lambda **_: next(statuses))
++    monkeypatch.setattr(gui, "stop_backend", lambda **_: None)
++    monkeypatch.setattr(gui, "start_backend", lambda **_: unready)
++    captured = _capture_progress(monkeypatch)
++    controller, _ = _controller()
++    errors = []
++    monkeypatch.setattr(gui.messagebox, "showerror", lambda *args: errors.append(args))
++
++    gui.ContextorGUI._restart_backend(controller)
++
++    with pytest.raises(RuntimeError, match="authenticated and ready") as exc_info:
++        captured["task"]()
++    captured["on_error"](exc_info.value)
++    assert errors and "authenticated and ready" in errors[0][1]
++
++
++def test_restart_starts_backend_when_initial_status_has_no_record(monkeypatch):
++    before = _status("stopped", record=None)
++    stopped = _status("stopped", record=None)
++    after = _status(
++        "ready",
++        ready=True,
++        record=_record("fresh-instance", 456, 2000),
++    )
++    statuses = iter((before, stopped))
++    events = []
++
++    def get_status(*, probe_timeout):
++        events.append(("status", probe_timeout))
++        return next(statuses)
++
++    monkeypatch.setattr(gui, "get_backend_status", get_status)
++    monkeypatch.setattr(gui, "stop_backend", lambda **_: events.append(("stop",)))
++    monkeypatch.setattr(gui, "start_backend", lambda **_: after)
++    captured = _capture_progress(monkeypatch)
++    controller, _ = _controller()
++
++    gui.ContextorGUI._restart_backend(controller)
++    result = captured["task"]()
++
++    assert result == (before, after)
++    assert events == [("status", 2.0), ("stop",), ("status", 0.5)]
++
++
++def test_restart_backend_button_is_in_shared_busy_buttons():
++    controller = SimpleNamespace(
++        analyze_btn=object(),
++        analyze_layer_btn=object(),
++        analyze_single_btn=object(),
++        test_suite_btn=object(),
++        restart_backend_btn=object(),
 +    )
 +
-+    observed_commit = {}
-+
-+    def fail_snapshot_save(*_args, **kwargs):
-+        assert kwargs["exact_revision"] == 2
-+        committed = PersistentIdentityRegistry(str(repo))
-+        observed_commit["module_id"] = committed.get_module_id("added")
-+        observed_commit["artifact_id"] = committed.get_artifact_id(
-+            "added::ADDED_VALUE"
-+        )
-+        assert observed_commit["module_id"] is not None
-+        assert observed_commit["artifact_id"] is not None
-+        assert read_metadata(repo_cache_dir(repo)).revision == 1
-+        raise OSError("controlled cross-store atomicity regression failure")
-+
-+    monkeypatch.setattr(runtime_module, "save_snapshot", fail_snapshot_save)
-+    server = CanonicalLiveServer(
-+        state,
-+        revision=1,
-+        updater=updater,
-+        persister=_repository_persister(repo, holder, previous_state=state),
-+    )
-+    with _running_server(server) as client:
-+        accepted = client.submit_update_file(
-+            str(added_path), origin="test", idempotency_key="cross-store-rollback"
-+        )
-+        terminal = _wait_for_terminal(client, accepted["job_id"])
-+        assert terminal["state"] == "failed"
-+        assert terminal["response"] == {
-+            "status": "error",
-+            "error": "canonical_persistence_failed",
-+            "revision": 1,
-+            "expected_revision": 2,
-+        }
-+        assert server._state is state
-+        assert server._revision == 1
-+        assert sorted(server._state.modules) == ["seed"]
-+        assert server._activity_seq == 0
-+        assert client.get_events(after_revision=1)["events"] == []
-+
-+    assert any("identity_sync_required=True" in (result or "") for result in plan_results)
-+    assert observed_commit["module_id"] is not None
-+    assert observed_commit["artifact_id"] is not None
-+    assert read_metadata(repo_cache_dir(repo)).revision == 1
-+    assert "registry" not in holder
-+    assert "registry_checkpoint" not in holder
-+
-+    reloaded = PersistentIdentityRegistry(str(repo))
-+    assert reloaded.get_module_id("seed") == baseline["module_registry"]["path_to_id"]["seed"]
-+    assert reloaded.get_artifact_id("seed::SEED_VALUE") == baseline["artifact_registry"]["path_to_id"]["seed::SEED_VALUE"]
-+    assert reloaded.get_module_id("added") is None
-+    assert reloaded.get_artifact_id("added::ADDED_VALUE") is None
-+    assert reloaded._state["module_registry"] == baseline["module_registry"]
-+    assert reloaded._state["artifact_registry"] == baseline["artifact_registry"]
-+    assert reloaded._state["module_recovery"] == baseline["module_recovery"]
-+    assert reloaded._state["artifact_recovery"] == baseline["artifact_recovery"]
-+    assert reloaded._state["module_slots"] == baseline["module_slots"]
-+    assert reloaded._state["artifact_slots"] == baseline["artifact_slots"]
-+    assert reloaded._state["output_references"] == baseline["output_references"]
-+
-+    child_code = """
-+import json
-+import sys
-+from contextor.core.live_state.hydration import hydrate_repository_engine
-+from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
-+root = sys.argv[1]
-+hydrated = hydrate_repository_engine(root)
-+registry = PersistentIdentityRegistry(root)
-+print(json.dumps({
-+    "source": hydrated.source if hydrated else None,
-+    "modules": sorted(hydrated.engine.state.modules) if hydrated else None,
-+    "added_module_id": registry.get_module_id("added"),
-+    "added_artifact_id": registry.get_artifact_id("added::ADDED_VALUE"),
-+}))
-+"""
-+    child = subprocess.run(
-+        [sys.executable, "-c", child_code, str(repo)],
-+        cwd=str(Path(__file__).resolve().parents[1]),
-+        env=os.environ.copy(),
-+        text=True,
-+        capture_output=True,
-+        check=True,
-+        timeout=10,
-+    )
-+    hydrated = json.loads(child.stdout.strip().splitlines()[-1])
-+    assert hydrated == {
-+        "source": "snapshot",
-+        "modules": ["seed"],
-+        "added_module_id": None,
-+        "added_artifact_id": None,
-+    }
-+
-+
- def test_worker_survives_failed_job_and_executes_next_job():
-     first_started = threading.Event()
- 
-diff --git a/tests/test_persistent_registry.py b/tests/test_persistent_registry.py
-index 394d01c..7d603e2 100644
---- a/tests/test_persistent_registry.py
-+++ b/tests/test_persistent_registry.py
-@@ -14,6 +14,48 @@ def temp_repo(tmp_path):
-     yield str(repo_dir)
-     shutil.rmtree(repo_dir, ignore_errors=True)
- 
-+def test_checkpoint_restore_persists_exact_registry_state(temp_repo):
-+    registry = PersistentIdentityRegistry(temp_repo)
-+    with registry.transaction():
-+        registry.sync_with_workspace({"seed"}, {"seed::SEED_VALUE"})
-+        registry.register_report_references(
-+            "baseline.json", [registry.get_module_id("seed")]
-+        )
-+
-+    checkpoint = registry.create_checkpoint()
-+    seed_id = registry.get_module_id("seed")
-+    seed_artifact_id = registry.get_artifact_id("seed::SEED_VALUE")
-+
-+    with registry.transaction():
-+        registry.sync_with_workspace(
-+            {"seed", "added"},
-+            {"seed::SEED_VALUE", "added::ADDED_VALUE"},
-+        )
-+        registry.register_report_references(
-+            "added.json", [registry.get_module_id("added")]
-+        )
-+
-+    assert registry.get_module_id("added") is not None
-+    assert registry.get_artifact_id("added::ADDED_VALUE") is not None
-+    assert registry._state["module_slots"] != checkpoint["module_slots"]
-+    assert registry._state["artifact_slots"] != checkpoint["artifact_slots"]
-+    assert registry._state["output_references"] != checkpoint["output_references"]
-+
-+    registry.restore_checkpoint(checkpoint)
-+    reloaded = PersistentIdentityRegistry(temp_repo)
-+
-+    assert reloaded.get_module_id("seed") == seed_id
-+    assert reloaded.get_artifact_id("seed::SEED_VALUE") == seed_artifact_id
-+    assert reloaded.get_module_id("added") is None
-+    assert reloaded.get_artifact_id("added::ADDED_VALUE") is None
-+    assert reloaded._state["module_registry"] == checkpoint["module_registry"]
-+    assert reloaded._state["artifact_registry"] == checkpoint["artifact_registry"]
-+    assert reloaded._state["module_recovery"] == checkpoint["module_recovery"]
-+    assert reloaded._state["artifact_recovery"] == checkpoint["artifact_recovery"]
-+    assert reloaded._state["module_slots"] == checkpoint["module_slots"]
-+    assert reloaded._state["artifact_slots"] == checkpoint["artifact_slots"]
-+    assert reloaded._state["output_references"] == checkpoint["output_references"]
-+
- def test_identity_preservation(temp_repo):
-     # nowy plik dostaje ID
-     registry = PersistentIdentityRegistry(temp_repo)
-FULL_DIFFS_END
++    assert gui.ContextorGUI._busy_buttons(controller) == [
++        controller.analyze_btn,
++        controller.analyze_layer_btn,
++        controller.analyze_single_btn,
++        controller.test_suite_btn,
++        controller.restart_backend_btn,
++    ]
+```

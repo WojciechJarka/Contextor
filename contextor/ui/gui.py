@@ -38,6 +38,11 @@ from contextor.core.repository_identity import (
 )
 from contextor.core.paths import prune_startup_caches
 from contextor.repo_generator import run_repo_generator
+from contextor.mcp_backend_control import (
+    get_backend_status,
+    start_backend,
+    stop_backend,
+)
 from contextor.ui import theme
 from contextor.ui.exclude_check import check_stale_excludes
 from contextor.ui.exclude_gui import run_exclude_window
@@ -283,6 +288,14 @@ class ContextorGUI:
         )
         self.mcp_logs_btn.pack(side="left", padx=(PAD_SM, 0))
 
+        self.restart_backend_btn = ttk.Button(
+            title_frame,
+            text="Restart Backend",
+            style="Ghost.TButton",
+            command=self._restart_backend,
+        )
+        self.restart_backend_btn.pack(side="left", padx=(PAD_SM, 0))
+
         sub_label = ttk.Label(
             header, text="Static architecture analysis · Read-only mode", style="Sub.TLabel"
         )
@@ -301,6 +314,10 @@ class ContextorGUI:
         self.tooltip.bind_tooltip(
             self.mcp_logs_btn,
             "Open the folder containing LIVE and MCP operation logs.",
+        )
+        self.tooltip.bind_tooltip(
+            self.restart_backend_btn,
+            "Stop the current persistent MCP backend and start a fresh instance using the current code on disk.",
         )
         self.tooltip.bind_tooltip(
             self.theme_btn,
@@ -660,7 +677,117 @@ class ContextorGUI:
             self.analyze_layer_btn,
             self.analyze_single_btn,
             self.test_suite_btn,
+            self.restart_backend_btn,
         ]
+
+    def _restart_backend(self):
+        """
+        Restart the persistent MCP backend without blocking the Tk main loop.
+        """
+
+        operation_title = "Restart Backend"
+
+        def _identity(status):
+            record = status.record
+            if record is None:
+                return None
+
+            return (
+                record.instance_id,
+                record.pid,
+                record.creation_time,
+            )
+
+        def task(log=None, progress_callback=None):
+            before = get_backend_status(
+                probe_timeout=2.0,
+            )
+            before_identity = _identity(before)
+
+            stop_backend(
+                timeout=5.0,
+            )
+
+            stopped = get_backend_status(
+                probe_timeout=0.5,
+            )
+
+            if (
+                stopped.state != "stopped"
+                or stopped.ready
+                or stopped.record is not None
+            ):
+                raise RuntimeError(
+                    "persistent MCP backend did not reach a confirmed stopped state"
+                )
+
+            after = start_backend(
+                timeout=20.0,
+                probe_timeout=2.0,
+            )
+
+            if not after.ready or after.record is None:
+                raise RuntimeError(
+                    "new persistent MCP backend did not become authenticated and ready"
+                )
+
+            after_identity = _identity(after)
+
+            if (
+                before_identity is not None
+                and after_identity == before_identity
+            ):
+                raise RuntimeError(
+                    "backend restart returned the previous backend process identity"
+                )
+
+            return before, after
+
+        def on_success(result):
+            before, after = result
+
+            old_pid = (
+                "none"
+                if before.record is None
+                else str(before.record.pid)
+            )
+            old_instance = (
+                "none"
+                if before.record is None
+                else before.record.instance_id
+            )
+
+            messagebox.showinfo(
+                "MCP backend restarted",
+                (
+                    "Persistent MCP backend restarted successfully.\n\n"
+                    f"Old PID: {old_pid}\n"
+                    f"Old instance: {old_instance}\n"
+                    f"New PID: {after.record.pid}\n"
+                    f"New instance: {after.record.instance_id}\n"
+                    f"Endpoint: {after.endpoint}"
+                ),
+            )
+
+        def on_error(exc):
+            messagebox.showerror(
+                operation_title,
+                f"Backend restart failed.\n\n{exc}",
+            )
+
+        self.progress_bar.is_cancelled = False
+
+        run_with_progress(
+            self.root,
+            self.progress_bar,
+            task,
+            on_success=on_success,
+            on_error=on_error,
+            buttons=self._busy_buttons(),
+            log_box=self.log_box,
+            cpu_indicator=self.cpu_indicator,
+            stop_button=self.stop_btn,
+        )
 
     def _run_test_suite(self):
         """
