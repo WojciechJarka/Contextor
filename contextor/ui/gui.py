@@ -39,6 +39,7 @@ from contextor.core.repository_identity import (
 from contextor.core.paths import prune_startup_caches
 from contextor.repo_generator import run_repo_generator
 from contextor.mcp_backend_control import (
+    BackendOwnerAlreadyClaimed,
     BackendOwnerInstanceRevoked,
     claim_backend_owner,
     get_backend_status,
@@ -78,6 +79,11 @@ from contextor.ui.theme import (
 LIVE_START_MAX_ATTEMPTS = 4
 LIVE_START_RETRY_DELAYS_MS = (1000, 2000, 5000)
 FULL_ANALYSIS_SHUTDOWN_WAIT_SECONDS = 1.5
+BACKEND_OWNER_CLAIM_MAX_ATTEMPTS = 3
+BACKEND_OWNER_CLAIM_RETRY_DELAYS_SECONDS = (
+    0.5,
+    1.0,
+)
 
 class ContextorGUI:
     """
@@ -122,6 +128,8 @@ class ContextorGUI:
         self.backend_owner_claim = None
         self._backend_owner_claim_error = None
         self._backend_owner_claim_thread = None
+        self._backend_owner_claim_state = "idle"
+        self._backend_owner_claim_attempt = 0
         self.live_client = None
         self.live_clients = {}
         self.live_watcher = None
@@ -243,10 +251,90 @@ class ContextorGUI:
             return
 
         def worker():
-            try:
-                self._claim_backend_owner_on_startup()
-            except Exception as exc:
-                self._backend_owner_claim_error = exc
+            self._backend_owner_claim_state = "claiming"
+            self._backend_owner_claim_attempt = 0
+
+            for attempt in range(
+                1,
+                BACKEND_OWNER_CLAIM_MAX_ATTEMPTS + 1,
+            ):
+                if getattr(self, "_closing", False):
+                    self._backend_owner_claim_state = "aborted"
+                    return
+
+                self._backend_owner_claim_attempt = attempt
+
+                try:
+                    claim = self._claim_backend_owner_on_startup()
+
+                except Exception as exc:
+                    self._backend_owner_claim_error = exc
+
+                    terminal = (
+                        isinstance(
+                            exc,
+                            BackendOwnerAlreadyClaimed,
+                        )
+                        or attempt
+                        >= BACKEND_OWNER_CLAIM_MAX_ATTEMPTS
+                    )
+
+                    if terminal:
+                        self._backend_owner_claim_state = "failed"
+
+                        self._set_live_status(
+                            f"Backend ownership failed: {exc}",
+                            category="MCP_CALL",
+                        )
+                        return
+
+                    self._backend_owner_claim_state = "retrying"
+
+                    self._set_live_status(
+                        (
+                            "Backend ownership unavailable; "
+                            f"retrying ({attempt + 1}/"
+                            f"{BACKEND_OWNER_CLAIM_MAX_ATTEMPTS})..."
+                        ),
+                        category="MCP_CALL",
+                    )
+
+                    delay = (
+                        BACKEND_OWNER_CLAIM_RETRY_DELAYS_SECONDS[
+                            attempt - 1
+                        ]
+                    )
+
+                    deadline = time.monotonic() + delay
+
+                    while time.monotonic() < deadline:
+                        if getattr(self, "_closing", False):
+                            self._backend_owner_claim_state = "aborted"
+                            return
+
+                        remaining = deadline - time.monotonic()
+
+                        time.sleep(
+                            min(
+                                0.05,
+                                max(0.0, remaining),
+                            )
+                        )
+
+                    self._backend_owner_claim_state = "claiming"
+                    continue
+
+                self.backend_owner_claim = claim
+                self._backend_owner_claim_error = None
+                self._backend_owner_claim_state = "claimed"
+
+                if attempt > 1:
+                    self._set_live_status(
+                        "Backend ownership restored.",
+                        category="MCP_CALL",
+                    )
+
+                return
 
         thread = threading.Thread(
             target=worker,
