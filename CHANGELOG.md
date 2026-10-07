@@ -1,3 +1,13 @@
+## 2026-10-07 Patch - Desktop MCP backend restart control
+
+Added a `Restart Backend` control to the Contextor Desktop header next to `MCP Logs`, allowing the persistent MCP backend to be restarted directly from the GUI without restarting Desktop or using the command line.
+
+The restart runs outside the Tk main loop and performs an identity-verified lifecycle sequence: capture the current backend identity, stop the existing backend, independently confirm the stopped state, start a fresh backend, require authenticated readiness, and verify that the new `(instance_id, pid, creation_time)` differs from the previous instance before reporting success.
+
+The existing backend ownership, lease, transport, authentication, autostart, and Desktop shutdown semantics were left unchanged. Restarting the backend does not restart LIVE or clear canonical/persistent repository state.
+
+Runtime certification confirmed a real backend replacement from PID 14668 to PID 12240 with a new backend instance identity while preserving the same `http://127.0.0.1:8765/mcp` endpoint and leaving the active LIVE watcher attached. Targeted GUI, backend-control, and progress-widget regressions passed: 15 tests passed.
+
 ##  2026-10-05 Patch - multi-repository LIVE runtime support
 
 Added runtime phase telemetry for split-lineage snapshot loading and used it to isolate cold-start cost to lineage chunk loading and deep persisted-lineage revalidation.
