@@ -574,7 +574,19 @@ def test_persistent_http_main_uses_shared_registry_without_root_registration(
             "stdio transport selected"
         )
 
-    async def fake_http(**kwargs):
+    server = object()
+
+    def fake_create_server(**kwargs):
+        events.append(
+            (
+                "create_server",
+                kwargs,
+            )
+        )
+        return server
+
+    async def fake_run_server(actual_server):
+        assert actual_server is server
         record = read_backend_record()
         assert record is not None
         assert record.pid == os.getpid()
@@ -586,8 +598,13 @@ def test_persistent_http_main_uses_shared_registry_without_root_registration(
         events.append(
             (
                 "http",
-                kwargs,
+                actual_server,
             )
+        )
+
+    async def fail_http(**_kwargs):
+        pytest.fail(
+            "persistent backend used FastMCP run_http_async"
         )
 
     monkeypatch.setattr(
@@ -598,7 +615,17 @@ def test_persistent_http_main_uses_shared_registry_without_root_registration(
     monkeypatch.setattr(
         mcp_server.mcp,
         "run_http_async",
-        fake_http,
+        fail_http,
+    )
+    monkeypatch.setattr(
+        mcp_server,
+        "_create_persistent_http_server",
+        fake_create_server,
+    )
+    monkeypatch.setattr(
+        mcp_server,
+        "_run_persistent_http_server",
+        fake_run_server,
     )
 
     mcp_server.main()
@@ -616,12 +643,23 @@ def test_persistent_http_main_uses_shared_registry_without_root_registration(
 
     assert len(http_events) == 1
 
-    assert http_events[0][1] == {
-        "transport": "streamable-http",
-        "host": "127.0.0.1",
-        "port": 8765,
-        "show_banner": False,
-    }
+    assert http_events[0][1] is server
+
+    create_events = [
+        event
+        for event in events
+        if event[0] == "create_server"
+    ]
+
+    assert create_events == [
+        (
+            "create_server",
+            {
+                "host": "127.0.0.1",
+                "port": 8765,
+            },
+        )
+    ]
 
     assert (
         "shutdown",

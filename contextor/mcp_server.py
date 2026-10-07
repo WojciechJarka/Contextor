@@ -170,6 +170,9 @@ _ensure_virtual_environment()
 warnings.filterwarnings("ignore")
 
 from typing import Any, Callable
+
+import uvicorn
+
 from fastmcp import FastMCP
 from fastmcp.server.auth.auth import AccessToken, TokenVerifier
 from fastmcp.exceptions import ToolError
@@ -979,6 +982,36 @@ def _register_server_root(
     )
 
 
+def _create_persistent_http_server(
+    *,
+    host: str,
+    port: int,
+) -> uvicorn.Server:
+    app = mcp.http_app(
+        path=None,
+        transport="streamable-http",
+        middleware=None,
+        stateless_http=None,
+    )
+
+    config = uvicorn.Config(
+        app,
+        host=host,
+        port=port,
+        timeout_graceful_shutdown=0,
+        lifespan="on",
+        log_level=mcp._deprecated_settings.log_level.lower(),
+    )
+
+    return uvicorn.Server(config)
+
+
+async def _run_persistent_http_server(
+    server: uvicorn.Server,
+) -> None:
+    await server.serve()
+
+
 def main():
     """Entry point for the MCP server."""
     if sys.platform == "win32":
@@ -1104,7 +1137,15 @@ def main():
         )
 
         async def _run():
-            if transport in _HTTP_TRANSPORTS:
+            if role == "persistent-backend":
+                server = _create_persistent_http_server(
+                    host=http_host,
+                    port=http_port,
+                )
+                await _run_persistent_http_server(
+                    server
+                )
+            elif transport in _HTTP_TRANSPORTS:
                 await mcp.run_http_async(
                     transport="streamable-http",
                     host=http_host,
