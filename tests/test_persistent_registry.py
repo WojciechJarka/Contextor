@@ -14,6 +14,48 @@ def temp_repo(tmp_path):
     yield str(repo_dir)
     shutil.rmtree(repo_dir, ignore_errors=True)
 
+def test_checkpoint_restore_persists_exact_registry_state(temp_repo):
+    registry = PersistentIdentityRegistry(temp_repo)
+    with registry.transaction():
+        registry.sync_with_workspace({"seed"}, {"seed::SEED_VALUE"})
+        registry.register_report_references(
+            "baseline.json", [registry.get_module_id("seed")]
+        )
+
+    checkpoint = registry.create_checkpoint()
+    seed_id = registry.get_module_id("seed")
+    seed_artifact_id = registry.get_artifact_id("seed::SEED_VALUE")
+
+    with registry.transaction():
+        registry.sync_with_workspace(
+            {"seed", "added"},
+            {"seed::SEED_VALUE", "added::ADDED_VALUE"},
+        )
+        registry.register_report_references(
+            "added.json", [registry.get_module_id("added")]
+        )
+
+    assert registry.get_module_id("added") is not None
+    assert registry.get_artifact_id("added::ADDED_VALUE") is not None
+    assert registry._state["module_slots"] != checkpoint["module_slots"]
+    assert registry._state["artifact_slots"] != checkpoint["artifact_slots"]
+    assert registry._state["output_references"] != checkpoint["output_references"]
+
+    registry.restore_checkpoint(checkpoint)
+    reloaded = PersistentIdentityRegistry(temp_repo)
+
+    assert reloaded.get_module_id("seed") == seed_id
+    assert reloaded.get_artifact_id("seed::SEED_VALUE") == seed_artifact_id
+    assert reloaded.get_module_id("added") is None
+    assert reloaded.get_artifact_id("added::ADDED_VALUE") is None
+    assert reloaded._state["module_registry"] == checkpoint["module_registry"]
+    assert reloaded._state["artifact_registry"] == checkpoint["artifact_registry"]
+    assert reloaded._state["module_recovery"] == checkpoint["module_recovery"]
+    assert reloaded._state["artifact_recovery"] == checkpoint["artifact_recovery"]
+    assert reloaded._state["module_slots"] == checkpoint["module_slots"]
+    assert reloaded._state["artifact_slots"] == checkpoint["artifact_slots"]
+    assert reloaded._state["output_references"] == checkpoint["output_references"]
+
 def test_identity_preservation(temp_repo):
     # nowy plik dostaje ID
     registry = PersistentIdentityRegistry(temp_repo)

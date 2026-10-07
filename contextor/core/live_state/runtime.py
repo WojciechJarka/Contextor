@@ -1075,6 +1075,30 @@ def _repository_canonical_query_handler(
     )
 
 
+def _clear_registry_checkpoint(
+    holder: dict[str, object] | None,
+) -> None:
+    if holder is None:
+        return
+    holder.pop("registry", None)
+    holder.pop("registry_checkpoint", None)
+
+
+def _restore_registry_checkpoint(
+    holder: dict[str, object] | None,
+) -> None:
+    if holder is None:
+        return
+
+    registry = holder.get("registry")
+    checkpoint = holder.get("registry_checkpoint")
+
+    if registry is None or checkpoint is None:
+        return
+
+    registry.restore_checkpoint(checkpoint)
+
+
 def _repository_updater(root: Path, holder: dict[str, object] | None = None):
     identity = require_repository_identity(root)
     cache = repo_cache_dir(root)
@@ -1088,15 +1112,29 @@ def _repository_updater(root: Path, holder: dict[str, object] | None = None):
         from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
 
         manager = FileStateManager(str(cache))
+        registry = PersistentIdentityRegistry(str(root))
+        registry_checkpoint = registry.create_checkpoint()
+
+        if holder is not None:
+            holder["registry"] = registry
+            holder["registry_checkpoint"] = registry_checkpoint
+
         engine = IncrementalAnalysisEngine(
             state,
-            PersistentIdentityRegistry(str(root)),
+            registry,
             manager,
             str(root),
         )
         _safe_trace_event("LIVE", "ENGINE_READY", op=op, repo=str(root), elapsed_ms=(time.monotonic() - started) * 1000.0)
         incremental_started = time.monotonic()
-        delta = engine.update_file(file_path)
+        try:
+            delta = engine.update_file(file_path)
+        except Exception:
+            try:
+                registry.restore_checkpoint(registry_checkpoint)
+            finally:
+                _clear_registry_checkpoint(holder)
+            raise
         _safe_trace_event("LIVE", "INCREMENTAL_END", op=op, repo=str(root), elapsed_ms=(time.monotonic() - incremental_started) * 1000.0, status=getattr(delta, "status", None))
         if holder is not None:
             holder["manager"] = manager
@@ -1159,35 +1197,18 @@ def _repository_persister(
                 ),
                 previous_state=persisted_state,
             )
-
-            if meta.revision != exact_revision:
-                raise ValueError(
-                    "Exact LIVE persistence revision mismatch."
-                )
-
-            persisted_state = state
-
-            _safe_trace_event(
-                "LIVE",
-                "SNAPSHOT_SAVE_END",
-                op=op,
-                repo=str(root),
-                elapsed_ms=(
-                    time.monotonic()
-                    - snapshot_started
-                )
-                * 1000.0,
-            )
-
-            _safe_trace_event(
-                "LIVE",
-                "FILE_STATE_SAVE_END",
-                op=op,
-                repo=str(root),
-                elapsed_ms=0.0,
-            )
-
         except Exception as exc:
+            try:
+                _restore_registry_checkpoint(holder)
+            except Exception as rollback_exc:
+                failure = RuntimeError(
+                    "Canonical snapshot persistence failed and registry rollback failed."
+                )
+                failure.current_revision = exact_revision - 1
+                raise failure from rollback_exc
+            finally:
+                _clear_registry_checkpoint(holder)
+
             from contextor.core.live_state.store import SnapshotRevisionConflict
 
             if isinstance(exc, SnapshotRevisionConflict):
@@ -1197,6 +1218,36 @@ def _repository_persister(
                 ) from exc
 
             raise
+
+        try:
+            if meta.revision != exact_revision:
+                raise ValueError(
+                    "Exact LIVE persistence revision mismatch."
+                )
+        finally:
+            _clear_registry_checkpoint(holder)
+
+        persisted_state = state
+
+        _safe_trace_event(
+            "LIVE",
+            "SNAPSHOT_SAVE_END",
+            op=op,
+            repo=str(root),
+            elapsed_ms=(
+                time.monotonic()
+                - snapshot_started
+            )
+            * 1000.0,
+        )
+
+        _safe_trace_event(
+            "LIVE",
+            "FILE_STATE_SAVE_END",
+            op=op,
+            repo=str(root),
+            elapsed_ms=0.0,
+        )
 
         return meta
 

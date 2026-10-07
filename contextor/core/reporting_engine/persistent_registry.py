@@ -3,6 +3,7 @@ import json
 import sys
 import uuid
 import datetime
+from copy import deepcopy
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Dict, Any, List, Set, Optional
@@ -260,6 +261,56 @@ class PersistentIdentityRegistry:
             self._transaction_mode = None
             self._in_transaction = False
             self._unlock()
+
+    def create_checkpoint(self) -> Dict[str, Any]:
+        """
+        Capture the exact currently loaded persistent registry state for
+        compensating rollback by the canonical mutation coordinator.
+
+        The checkpoint is a detached deep copy and includes active mappings,
+        recovery maps, slot generations, and output references.
+        """
+        if self._in_transaction:
+            raise RuntimeError(
+                "Cannot create registry checkpoint inside an active transaction."
+            )
+
+        return deepcopy(self._state)
+
+    def restore_checkpoint(
+        self,
+        checkpoint: Dict[str, Any],
+    ) -> None:
+        """
+        Restore an exact previously captured registry state transactionally.
+        """
+        if self._in_transaction:
+            raise RuntimeError(
+                "Cannot restore registry checkpoint inside an active transaction."
+            )
+
+        if not isinstance(checkpoint, dict):
+            raise TypeError("Registry checkpoint must be a dictionary.")
+
+        expected_keys = set(self.files)
+        if set(checkpoint) != expected_keys:
+            raise ValueError(
+                "Registry checkpoint does not match the persistent registry domain."
+            )
+
+        restored = deepcopy(checkpoint)
+
+        for key in expected_keys:
+            if not isinstance(restored.get(key), dict):
+                raise ValueError(
+                    f"Registry checkpoint family '{key}' must be a dictionary."
+                )
+
+        if self._state == restored:
+            return
+
+        with self.transaction():
+            self._state = restored
 
     @contextmanager
     def read_transaction(self):

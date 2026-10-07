@@ -564,6 +564,147 @@ def test_persistence_failure_leaves_canonical_state_revision_journal_and_diagnos
         )
 
 
+def test_generic_snapshot_failure_restores_committed_registry_and_old_canonical_state(
+    tmp_path, monkeypatch
+):
+    import copy
+    import json
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    import contextor.core.analysis.incremental.engine as incremental_module
+    import contextor.core.live_state.runtime as runtime_module
+    from contextor.core.analysis.state_manager import RepositoryAnalysisState
+    from contextor.core.live_state.runtime import _repository_persister, _repository_updater
+    from contextor.core.live_state.store import read_metadata
+    from contextor.core.paths import repo_cache_dir
+    from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setenv("CONTEXTOR_REGISTRY_DIR", str(tmp_path / "registry"))
+    PersistentIdentityRegistry(str(repo))
+
+    seed_path = repo / "seed.py"
+    seed_path.write_text("SEED_VALUE = 1\n", encoding="utf-8")
+    state = RepositoryAnalysisState()
+    holder = {}
+    updater = _repository_updater(repo, holder)
+    assert updater(state, str(seed_path)).status == "UPDATED"
+    state.revision = 1
+    assert _repository_persister(repo, holder)(state, 1).revision == 1
+    assert "registry" not in holder
+    assert "registry_checkpoint" not in holder
+
+    baseline = copy.deepcopy(PersistentIdentityRegistry(str(repo))._state)
+    added_path = repo / "added.py"
+    added_path.write_text("ADDED_VALUE = 2\n", encoding="utf-8")
+
+    plan_results = []
+
+    def capture_incremental_phase(name, **fields):
+        if name == "INCREMENTAL_EXECUTE_PLAN_END":
+            plan_results.append(fields.get("result"))
+
+    monkeypatch.setattr(
+        incremental_module, "_trace_incremental_phase", capture_incremental_phase
+    )
+
+    observed_commit = {}
+
+    def fail_snapshot_save(*_args, **kwargs):
+        assert kwargs["exact_revision"] == 2
+        committed = PersistentIdentityRegistry(str(repo))
+        observed_commit["module_id"] = committed.get_module_id("added")
+        observed_commit["artifact_id"] = committed.get_artifact_id(
+            "added::ADDED_VALUE"
+        )
+        assert observed_commit["module_id"] is not None
+        assert observed_commit["artifact_id"] is not None
+        assert read_metadata(repo_cache_dir(repo)).revision == 1
+        raise OSError("controlled cross-store atomicity regression failure")
+
+    monkeypatch.setattr(runtime_module, "save_snapshot", fail_snapshot_save)
+    server = CanonicalLiveServer(
+        state,
+        revision=1,
+        updater=updater,
+        persister=_repository_persister(repo, holder, previous_state=state),
+    )
+    with _running_server(server) as client:
+        accepted = client.submit_update_file(
+            str(added_path), origin="test", idempotency_key="cross-store-rollback"
+        )
+        terminal = _wait_for_terminal(client, accepted["job_id"])
+        assert terminal["state"] == "failed"
+        assert terminal["response"] == {
+            "status": "error",
+            "error": "canonical_persistence_failed",
+            "revision": 1,
+            "expected_revision": 2,
+        }
+        assert server._state is state
+        assert server._revision == 1
+        assert sorted(server._state.modules) == ["seed"]
+        assert server._activity_seq == 0
+        assert client.get_events(after_revision=1)["events"] == []
+
+    assert any("identity_sync_required=True" in (result or "") for result in plan_results)
+    assert observed_commit["module_id"] is not None
+    assert observed_commit["artifact_id"] is not None
+    assert read_metadata(repo_cache_dir(repo)).revision == 1
+    assert "registry" not in holder
+    assert "registry_checkpoint" not in holder
+
+    reloaded = PersistentIdentityRegistry(str(repo))
+    assert reloaded.get_module_id("seed") == baseline["module_registry"]["path_to_id"]["seed"]
+    assert reloaded.get_artifact_id("seed::SEED_VALUE") == baseline["artifact_registry"]["path_to_id"]["seed::SEED_VALUE"]
+    assert reloaded.get_module_id("added") is None
+    assert reloaded.get_artifact_id("added::ADDED_VALUE") is None
+    assert reloaded._state["module_registry"] == baseline["module_registry"]
+    assert reloaded._state["artifact_registry"] == baseline["artifact_registry"]
+    assert reloaded._state["module_recovery"] == baseline["module_recovery"]
+    assert reloaded._state["artifact_recovery"] == baseline["artifact_recovery"]
+    assert reloaded._state["module_slots"] == baseline["module_slots"]
+    assert reloaded._state["artifact_slots"] == baseline["artifact_slots"]
+    assert reloaded._state["output_references"] == baseline["output_references"]
+
+    child_code = """
+import json
+import sys
+from contextor.core.live_state.hydration import hydrate_repository_engine
+from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
+root = sys.argv[1]
+hydrated = hydrate_repository_engine(root)
+registry = PersistentIdentityRegistry(root)
+print(json.dumps({
+    "source": hydrated.source if hydrated else None,
+    "modules": sorted(hydrated.engine.state.modules) if hydrated else None,
+    "added_module_id": registry.get_module_id("added"),
+    "added_artifact_id": registry.get_artifact_id("added::ADDED_VALUE"),
+}))
+"""
+    child = subprocess.run(
+        [sys.executable, "-c", child_code, str(repo)],
+        cwd=str(Path(__file__).resolve().parents[1]),
+        env=os.environ.copy(),
+        text=True,
+        capture_output=True,
+        check=True,
+        timeout=10,
+    )
+    hydrated = json.loads(child.stdout.strip().splitlines()[-1])
+    assert hydrated == {
+        "source": "snapshot",
+        "modules": ["seed"],
+        "added_module_id": None,
+        "added_artifact_id": None,
+    }
+
+
 def test_worker_survives_failed_job_and_executes_next_job():
     first_started = threading.Event()
 
