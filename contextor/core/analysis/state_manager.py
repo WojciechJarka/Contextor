@@ -592,8 +592,14 @@ def canonical_artifact_consumption_targets(
     artifacts: dict[str, Any] | None,
 ) -> set[str]:
     """
-    Computes the exact set of expected canonical target keys (f"{module_path}::{symbol}")
-    from defined symbols in artifacts fact dictionaries.
+    Computes the exact set of expected canonical target keys
+    (f"{module_path}::{symbol}") from defined symbols in artifact
+    fact dictionaries.
+
+    Modern symbol-domain fields are authoritative even when empty.
+    The consumers mapping is used only as a compatibility fallback
+    for legacy artifact payloads that do not expose a modern symbol
+    domain.
     """
     targets: set[str] = set()
     if not isinstance(artifacts, dict):
@@ -603,29 +609,33 @@ def canonical_artifact_consumption_targets(
         if not isinstance(module_path, str) or not isinstance(module_data, dict):
             continue
 
-        # 1. Check own_symbols if available
+        # 1. Non-empty own_symbols is the strongest modern target-domain source.
         own_symbols = module_data.get("own_symbols")
-        if isinstance(own_symbols, (list, set, tuple)) and own_symbols:
+        own_symbols_available = isinstance(own_symbols, (list, set, tuple))
+        if own_symbols_available and own_symbols:
             for sym in own_symbols:
                 if isinstance(sym, str) and sym:
                     targets.add(f"{module_path}::{sym}")
             continue
 
-        # 2. Check symbols dict if available
+        # 2. A symbols dict is authoritative even when it defines zero targets.
+        #    Empty modern symbol facts must not fall through to stale consumers.
         symbols = module_data.get("symbols")
         if isinstance(symbols, dict):
-            has_syms = False
             for cat in ("classes", "functions", "methods", "globals"):
                 cat_syms = symbols.get(cat, [])
                 if isinstance(cat_syms, (list, set, tuple)):
                     for sym in cat_syms:
                         if isinstance(sym, str) and sym:
                             targets.add(f"{module_path}::{sym}")
-                            has_syms = True
-            if has_syms:
-                continue
+            continue
 
-        # 3. Fallback for legacy format where only consumers dict is present
+        # 3. Structurally available empty own_symbols also authoritatively means
+        #    that this module currently defines no canonical artifact targets.
+        if own_symbols_available:
+            continue
+
+        # 4. Compatibility fallback for true legacy consumers-only payloads.
         consumers_by_symbol = module_data.get("consumers", {})
         if isinstance(consumers_by_symbol, dict):
             for symbol, entry in consumers_by_symbol.items():

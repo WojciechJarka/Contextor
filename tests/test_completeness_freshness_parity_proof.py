@@ -14,7 +14,12 @@ import pytest
 from contextor.core.analysis.incremental_engine import IncrementalAnalysisEngine, IncrementalUpdateResult
 from contextor.core.analysis.incremental.preparation import prepare_source_update
 from contextor.core.analysis.refresh_planner import RefreshPlanner, _find_dependent_consumers
-from contextor.core.analysis.state_manager import FileStateManager, RepositoryAnalysisState, FileDelta
+from contextor.core.analysis.state_manager import (
+    FileDelta,
+    FileStateManager,
+    RepositoryAnalysisState,
+    canonical_artifact_consumption_targets,
+)
 from contextor.core.analysis.incremental.plan_executor import _resolve_canonical_target_key
 from contextor.core.api.facade import ContextorFacade
 from contextor.core.domain.module import Module
@@ -2503,4 +2508,104 @@ def test_named_package_local_import_update_matches_full_oracle(
         engine.state.artifact_consumption[target]["channels"]["consumer"]
     ) == {"api_imports", "direct_calls"}
     oracle = _build_full_static_state(tmp_path)
+    _assert_full_parity(engine.state, oracle)
+
+
+def test_canonical_target_domain_does_not_resurrect_stale_consumers_from_modern_empty_symbols():
+    artifacts = {
+        "api": {
+            "symbols": {
+                "classes": [],
+                "functions": [],
+                "methods": [],
+                "globals": [],
+            },
+            "own_symbols": set(),
+            "consumers": {
+                "VALUE": {
+                    "consumers": [],
+                    "channels": {},
+                }
+            },
+        }
+    }
+
+    assert canonical_artifact_consumption_targets(artifacts) == set()
+
+
+def test_canonical_target_domain_preserves_consumers_only_legacy_fallback():
+    artifacts = {
+        "legacy": {
+            "consumers": {
+                "foo": {
+                    "consumers": [],
+                    "channels": {},
+                }
+            }
+        }
+    }
+
+    assert canonical_artifact_consumption_targets(artifacts) == {
+        "legacy::foo"
+    }
+
+
+def test_content_change_removes_obsolete_consumption_target_and_matches_full_oracle(tmp_path):
+    f_provider = tmp_path / "a.py"
+    f_provider.write_text(
+        "def foo():\n"
+        "    return 1\n",
+        encoding="utf-8",
+    )
+
+    f_api = tmp_path / "api.py"
+    f_api.write_text(
+        "VALUE = 1\n",
+        encoding="utf-8",
+    )
+
+    f_consumer = tmp_path / "consumer.py"
+    f_consumer.write_text(
+        "from api import public\n"
+        "public()\n",
+        encoding="utf-8",
+    )
+
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir()
+
+    engine = IncrementalAnalysisEngine(
+        RepositoryAnalysisState(modules={}),
+        PersistentIdentityRegistry(str(tmp_path)),
+        FileStateManager(str(cache_dir)),
+        str(tmp_path),
+    )
+
+    engine.update_file(str(f_provider))
+    engine.update_file(str(f_api))
+    engine.update_file(str(f_consumer))
+
+    assert "api::VALUE" in engine.state.artifact_consumption
+
+    f_api.write_text(
+        "from a import foo as public\n",
+        encoding="utf-8",
+    )
+
+    result = engine.update_file(str(f_api))
+    oracle = _build_full_static_state(tmp_path)
+
+    assert result.artifact_consumption_state == "fresh"
+
+    assert "api::VALUE" not in oracle.artifact_consumption
+    assert "api::VALUE" not in engine.state.artifact_consumption
+
+    assert "a::foo" in oracle.artifact_consumption
+    assert "a::foo" in engine.state.artifact_consumption
+
+    assert (
+        engine.state.artifact_consumption["a::foo"]
+        == oracle.artifact_consumption["a::foo"]
+    )
+
     _assert_full_parity(engine.state, oracle)
