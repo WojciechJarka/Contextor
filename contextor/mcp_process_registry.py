@@ -4,13 +4,22 @@ from __future__ import annotations
 
 import ctypes
 from ctypes import wintypes
+from dataclasses import dataclass
+import errno
 import json
 import os
 import signal
 import subprocess
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
+
+
+@dataclass(frozen=True, slots=True)
+class ProcessIdentityProbe:
+    state: Literal["alive", "dead", "unknown"]
+    image: str | None
+    creation_time: int | None
 
 
 def registry_dir(root: Path) -> Path:
@@ -76,6 +85,100 @@ def _windows_process_identity(pid: int) -> tuple[str | None, int | None, bool]:
         kernel32.CloseHandle(handle)
 
 
+def _windows_process_identity_probe(pid: int) -> ProcessIdentityProbe:
+    unknown = ProcessIdentityProbe("unknown", None, None)
+    try:
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        kernel32.OpenProcess.restype = wintypes.HANDLE
+        kernel32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+        kernel32.WaitForSingleObject.restype = wintypes.DWORD
+        kernel32.QueryFullProcessImageNameW.argtypes = [
+            wintypes.HANDLE,
+            wintypes.DWORD,
+            wintypes.LPWSTR,
+            wintypes.PDWORD,
+        ]
+        kernel32.QueryFullProcessImageNameW.restype = wintypes.BOOL
+        kernel32.GetProcessTimes.argtypes = [
+            wintypes.HANDLE,
+            ctypes.POINTER(wintypes.FILETIME),
+            ctypes.POINTER(wintypes.FILETIME),
+            ctypes.POINTER(wintypes.FILETIME),
+            ctypes.POINTER(wintypes.FILETIME),
+        ]
+        kernel32.GetProcessTimes.restype = wintypes.BOOL
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        kernel32.CloseHandle.restype = wintypes.BOOL
+    except (OSError, AttributeError, TypeError, ValueError):
+        return unknown
+
+    process_query_limited_information = 0x1000
+    synchronize = 0x00100000
+    try:
+        handle = kernel32.OpenProcess(
+            process_query_limited_information | synchronize,
+            False,
+            pid,
+        )
+    except OSError:
+        return unknown
+
+    if not handle:
+        if ctypes.get_last_error() == 87:  # ERROR_INVALID_PARAMETER
+            return ProcessIdentityProbe("dead", None, None)
+        return unknown
+
+    try:
+        try:
+            wait_result = kernel32.WaitForSingleObject(handle, 0)
+        except OSError:
+            return unknown
+
+        if wait_result == 0:  # WAIT_OBJECT_0
+            return ProcessIdentityProbe("dead", None, None)
+        if wait_result != 258:  # WAIT_TIMEOUT
+            return unknown
+
+        image = None
+        try:
+            size = ctypes.c_ulong(32768)
+            buffer = ctypes.create_unicode_buffer(size.value)
+            if kernel32.QueryFullProcessImageNameW(
+                handle,
+                0,
+                buffer,
+                ctypes.byref(size),
+            ):
+                image = buffer.value
+        except (OSError, TypeError, ValueError):
+            pass
+
+        created = None
+        try:
+            creation = wintypes.FILETIME()
+            exit_time = wintypes.FILETIME()
+            kernel = wintypes.FILETIME()
+            user = wintypes.FILETIME()
+            if kernel32.GetProcessTimes(
+                handle,
+                ctypes.byref(creation),
+                ctypes.byref(exit_time),
+                ctypes.byref(kernel),
+                ctypes.byref(user),
+            ):
+                created = (creation.dwHighDateTime << 32) | creation.dwLowDateTime
+        except (OSError, TypeError, ValueError):
+            pass
+
+        return ProcessIdentityProbe("alive", image, created)
+    finally:
+        try:
+            kernel32.CloseHandle(handle)
+        except OSError:
+            pass
+
+
 def process_identity(pid: int) -> tuple[str | None, int | None, bool]:
     if sys_platform_is_windows():
         return _windows_process_identity(pid)
@@ -89,6 +192,34 @@ def process_identity(pid: int) -> tuple[str | None, int | None, bool]:
     except OSError:
         pass
     return image, None, True
+
+
+def probe_process_identity(pid: int) -> ProcessIdentityProbe:
+    if isinstance(pid, bool) or not isinstance(pid, int) or pid <= 0:
+        return ProcessIdentityProbe("unknown", None, None)
+
+    if sys_platform_is_windows():
+        return _windows_process_identity_probe(pid)
+
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return ProcessIdentityProbe("dead", None, None)
+    except PermissionError:
+        return ProcessIdentityProbe("alive", None, None)
+    except OSError as exc:
+        if exc.errno == errno.ESRCH:
+            return ProcessIdentityProbe("dead", None, None)
+        if exc.errno == errno.EPERM:
+            return ProcessIdentityProbe("alive", None, None)
+        return ProcessIdentityProbe("unknown", None, None)
+
+    image = None
+    try:
+        image = str(Path(f"/proc/{pid}/exe").resolve(strict=True))
+    except (OSError, RuntimeError):
+        pass
+    return ProcessIdentityProbe("alive", image, None)
 
 
 def sys_platform_is_windows() -> bool:
