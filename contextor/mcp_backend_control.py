@@ -67,6 +67,10 @@ class BackendOwnerLivenessUnknown(BackendControlError):
     """The current backend host-owner process cannot be classified safely."""
 
 
+class BackendOwnerInstanceRevoked(BackendControlError):
+    """The current backend instance lost its exact lifecycle owner and must terminate."""
+
+
 @dataclass(
     frozen=True,
     slots=True,
@@ -300,6 +304,10 @@ def claim_backend_owner(
             if owner_state == "unknown":
                 raise BackendOwnerLivenessUnknown(
                     "current backend host owner liveness is unknown"
+                )
+            if owner_state == "stale":
+                raise BackendOwnerInstanceRevoked(
+                    "backend instance lost its lifecycle owner and must be replaced"
                 )
             if owner_state != "stale":
                 raise BackendOwnerLivenessUnknown(
@@ -1089,6 +1097,7 @@ __all__ = [
     "BACKEND_SERVER_NAME",
     "BackendControlError",
     "BackendOwnerAlreadyClaimed",
+    "BackendOwnerInstanceRevoked",
     "BackendOwnerLivenessUnknown",
     "BackendStatus",
     "backend_control_lock_path",

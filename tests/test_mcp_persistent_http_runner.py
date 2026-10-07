@@ -1,9 +1,14 @@
 import asyncio
 import socket
+from types import SimpleNamespace
 
 import pytest
 
 from contextor import mcp_server
+from contextor.mcp_backend_state import (
+    BackendHostOwnerClaim,
+    BackendOwnerClaimError,
+)
 
 
 def _configure_main(
@@ -73,6 +78,24 @@ def _configure_main(
         mcp_server.atexit,
         "register",
         lambda _callback: None,
+    )
+
+
+def _owner_claim(
+    backend_instance_id="backend-current",
+    *,
+    owner_token="owner-token",
+):
+    return BackendHostOwnerClaim(
+        schema_version=1,
+        backend_instance_id=backend_instance_id,
+        host_owner_identity="host-owner",
+        host_kind="desktop",
+        host_pid=123,
+        host_executable="python.exe",
+        host_creation_time=456,
+        owner_token=owner_token,
+        claimed_at=1.0,
     )
 
 
@@ -162,7 +185,8 @@ def test_run_persistent_http_server_awaits_serve_once():
 
     asyncio.run(
         mcp_server._run_persistent_http_server(
-            server
+            server,
+            backend_instance_id="backend-runner-test",
         )
     )
 
@@ -180,7 +204,8 @@ def test_run_persistent_http_server_propagates_serve_exception():
     ):
         asyncio.run(
             mcp_server._run_persistent_http_server(
-                FakeServer()
+                FakeServer(),
+                backend_instance_id="backend-runner-test",
             )
         )
 
@@ -197,8 +222,14 @@ def test_persistent_backend_main_uses_controlled_runner_and_finalizes_lease(
         role="persistent-backend",
         transport="streamable-http",
     )
+    backend_instance_id = "active-backend-instance"
 
     class FakeLease:
+        def __init__(self):
+            self.record = SimpleNamespace(
+                instance_id=backend_instance_id
+            )
+
         @classmethod
         def acquire(cls, **kwargs):
             events.append(
@@ -223,9 +254,14 @@ def test_persistent_backend_main_uses_controlled_runner_and_finalizes_lease(
         )
         return server
 
-    async def fake_run_server(actual_server):
+    async def fake_run_server(
+        actual_server,
+        *,
+        backend_instance_id,
+    ):
         assert actual_server is server
-        events.append(("serve",))
+        assert backend_instance_id == "active-backend-instance"
+        events.append(("serve", backend_instance_id))
 
     async def fail_http(**_kwargs):
         pytest.fail(
@@ -265,7 +301,7 @@ def test_persistent_backend_main_uses_controlled_runner_and_finalizes_lease(
 
     mcp_server.main()
 
-    assert events.index(("serve",)) < events.index(("shutdown",))
+    assert events.index(("serve", backend_instance_id)) < events.index(("shutdown",))
     assert events.index(("shutdown",)) < events.index(("lease_release",))
 
 
@@ -375,7 +411,187 @@ def test_stdio_main_keeps_fastmcp_runner(
     assert events.count(("stdio",)) == 1
 
 
-def test_persistent_http_server_exits_normally_and_releases_ephemeral_port():
+@pytest.mark.parametrize(
+    ("case", "expected_pinned", "expected_revoked"),
+    [
+        ("unarmed_no_claim", None, False),
+        ("unarmed_other_instance", None, False),
+        ("unarmed_match", "current", False),
+        ("unarmed_unknown", None, False),
+        ("unarmed_stale", None, True),
+        ("armed_match", "pinned", False),
+        ("armed_unknown", "pinned", False),
+        ("armed_stale", "pinned", True),
+        ("armed_missing", "pinned", True),
+        ("armed_replaced", "pinned", True),
+        ("unarmed_read_error", None, False),
+        ("armed_read_error", "pinned", False),
+    ],
+    ids=[
+        "unarmed-no-claim",
+        "unarmed-other-instance",
+        "unarmed-current-match",
+        "unarmed-current-unknown",
+        "unarmed-current-stale",
+        "armed-exact-match",
+        "armed-exact-unknown",
+        "armed-exact-stale",
+        "armed-claim-missing",
+        "armed-claim-replaced",
+        "unarmed-claim-read-error",
+        "armed-claim-read-error",
+    ],
+)
+def test_evaluate_persistent_backend_owner_state_machine(
+    case,
+    expected_pinned,
+    expected_revoked,
+    monkeypatch,
+):
+    pinned_claim = (
+        _owner_claim()
+        if expected_pinned == "pinned"
+        or case.startswith("armed_")
+        else None
+    )
+    if case in {
+        "unarmed_no_claim",
+        "armed_missing",
+        "unarmed_read_error",
+        "armed_read_error",
+    }:
+        current_claim = None
+    elif case == "unarmed_other_instance":
+        current_claim = _owner_claim("backend-other")
+    elif case == "armed_replaced":
+        current_claim = _owner_claim(owner_token="replacement-token")
+    elif case.startswith("armed_"):
+        current_claim = pinned_claim
+    else:
+        current_claim = _owner_claim()
+
+    owner_state = {
+        "unarmed_match": "match",
+        "unarmed_unknown": "unknown",
+        "unarmed_stale": "stale",
+        "armed_match": "match",
+        "armed_unknown": "unknown",
+        "armed_stale": "stale",
+    }.get(case)
+    classified_claims = []
+
+    def fake_read_claim():
+        if case in {"unarmed_read_error", "armed_read_error"}:
+            raise BackendOwnerClaimError("malformed owner claim")
+        return current_claim
+
+    def fake_classify(claim):
+        classified_claims.append(claim)
+        return owner_state
+
+    monkeypatch.setattr(
+        mcp_server,
+        "read_backend_owner_claim",
+        fake_read_claim,
+    )
+    monkeypatch.setattr(
+        mcp_server,
+        "classify_backend_owner_process",
+        fake_classify,
+    )
+
+    result = mcp_server._evaluate_persistent_backend_owner(
+        backend_instance_id="backend-current",
+        pinned_claim=pinned_claim,
+    )
+
+    expected_claim = {
+        "current": current_claim,
+        "pinned": pinned_claim,
+    }.get(expected_pinned)
+    assert result == (expected_claim, expected_revoked)
+
+    if case in {
+        "unarmed_no_claim",
+        "unarmed_other_instance",
+        "armed_missing",
+        "armed_replaced",
+        "unarmed_read_error",
+        "armed_read_error",
+    }:
+        assert classified_claims == []
+    else:
+        assert classified_claims == [
+            pinned_claim if case.startswith("armed_") else current_claim
+        ]
+
+
+def test_watchdog_revokes_server_without_cancelling_serve_task(monkeypatch):
+    class FakeServer:
+        should_exit = False
+
+    async def exercise_watchdog():
+        server = FakeServer()
+        serve_finished = asyncio.Event()
+
+        async def fake_serve():
+            await serve_finished.wait()
+
+        serve_task = asyncio.create_task(fake_serve())
+        await asyncio.sleep(0)
+
+        monkeypatch.setattr(
+            mcp_server,
+            "_evaluate_persistent_backend_owner",
+            lambda **_kwargs: (None, True),
+        )
+
+        await mcp_server._watch_persistent_backend_owner(
+            server,
+            backend_instance_id="backend-watchdog-test",
+            poll_interval=0.001,
+        )
+
+        assert server.should_exit is True
+        assert serve_task.cancelled() is False
+        serve_finished.set()
+        await serve_task
+
+    asyncio.run(exercise_watchdog())
+
+
+def test_watchdog_continues_polling_until_instance_is_revoked(monkeypatch):
+    class FakeServer:
+        should_exit = False
+
+    server = FakeServer()
+    calls = []
+
+    def evaluate(**_kwargs):
+        calls.append(None)
+        return None, len(calls) > 1
+
+    monkeypatch.setattr(
+        mcp_server,
+        "_evaluate_persistent_backend_owner",
+        evaluate,
+    )
+
+    asyncio.run(
+        mcp_server._watch_persistent_backend_owner(
+            server,
+            backend_instance_id="backend-watchdog-test",
+            poll_interval=0.001,
+        )
+    )
+
+    assert len(calls) == 2
+    assert server.should_exit is True
+
+
+def test_persistent_http_server_exits_normally_and_releases_ephemeral_port(
+    monkeypatch,
+):
     host = "127.0.0.1"
     with socket.socket() as probe:
         probe.bind((host, 0))
@@ -386,9 +602,15 @@ def test_persistent_http_server_exits_normally_and_releases_ephemeral_port():
             host=host,
             port=port,
         )
+        monkeypatch.setattr(
+            mcp_server,
+            "_evaluate_persistent_backend_owner",
+            lambda **_kwargs: (None, False),
+        )
         serve_task = asyncio.create_task(
             mcp_server._run_persistent_http_server(
-                server
+                server,
+                backend_instance_id="backend-runner-test",
             )
         )
 
@@ -424,6 +646,79 @@ def test_persistent_http_server_exits_normally_and_releases_ephemeral_port():
                     {serve_task},
                     timeout=10,
                 )
+
+    asyncio.run(exercise_server())
+
+    with socket.socket() as rebound:
+        rebound.bind((host, port))
+        rebound.listen()
+
+
+def test_persistent_http_server_self_terminates_on_owner_revocation(
+    monkeypatch,
+):
+    host = "127.0.0.1"
+    with socket.socket() as probe:
+        probe.bind((host, 0))
+        port = probe.getsockname()[1]
+
+    async def exercise_server():
+        server = mcp_server._create_persistent_http_server(
+            host=host,
+            port=port,
+        )
+        evaluations = []
+
+        def evaluate(
+            *,
+            backend_instance_id,
+            pinned_claim,
+        ):
+            assert backend_instance_id == "backend-watchdog-test"
+            evaluations.append(server.started)
+            if len(evaluations) == 1 or not server.started:
+                return pinned_claim, False
+            return pinned_claim, True
+
+        monkeypatch.setattr(
+            mcp_server,
+            "_evaluate_persistent_backend_owner",
+            evaluate,
+        )
+        serve_task = asyncio.create_task(
+            mcp_server._run_persistent_http_server(
+                server,
+                backend_instance_id="backend-watchdog-test",
+                owner_poll_interval=0.01,
+            )
+        )
+
+        async def wait_until_started():
+            loop = asyncio.get_running_loop()
+            deadline = loop.time() + 10
+            while not server.started:
+                if serve_task.done():
+                    await serve_task
+                if loop.time() >= deadline:
+                    raise AssertionError(
+                        "Uvicorn server did not start before timeout"
+                    )
+                await asyncio.sleep(0.01)
+
+        await asyncio.wait_for(
+            wait_until_started(),
+            timeout=10,
+        )
+        done, _pending = await asyncio.wait(
+            {serve_task},
+            timeout=10,
+        )
+        assert serve_task in done
+        await serve_task
+        assert serve_task.cancelled() is False
+        assert server.should_exit is True
+        assert evaluations[0] is False
+        assert any(evaluations[1:])
 
     asyncio.run(exercise_server())
 

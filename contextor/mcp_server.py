@@ -193,7 +193,11 @@ from contextor.mcp_process_registry import (
     terminate_registered_process,
 )
 from contextor.mcp_backend_state import (
+    BackendHostOwnerClaim,
+    BackendOwnerClaimError,
     PersistentBackendLease,
+    classify_backend_owner_process,
+    read_backend_owner_claim,
 )
 from contextor.mcp.documentation import short_description
 from contextor.mcp.tools.get_artifact_blast_radius import (
@@ -982,6 +986,70 @@ def _register_server_root(
     )
 
 
+_PERSISTENT_BACKEND_OWNER_POLL_INTERVAL = 0.75
+
+
+def _evaluate_persistent_backend_owner(
+    *,
+    backend_instance_id: str,
+    pinned_claim: BackendHostOwnerClaim | None,
+) -> tuple[BackendHostOwnerClaim | None, bool]:
+    try:
+        current = read_backend_owner_claim()
+    except BackendOwnerClaimError:
+        return pinned_claim, False
+
+    if pinned_claim is None:
+        if (
+            current is None
+            or current.backend_instance_id != backend_instance_id
+        ):
+            return None, False
+
+        owner_state = classify_backend_owner_process(current)
+
+        if owner_state == "match":
+            return current, False
+
+        if owner_state == "stale":
+            return None, True
+
+        return None, False
+
+    if current != pinned_claim:
+        return pinned_claim, True
+
+    owner_state = classify_backend_owner_process(pinned_claim)
+
+    if owner_state == "stale":
+        return pinned_claim, True
+
+    return pinned_claim, False
+
+
+async def _watch_persistent_backend_owner(
+    server: uvicorn.Server,
+    *,
+    backend_instance_id: str,
+    poll_interval: float = _PERSISTENT_BACKEND_OWNER_POLL_INTERVAL,
+) -> None:
+    pinned_claim = None
+
+    while not server.should_exit:
+        pinned_claim, instance_revoked = (
+            _evaluate_persistent_backend_owner(
+                backend_instance_id=backend_instance_id,
+                pinned_claim=pinned_claim,
+            )
+        )
+
+        if instance_revoked:
+            server.should_exit = True
+            return
+
+        await asyncio.sleep(poll_interval)
+
+
 def _create_persistent_http_server(
     *,
     host: str,
@@ -1008,8 +1076,26 @@ def _create_persistent_http_server(
 
 async def _run_persistent_http_server(
     server: uvicorn.Server,
+    *,
+    backend_instance_id: str,
+    owner_poll_interval: float = _PERSISTENT_BACKEND_OWNER_POLL_INTERVAL,
 ) -> None:
-    await server.serve()
+    watchdog_task = asyncio.create_task(
+        _watch_persistent_backend_owner(
+            server,
+            backend_instance_id=backend_instance_id,
+            poll_interval=owner_poll_interval,
+        )
+    )
+
+    try:
+        await server.serve()
+    finally:
+        watchdog_task.cancel()
+        try:
+            await watchdog_task
+        except asyncio.CancelledError:
+            pass
 
 
 def main():
@@ -1143,7 +1229,8 @@ def main():
                     port=http_port,
                 )
                 await _run_persistent_http_server(
-                    server
+                    server,
+                    backend_instance_id=backend_lease.record.instance_id,
                 )
             elif transport in _HTTP_TRANSPORTS:
                 await mcp.run_http_async(

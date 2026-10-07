@@ -1,592 +1,573 @@
 STATUS=IMPLEMENTATION_PASS
-HEAD=9c45f430fd57d05964461f0b6253c8910b64de19
+HEAD=770e3c9ae9d1444a3eb0ba5a7da55fbf7801ef26
 
 FILES_CHANGED:
+- contextor/mcp_backend_control.py
 - contextor/mcp_server.py
-- tests/test_mcp_shared_backend_server_mode.py
+- tests/test_mcp_backend_owner.py
 - tests/test_mcp_persistent_http_runner.py
+- tests/test_mcp_shared_backend_server_mode.py
 
 LITERAL_IMPLEMENTATION_MATCH=YES
-The current main::_run anchor matched the supplied dispatch block. Added the supplied factory and runner with the specified arguments and control flow; no auth, lease acquisition, cleanup, transport parsing, or other main behavior was changed.
+The existing claim_backend_owner stale-owner branch, O2A controlled runner, and main persistent-backend dispatch matched the supplied anchors. Added only the requested O2B control-plane exception, owner evaluation/watchdog, runner lifecycle, and tests.
 
-FAST_MCP_PARITY=YES
-FAST_MCP_PARITY_EVIDENCE:
-fastmcp_version=2.12.4
-uvicorn_version=0.52.3
-FastMCP.run_http_async source uses (log_level or self._deprecated_settings.log_level).lower(), creates http_app with the selected path/transport/middleware/stateless settings, and configures Uvicorn with timeout_graceful_shutdown=0 and lifespan=on. The persistent factory passes those same app/config values and the settings log level explicitly. Existing non-persistent HTTP keeps show_banner=False on FastMCP.run_http_async. No banner handling was added to the persistent factory.
+STALE_SAME_INSTANCE_POLICY=PASS
+For the current backend_instance_id, MATCH with the same logical owner returns the current claim; MATCH with another logical owner raises BackendOwnerAlreadyClaimed; UNKNOWN raises BackendOwnerLivenessUnknown; STALE raises BackendOwnerInstanceRevoked before candidate creation or owner.json write. The focused stale test verifies owner.json bytes remain unchanged. A claim for an older backend_instance_id remains replaceable, and the existing regression still passes. The existing same-instance UNKNOWN test already covered fail-closed/no-write behavior.
 
-CONTROLLED_SERVER_BOUNDARY=PASS
-CONTROLLED_SERVER_BOUNDARY_EVIDENCE:
-The persistent-backend branch constructs uvicorn.Server in main before awaiting _run_persistent_http_server(server). The runner only awaits server.serve() once and propagates exceptions. Production O2A does not cancel the task, set should_exit, call shutdown directly, or add a watchdog.
+OWNER_WATCH_STATE_MACHINE:
+UNARMED + no claim or a claim for another backend instance -> remain unarmed.
+UNARMED + exact current-instance MATCH -> pin that exact claim.
+UNARMED + exact current-instance STALE -> revoke the instance.
+UNARMED + UNKNOWN or BackendOwnerClaimError -> retry without revocation.
+ARMED + exact pinned MATCH or UNKNOWN -> keep the pin and continue.
+ARMED + stale exact pin, missing claim, or any exact claim replacement -> revoke the instance.
+The watchdog polls every 0.75 seconds by default and does not use a heartbeat.
 
-FINALIZATION_ORDER=await server.serve() returns -> asyncio.run(_run()) returns -> _shutdown_cleanup() -> PersistentBackendLease.release().
-FINALIZATION_ORDER_EVIDENCE:
-await server.serve() returns -> asyncio.run(_run()) returns -> _shutdown_cleanup() -> PersistentBackendLease.release(). The existing finally ordering remains intact.
+SELF_TERMINATE_MECHANISM=On proven revocation the watchdog sets server.should_exit=True; Uvicorn performs its normal shutdown. Production code does not cancel server.serve(), call shutdown directly, kill a process, or remove owner.json.
+SERVE_TASK_CANCELLATION=NO
+OWNER_CLAIM_REMOVED_ON_REVOKE=NO
+FINALIZATION_ORDER=owner watchdog -> server.should_exit=True -> Uvicorn serve normal shutdown -> asyncio.run(_run()) returns -> _shutdown_cleanup() -> PersistentBackendLease.release()
 
-EPHEMERAL_PORT_PROBE=PASS
-The focused runtime regression started a real FastMCP/Uvicorn HTTP server on an ephemeral 127.0.0.1 port, observed server.started, set server.should_exit without cancelling the task, awaited task completion, confirmed cancelled() is false, and rebound the same port. Port 8765 was not used.
+EPHEMERAL_SELF_TERMINATE=PASS
+A real FastMCP/Uvicorn server ran on an ephemeral localhost port. The patched evaluation returned non-revoked first and revoked only after server.started; the watchdog set should_exit, serve_task completed without cancellation, and the same port rebound successfully. Port 8765 was not used.
 
 TARGETED_TESTS:
-Command: .venv\Scripts\python.exe -m pytest -q tests/test_mcp_persistent_http_runner.py tests/test_mcp_shared_backend_server_mode.py
-Result: 21 passed, 1 AuthlibDeprecationWarning. No other test modules or full suite were run.
-git diff --check for production/test edits: PASS (tracked source and test diffs plus the untracked new test diff checked). The aggregate check after embedding raw FULL_DIFFS in walkthrough.md flags only whitespace-prefixed blank context lines inside that report section.
+Command: .venv\Scripts\python.exe -m pytest -q tests/test_mcp_backend_owner.py tests/test_mcp_persistent_http_runner.py tests/test_mcp_shared_backend_server_mode.py
+Result: 88 passed, 1 AuthlibDeprecationWarning. No other test modules or full suite were run.
+git diff --check for the five implementation/test files before report generation: PASS.
 
 CONTEXTOR_POST_EDIT:
-canonical_state=fresh
-canonical_revision=1622
-workspace_sync=verified
-LIVE events: revisions 1620-1622, all desktop_watcher UPDATED events for the production file and both changed test files.
+Fetched BackendOwnerInstanceRevoked, claim_backend_owner, _evaluate_persistent_backend_owner, _watch_persistent_backend_owner, _run_persistent_http_server, and main. All six returned canonical_state=fresh and workspace_sync=verified at canonical_revision=1628.
+LIVE events: revisions 1623-1628; all six were desktop_watcher UPDATED events covering both production files and all three changed test files.
 continuity=continuous
 resync_required=false
-Fetched active implementations: _create_persistent_http_server, _run_persistent_http_server, main; fetched the new ephemeral runtime test and the updated persistent-backend main regression. Each returned canonical_state=fresh and workspace_sync=verified.
 
 IMPLEMENTATION_RESULT=PASS
 
 FULL_DIFFS
 BEGIN_ACTUAL_DIFFS
+diff --git a/contextor/mcp_backend_control.py b/contextor/mcp_backend_control.py
+index 2df4ab9..69e9ecd 100644
+--- a/contextor/mcp_backend_control.py
++++ b/contextor/mcp_backend_control.py
+@@ -67,6 +67,10 @@ class BackendOwnerLivenessUnknown(BackendControlError):
+     """The current backend host-owner process cannot be classified safely."""
+ 
+ 
++class BackendOwnerInstanceRevoked(BackendControlError):
++    """The current backend instance lost its exact lifecycle owner and must terminate."""
++
++
+ @dataclass(
+     frozen=True,
+     slots=True,
+@@ -301,6 +305,10 @@ def claim_backend_owner(
+                 raise BackendOwnerLivenessUnknown(
+                     "current backend host owner liveness is unknown"
+                 )
++            if owner_state == "stale":
++                raise BackendOwnerInstanceRevoked(
++                    "backend instance lost its lifecycle owner and must be replaced"
++                )
+             if owner_state != "stale":
+                 raise BackendOwnerLivenessUnknown(
+                     "current backend host owner state is invalid"
+@@ -1089,6 +1097,7 @@ __all__ = [
+     "BACKEND_SERVER_NAME",
+     "BackendControlError",
+     "BackendOwnerAlreadyClaimed",
++    "BackendOwnerInstanceRevoked",
+     "BackendOwnerLivenessUnknown",
+     "BackendStatus",
+     "backend_control_lock_path",
 diff --git a/contextor/mcp_server.py b/contextor/mcp_server.py
-index 6cd3df4..6e7d342 100644
+index 6e7d342..06173d3 100644
 --- a/contextor/mcp_server.py
 +++ b/contextor/mcp_server.py
-@@ -170,6 +170,9 @@ _ensure_virtual_environment()
- warnings.filterwarnings("ignore")
- 
- from typing import Any, Callable
-+
-+import uvicorn
-+
- from fastmcp import FastMCP
- from fastmcp.server.auth.auth import AccessToken, TokenVerifier
- from fastmcp.exceptions import ToolError
-@@ -979,6 +982,36 @@ def _register_server_root(
+@@ -193,7 +193,11 @@ from contextor.mcp_process_registry import (
+     terminate_registered_process,
+ )
+ from contextor.mcp_backend_state import (
++    BackendHostOwnerClaim,
++    BackendOwnerClaimError,
+     PersistentBackendLease,
++    classify_backend_owner_process,
++    read_backend_owner_claim,
+ )
+ from contextor.mcp.documentation import short_description
+ from contextor.mcp.tools.get_artifact_blast_radius import (
+@@ -982,6 +986,70 @@ def _register_server_root(
      )
  
  
-+def _create_persistent_http_server(
++_PERSISTENT_BACKEND_OWNER_POLL_INTERVAL = 0.75
++
++
++def _evaluate_persistent_backend_owner(
 +    *,
-+    host: str,
-+    port: int,
-+) -> uvicorn.Server:
-+    app = mcp.http_app(
-+        path=None,
-+        transport="streamable-http",
-+        middleware=None,
-+        stateless_http=None,
-+    )
++    backend_instance_id: str,
++    pinned_claim: BackendHostOwnerClaim | None,
++) -> tuple[BackendHostOwnerClaim | None, bool]:
++    try:
++        current = read_backend_owner_claim()
++    except BackendOwnerClaimError:
++        return pinned_claim, False
 +
-+    config = uvicorn.Config(
-+        app,
-+        host=host,
-+        port=port,
-+        timeout_graceful_shutdown=0,
-+        lifespan="on",
-+        log_level=mcp._deprecated_settings.log_level.lower(),
-+    )
++    if pinned_claim is None:
++        if (
++            current is None
++            or current.backend_instance_id != backend_instance_id
++        ):
++            return None, False
 +
-+    return uvicorn.Server(config)
++        owner_state = classify_backend_owner_process(current)
++
++        if owner_state == "match":
++            return current, False
++
++        if owner_state == "stale":
++            return None, True
++
++        return None, False
++
++    if current != pinned_claim:
++        return pinned_claim, True
++
++    owner_state = classify_backend_owner_process(pinned_claim)
++
++    if owner_state == "stale":
++        return pinned_claim, True
++
++    return pinned_claim, False
 +
 +
-+async def _run_persistent_http_server(
++async def _watch_persistent_backend_owner(
 +    server: uvicorn.Server,
++    *,
++    backend_instance_id: str,
++    poll_interval: float = _PERSISTENT_BACKEND_OWNER_POLL_INTERVAL,
 +) -> None:
-+    await server.serve()
++    pinned_claim = None
 +
-+
- def main():
-     """Entry point for the MCP server."""
-     if sys.platform == "win32":
-@@ -1104,7 +1137,15 @@ def main():
-         )
- 
-         async def _run():
--            if transport in _HTTP_TRANSPORTS:
-+            if role == "persistent-backend":
-+                server = _create_persistent_http_server(
-+                    host=http_host,
-+                    port=http_port,
-+                )
-+                await _run_persistent_http_server(
-+                    server
-+                )
-+            elif transport in _HTTP_TRANSPORTS:
-                 await mcp.run_http_async(
-                     transport="streamable-http",
-                     host=http_host,
-diff --git a/tests/test_mcp_shared_backend_server_mode.py b/tests/test_mcp_shared_backend_server_mode.py
-index d2bc63c..2640243 100644
---- a/tests/test_mcp_shared_backend_server_mode.py
-+++ b/tests/test_mcp_shared_backend_server_mode.py
-@@ -574,7 +574,19 @@ def test_persistent_http_main_uses_shared_registry_without_root_registration(
-             "stdio transport selected"
-         )
- 
--    async def fake_http(**kwargs):
-+    server = object()
-+
-+    def fake_create_server(**kwargs):
-+        events.append(
-+            (
-+                "create_server",
-+                kwargs,
++    while not server.should_exit:
++        pinned_claim, instance_revoked = (
++            _evaluate_persistent_backend_owner(
++                backend_instance_id=backend_instance_id,
++                pinned_claim=pinned_claim,
 +            )
 +        )
-+        return server
 +
-+    async def fake_run_server(actual_server):
-+        assert actual_server is server
-         record = read_backend_record()
-         assert record is not None
-         assert record.pid == os.getpid()
-@@ -586,10 +598,15 @@ def test_persistent_http_main_uses_shared_registry_without_root_registration(
-         events.append(
-             (
-                 "http",
--                kwargs,
-+                actual_server,
++        if instance_revoked:
++            server.should_exit = True
++            return
++
++        await asyncio.sleep(poll_interval)
++
++
+ def _create_persistent_http_server(
+     *,
+     host: str,
+@@ -1008,8 +1076,26 @@ def _create_persistent_http_server(
+ 
+ async def _run_persistent_http_server(
+     server: uvicorn.Server,
++    *,
++    backend_instance_id: str,
++    owner_poll_interval: float = _PERSISTENT_BACKEND_OWNER_POLL_INTERVAL,
+ ) -> None:
+-    await server.serve()
++    watchdog_task = asyncio.create_task(
++        _watch_persistent_backend_owner(
++            server,
++            backend_instance_id=backend_instance_id,
++            poll_interval=owner_poll_interval,
++        )
++    )
++
++    try:
++        await server.serve()
++    finally:
++        watchdog_task.cancel()
++        try:
++            await watchdog_task
++        except asyncio.CancelledError:
++            pass
+ 
+ 
+ def main():
+@@ -1143,7 +1229,8 @@ def main():
+                     port=http_port,
+                 )
+                 await _run_persistent_http_server(
+-                    server
++                    server,
++                    backend_instance_id=backend_lease.record.instance_id,
+                 )
+             elif transport in _HTTP_TRANSPORTS:
+                 await mcp.run_http_async(
+diff --git a/tests/test_mcp_backend_owner.py b/tests/test_mcp_backend_owner.py
+index 63cc2c6..897b9b4 100644
+--- a/tests/test_mcp_backend_owner.py
++++ b/tests/test_mcp_backend_owner.py
+@@ -428,7 +428,7 @@ def test_claim_backend_owner_rejects_live_foreign_owner(
+         ProcessIdentityProbe("alive", sys.executable, 333),
+     ],
+ )
+-def test_claim_backend_owner_takes_over_stale_owner(
++def test_claim_backend_owner_revokes_same_instance_stale_owner_without_write(
+     tmp_path,
+     monkeypatch,
+     probe_for_existing,
+@@ -443,17 +443,20 @@ def test_claim_backend_owner_takes_over_stale_owner(
+         return ProcessIdentityProbe("alive", sys.executable, 123456789)
+ 
+     monkeypatch.setattr(state, "probe_process_identity", probe)
++    before = state.backend_owner_claim_path().read_bytes()
+ 
+-    replacement = control.claim_backend_owner(
+-        host_owner_identity="replacement-host",
+-        host_kind="desktop",
+-        owner_token="replacement-token",
+-    )
++    with pytest.raises(
++        control.BackendOwnerInstanceRevoked,
++        match="backend instance lost its lifecycle owner and must be replaced",
++    ):
++        control.claim_backend_owner(
++            host_owner_identity="replacement-host",
++            host_kind="desktop",
++            owner_token="replacement-token",
++        )
+ 
+-    assert replacement.backend_instance_id == record.instance_id
+-    assert replacement.host_owner_identity == "replacement-host"
+-    assert replacement != existing
+-    assert state.read_backend_owner_claim() == replacement
++    assert existing.backend_instance_id == record.instance_id
++    assert state.backend_owner_claim_path().read_bytes() == before
+ 
+ 
+ def test_claim_backend_owner_unknown_liveness_fails_without_write(
+diff --git a/tests/test_mcp_persistent_http_runner.py b/tests/test_mcp_persistent_http_runner.py
+index 8945c3d..f70e3e8 100644
+--- a/tests/test_mcp_persistent_http_runner.py
++++ b/tests/test_mcp_persistent_http_runner.py
+@@ -1,9 +1,14 @@
+ import asyncio
+ import socket
++from types import SimpleNamespace
+ 
+ import pytest
+ 
+ from contextor import mcp_server
++from contextor.mcp_backend_state import (
++    BackendHostOwnerClaim,
++    BackendOwnerClaimError,
++)
+ 
+ 
+ def _configure_main(
+@@ -76,6 +81,24 @@ def _configure_main(
+     )
+ 
+ 
++def _owner_claim(
++    backend_instance_id="backend-current",
++    *,
++    owner_token="owner-token",
++):
++    return BackendHostOwnerClaim(
++        schema_version=1,
++        backend_instance_id=backend_instance_id,
++        host_owner_identity="host-owner",
++        host_kind="desktop",
++        host_pid=123,
++        host_executable="python.exe",
++        host_creation_time=456,
++        owner_token=owner_token,
++        claimed_at=1.0,
++    )
++
++
+ def test_create_persistent_http_server_uses_exact_fastmcp_and_uvicorn_config(
+     monkeypatch,
+ ):
+@@ -162,7 +185,8 @@ def test_run_persistent_http_server_awaits_serve_once():
+ 
+     asyncio.run(
+         mcp_server._run_persistent_http_server(
+-            server
++            server,
++            backend_instance_id="backend-runner-test",
+         )
+     )
+ 
+@@ -180,7 +204,8 @@ def test_run_persistent_http_server_propagates_serve_exception():
+     ):
+         asyncio.run(
+             mcp_server._run_persistent_http_server(
+-                FakeServer()
++                FakeServer(),
++                backend_instance_id="backend-runner-test",
              )
          )
  
-+    async def fail_http(**_kwargs):
-+        pytest.fail(
-+            "persistent backend used FastMCP run_http_async"
-+        )
-+
-     monkeypatch.setattr(
-         mcp_server.mcp,
-         "run_stdio_async",
-@@ -598,7 +615,17 @@ def test_persistent_http_main_uses_shared_registry_without_root_registration(
-     monkeypatch.setattr(
-         mcp_server.mcp,
-         "run_http_async",
--        fake_http,
-+        fail_http,
-+    )
-+    monkeypatch.setattr(
-+        mcp_server,
-+        "_create_persistent_http_server",
-+        fake_create_server,
-+    )
-+    monkeypatch.setattr(
-+        mcp_server,
-+        "_run_persistent_http_server",
-+        fake_run_server,
+@@ -197,8 +222,14 @@ def test_persistent_backend_main_uses_controlled_runner_and_finalizes_lease(
+         role="persistent-backend",
+         transport="streamable-http",
      )
++    backend_instance_id = "active-backend-instance"
+ 
+     class FakeLease:
++        def __init__(self):
++            self.record = SimpleNamespace(
++                instance_id=backend_instance_id
++            )
++
+         @classmethod
+         def acquire(cls, **kwargs):
+             events.append(
+@@ -223,9 +254,14 @@ def test_persistent_backend_main_uses_controlled_runner_and_finalizes_lease(
+         )
+         return server
+ 
+-    async def fake_run_server(actual_server):
++    async def fake_run_server(
++        actual_server,
++        *,
++        backend_instance_id,
++    ):
+         assert actual_server is server
+-        events.append(("serve",))
++        assert backend_instance_id == "active-backend-instance"
++        events.append(("serve", backend_instance_id))
+ 
+     async def fail_http(**_kwargs):
+         pytest.fail(
+@@ -265,7 +301,7 @@ def test_persistent_backend_main_uses_controlled_runner_and_finalizes_lease(
  
      mcp_server.main()
-@@ -616,12 +643,23 @@ def test_persistent_http_main_uses_shared_registry_without_root_registration(
  
-     assert len(http_events) == 1
+-    assert events.index(("serve",)) < events.index(("shutdown",))
++    assert events.index(("serve", backend_instance_id)) < events.index(("shutdown",))
+     assert events.index(("shutdown",)) < events.index(("lease_release",))
  
--    assert http_events[0][1] == {
--        "transport": "streamable-http",
--        "host": "127.0.0.1",
--        "port": 8765,
--        "show_banner": False,
--    }
-+    assert http_events[0][1] is server
-+
-+    create_events = [
-+        event
-+        for event in events
-+        if event[0] == "create_server"
-+    ]
-+
-+    assert create_events == [
-+        (
-+            "create_server",
-+            {
-+                "host": "127.0.0.1",
-+                "port": 8765,
-+            },
-+        )
-+    ]
  
-     assert (
-         "shutdown",
-diff --git a/tests/test_mcp_persistent_http_runner.py b/tests/test_mcp_persistent_http_runner.py
-new file mode 100644
-index 0000000..8945c3d
---- /dev/null
-+++ b/tests/test_mcp_persistent_http_runner.py
-@@ -0,0 +1,432 @@
-+import asyncio
-+import socket
-+
-+import pytest
-+
-+from contextor import mcp_server
-+
-+
-+def _configure_main(
-+    monkeypatch,
-+    tmp_path,
-+    events,
-+    *,
-+    role,
-+    transport,
-+):
-+    registry = tmp_path / "registry"
-+
-+    monkeypatch.setattr(
-+        mcp_server.sys,
-+        "platform",
-+        "linux",
-+    )
-+    monkeypatch.setattr(
-+        mcp_server,
-+        "_MCP_BOOTSTRAP_TRANSPORT",
-+        transport,
-+    )
-+    monkeypatch.setenv(
-+        "CONTEXTOR_MCP_TRANSPORT",
-+        transport,
-+    )
-+    monkeypatch.setenv(
-+        "CONTEXTOR_MCP_SERVER_ROLE",
-+        role,
-+    )
-+    monkeypatch.setenv(
-+        "CONTEXTOR_MCP_PROCESS_REGISTRY",
-+        str(registry),
-+    )
-+    monkeypatch.setenv(
-+        "CONTEXTOR_STATE_DIR",
-+        str(tmp_path / "state"),
-+    )
-+    if transport in mcp_server._HTTP_TRANSPORTS:
-+        monkeypatch.setenv(
-+            "CONTEXTOR_MCP_HOST",
-+            "127.0.0.1",
-+        )
-+        monkeypatch.setenv(
-+            "CONTEXTOR_MCP_PORT",
-+            "8765",
-+        )
-+
-+    monkeypatch.setattr(
-+        mcp_server,
-+        "_cleanup_orphaned_processes",
-+        lambda _directory: None,
-+    )
-+    monkeypatch.setattr(
-+        mcp_server,
-+        "_register_server_root",
-+        lambda _directory, _role: None,
-+    )
-+    monkeypatch.setattr(
-+        mcp_server,
-+        "_shutdown_mcp_owned_processes",
-+        lambda _directory, _owner_pid: events.append(
-+            ("shutdown",)
-+        ),
-+    )
-+    monkeypatch.setattr(
-+        mcp_server.atexit,
-+        "register",
-+        lambda _callback: None,
-+    )
-+
-+
-+def test_create_persistent_http_server_uses_exact_fastmcp_and_uvicorn_config(
+@@ -375,7 +411,187 @@ def test_stdio_main_keeps_fastmcp_runner(
+     assert events.count(("stdio",)) == 1
+ 
+ 
+-def test_persistent_http_server_exits_normally_and_releases_ephemeral_port():
++@pytest.mark.parametrize(
++    ("case", "expected_pinned", "expected_revoked"),
++    [
++        ("unarmed_no_claim", None, False),
++        ("unarmed_other_instance", None, False),
++        ("unarmed_match", "current", False),
++        ("unarmed_unknown", None, False),
++        ("unarmed_stale", None, True),
++        ("armed_match", "pinned", False),
++        ("armed_unknown", "pinned", False),
++        ("armed_stale", "pinned", True),
++        ("armed_missing", "pinned", True),
++        ("armed_replaced", "pinned", True),
++        ("unarmed_read_error", None, False),
++        ("armed_read_error", "pinned", False),
++    ],
++    ids=[
++        "unarmed-no-claim",
++        "unarmed-other-instance",
++        "unarmed-current-match",
++        "unarmed-current-unknown",
++        "unarmed-current-stale",
++        "armed-exact-match",
++        "armed-exact-unknown",
++        "armed-exact-stale",
++        "armed-claim-missing",
++        "armed-claim-replaced",
++        "unarmed-claim-read-error",
++        "armed-claim-read-error",
++    ],
++)
++def test_evaluate_persistent_backend_owner_state_machine(
++    case,
++    expected_pinned,
++    expected_revoked,
 +    monkeypatch,
 +):
-+    host = "127.0.0.1"
-+    port = 43127
-+    app = object()
-+    config = object()
-+    calls = []
++    pinned_claim = (
++        _owner_claim()
++        if expected_pinned == "pinned"
++        or case.startswith("armed_")
++        else None
++    )
++    if case in {
++        "unarmed_no_claim",
++        "armed_missing",
++        "unarmed_read_error",
++        "armed_read_error",
++    }:
++        current_claim = None
++    elif case == "unarmed_other_instance":
++        current_claim = _owner_claim("backend-other")
++    elif case == "armed_replaced":
++        current_claim = _owner_claim(owner_token="replacement-token")
++    elif case.startswith("armed_"):
++        current_claim = pinned_claim
++    else:
++        current_claim = _owner_claim()
 +
-+    def fake_http_app(**kwargs):
-+        calls.append(("http_app", kwargs))
-+        return app
++    owner_state = {
++        "unarmed_match": "match",
++        "unarmed_unknown": "unknown",
++        "unarmed_stale": "stale",
++        "armed_match": "match",
++        "armed_unknown": "unknown",
++        "armed_stale": "stale",
++    }.get(case)
++    classified_claims = []
 +
-+    def fake_config(actual_app, **kwargs):
-+        calls.append(
-+            (
-+                "config",
-+                actual_app,
-+                kwargs,
-+            )
++    def fake_read_claim():
++        if case in {"unarmed_read_error", "armed_read_error"}:
++            raise BackendOwnerClaimError("malformed owner claim")
++        return current_claim
++
++    def fake_classify(claim):
++        classified_claims.append(claim)
++        return owner_state
++
++    monkeypatch.setattr(
++        mcp_server,
++        "read_backend_owner_claim",
++        fake_read_claim,
++    )
++    monkeypatch.setattr(
++        mcp_server,
++        "classify_backend_owner_process",
++        fake_classify,
++    )
++
++    result = mcp_server._evaluate_persistent_backend_owner(
++        backend_instance_id="backend-current",
++        pinned_claim=pinned_claim,
++    )
++
++    expected_claim = {
++        "current": current_claim,
++        "pinned": pinned_claim,
++    }.get(expected_pinned)
++    assert result == (expected_claim, expected_revoked)
++
++    if case in {
++        "unarmed_no_claim",
++        "unarmed_other_instance",
++        "armed_missing",
++        "armed_replaced",
++        "unarmed_read_error",
++        "armed_read_error",
++    }:
++        assert classified_claims == []
++    else:
++        assert classified_claims == [
++            pinned_claim if case.startswith("armed_") else current_claim
++        ]
++
++
++def test_watchdog_revokes_server_without_cancelling_serve_task(monkeypatch):
++    class FakeServer:
++        should_exit = False
++
++    async def exercise_watchdog():
++        server = FakeServer()
++        serve_finished = asyncio.Event()
++
++        async def fake_serve():
++            await serve_finished.wait()
++
++        serve_task = asyncio.create_task(fake_serve())
++        await asyncio.sleep(0)
++
++        monkeypatch.setattr(
++            mcp_server,
++            "_evaluate_persistent_backend_owner",
++            lambda **_kwargs: (None, True),
 +        )
-+        return config
 +
++        await mcp_server._watch_persistent_backend_owner(
++            server,
++            backend_instance_id="backend-watchdog-test",
++            poll_interval=0.001,
++        )
++
++        assert server.should_exit is True
++        assert serve_task.cancelled() is False
++        serve_finished.set()
++        await serve_task
++
++    asyncio.run(exercise_watchdog())
++
++
++def test_watchdog_continues_polling_until_instance_is_revoked(monkeypatch):
 +    class FakeServer:
-+        def __init__(self, actual_config):
-+            self.config = actual_config
-+
-+    monkeypatch.setattr(
-+        mcp_server.mcp,
-+        "http_app",
-+        fake_http_app,
-+    )
-+    monkeypatch.setattr(
-+        mcp_server.uvicorn,
-+        "Config",
-+        fake_config,
-+    )
-+    monkeypatch.setattr(
-+        mcp_server.uvicorn,
-+        "Server",
-+        FakeServer,
-+    )
-+
-+    server = mcp_server._create_persistent_http_server(
-+        host=host,
-+        port=port,
-+    )
-+
-+    assert isinstance(server, FakeServer)
-+    assert server.config is config
-+    assert calls == [
-+        (
-+            "http_app",
-+            {
-+                "path": None,
-+                "transport": "streamable-http",
-+                "middleware": None,
-+                "stateless_http": None,
-+            },
-+        ),
-+        (
-+            "config",
-+            app,
-+            {
-+                "host": host,
-+                "port": port,
-+                "timeout_graceful_shutdown": 0,
-+                "lifespan": "on",
-+                "log_level": mcp_server.mcp._deprecated_settings.log_level.lower(),
-+            },
-+        ),
-+    ]
-+
-+
-+def test_run_persistent_http_server_awaits_serve_once():
-+    class FakeServer:
-+        def __init__(self):
-+            self.serve_calls = 0
-+
-+        async def serve(self):
-+            self.serve_calls += 1
++        should_exit = False
 +
 +    server = FakeServer()
++    calls = []
++
++    def evaluate(**_kwargs):
++        calls.append(None)
++        return None, len(calls) > 1
++
++    monkeypatch.setattr(
++        mcp_server,
++        "_evaluate_persistent_backend_owner",
++        evaluate,
++    )
 +
 +    asyncio.run(
-+        mcp_server._run_persistent_http_server(
-+            server
++        mcp_server._watch_persistent_backend_owner(
++            server,
++            backend_instance_id="backend-watchdog-test",
++            poll_interval=0.001,
 +        )
 +    )
 +
-+    assert server.serve_calls == 1
++    assert len(calls) == 2
++    assert server.should_exit is True
 +
 +
-+def test_run_persistent_http_server_propagates_serve_exception():
-+    class FakeServer:
-+        async def serve(self):
-+            raise RuntimeError("serve failed")
-+
-+    with pytest.raises(
-+        RuntimeError,
-+        match="serve failed",
-+    ):
-+        asyncio.run(
-+            mcp_server._run_persistent_http_server(
-+                FakeServer()
-+            )
-+        )
-+
-+
-+def test_persistent_backend_main_uses_controlled_runner_and_finalizes_lease(
-+    tmp_path,
++def test_persistent_http_server_exits_normally_and_releases_ephemeral_port(
 +    monkeypatch,
 +):
-+    events = []
-+    _configure_main(
-+        monkeypatch,
-+        tmp_path,
-+        events,
-+        role="persistent-backend",
-+        transport="streamable-http",
-+    )
-+
-+    class FakeLease:
-+        @classmethod
-+        def acquire(cls, **kwargs):
-+            events.append(
-+                (
-+                    "lease_acquire",
-+                    kwargs,
-+                )
-+            )
-+            return cls()
-+
-+        def release(self):
-+            events.append(("lease_release",))
-+
-+    server = object()
-+
-+    def fake_create_server(**kwargs):
-+        events.append(
-+            (
-+                "create_server",
-+                kwargs,
-+            )
+     host = "127.0.0.1"
+     with socket.socket() as probe:
+         probe.bind((host, 0))
+@@ -386,9 +602,15 @@ def test_persistent_http_server_exits_normally_and_releases_ephemeral_port():
+             host=host,
+             port=port,
+         )
++        monkeypatch.setattr(
++            mcp_server,
++            "_evaluate_persistent_backend_owner",
++            lambda **_kwargs: (None, False),
 +        )
-+        return server
-+
-+    async def fake_run_server(actual_server):
-+        assert actual_server is server
-+        events.append(("serve",))
-+
-+    async def fail_http(**_kwargs):
-+        pytest.fail(
-+            "persistent backend used FastMCP run_http_async"
-+        )
-+
-+    async def fail_stdio():
-+        pytest.fail(
-+            "stdio transport selected"
-+        )
-+
-+    monkeypatch.setattr(
-+        mcp_server,
-+        "PersistentBackendLease",
-+        FakeLease,
-+    )
-+    monkeypatch.setattr(
-+        mcp_server,
-+        "_create_persistent_http_server",
-+        fake_create_server,
-+    )
-+    monkeypatch.setattr(
-+        mcp_server,
-+        "_run_persistent_http_server",
-+        fake_run_server,
-+    )
-+    monkeypatch.setattr(
-+        mcp_server.mcp,
-+        "run_http_async",
-+        fail_http,
-+    )
-+    monkeypatch.setattr(
-+        mcp_server.mcp,
-+        "run_stdio_async",
-+        fail_stdio,
-+    )
-+
-+    mcp_server.main()
-+
-+    assert events.index(("serve",)) < events.index(("shutdown",))
-+    assert events.index(("shutdown",)) < events.index(("lease_release",))
+         serve_task = asyncio.create_task(
+             mcp_server._run_persistent_http_server(
+-                server
++                server,
++                backend_instance_id="backend-runner-test",
+             )
+         )
+ 
+@@ -430,3 +652,76 @@ def test_persistent_http_server_exits_normally_and_releases_ephemeral_port():
+     with socket.socket() as rebound:
+         rebound.bind((host, port))
+         rebound.listen()
 +
 +
-+def test_host_owned_http_main_keeps_fastmcp_runner(
-+    tmp_path,
++def test_persistent_http_server_self_terminates_on_owner_revocation(
 +    monkeypatch,
 +):
-+    events = []
-+    _configure_main(
-+        monkeypatch,
-+        tmp_path,
-+        events,
-+        role="host-owned",
-+        transport="streamable-http",
-+    )
-+
-+    async def fake_http(**kwargs):
-+        events.append(
-+            (
-+                "http",
-+                kwargs,
-+            )
-+        )
-+
-+    async def fail_controlled_server(*_args, **_kwargs):
-+        pytest.fail(
-+            "host-owned HTTP used the persistent server runner"
-+        )
-+
-+    async def fail_stdio():
-+        pytest.fail(
-+            "stdio transport selected"
-+        )
-+
-+    monkeypatch.setattr(
-+        mcp_server.mcp,
-+        "run_http_async",
-+        fake_http,
-+    )
-+    monkeypatch.setattr(
-+        mcp_server.mcp,
-+        "run_stdio_async",
-+        fail_stdio,
-+    )
-+    monkeypatch.setattr(
-+        mcp_server,
-+        "_create_persistent_http_server",
-+        lambda **_kwargs: pytest.fail(
-+            "host-owned HTTP constructed the persistent server"
-+        ),
-+    )
-+    monkeypatch.setattr(
-+        mcp_server,
-+        "_run_persistent_http_server",
-+        fail_controlled_server,
-+    )
-+
-+    mcp_server.main()
-+
-+    assert events.count(
-+        (
-+            "http",
-+            {
-+                "transport": "streamable-http",
-+                "host": "127.0.0.1",
-+                "port": 8765,
-+                "show_banner": False,
-+            },
-+        )
-+    ) == 1
-+
-+
-+def test_stdio_main_keeps_fastmcp_runner(
-+    tmp_path,
-+    monkeypatch,
-+):
-+    events = []
-+    _configure_main(
-+        monkeypatch,
-+        tmp_path,
-+        events,
-+        role="host-owned",
-+        transport="stdio",
-+    )
-+
-+    async def fake_stdio():
-+        events.append(("stdio",))
-+
-+    async def fail_http(**_kwargs):
-+        pytest.fail(
-+            "HTTP transport selected"
-+        )
-+
-+    monkeypatch.setattr(
-+        mcp_server.mcp,
-+        "run_stdio_async",
-+        fake_stdio,
-+    )
-+    monkeypatch.setattr(
-+        mcp_server.mcp,
-+        "run_http_async",
-+        fail_http,
-+    )
-+
-+    mcp_server.main()
-+
-+    assert events.count(("stdio",)) == 1
-+
-+
-+def test_persistent_http_server_exits_normally_and_releases_ephemeral_port():
 +    host = "127.0.0.1"
 +    with socket.socket() as probe:
 +        probe.bind((host, 0))
@@ -597,9 +578,29 @@ index 0000000..8945c3d
 +            host=host,
 +            port=port,
 +        )
++        evaluations = []
++
++        def evaluate(
++            *,
++            backend_instance_id,
++            pinned_claim,
++        ):
++            assert backend_instance_id == "backend-watchdog-test"
++            evaluations.append(server.started)
++            if len(evaluations) == 1 or not server.started:
++                return pinned_claim, False
++            return pinned_claim, True
++
++        monkeypatch.setattr(
++            mcp_server,
++            "_evaluate_persistent_backend_owner",
++            evaluate,
++        )
 +        serve_task = asyncio.create_task(
 +            mcp_server._run_persistent_http_server(
-+                server
++                server,
++                backend_instance_id="backend-watchdog-test",
++                owner_poll_interval=0.01,
 +            )
 +        )
 +
@@ -615,33 +616,65 @@ index 0000000..8945c3d
 +                    )
 +                await asyncio.sleep(0.01)
 +
-+        try:
-+            await asyncio.wait_for(
-+                wait_until_started(),
-+                timeout=10,
-+            )
-+            server.should_exit = True
-+            done, _pending = await asyncio.wait(
-+                {serve_task},
-+                timeout=10,
-+            )
-+            assert serve_task in done
-+            await serve_task
-+            assert serve_task.cancelled() is False
-+        finally:
-+            if not serve_task.done():
-+                server.should_exit = True
-+                await asyncio.wait(
-+                    {serve_task},
-+                    timeout=10,
-+                )
++        await asyncio.wait_for(
++            wait_until_started(),
++            timeout=10,
++        )
++        done, _pending = await asyncio.wait(
++            {serve_task},
++            timeout=10,
++        )
++        assert serve_task in done
++        await serve_task
++        assert serve_task.cancelled() is False
++        assert server.should_exit is True
++        assert evaluations[0] is False
++        assert any(evaluations[1:])
 +
 +    asyncio.run(exercise_server())
 +
 +    with socket.socket() as rebound:
 +        rebound.bind((host, port))
 +        rebound.listen()
+diff --git a/tests/test_mcp_shared_backend_server_mode.py b/tests/test_mcp_shared_backend_server_mode.py
+index 2640243..395c4b4 100644
+--- a/tests/test_mcp_shared_backend_server_mode.py
++++ b/tests/test_mcp_shared_backend_server_mode.py
+@@ -585,7 +585,11 @@ def test_persistent_http_main_uses_shared_registry_without_root_registration(
+         )
+         return server
+ 
+-    async def fake_run_server(actual_server):
++    async def fake_run_server(
++        actual_server,
++        *,
++        backend_instance_id,
++    ):
+         assert actual_server is server
+         record = read_backend_record()
+         assert record is not None
+@@ -595,10 +599,12 @@ def test_persistent_http_main_uses_shared_registry_without_root_registration(
+         assert record.host == "127.0.0.1"
+         assert record.port == 8765
+         assert Path(record.process_registry) == registry.resolve()
++        assert backend_instance_id == record.instance_id
+         events.append(
+             (
+                 "http",
+                 actual_server,
++                backend_instance_id,
+             )
+         )
+ 
+@@ -644,6 +650,7 @@ def test_persistent_http_main_uses_shared_registry_without_root_registration(
+     assert len(http_events) == 1
+ 
+     assert http_events[0][1] is server
++    assert http_events[0][2]
+ 
+     create_events = [
+         event
 END_ACTUAL_DIFFS
 
 FILES_CHANGED_NOTE:
-walkthrough.md is the requested report and is not included in FILES_CHANGED or in its own diff.
+walkthrough.md is the requested report and is not included in FILES_CHANGED or in its own diff. It contains the full raw diffs above.

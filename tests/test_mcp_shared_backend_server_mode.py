@@ -585,7 +585,11 @@ def test_persistent_http_main_uses_shared_registry_without_root_registration(
         )
         return server
 
-    async def fake_run_server(actual_server):
+    async def fake_run_server(
+        actual_server,
+        *,
+        backend_instance_id,
+    ):
         assert actual_server is server
         record = read_backend_record()
         assert record is not None
@@ -595,10 +599,12 @@ def test_persistent_http_main_uses_shared_registry_without_root_registration(
         assert record.host == "127.0.0.1"
         assert record.port == 8765
         assert Path(record.process_registry) == registry.resolve()
+        assert backend_instance_id == record.instance_id
         events.append(
             (
                 "http",
                 actual_server,
+                backend_instance_id,
             )
         )
 
@@ -644,6 +650,7 @@ def test_persistent_http_main_uses_shared_registry_without_root_registration(
     assert len(http_events) == 1
 
     assert http_events[0][1] is server
+    assert http_events[0][2]
 
     create_events = [
         event

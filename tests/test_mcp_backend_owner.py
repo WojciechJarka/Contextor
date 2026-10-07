@@ -428,7 +428,7 @@ def test_claim_backend_owner_rejects_live_foreign_owner(
         ProcessIdentityProbe("alive", sys.executable, 333),
     ],
 )
-def test_claim_backend_owner_takes_over_stale_owner(
+def test_claim_backend_owner_revokes_same_instance_stale_owner_without_write(
     tmp_path,
     monkeypatch,
     probe_for_existing,
@@ -443,17 +443,20 @@ def test_claim_backend_owner_takes_over_stale_owner(
         return ProcessIdentityProbe("alive", sys.executable, 123456789)
 
     monkeypatch.setattr(state, "probe_process_identity", probe)
+    before = state.backend_owner_claim_path().read_bytes()
 
-    replacement = control.claim_backend_owner(
-        host_owner_identity="replacement-host",
-        host_kind="desktop",
-        owner_token="replacement-token",
-    )
+    with pytest.raises(
+        control.BackendOwnerInstanceRevoked,
+        match="backend instance lost its lifecycle owner and must be replaced",
+    ):
+        control.claim_backend_owner(
+            host_owner_identity="replacement-host",
+            host_kind="desktop",
+            owner_token="replacement-token",
+        )
 
-    assert replacement.backend_instance_id == record.instance_id
-    assert replacement.host_owner_identity == "replacement-host"
-    assert replacement != existing
-    assert state.read_backend_owner_claim() == replacement
+    assert existing.backend_instance_id == record.instance_id
+    assert state.backend_owner_claim_path().read_bytes() == before
 
 
 def test_claim_backend_owner_unknown_liveness_fails_without_write(
