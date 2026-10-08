@@ -1,429 +1,190 @@
-# L14_SEMANTIC_FIXPOINT_FAN_IN_REGRESSION
+# L37 / L38 Durable and LIVE Authority Discovery
 
 ## CURRENT_HEAD
 
-- `git rev-parse HEAD`: `90755ea111313ac55fc9bbdc157f25d3f54711ac`.
-- Only the target test and this required report are modified. `plan_executor.py` and other production files are unchanged.
-- Contextor MCP discovery preceded source/Git verification. At LIVE revision `1637`, the test module and executor module had fresh syntax diagnostics with no errors. `execute_refresh_plan` implementation was retrieved completely in source ranges `758-1015` and `1016-1273` after its symbol fetch required confirmation due to output size.
-- Contextor `artifact_consumption` fact lineage identifies `RepositoryAnalysisState.artifact_consumption` as canonical owner, `_rebuild_consumer_slice` as the incremental consumer-slice producer, and `IncrementalAnalysisEngine._apply_delta_and_commit` as incremental state installer. The lineage response was LIVE, revision `1637`, `resync_required=false`; its workspace sync was `unverified` for that narrow lineage projection.
+- Repository: C:\Temp\Contextor_Repo
+- HEAD: c23692a38eea6c2cdc2be2e74d9f51238ee72907
+- Contextor-first discovery: deferred Contextor tools were located; current MCP source evidence was read with workspace_sync=verified at canonical revision 1639. Discovery used get_symbol_lineage, contextor_fact_lineage, get_symbol_implementation and get_source_range for the full-analysis facade/coordinator, Live server update/publication, runtime persistence and hydration paths. Git/source inspection below is literal verification, not the architecture source of record.
+- No tests were run. No production or test file was edited.
 
-## EXACT_TEST_SCENARIO
+Evidence labels:
+- CODE_PATH_PROVED: control flow in the checked-out implementation establishes the statement.
+- DIRECT_EVIDENCE: an existing focused test asserts the stated behavior; tests were not executed in this task.
+- CONTRACT_PROVED: documented/exposed call contract establishes the behavior.
+- INFERENCE: consequence derived from source ordering, not an executed process-crash observation.
+- UNKNOWN: source/contract does not establish the claim.
 
-Added `test_semantic_fan_in_recompute_is_once_only_and_order_independent` at `C:\Temp\Contextor_Repo\tests\test_completeness_freshness_parity_proof.py:1023-1234`.
+## L37_FULL_ANALYSIS_CHAIN
 
-Each of two independent temporary repositories starts with:
+### Entry, lease, candidate and identity
 
-```python
-# a.py
+1. MCP project analysis enters _start_analysis_job through C:\Temp\Contextor_Repo\contextor\mcp\tools\analyze_project.py:7-18; the project job calls run_full_analysis_exclusive in C:\Temp\Contextor_Repo\contextor\mcp\analysis_jobs.py:230-300. GUI and CLI also call the exclusive coordinator (C:\Temp\Contextor_Repo\contextor\ui\gui.py:1091-1097; C:\Temp\Contextor_Repo\contextor\cli.py:95). CODE_PATH_PROVED.
+2. acquire_full_analysis in C:\Temp\Contextor_Repo\contextor\core\analysis\full_analysis_coordinator.py:410-581 takes the canonical writer admission gate, process lock and OS lock and returns a lease. run_full_analysis_exclusive at :606-693 calls ContextorFacade.analyze_project while holding that lease and releases it in finally at :681-682. Admission gate cleanup is in _canonical_writer_admission at :122-205; OS/process lock cleanup is in release_full_analysis at :584-603. CODE_PATH_PROVED.
+3. ContextorFacade.analyze_project spans C:\Temp\Contextor_Repo\contextor\core\api\facade.py:557-1291. It initializes repository identity through _initialize_repository_identity at :252-261; then indexes and constructs the full candidate through the indexing/pipeline sections at :675-1050. The candidate RepositoryAnalysisState includes modules, artifacts, graph, canonical artifact-consumption, module usages, lineage and other full-analysis state before persistence. CODE_PATH_PROVED.
+4. Full analysis does not wrap candidate construction in a persistent identity-registry write transaction. _initialize_repository_identity calls ensure_initialized; PersistentIdentityRegistry.ensure_initialized at C:\Temp\Contextor_Repo\contextor\core\reporting_engine\persistent_registry.py:121-127 enters a write transaction only when required registry files are absent. Lineage materialization uses a registry read_transaction in facade.py:264-478 (read scope at :304). The full method itself has no registry transaction() call; the two facade write-transaction call sites found are facade.py:1420 and :1643, outside analyze_project. CODE_PATH_PROVED.
+5. Registry transactions are their own durable unit. PersistentIdentityRegistry.transaction at persistent_registry.py:200-263 writes temp registry files and a committing journal, replaces registry files, removes the journal and releases its lock. _recover_transaction at :172-197 recovers that registry journal only. It does not encompass the engine snapshot pointer or LIVE server state. CODE_PATH_PROVED.
 
-def existing():
-    return 1
+### Snapshot then publication
 
-# z_bridge.py
-import a
+6. analyze_project computes target revision and a FileState payload at facade.py:1080-1105, then calls save_engine_state(... exact_revision=target_revision, file_state_payload=file_state_payload) at :1106-1116. The publication branch is explicitly guarded by if meta is not None at :1134. CODE_PATH_PROVED.
+7. save_engine_state in C:\Temp\Contextor_Repo\contextor\core\analysis\state_manager.py:457-483 wraps save_snapshot, catches exceptions and returns None. Consequently a returned None skips FULL publication at the facade gate; failure is reflected in status, not rolled back through a cross-store transaction. CODE_PATH_PROVED.
+8. save_snapshot in C:\Temp\Contextor_Repo\contextor\core\live_state\store.py:1462-1835 writes the engine generation and associated FileState/lineage material, flushes/fsyncs files, writes/fsyncs metadata temp, then commits metadata with os.replace(meta_tmp, meta_file) at :1768-1797. FULL passes exact_revision, so committed metadata points at a versioned state generation; the default no-exact-revision path has a separate base-pickle replacement at :1784-1793. The FileState payload must match exact_revision (:1729-1752). CODE_PATH_PROVED.
+9. Only after save_engine_state returns non-None does analyze_project connect and call client.publish(state, origin=origin) (facade.py:1130-1147). A non-ok response becomes failed at :1151-1167; thrown exceptions are caught at :1172-1179 and recorded failed/timed_out. There is no disk rollback or LIVE rollback in this exception handler. The facade proceeds to return its analysis result. CODE_PATH_PROVED.
+10. LiveStateClient.publish at C:\Temp\Contextor_Repo\contextor\core\live_state\ipc.py:1879-1888 only sends the publish request. CanonicalLiveServer._execute_publish at :1203-1259 validates candidate revision, marks provenance and assigns self._state and self._revision at :1254-1257; it calls no snapshot persister. _dispatch routes publish straight to this method at :1536-1537. CODE_PATH_PROVED.
+11. IPC server ordering is dispatch then response send: CanonicalLiveServer.serve_forever, ipc.py:1175-1186. If dispatch commits and response send then fails, caller may report a transport error after server memory already changed. This is a possible lost-response boundary, not an observed runtime event. CODE_PATH_PROVED for order; INFERENCE for the concrete transport outcome.
 
-def bridge():
-    return a.added()
+### FULL failure boundary
 
-# m_consumer.py
-import a
-import z_bridge
+- Save failure before metadata commit: save_engine_state catches and returns None; FULL does not invoke publish because of the meta is not None guard. A partially written generation can be orphaned, but exact-revision metadata still points to the previous generation until pointer replacement. CODE_PATH_PROVED.
+- Metadata pointer commit succeeds, connect fails / no client / publish returns error / publish raises: durable authority is the new snapshot; current LIVE server can remain on its previous state. There is no cross-authority rollback. Focused tests test_h3a_case_u_active_daemon_publish_raises_failure_semantics and test_h3a_case_v_active_daemon_publish_failure_response_dict assert disk/FileState at new revision while daemon remains at old revision (details in EXISTING_TEST_EVIDENCE). DIRECT_EVIDENCE.
+- Publication dispatch succeeds but response delivery fails: in-memory server may be new while caller records failure. Since the snapshot was already committed in the FULL path, disk is still new. CODE_PATH_PROVED/INFERENCE.
+- Writer lease release is in run_full_analysis_exclusive.finally (full_analysis_coordinator.py:681-682). It serializes cooperating writers; it is not a rollback or atomic commit spanning snapshot and daemon state. CODE_PATH_PROVED.
 
-def run():
-    return a.added(), z_bridge.bridge()
-```
+## L38_SCOPED_LIVE_CHAIN
 
-After all modules are initially loaded, `a.py` gains `added()`. The test first asserts `a::added` is not in the initial canonical consumption map. The real planner naturally returns `("m_consumer", "z_bridge")`; the test asserts it schedules both modules. The forward case uses that natural order. For the reverse case only, the test constructs a `RefreshPlan` preserving every other field and setting `recompute_modules=("z_bridge", "m_consumer")`. The planner implementation is not changed.
+### Normal canonical service update
 
-## SOURCE_EVIDENCE
+1. run_service loads a snapshot, reads metadata/revision, and creates CanonicalLiveServer with _repository_updater, _repository_persister, and _repository_mutation_guard (C:\Temp\Contextor_Repo\contextor\core\live_state\runtime.py:1395-1410, :1480-1515). CODE_PATH_PROVED.
+2. Desktop queued update dispatch goes through submit_update_file and mutation coordinator (C:\Temp\Contextor_Repo\contextor\core\live_state\ipc.py:1530-1533); _execute_queued_update_file acquires the configured mutation guard (:1261-1269). _repository_mutation_guard at runtime.py:1257-1292 acquires/releases the same canonical writer lease with writer_kind=live_mutation.
+3. Direct LiveStateClient.update_file goes to operation=update_file (ipc.py:1890-1891, dispatch at :1534-1535) and bypasses _execute_queued_update_file's cross-process writer guard. It still enters _execute_update_file and its persistence-before-commit order. CODE_PATH_PROVED.
+4. _repository_updater at runtime.py:1102-1144 checkpoints registry state, runs engine.update_file, and restores checkpoint on updater exception. _repository_persister at :1147-1254 calls save_snapshot with exact_revision, matching FileState payload and previous persisted state at :1183-1199. Persistence exceptions restore the registry checkpoint and re-raise (:1200-1220); success clears the checkpoint and advances its remembered persisted state (:1222-1230).
+5. _execute_update_file at ipc.py:1271-1512 clones the old state and invokes updater against the candidate. If persister exists, it runs before canonical self._state / self._revision assignment (:~1370-1442); persistence errors return failure without replacing the old state (:1390-1418); successful persistence is followed by a state/revision concurrency check and canonical assignment (:1421-1442). The normal runtime always supplies this persister. Thus the normal service update_file operation cannot publish its candidate before its exact-revision snapshot succeeds. CODE_PATH_PROVED.
+6. The persister's exact-revision snapshot uses the versioned metadata-pointer commit order described above. A process death before pointer commit leaves old selected generation; after successful pointer commit but before server-state assignment, restart can select the new durable candidate even though the old server had not exposed it yet. The latter is an INFERENCE from commit order and startup loader.
 
-`C:\Temp\Contextor_Repo\contextor\core\analysis\refresh_planner.py:270-286` selects consumers for artifact additions and sorts the initial recompute tuple. `C:\Temp\Contextor_Repo\contextor\core\domain\refresh_plan.py:39-72` defines the immutable plan fields copied by the reverse-order case.
+### Other scoped routes and boundary qualification
 
-In `C:\Temp\Contextor_Repo\contextor\core\analysis\incremental\plan_executor.py`, candidate artifacts/usages and the target indexes are prepared before the queue (`:789-887`); re-export maps and export surfaces are assembled before it (`:894-905`). The exact queue and downstream scheduling implementation is:
+7. ContextorFacade.analyze_single_file (C:\Temp\Contextor_Repo\contextor\core\api\facade.py:1484-1601) reuses/hydrates state, calls hydrated.engine.update_file at :1564-1585, then calls hydrated.client.publish(... origin="scoped_analysis") at :1587-1593. There is no snapshot save in this method. It ignores the returned publish response and only catches a small set of transport exceptions at :1594-1596. CODE_PATH_PROVED.
+8. The ordinary hydrated candidate retains the loaded canonical revision: the incremental engine update path in C:\Temp\Contextor_Repo\contextor\core\analysis\incremental\engine.py:453-~720 does not assign or increment state.revision; _apply_delta_and_commit is at :760-1018. A canonical server with current revision r rejects a candidate carrying r, because _execute_publish requires at least r+1 (ipc.py:1222-1233). Therefore the current in-repository analyze_single_file route issues an unpersisted publish attempt but source does not show it successfully changing server authority; it is rejected as non-monotonic when hydrated state has its normal revision. CODE_PATH_PROVED. No test establishes this exact rejection.
+9. Separate from scoped update, LiveStateClient.publish is a production method and publish is a server dispatch operation. A caller can send a state carrying exactly current revision+1; _execute_publish accepts it and assigns canonical Live memory with no persister/snapshot call (ipc.py:1203-1259, :1536-1537, client method :1879-1888). Concrete source sequence: durable snapshot P0/revision r and Live P0/r; caller sends P1/revision r+1 via publish; server accepts P1/r+1; process restarts and snapshot loader still selects P0/r because publish wrote no snapshot. This proves an unguarded persistence-free LIVE publication capability. It does not prove that the current analyze_single_file call succeeds, and it is distinct from the normal update_file mutation path. CODE_PATH_PROVED for the accepted branch and missing persistence call; INFERENCE for restart result.
+10. Offline MCP update_file fallback is a third state boundary, not a shared Live server commit. C:\Temp\Contextor_Repo\contextor\mcp\tools\update_file.py:212-228 uses live_client.update_file when connected; otherwise it calls engine.update_file first and _persist_live_engine afterward. _persist_live_engine at :73-104 calls save_engine_state without exact_revision/FileState payload and returns False on persistence failure; fallback caller does not restore engine state. C:\Temp\Contextor_Repo\contextor\mcp\runtime.py:311-419 keeps the engine in process cache or hydrates from disk on a fresh process. A failed save can therefore leave that MCP process's engine changed while restart rehydrates old durable state. This is a separate proved local-cache loss path; it is not evidence that the shared CanonicalLiveServer accepted an unpersisted update_file. CODE_PATH_PROVED.
+11. The fallback uses default non-exact snapshot mode. save_snapshot replaces the base engine pickle before metadata (store.py:1784-1793); loader checks embedded metadata revision equals external metadata revision and returns None on mismatch (:1928-1929). Abrupt termination between those replacements may make the referenced snapshot unloadable. This is an INFERENCE about the crash window, supported by ordering/validation code; no kill-at-boundary test was found.
 
-```python
-        recompute_queue = deque(plan.recompute_modules)
-        scheduled_recompute = set(plan.recompute_modules)
-        processed_recompute: Set[str] = set()
+## DURABLE_VS_LIVE_ORDERING
 
-        while recompute_queue:
-            consumer_path = recompute_queue.popleft()
+| Path | Durable commit | LIVE/in-memory commit | Consequence |
+|---|---|---|---|
+| FULL project analysis | Exact-revision snapshot and FileState metadata pointer first (facade.py:1106-1116; store.py:1768-1797) | Separate client.publish then server assignment (facade.py:1141-1147; ipc.py:1254-1257) | Publication failure leaves durable new / daemon old. |
+| Canonical server update_file | _repository_persister exact snapshot first (runtime.py:1183-1199) | Candidate assignment after persister (ipc.py:1421-1442) | Persistence failure leaves server canonical old. |
+| Canonical server queued update | Same as update_file, under mutation guard | Same server assignment after persistence | Cooperating writer exclusion plus persistence-before-exposure; no cross-store registry/snapshot transaction. |
+| analyze_single_file | No snapshot call in method | Attempts generic publish; candidate retains old revision and normal server rejects it | No proved successful scoped commit via this caller. |
+| Raw LiveStateClient.publish | No snapshot call | Accepts valid next-revision state and assigns server memory | Persistence-free publication can leave disk old across server restart. |
+| MCP offline fallback | Update engine first; then best-effort snapshot save | MCP process-local engine changes before save | Save failure has no engine rollback; restart loads old disk snapshot. |
 
-            if consumer_path in processed_recompute:
-                continue
+The normal FULL path and normal update_file path have different sequencing around LIVE exposure but neither has a single atomic transaction covering all authorities. The raw publication operation is not coupled to snapshot persistence.
 
-            processed_recompute.add(consumer_path)
+## FAILURE_BOUNDARY_MATRIX
 
-            consumer_facts = candidate.module_usages.get(
-                consumer_path
-            )
-            if not consumer_facts:
-                continue
+### A. Durable save succeeds; LIVE publication fails
 
-            previous_slice = _consumer_slice_signature(
-                consumer_path,
-                candidate.artifact_consumption,
-                consumer_target_index,
-            )
+- FULL: confirmed split. Disk snapshot and FileState are revision r+1; daemon may remain r. No rollback. Existing H3A U/V tests assert this state. DIRECT_EVIDENCE + CODE_PATH_PROVED.
+- Scoped server update: not the normal sequence; persister occurs before exposure. If persister succeeds and a later canonical revision identity check fails, disk can be ahead of server; _execute_update_file returns canonical_revision_changed_during_update after persistence (ipc.py:1421-1435). CODE_PATH_PROVED.
+- Startup usage backfill: exact save is performed before server construction (runtime.py:1433-1478); exception aborts startup. The previous selected generation stays authoritative for metadata-pointer failures; focused test below covers exception recovery. CODE_PATH_PROVED/DIRECT_EVIDENCE.
 
-            candidate.artifact_consumption = _rebuild_consumer_slice(
-                consumer=consumer_path,
-                consumer_facts=consumer_facts,
-                candidate_consumption=candidate.artifact_consumption,
-                candidate_artifacts=candidate.artifacts,
-                reexports=reexports,
-                reexport_facts_by_module=candidate.reexport_facts_by_module,
-                module_export_surfaces=module_export_surfaces,
-                expected_targets=expected_targets,
-                dotted_target_index=dotted_target_index,
-                consumer_target_index=consumer_target_index,
-            )
+### B. LIVE publication succeeds; durable save fails
 
-            executed_recompute.append(
-                consumer_path
-            )
+- FULL project chain: save failure returns meta=None, so publish is skipped (facade.py:1107-1116, :1134-1135). This combination is blocked in that chain. CODE_PATH_PROVED.
+- Normal scoped update_file: durable save precedes state assignment; save exceptions return before the LIVE commit. This combination is blocked in this path. CODE_PATH_PROVED.
+- Raw publish: it does not attempt a durable save, so there is no save exception boundary. It can make LIVE newer while disk remains old. This is the persistence-free capability described in L38_SCOPED_LIVE_CHAIN. CODE_PATH_PROVED.
+- Offline MCP fallback: save can fail after process-local engine update; it reports live_state_persisted=False but does not undo the engine update. It is not a shared Live server publication. CODE_PATH_PROVED.
 
-            current_slice = _consumer_slice_signature(
-                consumer_path,
-                candidate.artifact_consumption,
-                consumer_target_index,
-            )
+### C. Process terminates immediately after LIVE publication
 
-            if current_slice == previous_slice:
-                continue
+- FULL: durable exact-revision snapshot was already committed. If daemon process is restarted, it can hydrate that committed revision. If only the publishing client process terminates and daemon survives, daemon memory remains the published revision. CODE_PATH_PROVED for ordering; restart consequence is INFERENCE from startup loader.
+- Normal scoped update: exact snapshot commit precedes server assignment, so after assignment both are already at the new revision. CODE_PATH_PROVED; restart consequence INFERENCE.
+- Raw publish: no snapshot precedes assignment. Server-process termination followed by restart returns to selected disk snapshot, potentially old revision. CODE_PATH_PROVED/INFERENCE.
+- Offline MCP fallback: termination after successful save can recover the new snapshot; termination after failed save loses process-local state. CODE_PATH_PROVED/INFERENCE.
 
-            downstream_consumers = _find_dependent_consumers(
-                consumer_path,
-                candidate.module_usages,
-            )
+### D. Restart after either partial transition
 
-            for downstream_consumer in sorted(
-                downstream_consumers
-            ):
-                if downstream_consumer == delta.module_path:
-                    continue
+run_service uses load_snapshot and passes the loaded state/revision into CanonicalLiveServer (runtime.py:1403-1410, :1480-1515). It does not hydrate from the prior daemon's RAM. load_snapshot selects the state file named by current metadata (store.py:1898-1903), verifies embedded revision matches external metadata (:1928-1929) and returns None for rejected/missing state; no older-generation search is shown. Thus after L37 split, restart selects the new FULL snapshot. After raw persistence-free publish, restart selects the old snapshot. CODE_PATH_PROVED for selection; INFERENCE for authority consequence.
 
-                if downstream_consumer in processed_recompute:
-                    continue
+## ROLLBACK_AND_RECOVERY
 
-                if downstream_consumer in scheduled_recompute:
-                    continue
+- Snapshot: versioned exact-revision generation writes culminate in metadata-pointer replace (store.py:1768-1797). The old pointer remains until commit. Cleanup in :1799-1835 deletes temp files; it is not a multi-authority rollback.
+- Identity registry: transaction journal recovery is limited to registry files (persistent_registry.py:172-197, :200-263). create_checkpoint/restore_checkpoint at :265-313 are in-process exception-recovery mechanisms. The LIVE updater takes a checkpoint and restores on caught updater/persistence exceptions (runtime.py:1102-1144, :1200-1220). Abrupt process termination cannot execute Python checkpoint restoration; registry journaling may independently recover a registry transaction.
+- FULL publication: facade catches publication failures but has no code to restore previous metadata or previous daemon state (facade.py:1130-1179). A committed new durable snapshot is retained.
+- Scoped server update: persistence exceptions are handled before canonical assignment; old server state/revision/event sequence remain. Registry checkpoint restoration is part of this exception path. CanonicalLiveServer._execute_update_file also rejects a revision/state change detected after persistence; that failure can leave disk ahead.
+- Startup: load_snapshot validates the metadata-selected single generation and returns None on invalid/mismatched content; it does not walk backwards through generations (store.py:1866-1930+). load_engine_state wraps loader errors and returns None (state_manager.py:485-504). run_service continues from state=None unless a usage backfill condition applies; no automatic full reanalysis is part of the load itself.
+- Workspace resync is a separate Desktop watcher layer. _startup_reconciliation_paths and trust checks are in C:\Temp\Contextor_Repo\contextor\core\live_state\watcher.py:477-528; poll_once is at :640-718. A GUI-configured on_resync can request run_full_analysis_exclusive (C:\Temp\Contextor_Repo\contextor\ui\gui.py:1435-1485). This reconciliation is not a transaction rollback and depends on watcher startup/callback availability.
+- Full writer lock death recovery only recovers admission, not data authority: tests/test_full_analysis_coordination.py::test_cross_process_os_lock_and_process_death_recovery at :399+ exercises lock recovery. It does not establish which snapshot/LIVE authority survives a kill at either commit boundary.
 
-                scheduled_recompute.add(
-                    downstream_consumer
-                )
-                recompute_queue.append(
-                    downstream_consumer
-                )
-```
+## STARTUP_HYDRATION
 
-This excerpt is `plan_executor.py:914-986`. The only enqueue routes in this executor are the initial `deque(plan.recompute_modules)` and this changed-slice downstream branch. There is no explicit iteration limit; queue termination is bounded by `processed_recompute` and `scheduled_recompute` deduplication over discovered consumer modules. Existing `test_transitive_propagation_cycle_terminates_without_duplicate_recompute` at `tests/test_completeness_freshness_parity_proof.py:1308-1389` separately expects a full-analysis `ArchitectureCycle` and checks that the executor trace contains no duplicate module names.
+- resolve_authoritative_repository_state in C:\Temp\Contextor_Repo\contextor\core\live_state\hydration.py:29-82 first tries active LIVE ping/snapshot; on transport errors it uses metadata and load_engine_state. If LIVE snapshot succeeds, it returns that state without comparing it against disk metadata. hydrate_repository_engine at :85-112 wraps the resolved state in an incremental engine/registry/FileStateManager; it does not scan the repository.
+- Service startup in runtime.py:1395-1410 calls load_snapshot; optional ensure_module_usages backfill is persisted as exact next revision before server construction (:1433-1478). A backfill exception exits startup; there is no catch-and-select-older-snapshot branch in that sequence.
+- CanonicalLiveServer is constructed with loaded state and metadata revision (runtime.py:1480-1515). An invalid snapshot that load_snapshot rejects therefore does not reconstruct the old LIVE state from another generation at this layer.
+- migrate_legacy_snapshot at store.py:2277-2311 migrates a legacy snapshot only when target metadata does not already exist. It is not fallback recovery for an existing invalid target snapshot.
+- FileStateManager._load at C:\Temp\Contextor_Repo\contextor\core\analysis\state_manager.py:280-355 validates FileState generation identity/revision against engine metadata; mismatch or corruption means the baseline is untrusted.
+- Desktop watcher startup reconciliation can detect added/modified/deleted paths with its trusted-file baseline and can invoke full resync when configured. Existing test coverage proves reconciliation of workspace edits after watcher startup, not recovery from forced termination between snapshot replacements or between FULL save and publication.
 
-`_rebuild_consumer_slice` is at `plan_executor.py:401-678`; it rebuilds one module's consumption from that module's `ModuleUsageFacts` plus candidate artifact/re-export inputs, updates the copy-on-write `artifact_consumption` map, and updates the execution-local consumer-to-target index. `_resolve_canonical_target_keys` at `plan_executor.py:277-356` resolves through `candidate_artifacts`, `expected_targets`, and `dotted_target_index`. Although `candidate_consumption` is an argument, the helper does not read it. This is direct source evidence that one consumer's rebuilt consumption entries do not supply the target identities used to resolve another consumer's slice in this scenario. The test establishes this specific once-only behavior; it does not claim a universal theorem for all future fact families or executor inputs.
+## EXISTING_TEST_EVIDENCE
 
-## REVISIT_SKIP_EVIDENCE
+Existing tests were inspected, not run.
 
-The regression instruments the planner, `_rebuild_consumer_slice`, `_consumer_slice_signature`, and `_find_dependent_consumers` without changing production logic (`test...:1088-1172`). It records both signature values around each fan-in rebuild and the order of rebuild, post-rebuild signature, and downstream discovery.
+### FULL save/publication split
 
-For the required forward run, assertions at `tests/test_completeness_freshness_parity_proof.py:1174-1198` establish:
+- tests/test_h3a_workspace_canonical_freshness.py::test_h3a_case_t_active_daemon_successful_publish (:953-1010): successful FULL save then successful LIVE publish.
+- tests/test_h3a_workspace_canonical_freshness.py::test_h3a_case_u_active_daemon_publish_raises_failure_semantics (:1012-1079): publication raises before dispatch; asserts durable snapshot/FileState revision advances and active daemon remains at prior state; status reports publish failure. Direct regression for L37 divergence.
+- tests/test_h3a_workspace_canonical_freshness.py::test_h3a_case_v_active_daemon_publish_failure_response_dict (:1081-1139): error response, same durable-new/LIVE-old assertion.
+- tests/test_h3a_workspace_canonical_freshness.py::test_h3a_case_i_crash_window_false_verified_prevented (:316-374): injects a T0/T1 disk metadata mismatch and verifies freshness is untrusted; it does not terminate a process during the real save/publish sequence.
 
-- The initial natural planner tuple and executor trace are `("m_consumer", "z_bridge")`.
-- Each fan-in module is rebuilt exactly once; the recorded fan-in rebuild order equals the requested queue order.
-- Both `m_consumer` and `z_bridge` have differing before/after slice signatures.
-- `z_bridge`'s rebuild precedes its changed post-rebuild signature, which precedes discovery of `("m_consumer",)` downstream from `z_bridge`.
-- At that discovery point, source lines `924-925` show `m_consumer` has already been added to `processed_recompute`; source lines `975-976` skip it. The observed trace contains only one `m_consumer` rebuild.
+### Scoped update persistence order and rollback
 
-In the reverse run, `m_consumer` is already in `scheduled_recompute` when `z_bridge` discovers it, so source lines `978-985` avoid a duplicate enqueue while its original queue item still executes afterward. The trace proves each ordering executes each fan-in consumer once.
+- tests/test_live_state_ipc.py::test_persister_runs_after_validation_before_canonical_exposure (:942-962): persister observes old state/revision/event sequence and successful response exposes persisted candidate afterward.
+- tests/test_live_state_ipc.py::test_persistence_conflict_fails_closed_without_live_event (:965-992): revision conflict leaves old state/revision and no event.
+- tests/test_live_state_ipc.py::test_real_repository_persister_disk_ahead_fails_closed (:994-1035): disk already at r+1; attempted update fails closed and does not advance server state.
+- tests/test_live_mutation_coordinator.py::test_candidate_is_invisible_during_slow_persistence (:493-525) and ::test_persistence_failure_leaves_canonical_state_revision_journal_and_diagnostics_unchanged (:528-564): candidate invisibility and exception rollback.
+- tests/test_live_mutation_coordinator.py::test_generic_snapshot_failure_restores_committed_registry_and_old_canonical_state (:567-700+): injects snapshot exception after registry sync and checks checkpoint restoration / old canonical state; exception recovery, not process-kill recovery.
+- tests/test_live_state_ipc.py::test_startup_backfill_failure_leaves_previous_generation_authoritative (:1383-~1445): injected startup metadata-replace failure leaves prior generation selected. Exception path only.
+- tests/test_live_state_store.py::test_snapshot_roundtrip_increments_revision_and_records_writer (:89-99), ::test_default_snapshot_publishes_final_pickle_via_temp_replace (:101-111), ::test_cleanup_failure_cannot_mask_persistence_failure_or_leak_lock (:113-137), and ::test_exact_snapshot_revision_rules_and_disk_ahead_without_overwrite (:139-154) cover store behaviors but not abrupt power/process interruption at every replacement boundary.
 
-## FULL_VS_INCREMENTAL_PARITY
+### Restart and reconciliation
 
-The independent oracle is the existing `_build_full_static_state` helper at `tests/test_completeness_freshness_parity_proof.py:40-49`: it runs `ContextorFacade.analyze_project` and hydrates the resulting repository engine. The existing `_assert_full_parity` helper at `:52-112` checks canonical target-key equality, consumers, channel consumer keys and channel sets, as well as other plan-controlled state.
+- tests/test_live_watcher_startup_reconciliation.py::test_startup_reconciles_offline_add_modify_delete_and_is_idempotent (:147-203) proves watcher reconciliation and repeated no-op after successful reconciliation.
+- tests/test_mcp_regressions.py::test_incremental_live_state_persistence_roundtrips_for_restart (:2562-2594) proves successful local persistence/reload, not save-failure rollback.
+- tests/test_live_single_file_reuse.py::test_single_file_changed_target_falls_back_to_incremental_engine (:57-85) proves the single-file incremental route is called; it does not assert durable snapshot publication or successful canonical Live revision transition.
+- No inspected focused test proves an accepted persistence-free LiveStateClient.publish followed by a real backend subprocess restart. The missing test is an evidence gap, not needed to prove the no-persister source branch.
+- Existing process-death test tests/test_full_analysis_coordination.py::test_cross_process_os_lock_and_process_death_recovery (:399+) proves lease recovery only. Abrupt termination at save/publish boundaries is untested in the focused inventory.
 
-The new test additionally compares a whole-map canonical snapshot retaining every target key, sorted consumer value, channel-consumer key, and sorted channel value (`:1036-1049`, `:1200-1212`). It asserts the exact full-oracle entry:
+## SHARED_TRANSACTION_BOUNDARY
 
-```python
-"a::added": {
-    "consumers": ["m_consumer", "z_bridge"],
-    "channels": {
-        "m_consumer": ["direct_calls"],
-        "z_bridge": ["direct_calls"],
-    },
-}
-```
+L37 and L38 do not share a single cross-authority transaction.
 
-Each incremental result matches its independently built full oracle and passes `_assert_full_parity`.
+- FULL analysis: writer lease surrounds analyze_project; identity registry initialization/read transaction, snapshot/FileState generation commit, then daemon publication are separate operations. The lease serializes cooperating writers but does not undo committed snapshot state when later publication fails.
+- Scoped server update_file: same writer lease is used for queued mutations; direct mutations may skip that outer lease, but both use server mutation lock and persistence-before-state assignment. Registry checkpoint and journal cover registry rollback/recovery only.
+- Raw publish: no snapshot persistence or registry checkpoint is called.
+- MCP offline fallback: updates MCP process-local engine, then attempts snapshot save without coupling cache engine rollback to disk transaction.
+- These are independent ordering mechanisms around a shared snapshot store, not one atomic journal/generation transaction.
 
-## ORDER_INDEPENDENCE_RESULT
+## PROVEN_DEFECTS
 
-Both full canonical snapshots compare equal (`tests/test_completeness_freshness_parity_proof.py:1215-1226`):
+### L37 — durable/LIVE divergence after FULL publication failure
 
-- Natural order: `("m_consumer", "z_bridge")`.
-- Explicit executor-level order: `("z_bridge", "m_consumer")`.
+PROVED_DEFECT. analyze_project commits the exact-revision snapshot before client.publish, catches publish exceptions/errors without restoring the old disk generation or daemon, and existing H3A U/V tests assert disk r+1 alongside daemon r. The failure can leave two active authorities describing different revisions until daemon restart or a later publication. Evidence: facade.py:1106-1179; tests cited above. CODE_PATH_PROVED + DIRECT_EVIDENCE.
 
-Each order also matches its own independently constructed FULL oracle across exact canonical target, consumer, and channel values. No planner or production edit was needed.
+### L38 — persistence-free publication capability, with scoped-path boundary
 
-## NEGATIVE_CONTROL_RESULT
+PROVED_DEFECT at the publish operation boundary. Server dispatch exposes publish; _execute_publish accepts a candidate at the expected next revision and assigns canonical Live memory with no persister/snapshot call. A source-based P0/r -> P1/r+1 client.publish -> server restart sequence therefore selects disk P0/r. Evidence: ipc.py:1203-1259, :1536-1537, :1879-1888, and startup loading at runtime.py:1403-1410. CODE_PATH_PROVED for the unguarded accepting path; INFERENCE for the restart outcome. The current in-repository analyze_single_file scoped caller itself does not establish successful L38 publication because its candidate keeps the old revision and is rejected by the monotonicity check. The normal server update_file/queued mutation path persists first and is closed against this particular ordering defect (runtime.py:1183-1199; ipc.py:1421-1442). Offline MCP fallback separately has a process-local update-before-save loss path, but does not prove server LIVE publication.
 
-At `tests/test_completeness_freshness_parity_proof.py:1228-1234`, the test deep-copies the incremental state and replaces `m_consumer`'s `a::added` channel with `invented_channel`. The canonical snapshot then differs, and `_assert_full_parity` raises an assertion containing `channel mismatch`. This confirms the oracle comparison detects a concrete canonical `artifact_consumption` error.
+## UNRESOLVED_EVIDENCE
 
-## TARGETED_TEST_RESULTS
+- No focused test kills the backend after an accepted raw publish but before durable save/restart. Source establishes that publish has no persistence call; a runtime reproduction was not run because this is discovery-only.
+- No process-kill test targets the interval after FULL metadata pointer replacement but before daemon receives/commits publication, or between default-mode base-pickle replace and metadata replace.
+- No focused test asserts that analyze_single_file sees the non_monotonic_canonical_revision response. Source indicates the rejection when hydrated state carries its normal canonical revision; the method ignores the response.
+- IPC response-loss after dispatch is established as ordering only. Whether a particular pipe failure occurs after server state assignment is runtime-dependent and not demonstrated.
+- Scope distinction for L38: source proves the generic publication capability is persistence-free, while the normal scoped file mutation operation is persistence-before-exposure. No external API contract was found that states whether callers of LiveStateClient.publish are required to durably save candidates first. This missing contract affects whether the generic endpoint is considered an intended supported workflow; it does not change the source fact that it can commit memory without persisting.
+- Workspace reconciliation after restart depends on watcher creation and configured resync callback; no evidence establishes that every service restart automatically starts a Desktop watcher or runs FULL reanalysis.
 
-Command:
-
-```text
-& .\.venv\Scripts\python.exe -m pytest tests/test_completeness_freshness_parity_proof.py::test_semantic_fan_in_recompute_is_once_only_and_order_independent -q
-```
-
-Result: `1 passed in 8.69s`.
-
-No other tests and no full repository pytest run were performed.
-
-Closest existing focused coverage:
-
-- `test_transitive_reexport_late_provider_matches_full_oracle` at `tests/test_completeness_freshness_parity_proof.py:954-1020` covers late provider propagation and full parity, but does not observe a processed consumer being rediscovered or run opposite queue orders.
-- `test_transitive_propagation_stops_when_direct_consumer_slice_is_unchanged` at `:1237-1307` covers stopping propagation on an unchanged direct slice, not fan-in after a changed slice.
-- `test_transitive_propagation_cycle_terminates_without_duplicate_recompute` at `:1308-1389` covers cycle diagnostics and duplicate-free execution, but not this changed-slice fan-in order.
-- `test_execute_refresh_plan_builds_full_indexes_once_for_many_consumers` at `tests/test_incremental_plan_executor_complexity.py:170` covers index construction, not downstream rediscovery/revisit ordering.
+L37_STATUS=PROVED_DEFECT
+L38_STATUS=PROVED_DEFECT
+PRODUCTION_EDITS=NONE
+TESTS_RUN=NONE
 
 ## FILES_CHANGED
 
-- `C:\Temp\Contextor_Repo\tests\test_completeness_freshness_parity_proof.py` — added the targeted regression only.
-- `C:\Temp\Contextor_Repo\walkthrough.md` — this required task report.
-- Production files changed: none.
-
-## FULL_DIFFS
-
-The complete Git diff for the changed test file follows. `walkthrough.md` is the required report itself and is not repeated as a self-diff. No production diff exists.
-```diff
-diff --git a/tests/test_completeness_freshness_parity_proof.py b/tests/test_completeness_freshness_parity_proof.py
-index f8e2bac..ebda63e 100644
---- a/tests/test_completeness_freshness_parity_proof.py
-+++ b/tests/test_completeness_freshness_parity_proof.py
-@@ -1020,6 +1020,220 @@ def test_transitive_reexport_late_provider_matches_full_oracle(tmp_path):
-     _assert_full_parity(engine.state, oracle)
- 
- 
-+def test_semantic_fan_in_recompute_is_once_only_and_order_independent(tmp_path):
-+    from contextor.core.analysis.incremental import plan_executor
-+    from contextor.core.analysis.incremental.plan_executor import (
-+        _consumer_slice_signature as original_slice_signature,
-+        _rebuild_consumer_slice as original_rebuild_consumer_slice,
-+    )
-+    from contextor.core.analysis.refresh_planner import (
-+        _find_dependent_consumers as original_find_dependent_consumers,
-+    )
-+
-+    fan_in_modules = {"m_consumer", "z_bridge"}
-+
-+    def artifact_consumption_snapshot(state):
-+        return {
-+            target: {
-+                "consumers": tuple(sorted(entry.get("consumers", ()))),
-+                "channels": {
-+                    consumer: tuple(sorted(channels))
-+                    for consumer, channels in sorted(
-+                        entry.get("channels", {}).items()
-+                    )
-+                },
-+            }
-+            for target, entry in sorted(state.artifact_consumption.items())
-+        }
-+
-+    def run_ordered_case(case_name, requested_order):
-+        repo_dir = tmp_path / case_name
-+        repo_dir.mkdir()
-+
-+        provider = repo_dir / "a.py"
-+        bridge = repo_dir / "z_bridge.py"
-+        consumer = repo_dir / "m_consumer.py"
-+        provider.write_text(
-+            "def existing():\n"
-+            "    return 1\n",
-+            encoding="utf-8",
-+        )
-+        bridge.write_text(
-+            "import a\n"
-+            "\n"
-+            "def bridge():\n"
-+            "    return a.added()\n",
-+            encoding="utf-8",
-+        )
-+        consumer.write_text(
-+            "import a\n"
-+            "import z_bridge\n"
-+            "\n"
-+            "def run():\n"
-+            "    return a.added(), z_bridge.bridge()\n",
-+            encoding="utf-8",
-+        )
-+
-+        cache_dir = repo_dir / "cache"
-+        cache_dir.mkdir()
-+        engine = IncrementalAnalysisEngine(
-+            RepositoryAnalysisState(modules={}),
-+            PersistentIdentityRegistry(str(repo_dir)),
-+            FileStateManager(str(cache_dir)),
-+            str(repo_dir),
-+        )
-+        for source_path in (provider, bridge, consumer):
-+            engine.update_file(str(source_path))
-+
-+        assert "a::added" not in engine.state.artifact_consumption
-+        provider.write_text(
-+            "def existing():\n"
-+            "    return 1\n"
-+            "\n"
-+            "def added():\n"
-+            "    return 2\n",
-+            encoding="utf-8",
-+        )
-+
-+        natural_orders = []
-+        scheduled_orders = []
-+        rebuild_order = []
-+        signature_values = {}
-+        discoveries = []
-+        event_trace = []
-+        original_plan_refresh = RefreshPlanner.plan_refresh
-+
-+        def ordered_plan_refresh(*args, **kwargs):
-+            natural_plan = original_plan_refresh(*args, **kwargs)
-+            delta = args[0] if args else kwargs.get("delta")
-+            if delta is not None and delta.module_path == "a":
-+                natural_orders.append(natural_plan.recompute_modules)
-+                assert set(natural_plan.recompute_modules) == fan_in_modules
-+                if natural_plan.recompute_modules == requested_order:
-+                    scheduled_plan = natural_plan
-+                else:
-+                    scheduled_plan = RefreshPlan(
-+                        reparse_modules=natural_plan.reparse_modules,
-+                        recompute_modules=requested_order,
-+                        patch_families=natural_plan.patch_families,
-+                        graph_recomputations=natural_plan.graph_recomputations,
-+                        refresh_completeness=natural_plan.refresh_completeness,
-+                        semantic_certainty=natural_plan.semantic_certainty,
-+                        reason=natural_plan.reason,
-+                    )
-+                scheduled_orders.append(scheduled_plan.recompute_modules)
-+                return scheduled_plan
-+            return natural_plan
-+
-+        def traced_rebuild(*args, **kwargs):
-+            consumer_path = kwargs.get("consumer", args[0] if args else None)
-+            rebuild_order.append(consumer_path)
-+            event_trace.append(("rebuild", consumer_path))
-+            return original_rebuild_consumer_slice(*args, **kwargs)
-+
-+        def traced_signature(consumer_path, *args, **kwargs):
-+            signature = original_slice_signature(
-+                consumer_path,
-+                *args,
-+                **kwargs,
-+            )
-+            signature_values.setdefault(consumer_path, []).append(signature)
-+            event_trace.append(("signature", consumer_path, signature))
-+            return signature
-+
-+        def traced_discovery(module_path, usages):
-+            downstream = original_find_dependent_consumers(module_path, usages)
-+            ordered_downstream = tuple(sorted(downstream))
-+            discoveries.append((module_path, ordered_downstream))
-+            event_trace.append(("discover", module_path, ordered_downstream))
-+            return downstream
-+
-+        with (
-+            patch.object(
-+                RefreshPlanner,
-+                "plan_refresh",
-+                side_effect=ordered_plan_refresh,
-+            ),
-+            patch(
-+                "contextor.core.analysis.refresh_planner._find_dependent_consumers",
-+                side_effect=traced_discovery,
-+            ),
-+            patch.object(
-+                plan_executor,
-+                "_rebuild_consumer_slice",
-+                side_effect=traced_rebuild,
-+            ),
-+            patch.object(
-+                plan_executor,
-+                "_consumer_slice_signature",
-+                side_effect=traced_signature,
-+            ),
-+        ):
-+            result = engine.update_file(str(provider))
-+
-+        assert natural_orders == [("m_consumer", "z_bridge")]
-+        assert scheduled_orders == [requested_order]
-+        assert result.execution_trace["recompute_modules"] == requested_order
-+
-+        fan_in_rebuild_order = tuple(
-+            module for module in rebuild_order if module in fan_in_modules
-+        )
-+        assert fan_in_rebuild_order == requested_order
-+        assert fan_in_rebuild_order.count("m_consumer") == 1
-+        assert fan_in_rebuild_order.count("z_bridge") == 1
-+
-+        assert signature_values["m_consumer"][0] != signature_values["m_consumer"][1]
-+        assert signature_values["z_bridge"][0] != signature_values["z_bridge"][1]
-+        z_bridge_rebuild = event_trace.index(("rebuild", "z_bridge"))
-+        z_bridge_signatures = [
-+            index
-+            for index, event in enumerate(event_trace)
-+            if event[:2] == ("signature", "z_bridge")
-+        ]
-+        z_bridge_discovery = event_trace.index(
-+            ("discover", "z_bridge", ("m_consumer",))
-+        )
-+        assert len(z_bridge_signatures) == 2
-+        assert z_bridge_rebuild < z_bridge_signatures[1] < z_bridge_discovery
-+        assert ("z_bridge", ("m_consumer",)) in discoveries
-+
-+        oracle = _build_full_static_state(repo_dir)
-+        _assert_full_parity(engine.state, oracle)
-+        incremental_snapshot = artifact_consumption_snapshot(engine.state)
-+        oracle_snapshot = artifact_consumption_snapshot(oracle)
-+        assert incremental_snapshot == oracle_snapshot
-+        assert oracle.artifact_consumption["a::added"] == {
-+            "consumers": ["m_consumer", "z_bridge"],
-+            "channels": {
-+                "m_consumer": ["direct_calls"],
-+                "z_bridge": ["direct_calls"],
-+            },
-+        }
-+
-+        return engine.state, oracle, incremental_snapshot
-+
-+    forward_state, forward_oracle, forward_snapshot = run_ordered_case(
-+        "m_before_z",
-+        ("m_consumer", "z_bridge"),
-+    )
-+    reverse_state, reverse_oracle, reverse_snapshot = run_ordered_case(
-+        "z_before_m",
-+        ("z_bridge", "m_consumer"),
-+    )
-+
-+    assert forward_snapshot == artifact_consumption_snapshot(forward_oracle)
-+    assert reverse_snapshot == artifact_consumption_snapshot(reverse_oracle)
-+    assert forward_snapshot == reverse_snapshot
-+
-+    negative_state = deepcopy(forward_state)
-+    negative_state.artifact_consumption["a::added"]["channels"][
-+        "m_consumer"
-+    ] = ["invented_channel"]
-+    assert artifact_consumption_snapshot(negative_state) != forward_snapshot
-+    with pytest.raises(AssertionError, match="channel mismatch"):
-+        _assert_full_parity(negative_state, forward_oracle)
-+
-+
- def test_transitive_propagation_stops_when_direct_consumer_slice_is_unchanged(
-     tmp_path,
- ):
-```
+NONE (walkthrough.md is the requested report artifact and is excluded from source/test change accounting).
 
 ## ACTUAL_DIFF
 
-- Test file: full actual diff is included above.
-- Production/tests other than the target test: NONE.
-- Walkthrough: report file only; its self-diff is omitted.
+NONE
+
