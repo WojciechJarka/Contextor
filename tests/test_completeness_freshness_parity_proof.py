@@ -1020,6 +1020,220 @@ def test_transitive_reexport_late_provider_matches_full_oracle(tmp_path):
     _assert_full_parity(engine.state, oracle)
 
 
+def test_semantic_fan_in_recompute_is_once_only_and_order_independent(tmp_path):
+    from contextor.core.analysis.incremental import plan_executor
+    from contextor.core.analysis.incremental.plan_executor import (
+        _consumer_slice_signature as original_slice_signature,
+        _rebuild_consumer_slice as original_rebuild_consumer_slice,
+    )
+    from contextor.core.analysis.refresh_planner import (
+        _find_dependent_consumers as original_find_dependent_consumers,
+    )
+
+    fan_in_modules = {"m_consumer", "z_bridge"}
+
+    def artifact_consumption_snapshot(state):
+        return {
+            target: {
+                "consumers": tuple(sorted(entry.get("consumers", ()))),
+                "channels": {
+                    consumer: tuple(sorted(channels))
+                    for consumer, channels in sorted(
+                        entry.get("channels", {}).items()
+                    )
+                },
+            }
+            for target, entry in sorted(state.artifact_consumption.items())
+        }
+
+    def run_ordered_case(case_name, requested_order):
+        repo_dir = tmp_path / case_name
+        repo_dir.mkdir()
+
+        provider = repo_dir / "a.py"
+        bridge = repo_dir / "z_bridge.py"
+        consumer = repo_dir / "m_consumer.py"
+        provider.write_text(
+            "def existing():\n"
+            "    return 1\n",
+            encoding="utf-8",
+        )
+        bridge.write_text(
+            "import a\n"
+            "\n"
+            "def bridge():\n"
+            "    return a.added()\n",
+            encoding="utf-8",
+        )
+        consumer.write_text(
+            "import a\n"
+            "import z_bridge\n"
+            "\n"
+            "def run():\n"
+            "    return a.added(), z_bridge.bridge()\n",
+            encoding="utf-8",
+        )
+
+        cache_dir = repo_dir / "cache"
+        cache_dir.mkdir()
+        engine = IncrementalAnalysisEngine(
+            RepositoryAnalysisState(modules={}),
+            PersistentIdentityRegistry(str(repo_dir)),
+            FileStateManager(str(cache_dir)),
+            str(repo_dir),
+        )
+        for source_path in (provider, bridge, consumer):
+            engine.update_file(str(source_path))
+
+        assert "a::added" not in engine.state.artifact_consumption
+        provider.write_text(
+            "def existing():\n"
+            "    return 1\n"
+            "\n"
+            "def added():\n"
+            "    return 2\n",
+            encoding="utf-8",
+        )
+
+        natural_orders = []
+        scheduled_orders = []
+        rebuild_order = []
+        signature_values = {}
+        discoveries = []
+        event_trace = []
+        original_plan_refresh = RefreshPlanner.plan_refresh
+
+        def ordered_plan_refresh(*args, **kwargs):
+            natural_plan = original_plan_refresh(*args, **kwargs)
+            delta = args[0] if args else kwargs.get("delta")
+            if delta is not None and delta.module_path == "a":
+                natural_orders.append(natural_plan.recompute_modules)
+                assert set(natural_plan.recompute_modules) == fan_in_modules
+                if natural_plan.recompute_modules == requested_order:
+                    scheduled_plan = natural_plan
+                else:
+                    scheduled_plan = RefreshPlan(
+                        reparse_modules=natural_plan.reparse_modules,
+                        recompute_modules=requested_order,
+                        patch_families=natural_plan.patch_families,
+                        graph_recomputations=natural_plan.graph_recomputations,
+                        refresh_completeness=natural_plan.refresh_completeness,
+                        semantic_certainty=natural_plan.semantic_certainty,
+                        reason=natural_plan.reason,
+                    )
+                scheduled_orders.append(scheduled_plan.recompute_modules)
+                return scheduled_plan
+            return natural_plan
+
+        def traced_rebuild(*args, **kwargs):
+            consumer_path = kwargs.get("consumer", args[0] if args else None)
+            rebuild_order.append(consumer_path)
+            event_trace.append(("rebuild", consumer_path))
+            return original_rebuild_consumer_slice(*args, **kwargs)
+
+        def traced_signature(consumer_path, *args, **kwargs):
+            signature = original_slice_signature(
+                consumer_path,
+                *args,
+                **kwargs,
+            )
+            signature_values.setdefault(consumer_path, []).append(signature)
+            event_trace.append(("signature", consumer_path, signature))
+            return signature
+
+        def traced_discovery(module_path, usages):
+            downstream = original_find_dependent_consumers(module_path, usages)
+            ordered_downstream = tuple(sorted(downstream))
+            discoveries.append((module_path, ordered_downstream))
+            event_trace.append(("discover", module_path, ordered_downstream))
+            return downstream
+
+        with (
+            patch.object(
+                RefreshPlanner,
+                "plan_refresh",
+                side_effect=ordered_plan_refresh,
+            ),
+            patch(
+                "contextor.core.analysis.refresh_planner._find_dependent_consumers",
+                side_effect=traced_discovery,
+            ),
+            patch.object(
+                plan_executor,
+                "_rebuild_consumer_slice",
+                side_effect=traced_rebuild,
+            ),
+            patch.object(
+                plan_executor,
+                "_consumer_slice_signature",
+                side_effect=traced_signature,
+            ),
+        ):
+            result = engine.update_file(str(provider))
+
+        assert natural_orders == [("m_consumer", "z_bridge")]
+        assert scheduled_orders == [requested_order]
+        assert result.execution_trace["recompute_modules"] == requested_order
+
+        fan_in_rebuild_order = tuple(
+            module for module in rebuild_order if module in fan_in_modules
+        )
+        assert fan_in_rebuild_order == requested_order
+        assert fan_in_rebuild_order.count("m_consumer") == 1
+        assert fan_in_rebuild_order.count("z_bridge") == 1
+
+        assert signature_values["m_consumer"][0] != signature_values["m_consumer"][1]
+        assert signature_values["z_bridge"][0] != signature_values["z_bridge"][1]
+        z_bridge_rebuild = event_trace.index(("rebuild", "z_bridge"))
+        z_bridge_signatures = [
+            index
+            for index, event in enumerate(event_trace)
+            if event[:2] == ("signature", "z_bridge")
+        ]
+        z_bridge_discovery = event_trace.index(
+            ("discover", "z_bridge", ("m_consumer",))
+        )
+        assert len(z_bridge_signatures) == 2
+        assert z_bridge_rebuild < z_bridge_signatures[1] < z_bridge_discovery
+        assert ("z_bridge", ("m_consumer",)) in discoveries
+
+        oracle = _build_full_static_state(repo_dir)
+        _assert_full_parity(engine.state, oracle)
+        incremental_snapshot = artifact_consumption_snapshot(engine.state)
+        oracle_snapshot = artifact_consumption_snapshot(oracle)
+        assert incremental_snapshot == oracle_snapshot
+        assert oracle.artifact_consumption["a::added"] == {
+            "consumers": ["m_consumer", "z_bridge"],
+            "channels": {
+                "m_consumer": ["direct_calls"],
+                "z_bridge": ["direct_calls"],
+            },
+        }
+
+        return engine.state, oracle, incremental_snapshot
+
+    forward_state, forward_oracle, forward_snapshot = run_ordered_case(
+        "m_before_z",
+        ("m_consumer", "z_bridge"),
+    )
+    reverse_state, reverse_oracle, reverse_snapshot = run_ordered_case(
+        "z_before_m",
+        ("z_bridge", "m_consumer"),
+    )
+
+    assert forward_snapshot == artifact_consumption_snapshot(forward_oracle)
+    assert reverse_snapshot == artifact_consumption_snapshot(reverse_oracle)
+    assert forward_snapshot == reverse_snapshot
+
+    negative_state = deepcopy(forward_state)
+    negative_state.artifact_consumption["a::added"]["channels"][
+        "m_consumer"
+    ] = ["invented_channel"]
+    assert artifact_consumption_snapshot(negative_state) != forward_snapshot
+    with pytest.raises(AssertionError, match="channel mismatch"):
+        _assert_full_parity(negative_state, forward_oracle)
+
+
 def test_transitive_propagation_stops_when_direct_consumer_slice_is_unchanged(
     tmp_path,
 ):

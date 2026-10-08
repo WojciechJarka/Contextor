@@ -1,526 +1,429 @@
-CPA_BACKEND_OWNER_O3H_RETRY_AND_VISIBLE_FAILURE
+# L14_SEMANTIC_FIXPOINT_FAN_IN_REGRESSION
 
-STATUS=PASS
-HEAD=41d4340d6547bd2ccede76a6cd05c32bf4941c91
+## CURRENT_HEAD
 
-FILES_CHANGED:
-- C:\Temp\Contextor_Repo\contextor\ui\gui.py
-- C:\Temp\Contextor_Repo\tests\test_gui_backend_owner.py
+- `git rev-parse HEAD`: `90755ea111313ac55fc9bbdc157f25d3f54711ac`.
+- Only the target test and this required report are modified. `plan_executor.py` and other production files are unchanged.
+- Contextor MCP discovery preceded source/Git verification. At LIVE revision `1637`, the test module and executor module had fresh syntax diagnostics with no errors. `execute_refresh_plan` implementation was retrieved completely in source ranges `758-1015` and `1016-1273` after its symbol fetch required confirmation due to output size.
+- Contextor `artifact_consumption` fact lineage identifies `RepositoryAnalysisState.artifact_consumption` as canonical owner, `_rebuild_consumer_slice` as the incremental consumer-slice producer, and `IncrementalAnalysisEngine._apply_delta_and_commit` as incremental state installer. The lineage response was LIVE, revision `1637`, `resync_required=false`; its workspace sync was `unverified` for that narrow lineage projection.
 
-LITERAL_IMPLEMENTATION_MATCH=YES
-RETRY_MAX_ATTEMPTS=3
-RETRY_DELAYS=0.5 seconds, 1.0 seconds
-FOREIGN_OWNER_RETRY=NO
-DUPLICATE_WORKER_SUPPRESSION=PASS; existing live-thread guard retained and covered by focused test
-CLOSE_DURING_RETRY=PASS; state becomes aborted, no subsequent claim or terminal failure status
-VISIBLE_FAILURE_CHANNEL=PASS; retry/failure/recovery published only through _set_live_status(category="MCP_CALL")
-RECOVERY_VISIBLE=PASS; successful retry emits "Backend ownership restored."
-CLAIM_CORE_UNCHANGED=YES; _claim_current_backend_for_desktop and _claim_backend_owner_on_startup unchanged
-OUT_OF_SCOPE_PRODUCTION_SEMANTICS_UNCHANGED=YES; backend lifecycle, ownership schema, LIVE ownership, restart lifecycle, on_closing, autostart, and CLI untouched
+## EXACT_TEST_SCENARIO
 
-TARGETED_TESTS=PASS
-COMMAND=.\.venv\Scripts\python.exe -m pytest -q tests\test_gui_backend_owner.py tests\test_gui_backend_restart.py tests\test_gui_live_startup.py
-RESULT=37 passed, 1 warning in 10.51s
-WARNING=AuthlibDeprecationWarning from installed FastMCP/Authlib dependency; no test failures
+Added `test_semantic_fan_in_recompute_is_once_only_and_order_independent` at `C:\Temp\Contextor_Repo\tests\test_completeness_freshness_parity_proof.py:1023-1234`.
 
-CONTEXTOR_POST_EDIT=PASS
-FETCHED=ContextorGUI.__init__; ContextorGUI._start_backend_owner_claim; ContextorGUI._claim_backend_owner_on_startup; ContextorGUI.on_closing
-CANONICAL_STATE=fresh
-WORKSPACE_SYNC=verified
-CANONICAL_REVISION=1636
-PROVENANCE=live
-LIVE_CONTINUITY=continuous
-RESYNC_REQUIRED=false
-WATCHER_EVIDENCE=desktop_watcher UPDATED gui.py at revision 1634 and test_gui_backend_owner.py at revisions 1635-1636
-POST_EDIT_SYNTAX_ERRORS=0
-POST_EDIT_NAME_COLLISIONS=0
-POST_EDIT_CYCLES=0
+Each of two independent temporary repositories starts with:
 
-IMPLEMENTATION_RESULT=PASS; requested retry, visible failure, success, foreign-owner terminal, close-abort, duplicate-worker, and messagebox regression cases are covered
-TESTS_RUN=ONLY the three requested targeted test files
-FULL_REPOSITORY_ANALYSIS=NOT_RUN
+```python
+# a.py
 
-FULL_DIFFS
-diff --git a/contextor/ui/gui.py b/contextor/ui/gui.py
-index 98a0225..96634ed 100644
---- a/contextor/ui/gui.py
-+++ b/contextor/ui/gui.py
-@@ -39,6 +39,7 @@ from contextor.core.repository_identity import (
- from contextor.core.paths import prune_startup_caches
- from contextor.repo_generator import run_repo_generator
- from contextor.mcp_backend_control import (
-+    BackendOwnerAlreadyClaimed,
-     BackendOwnerInstanceRevoked,
-     claim_backend_owner,
-     get_backend_status,
-@@ -78,6 +79,11 @@ from contextor.ui.theme import (
- LIVE_START_MAX_ATTEMPTS = 4
- LIVE_START_RETRY_DELAYS_MS = (1000, 2000, 5000)
- FULL_ANALYSIS_SHUTDOWN_WAIT_SECONDS = 1.5
-+BACKEND_OWNER_CLAIM_MAX_ATTEMPTS = 3
-+BACKEND_OWNER_CLAIM_RETRY_DELAYS_SECONDS = (
-+    0.5,
-+    1.0,
-+)
- 
- class ContextorGUI:
-     """
-@@ -122,6 +128,8 @@ class ContextorGUI:
-         self.backend_owner_claim = None
-         self._backend_owner_claim_error = None
-         self._backend_owner_claim_thread = None
-+        self._backend_owner_claim_state = "idle"
-+        self._backend_owner_claim_attempt = 0
-         self.live_client = None
-         self.live_clients = {}
-         self.live_watcher = None
-@@ -243,10 +251,90 @@ class ContextorGUI:
-             return
- 
-         def worker():
--            try:
--                self._claim_backend_owner_on_startup()
--            except Exception as exc:
--                self._backend_owner_claim_error = exc
-+            self._backend_owner_claim_state = "claiming"
-+            self._backend_owner_claim_attempt = 0
-+
-+            for attempt in range(
-+                1,
-+                BACKEND_OWNER_CLAIM_MAX_ATTEMPTS + 1,
-+            ):
-+                if getattr(self, "_closing", False):
-+                    self._backend_owner_claim_state = "aborted"
-+                    return
-+
-+                self._backend_owner_claim_attempt = attempt
-+
-+                try:
-+                    claim = self._claim_backend_owner_on_startup()
-+
-+                except Exception as exc:
-+                    self._backend_owner_claim_error = exc
-+
-+                    terminal = (
-+                        isinstance(
-+                            exc,
-+                            BackendOwnerAlreadyClaimed,
-+                        )
-+                        or attempt
-+                        >= BACKEND_OWNER_CLAIM_MAX_ATTEMPTS
-+                    )
-+
-+                    if terminal:
-+                        self._backend_owner_claim_state = "failed"
-+
-+                        self._set_live_status(
-+                            f"Backend ownership failed: {exc}",
-+                            category="MCP_CALL",
-+                        )
-+                        return
-+
-+                    self._backend_owner_claim_state = "retrying"
-+
-+                    self._set_live_status(
-+                        (
-+                            "Backend ownership unavailable; "
-+                            f"retrying ({attempt + 1}/"
-+                            f"{BACKEND_OWNER_CLAIM_MAX_ATTEMPTS})..."
-+                        ),
-+                        category="MCP_CALL",
-+                    )
-+
-+                    delay = (
-+                        BACKEND_OWNER_CLAIM_RETRY_DELAYS_SECONDS[
-+                            attempt - 1
-+                        ]
-+                    )
-+
-+                    deadline = time.monotonic() + delay
-+
-+                    while time.monotonic() < deadline:
-+                        if getattr(self, "_closing", False):
-+                            self._backend_owner_claim_state = "aborted"
-+                            return
-+
-+                        remaining = deadline - time.monotonic()
-+
-+                        time.sleep(
-+                            min(
-+                                0.05,
-+                                max(0.0, remaining),
-+                            )
-+                        )
-+
-+                    self._backend_owner_claim_state = "claiming"
-+                    continue
-+
-+                self.backend_owner_claim = claim
-+                self._backend_owner_claim_error = None
-+                self._backend_owner_claim_state = "claimed"
-+
-+                if attempt > 1:
-+                    self._set_live_status(
-+                        "Backend ownership restored.",
-+                        category="MCP_CALL",
-+                    )
-+
-+                return
- 
-         thread = threading.Thread(
-             target=worker,
-diff --git a/tests/test_gui_backend_owner.py b/tests/test_gui_backend_owner.py
-index 18724c3..c15cc88 100644
---- a/tests/test_gui_backend_owner.py
-+++ b/tests/test_gui_backend_owner.py
-@@ -4,7 +4,10 @@ from types import SimpleNamespace
- 
- import pytest
- 
--from contextor.mcp_backend_control import BackendOwnerInstanceRevoked
-+from contextor.mcp_backend_control import (
-+    BackendOwnerAlreadyClaimed,
-+    BackendOwnerInstanceRevoked,
-+)
- from contextor.ui import gui
- 
- 
-@@ -25,13 +28,20 @@ def _status(state, ready=False, record=None):
- 
- 
- def _controller():
-+    status_calls = []
-     controller = SimpleNamespace(
-         desktop_instance_id="desktop-instance",
-         backend_owner_token="backend-owner-token",
-         backend_owner_claim=None,
-         _backend_owner_claim_error=None,
-         _backend_owner_claim_thread=None,
-+        _backend_owner_claim_state="idle",
-+        _backend_owner_claim_attempt=0,
-         _closing=False,
-+        _status_calls=status_calls,
-+        _set_live_status=lambda *args, **kwargs: status_calls.append(
-+            (args, kwargs)
-+        ),
-     )
-     controller._claim_current_backend_for_desktop = lambda: (
-         gui.ContextorGUI._claim_current_backend_for_desktop(controller)
-@@ -39,6 +49,33 @@ def _controller():
-     return controller
- 
- 
-+def _fast_retry_clock(monkeypatch, controller=None):
-+    clock = [0.0]
-+    sleeps = []
-+
-+    def monotonic():
-+        return clock[0]
-+
-+    def sleep(delay):
-+        sleeps.append(delay)
-+        if controller is not None:
-+            controller._closing = True
-+            clock[0] += 10.0
-+        else:
-+            clock[0] += delay
-+
-+    monkeypatch.setattr(gui.time, "monotonic", monotonic)
-+    monkeypatch.setattr(gui.time, "sleep", sleep)
-+    return clock, sleeps
-+
-+
-+def _published_statuses(controller):
-+    return [
-+        (args[0], kwargs)
-+        for args, kwargs in controller._status_calls
-+    ]
-+
-+
- class _FakeVar:
-     def __init__(self, value=""):
-         self.value = value
-@@ -98,6 +135,8 @@ def test_init_creates_separate_live_and_backend_owner_identities(monkeypatch):
-     assert controller.backend_owner_claim is None
-     assert controller._backend_owner_claim_error is None
-     assert controller._backend_owner_claim_thread is None
-+    assert controller._backend_owner_claim_state == "idle"
-+    assert controller._backend_owner_claim_attempt == 0
+def existing():
+    return 1
+
+# z_bridge.py
+import a
+
+def bridge():
+    return a.added()
+
+# m_consumer.py
+import a
+import z_bridge
+
+def run():
+    return a.added(), z_bridge.bridge()
+```
+
+After all modules are initially loaded, `a.py` gains `added()`. The test first asserts `a::added` is not in the initial canonical consumption map. The real planner naturally returns `("m_consumer", "z_bridge")`; the test asserts it schedules both modules. The forward case uses that natural order. For the reverse case only, the test constructs a `RefreshPlan` preserving every other field and setting `recompute_modules=("z_bridge", "m_consumer")`. The planner implementation is not changed.
+
+## SOURCE_EVIDENCE
+
+`C:\Temp\Contextor_Repo\contextor\core\analysis\refresh_planner.py:270-286` selects consumers for artifact additions and sorts the initial recompute tuple. `C:\Temp\Contextor_Repo\contextor\core\domain\refresh_plan.py:39-72` defines the immutable plan fields copied by the reverse-order case.
+
+In `C:\Temp\Contextor_Repo\contextor\core\analysis\incremental\plan_executor.py`, candidate artifacts/usages and the target indexes are prepared before the queue (`:789-887`); re-export maps and export surfaces are assembled before it (`:894-905`). The exact queue and downstream scheduling implementation is:
+
+```python
+        recompute_queue = deque(plan.recompute_modules)
+        scheduled_recompute = set(plan.recompute_modules)
+        processed_recompute: Set[str] = set()
+
+        while recompute_queue:
+            consumer_path = recompute_queue.popleft()
+
+            if consumer_path in processed_recompute:
+                continue
+
+            processed_recompute.add(consumer_path)
+
+            consumer_facts = candidate.module_usages.get(
+                consumer_path
+            )
+            if not consumer_facts:
+                continue
+
+            previous_slice = _consumer_slice_signature(
+                consumer_path,
+                candidate.artifact_consumption,
+                consumer_target_index,
+            )
+
+            candidate.artifact_consumption = _rebuild_consumer_slice(
+                consumer=consumer_path,
+                consumer_facts=consumer_facts,
+                candidate_consumption=candidate.artifact_consumption,
+                candidate_artifacts=candidate.artifacts,
+                reexports=reexports,
+                reexport_facts_by_module=candidate.reexport_facts_by_module,
+                module_export_surfaces=module_export_surfaces,
+                expected_targets=expected_targets,
+                dotted_target_index=dotted_target_index,
+                consumer_target_index=consumer_target_index,
+            )
+
+            executed_recompute.append(
+                consumer_path
+            )
+
+            current_slice = _consumer_slice_signature(
+                consumer_path,
+                candidate.artifact_consumption,
+                consumer_target_index,
+            )
+
+            if current_slice == previous_slice:
+                continue
+
+            downstream_consumers = _find_dependent_consumers(
+                consumer_path,
+                candidate.module_usages,
+            )
+
+            for downstream_consumer in sorted(
+                downstream_consumers
+            ):
+                if downstream_consumer == delta.module_path:
+                    continue
+
+                if downstream_consumer in processed_recompute:
+                    continue
+
+                if downstream_consumer in scheduled_recompute:
+                    continue
+
+                scheduled_recompute.add(
+                    downstream_consumer
+                )
+                recompute_queue.append(
+                    downstream_consumer
+                )
+```
+
+This excerpt is `plan_executor.py:914-986`. The only enqueue routes in this executor are the initial `deque(plan.recompute_modules)` and this changed-slice downstream branch. There is no explicit iteration limit; queue termination is bounded by `processed_recompute` and `scheduled_recompute` deduplication over discovered consumer modules. Existing `test_transitive_propagation_cycle_terminates_without_duplicate_recompute` at `tests/test_completeness_freshness_parity_proof.py:1308-1389` separately expects a full-analysis `ArchitectureCycle` and checks that the executor trace contains no duplicate module names.
+
+`_rebuild_consumer_slice` is at `plan_executor.py:401-678`; it rebuilds one module's consumption from that module's `ModuleUsageFacts` plus candidate artifact/re-export inputs, updates the copy-on-write `artifact_consumption` map, and updates the execution-local consumer-to-target index. `_resolve_canonical_target_keys` at `plan_executor.py:277-356` resolves through `candidate_artifacts`, `expected_targets`, and `dotted_target_index`. Although `candidate_consumption` is an argument, the helper does not read it. This is direct source evidence that one consumer's rebuilt consumption entries do not supply the target identities used to resolve another consumer's slice in this scenario. The test establishes this specific once-only behavior; it does not claim a universal theorem for all future fact families or executor inputs.
+
+## REVISIT_SKIP_EVIDENCE
+
+The regression instruments the planner, `_rebuild_consumer_slice`, `_consumer_slice_signature`, and `_find_dependent_consumers` without changing production logic (`test...:1088-1172`). It records both signature values around each fan-in rebuild and the order of rebuild, post-rebuild signature, and downstream discovery.
+
+For the required forward run, assertions at `tests/test_completeness_freshness_parity_proof.py:1174-1198` establish:
+
+- The initial natural planner tuple and executor trace are `("m_consumer", "z_bridge")`.
+- Each fan-in module is rebuilt exactly once; the recorded fan-in rebuild order equals the requested queue order.
+- Both `m_consumer` and `z_bridge` have differing before/after slice signatures.
+- `z_bridge`'s rebuild precedes its changed post-rebuild signature, which precedes discovery of `("m_consumer",)` downstream from `z_bridge`.
+- At that discovery point, source lines `924-925` show `m_consumer` has already been added to `processed_recompute`; source lines `975-976` skip it. The observed trace contains only one `m_consumer` rebuild.
+
+In the reverse run, `m_consumer` is already in `scheduled_recompute` when `z_bridge` discovers it, so source lines `978-985` avoid a duplicate enqueue while its original queue item still executes afterward. The trace proves each ordering executes each fan-in consumer once.
+
+## FULL_VS_INCREMENTAL_PARITY
+
+The independent oracle is the existing `_build_full_static_state` helper at `tests/test_completeness_freshness_parity_proof.py:40-49`: it runs `ContextorFacade.analyze_project` and hydrates the resulting repository engine. The existing `_assert_full_parity` helper at `:52-112` checks canonical target-key equality, consumers, channel consumer keys and channel sets, as well as other plan-controlled state.
+
+The new test additionally compares a whole-map canonical snapshot retaining every target key, sorted consumer value, channel-consumer key, and sorted channel value (`:1036-1049`, `:1200-1212`). It asserts the exact full-oracle entry:
+
+```python
+"a::added": {
+    "consumers": ["m_consumer", "z_bridge"],
+    "channels": {
+        "m_consumer": ["direct_calls"],
+        "z_bridge": ["direct_calls"],
+    },
+}
+```
+
+Each incremental result matches its independently built full oracle and passes `_assert_full_parity`.
+
+## ORDER_INDEPENDENCE_RESULT
+
+Both full canonical snapshots compare equal (`tests/test_completeness_freshness_parity_proof.py:1215-1226`):
+
+- Natural order: `("m_consumer", "z_bridge")`.
+- Explicit executor-level order: `("z_bridge", "m_consumer")`.
+
+Each order also matches its own independently constructed FULL oracle across exact canonical target, consumer, and channel values. No planner or production edit was needed.
+
+## NEGATIVE_CONTROL_RESULT
+
+At `tests/test_completeness_freshness_parity_proof.py:1228-1234`, the test deep-copies the incremental state and replaces `m_consumer`'s `a::added` channel with `invented_channel`. The canonical snapshot then differs, and `_assert_full_parity` raises an assertion containing `channel mismatch`. This confirms the oracle comparison detects a concrete canonical `artifact_consumption` error.
+
+## TARGETED_TEST_RESULTS
+
+Command:
+
+```text
+& .\.venv\Scripts\python.exe -m pytest tests/test_completeness_freshness_parity_proof.py::test_semantic_fan_in_recompute_is_once_only_and_order_independent -q
+```
+
+Result: `1 passed in 8.69s`.
+
+No other tests and no full repository pytest run were performed.
+
+Closest existing focused coverage:
+
+- `test_transitive_reexport_late_provider_matches_full_oracle` at `tests/test_completeness_freshness_parity_proof.py:954-1020` covers late provider propagation and full parity, but does not observe a processed consumer being rediscovered or run opposite queue orders.
+- `test_transitive_propagation_stops_when_direct_consumer_slice_is_unchanged` at `:1237-1307` covers stopping propagation on an unchanged direct slice, not fan-in after a changed slice.
+- `test_transitive_propagation_cycle_terminates_without_duplicate_recompute` at `:1308-1389` covers cycle diagnostics and duplicate-free execution, but not this changed-slice fan-in order.
+- `test_execute_refresh_plan_builds_full_indexes_once_for_many_consumers` at `tests/test_incremental_plan_executor_complexity.py:170` covers index construction, not downstream rediscovery/revisit ordering.
+
+## FILES_CHANGED
+
+- `C:\Temp\Contextor_Repo\tests\test_completeness_freshness_parity_proof.py` — added the targeted regression only.
+- `C:\Temp\Contextor_Repo\walkthrough.md` — this required task report.
+- Production files changed: none.
+
+## FULL_DIFFS
+
+The complete Git diff for the changed test file follows. `walkthrough.md` is the required report itself and is not repeated as a self-diff. No production diff exists.
+```diff
+diff --git a/tests/test_completeness_freshness_parity_proof.py b/tests/test_completeness_freshness_parity_proof.py
+index f8e2bac..ebda63e 100644
+--- a/tests/test_completeness_freshness_parity_proof.py
++++ b/tests/test_completeness_freshness_parity_proof.py
+@@ -1020,6 +1020,220 @@ def test_transitive_reexport_late_provider_matches_full_oracle(tmp_path):
+     _assert_full_parity(engine.state, oracle)
  
  
- def test_claim_current_backend_uses_exact_desktop_owner_contract(monkeypatch):
-@@ -289,9 +328,20 @@ def test_start_backend_owner_claim_runs_in_nonblocking_daemon_thread():
-     assert not thread.is_alive()
- 
- 
--def test_start_backend_owner_claim_stores_worker_exception():
-+def test_start_backend_owner_claim_stores_worker_exception(monkeypatch):
-     controller = _controller()
-     expected = RuntimeError("claim failed")
-+    monkeypatch.setattr(gui, "BACKEND_OWNER_CLAIM_MAX_ATTEMPTS", 1)
-+    monkeypatch.setattr(
-+        gui.messagebox,
-+        "showerror",
-+        lambda *_args, **_kwargs: pytest.fail("worker must not show a messagebox"),
++def test_semantic_fan_in_recompute_is_once_only_and_order_independent(tmp_path):
++    from contextor.core.analysis.incremental import plan_executor
++    from contextor.core.analysis.incremental.plan_executor import (
++        _consumer_slice_signature as original_slice_signature,
++        _rebuild_consumer_slice as original_rebuild_consumer_slice,
 +    )
-+    monkeypatch.setattr(
-+        gui.messagebox,
-+        "showinfo",
-+        lambda *_args, **_kwargs: pytest.fail("worker must not show a messagebox"),
-+    )
- 
-     def fail_claim():
-         raise expected
-@@ -303,6 +353,252 @@ def test_start_backend_owner_claim_stores_worker_exception():
-     controller._backend_owner_claim_thread.join(timeout=1.0)
-     assert controller._backend_owner_claim_thread.is_alive() is False
-     assert controller._backend_owner_claim_error is expected
-+    assert controller._backend_owner_claim_state == "failed"
-+    assert controller._backend_owner_claim_attempt == 1
-+    assert controller._status_calls == [
-+        (("Backend ownership failed: claim failed",), {"category": "MCP_CALL"})
-+    ]
-+
-+
-+def test_owner_claim_first_attempt_success_has_no_retry_or_failure_status():
-+    controller = _controller()
-+    claim = SimpleNamespace(backend_instance_id="instance-1")
-+    calls = []
-+    controller._claim_backend_owner_on_startup = lambda: calls.append(1) or claim
-+
-+    gui.ContextorGUI._start_backend_owner_claim(controller)
-+
-+    thread = controller._backend_owner_claim_thread
-+    thread.join(timeout=1.0)
-+
-+    assert not thread.is_alive()
-+    assert calls == [1]
-+    assert controller.backend_owner_claim is claim
-+    assert controller._backend_owner_claim_state == "claimed"
-+    assert controller._backend_owner_claim_attempt == 1
-+    assert controller._backend_owner_claim_error is None
-+    assert _published_statuses(controller) == []
-+
-+
-+def test_owner_claim_transient_failure_then_success_retries_once(monkeypatch):
-+    controller = _controller()
-+    _, sleeps = _fast_retry_clock(monkeypatch)
-+    temporary = RuntimeError("temporary")
-+    claim = SimpleNamespace(backend_instance_id="instance-1")
-+    call_times = []
-+
-+    def claim_on_startup():
-+        call_times.append(gui.time.monotonic())
-+        if len(call_times) == 1:
-+            raise temporary
-+        return claim
-+
-+    controller._claim_backend_owner_on_startup = claim_on_startup
-+    gui.ContextorGUI._start_backend_owner_claim(controller)
-+    thread = controller._backend_owner_claim_thread
-+    thread.join(timeout=1.0)
-+
-+    assert not thread.is_alive()
-+    assert len(call_times) == 2
-+    assert call_times[1] - call_times[0] == pytest.approx(0.5)
-+    assert controller.backend_owner_claim is claim
-+    assert controller._backend_owner_claim_state == "claimed"
-+    assert controller._backend_owner_claim_attempt == 2
-+    assert controller._backend_owner_claim_error is None
-+    assert _published_statuses(controller) == [
-+        (
-+            "Backend ownership unavailable; retrying (2/3)...",
-+            {"category": "MCP_CALL"},
-+        ),
-+        (
-+            "Backend ownership restored.",
-+            {"category": "MCP_CALL"},
-+        ),
-+    ]
-+    assert sum(sleeps) == pytest.approx(0.5)
-+
-+
-+def test_owner_claim_two_failures_then_success_traverses_both_delays(monkeypatch):
-+    controller = _controller()
-+    _, sleeps = _fast_retry_clock(monkeypatch)
-+    errors = [RuntimeError("temporary-1"), RuntimeError("temporary-2")]
-+    claim = SimpleNamespace(backend_instance_id="instance-1")
-+    call_times = []
-+
-+    def claim_on_startup():
-+        call_times.append(gui.time.monotonic())
-+        if len(call_times) <= 2:
-+            raise errors[len(call_times) - 1]
-+        return claim
-+
-+    controller._claim_backend_owner_on_startup = claim_on_startup
-+    gui.ContextorGUI._start_backend_owner_claim(controller)
-+    thread = controller._backend_owner_claim_thread
-+    thread.join(timeout=1.0)
-+
-+    assert not thread.is_alive()
-+    assert len(call_times) == 3
-+    assert call_times[1] - call_times[0] == pytest.approx(0.5)
-+    assert call_times[2] - call_times[1] == pytest.approx(1.0)
-+    assert sum(sleeps) == pytest.approx(1.5)
-+    assert controller.backend_owner_claim is claim
-+    assert controller._backend_owner_claim_state == "claimed"
-+    assert controller._backend_owner_claim_attempt == 3
-+    assert controller._backend_owner_claim_error is None
-+    assert _published_statuses(controller) == [
-+        (
-+            "Backend ownership unavailable; retrying (2/3)...",
-+            {"category": "MCP_CALL"},
-+        ),
-+        (
-+            "Backend ownership unavailable; retrying (3/3)...",
-+            {"category": "MCP_CALL"},
-+        ),
-+        (
-+            "Backend ownership restored.",
-+            {"category": "MCP_CALL"},
-+        ),
-+    ]
-+
-+
-+def test_owner_claim_three_failures_emits_one_terminal_failure(monkeypatch):
-+    controller = _controller()
-+    _, sleeps = _fast_retry_clock(monkeypatch)
-+    errors = [
-+        RuntimeError("temporary-1"),
-+        RuntimeError("temporary-2"),
-+        RuntimeError("final"),
-+    ]
-+    calls = []
-+
-+    def fail_claim():
-+        calls.append(1)
-+        raise errors[len(calls) - 1]
-+
-+    controller._claim_backend_owner_on_startup = fail_claim
-+    gui.ContextorGUI._start_backend_owner_claim(controller)
-+    thread = controller._backend_owner_claim_thread
-+    thread.join(timeout=1.0)
-+
-+    assert not thread.is_alive()
-+    assert calls == [1, 1, 1]
-+    assert controller._backend_owner_claim_state == "failed"
-+    assert controller._backend_owner_claim_attempt == 3
-+    assert controller._backend_owner_claim_error is errors[-1]
-+    assert _published_statuses(controller) == [
-+        (
-+            "Backend ownership unavailable; retrying (2/3)...",
-+            {"category": "MCP_CALL"},
-+        ),
-+        (
-+            "Backend ownership unavailable; retrying (3/3)...",
-+            {"category": "MCP_CALL"},
-+        ),
-+        (
-+            "Backend ownership failed: final",
-+            {"category": "MCP_CALL"},
-+        ),
-+    ]
-+    assert sum(sleeps) == pytest.approx(1.5)
-+
-+
-+def test_foreign_owner_is_terminal_without_retry_or_messagebox(monkeypatch):
-+    controller = _controller()
-+    error = BackendOwnerAlreadyClaimed("foreign owner")
-+    calls = []
-+
-+    def fail_claim():
-+        calls.append(1)
-+        raise error
-+
-+    def fail_messagebox(*_args, **_kwargs):
-+        pytest.fail("owner worker must not show a messagebox")
-+
-+    controller._claim_backend_owner_on_startup = fail_claim
-+    monkeypatch.setattr(gui.messagebox, "showerror", fail_messagebox)
-+    monkeypatch.setattr(gui.messagebox, "showinfo", fail_messagebox)
-+    monkeypatch.setattr(
-+        gui.time,
-+        "sleep",
-+        lambda _delay: pytest.fail("foreign owner must not be retried"),
++    from contextor.core.analysis.refresh_planner import (
++        _find_dependent_consumers as original_find_dependent_consumers,
 +    )
 +
-+    gui.ContextorGUI._start_backend_owner_claim(controller)
-+    thread = controller._backend_owner_claim_thread
-+    thread.join(timeout=1.0)
++    fan_in_modules = {"m_consumer", "z_bridge"}
 +
-+    assert not thread.is_alive()
-+    assert calls == [1]
-+    assert controller._backend_owner_claim_state == "failed"
-+    assert controller._backend_owner_claim_attempt == 1
-+    assert controller._backend_owner_claim_error is error
-+    assert _published_statuses(controller) == [
-+        (
-+            "Backend ownership failed: foreign owner",
-+            {"category": "MCP_CALL"},
++    def artifact_consumption_snapshot(state):
++        return {
++            target: {
++                "consumers": tuple(sorted(entry.get("consumers", ()))),
++                "channels": {
++                    consumer: tuple(sorted(channels))
++                    for consumer, channels in sorted(
++                        entry.get("channels", {}).items()
++                    )
++                },
++            }
++            for target, entry in sorted(state.artifact_consumption.items())
++        }
++
++    def run_ordered_case(case_name, requested_order):
++        repo_dir = tmp_path / case_name
++        repo_dir.mkdir()
++
++        provider = repo_dir / "a.py"
++        bridge = repo_dir / "z_bridge.py"
++        consumer = repo_dir / "m_consumer.py"
++        provider.write_text(
++            "def existing():\n"
++            "    return 1\n",
++            encoding="utf-8",
 +        )
-+    ]
-+
-+
-+def test_closing_during_retry_delay_aborts_without_final_failure(monkeypatch):
-+    controller = _controller()
-+    _, sleeps = _fast_retry_clock(monkeypatch, controller=controller)
-+    temporary = RuntimeError("temporary")
-+    calls = []
-+
-+    def fail_claim():
-+        calls.append(1)
-+        raise temporary
-+
-+    controller._claim_backend_owner_on_startup = fail_claim
-+    gui.ContextorGUI._start_backend_owner_claim(controller)
-+    thread = controller._backend_owner_claim_thread
-+    thread.join(timeout=1.0)
-+
-+    assert not thread.is_alive()
-+    assert calls == [1]
-+    assert sleeps
-+    assert controller._backend_owner_claim_state == "aborted"
-+    assert controller._backend_owner_claim_attempt == 1
-+    assert controller._backend_owner_claim_error is temporary
-+    assert _published_statuses(controller) == [
-+        (
-+            "Backend ownership unavailable; retrying (2/3)...",
-+            {"category": "MCP_CALL"},
++        bridge.write_text(
++            "import a\n"
++            "\n"
++            "def bridge():\n"
++            "    return a.added()\n",
++            encoding="utf-8",
 +        )
-+    ]
++        consumer.write_text(
++            "import a\n"
++            "import z_bridge\n"
++            "\n"
++            "def run():\n"
++            "    return a.added(), z_bridge.bridge()\n",
++            encoding="utf-8",
++        )
++
++        cache_dir = repo_dir / "cache"
++        cache_dir.mkdir()
++        engine = IncrementalAnalysisEngine(
++            RepositoryAnalysisState(modules={}),
++            PersistentIdentityRegistry(str(repo_dir)),
++            FileStateManager(str(cache_dir)),
++            str(repo_dir),
++        )
++        for source_path in (provider, bridge, consumer):
++            engine.update_file(str(source_path))
++
++        assert "a::added" not in engine.state.artifact_consumption
++        provider.write_text(
++            "def existing():\n"
++            "    return 1\n"
++            "\n"
++            "def added():\n"
++            "    return 2\n",
++            encoding="utf-8",
++        )
++
++        natural_orders = []
++        scheduled_orders = []
++        rebuild_order = []
++        signature_values = {}
++        discoveries = []
++        event_trace = []
++        original_plan_refresh = RefreshPlanner.plan_refresh
++
++        def ordered_plan_refresh(*args, **kwargs):
++            natural_plan = original_plan_refresh(*args, **kwargs)
++            delta = args[0] if args else kwargs.get("delta")
++            if delta is not None and delta.module_path == "a":
++                natural_orders.append(natural_plan.recompute_modules)
++                assert set(natural_plan.recompute_modules) == fan_in_modules
++                if natural_plan.recompute_modules == requested_order:
++                    scheduled_plan = natural_plan
++                else:
++                    scheduled_plan = RefreshPlan(
++                        reparse_modules=natural_plan.reparse_modules,
++                        recompute_modules=requested_order,
++                        patch_families=natural_plan.patch_families,
++                        graph_recomputations=natural_plan.graph_recomputations,
++                        refresh_completeness=natural_plan.refresh_completeness,
++                        semantic_certainty=natural_plan.semantic_certainty,
++                        reason=natural_plan.reason,
++                    )
++                scheduled_orders.append(scheduled_plan.recompute_modules)
++                return scheduled_plan
++            return natural_plan
++
++        def traced_rebuild(*args, **kwargs):
++            consumer_path = kwargs.get("consumer", args[0] if args else None)
++            rebuild_order.append(consumer_path)
++            event_trace.append(("rebuild", consumer_path))
++            return original_rebuild_consumer_slice(*args, **kwargs)
++
++        def traced_signature(consumer_path, *args, **kwargs):
++            signature = original_slice_signature(
++                consumer_path,
++                *args,
++                **kwargs,
++            )
++            signature_values.setdefault(consumer_path, []).append(signature)
++            event_trace.append(("signature", consumer_path, signature))
++            return signature
++
++        def traced_discovery(module_path, usages):
++            downstream = original_find_dependent_consumers(module_path, usages)
++            ordered_downstream = tuple(sorted(downstream))
++            discoveries.append((module_path, ordered_downstream))
++            event_trace.append(("discover", module_path, ordered_downstream))
++            return downstream
++
++        with (
++            patch.object(
++                RefreshPlanner,
++                "plan_refresh",
++                side_effect=ordered_plan_refresh,
++            ),
++            patch(
++                "contextor.core.analysis.refresh_planner._find_dependent_consumers",
++                side_effect=traced_discovery,
++            ),
++            patch.object(
++                plan_executor,
++                "_rebuild_consumer_slice",
++                side_effect=traced_rebuild,
++            ),
++            patch.object(
++                plan_executor,
++                "_consumer_slice_signature",
++                side_effect=traced_signature,
++            ),
++        ):
++            result = engine.update_file(str(provider))
++
++        assert natural_orders == [("m_consumer", "z_bridge")]
++        assert scheduled_orders == [requested_order]
++        assert result.execution_trace["recompute_modules"] == requested_order
++
++        fan_in_rebuild_order = tuple(
++            module for module in rebuild_order if module in fan_in_modules
++        )
++        assert fan_in_rebuild_order == requested_order
++        assert fan_in_rebuild_order.count("m_consumer") == 1
++        assert fan_in_rebuild_order.count("z_bridge") == 1
++
++        assert signature_values["m_consumer"][0] != signature_values["m_consumer"][1]
++        assert signature_values["z_bridge"][0] != signature_values["z_bridge"][1]
++        z_bridge_rebuild = event_trace.index(("rebuild", "z_bridge"))
++        z_bridge_signatures = [
++            index
++            for index, event in enumerate(event_trace)
++            if event[:2] == ("signature", "z_bridge")
++        ]
++        z_bridge_discovery = event_trace.index(
++            ("discover", "z_bridge", ("m_consumer",))
++        )
++        assert len(z_bridge_signatures) == 2
++        assert z_bridge_rebuild < z_bridge_signatures[1] < z_bridge_discovery
++        assert ("z_bridge", ("m_consumer",)) in discoveries
++
++        oracle = _build_full_static_state(repo_dir)
++        _assert_full_parity(engine.state, oracle)
++        incremental_snapshot = artifact_consumption_snapshot(engine.state)
++        oracle_snapshot = artifact_consumption_snapshot(oracle)
++        assert incremental_snapshot == oracle_snapshot
++        assert oracle.artifact_consumption["a::added"] == {
++            "consumers": ["m_consumer", "z_bridge"],
++            "channels": {
++                "m_consumer": ["direct_calls"],
++                "z_bridge": ["direct_calls"],
++            },
++        }
++
++        return engine.state, oracle, incremental_snapshot
++
++    forward_state, forward_oracle, forward_snapshot = run_ordered_case(
++        "m_before_z",
++        ("m_consumer", "z_bridge"),
++    )
++    reverse_state, reverse_oracle, reverse_snapshot = run_ordered_case(
++        "z_before_m",
++        ("z_bridge", "m_consumer"),
++    )
++
++    assert forward_snapshot == artifact_consumption_snapshot(forward_oracle)
++    assert reverse_snapshot == artifact_consumption_snapshot(reverse_oracle)
++    assert forward_snapshot == reverse_snapshot
++
++    negative_state = deepcopy(forward_state)
++    negative_state.artifact_consumption["a::added"]["channels"][
++        "m_consumer"
++    ] = ["invented_channel"]
++    assert artifact_consumption_snapshot(negative_state) != forward_snapshot
++    with pytest.raises(AssertionError, match="channel mismatch"):
++        _assert_full_parity(negative_state, forward_oracle)
 +
 +
-+def test_duplicate_owner_worker_is_suppressed_while_first_is_alive():
-+    controller = _controller()
-+    entered = threading.Event()
-+    release = threading.Event()
-+    calls = []
-+    claim = SimpleNamespace(backend_instance_id="instance-1")
-+
-+    def claim_on_startup():
-+        calls.append(1)
-+        entered.set()
-+        release.wait(timeout=2.0)
-+        return claim
-+
-+    controller._claim_backend_owner_on_startup = claim_on_startup
-+    gui.ContextorGUI._start_backend_owner_claim(controller)
-+    first_thread = controller._backend_owner_claim_thread
-+
-+    assert entered.wait(timeout=1.0)
-+    gui.ContextorGUI._start_backend_owner_claim(controller)
-+
-+    assert controller._backend_owner_claim_thread is first_thread
-+    assert first_thread.is_alive()
-+    assert calls == [1]
-+    release.set()
-+    first_thread.join(timeout=1.0)
-+
-+    assert not first_thread.is_alive()
-+    assert calls == [1]
-+    assert controller.backend_owner_claim is claim
-+    assert controller._backend_owner_claim_state == "claimed"
- 
- 
- def test_post_paint_starts_backend_claim_before_cleanup_and_live(monkeypatch, tmp_path):
+ def test_transitive_propagation_stops_when_direct_consumer_slice_is_unchanged(
+     tmp_path,
+ ):
+```
+
+## ACTUAL_DIFF
+
+- Test file: full actual diff is included above.
+- Production/tests other than the target test: NONE.
+- Walkthrough: report file only; its self-diff is omitted.
