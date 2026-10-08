@@ -698,6 +698,49 @@ def test_scoped_analysis_success_refreshes_repository_live_identity(
     assert started == [str(repo.resolve()) if operation == "layer" else str(repo)]
 
 
+def test_scoped_analysis_accepted_recovery_does_not_start_watcher(
+    tmp_path, monkeypatch
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    target = repo / "module.py"
+    target.write_text("VALUE = 1\n", encoding="utf-8")
+    incidents = []
+    statuses = []
+    reports = []
+
+    def analyze_file(*_args, publication_result=None, **_kwargs):
+        publication_result.update(
+            status="recovery_required", revision=17, warning="release unverified"
+        )
+        return "single-output"
+
+    monkeypatch.setattr(
+        gui, "run_with_progress",
+        lambda _root, _progress, task, *, on_success, **_kwargs: on_success(task()),
+    )
+    monkeypatch.setattr(gui.ContextorFacade, "analyze_single_file", analyze_file)
+    monkeypatch.setattr(gui.messagebox, "showinfo", lambda *_args: reports.append(True))
+    controller = SimpleNamespace(
+        root=object(), progress_bar=SimpleNamespace(is_cancelled=False),
+        log_box=object(), cpu_indicator=object(), stop_btn=object(),
+        repo_path_var=SimpleNamespace(get=lambda: str(repo)),
+        file_path_var=SimpleNamespace(get=lambda: str(target)),
+        _busy_buttons=lambda: [],
+        _start_live_watcher=lambda _path: pytest.fail("unhealthy watcher started"),
+        _request_full_analysis_recovery=lambda path, reason: incidents.append((path, reason)),
+        _set_live_status=statuses.append,
+    )
+
+    gui.ContextorGUI.analyze_single(controller)
+
+    assert reports == [True]
+    assert incidents == [(
+        str(repo.resolve()), "Canonical LIVE publish requires recovery verification."
+    )]
+    assert statuses == ["LIVE: recovery required after accepted publish (revision 17)"]
+
+
 def test_closing_gui_shuts_down_owned_live_client(monkeypatch):
     events = []
     token = "test-gui-owner-token"

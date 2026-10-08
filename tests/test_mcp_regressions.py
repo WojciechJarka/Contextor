@@ -1260,6 +1260,40 @@ def test_project_analysis_job_does_not_hydrate_after_failed_publication(
     assert str(repo) not in mcp_runtime._live_engine_revisions
 
 
+def test_project_analysis_job_preserves_accepted_recovery_status(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    async def fake_worker(*_args, **_kwargs):
+        return {
+            "skipped_python_files": [],
+            "live_publish_status": "recovery_required",
+            "live_publish_revision": 11,
+            "live_publish_warning": "release unverified",
+        }
+
+    monkeypatch.setattr(analysis_jobs, "_run_analysis_worker", fake_worker)
+    monkeypatch.setattr(
+        mcp_runtime, "get_or_init_engine",
+        lambda _root: pytest.fail("unhealthy publication hydrated as healthy"),
+    )
+    job = _project_analysis_job(repo, "accepted-recovery")
+    analysis_jobs._write_analysis_job(repo, job)
+
+    asyncio.run(analysis_jobs._execute_analysis_job(repo, job, None, []))
+
+    final_job = analysis_jobs._read_analysis_job(repo, job["job_id"])
+    assert final_job["status"] == "completed"
+    assert final_job["live_publish_status"] == "recovery_required"
+    assert final_job["live_publish_revision"] == 11
+    assert final_job["live_publish_warning"] == "release unverified"
+    assert "accepted" in final_job["message"]
+    assert "rejected" not in final_job["message"]
+    public_job = analysis_jobs._public_job(final_job)
+    assert public_job["live_publish_status"] == "recovery_required"
+    assert public_job["live_publish_revision"] == 11
+
+
 def test_analysis_status_bounds_and_exposes_skipped_python_files(tmp_path):
     repo = tmp_path / "repo"
     repo.mkdir()

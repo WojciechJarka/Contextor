@@ -391,7 +391,12 @@ async def _execute_analysis_job(
                     mcp_runtime._live_engine_revisions.pop(cache_key, None)
         publish_status = job.get("live_publish_status")
         completed_message = "Analysis completed successfully."
-        if job["operation"] == "project" and publish_status != "success":
+        if job["operation"] == "project" and publish_status == "recovery_required":
+            completed_message = (
+                "Analysis completed; canonical LIVE publication was accepted "
+                "but recovery verification is required."
+            )
+        elif job["operation"] == "project" and publish_status != "success":
             completed_message = (
                 "Analysis completed, but canonical LIVE publish "
                 f"{publish_status or 'failed'}."

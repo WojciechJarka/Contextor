@@ -1499,6 +1499,20 @@ class ContextorGUI:
                         release_full_analysis(startup_lease)
                     if (
                         isinstance(published, dict)
+                        and published.get("resync_required") is True
+                    ):
+                        self._request_full_analysis_recovery(
+                            path,
+                            "Canonical LIVE publish requires recovery verification.",
+                        )
+                        if ContextorGUI._is_selected_live_repository(self, path):
+                            self._set_live_status(
+                                "LIVE: recovery required after accepted publish "
+                                f"(revision {published.get('revision')})"
+                            )
+                        return
+                    if (
+                        isinstance(published, dict)
                         and published.get("status") == "ok"
                     ):
                         if ContextorGUI._is_selected_live_repository(self, path):
@@ -1738,13 +1752,27 @@ class ContextorGUI:
             )
             return
 
+        publication_result = {}
+
         def task(log=None, progress_callback=None):
             return ContextorFacade.analyze_single_file(
-                str(file_resolved), str(root_resolved), log=log, progress_callback=progress_callback
+                str(file_resolved), str(root_resolved), log=log,
+                progress_callback=progress_callback,
+                publication_result=publication_result,
             )
 
         def on_success(output):
-            self._start_live_watcher(str(root_resolved))
+            if publication_result.get("status") == "recovery_required":
+                self._request_full_analysis_recovery(
+                    str(root_resolved),
+                    "Canonical LIVE publish requires recovery verification.",
+                )
+                self._set_live_status(
+                    "LIVE: recovery required after accepted publish "
+                    f"(revision {publication_result.get('revision')})"
+                )
+            elif publication_result.get("status") != "failed":
+                self._start_live_watcher(str(root_resolved))
             messagebox.showinfo("Done", f"Single file report created:\n{output}")
 
         def on_error(exc):

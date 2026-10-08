@@ -1,5 +1,8 @@
 """Fast single-file primitives reuse canonical state instead of reparsing."""
 
+from types import SimpleNamespace
+from dataclasses import replace
+
 from contextor.core.reporting_engine.canonical_artifacts import (
     canonical_artifact_report,
 )
@@ -82,6 +85,43 @@ def test_single_file_changed_target_falls_back_to_incremental_engine(
 
     assert output.endswith("single_core.alpha.json")
     assert calls == 1
+
+
+def test_single_file_reports_accepted_recovery_without_changing_string_return(
+    sample_repo, isolated_dirs, monkeypatch
+):
+    import contextor.core.api.facade as facade_module
+
+    target = sample_repo / "core" / "alpha.py"
+    ContextorFacade.analyze_project(str(sample_repo))
+    original_hydrate = facade_module.hydrate_repository_engine
+    published = []
+
+    def hydrate_with_client(root):
+        hydrated = original_hydrate(root)
+        client = SimpleNamespace(publish=lambda *_a, **_k: published.append(True) or {
+            "status": "ok", "revision": 17,
+            "resync_required": True, "warning": "release unverified",
+        })
+        return replace(hydrated, client=client)
+
+    monkeypatch.setattr(facade_module, "hydrate_repository_engine", hydrate_with_client)
+    target.write_text(
+        target.read_text(encoding="utf-8").replace("MAX_ITEMS = 10", "MAX_ITEMS = 11"),
+        encoding="utf-8",
+    )
+    publication = {}
+    output = ContextorFacade.analyze_single_file(
+        str(target), str(sample_repo), publication_result=publication,
+    )
+
+    assert isinstance(output, str)
+    assert output.endswith("single_core.alpha.json")
+    assert published == [True]
+    assert publication == {
+        "status": "recovery_required", "revision": 17,
+        "warning": "release unverified",
+    }
 
 
 def test_single_file_resync_state_rejects_state_only_path(

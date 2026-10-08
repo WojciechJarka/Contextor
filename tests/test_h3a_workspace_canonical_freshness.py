@@ -1143,6 +1143,32 @@ def test_h3a_case_v_active_daemon_publish_failure_response_dict(tmp_path, monkey
         _stop_authoritative_live(repo, server_client)
 
 
+def test_full_publish_accepted_recovery_preserves_revision_and_warning(tmp_path, monkeypatch):
+    from contextor.core.live_state import LiveStateClient
+
+    repo, mod_a = _setup_repo(tmp_path)
+    ContextorFacade.analyze_project(str(repo))
+    server_client = _start_authoritative_live(repo)
+    try:
+        mod_a.write_text("def compute_data(x: int) -> int:\n    return x * 333\n", encoding="utf-8")
+        monkeypatch.setattr(
+            LiveStateClient, "publish",
+            lambda self, state, **kwargs: {
+                "status": "ok", "revision": state.revision,
+                "resync_required": True, "warning": "release unverified",
+            },
+        )
+        errors, result = ContextorFacade.analyze_project(str(repo))
+        assert not errors
+        assert result.live_publish_status == "recovery_required"
+        assert result.live_publish_revision is not None
+        assert result.live_publish_warning == "release unverified"
+        assert result.summary_data["live_publish_status"] == "recovery_required"
+        assert result.summary_data["live_publish_revision"] == result.live_publish_revision
+    finally:
+        _stop_authoritative_live(repo, server_client)
+
+
 def test_h3a_case_w_no_active_daemon_not_attempted(tmp_path):
     """Case W (H3A-H6 - No Active Daemon -> not_attempted):
     - No daemon running

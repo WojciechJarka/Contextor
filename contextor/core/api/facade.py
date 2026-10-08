@@ -10,6 +10,7 @@ import json
 import os
 import time
 from pathlib import Path
+from typing import Any
 
 from contextor.core.errors import AnalysisCancelled, checkpoint
 from contextor.core.graph.cycles import detect_cycles
@@ -1153,9 +1154,16 @@ class ContextorFacade:
                             and published.get("status") == "ok"
                             and published.get("revision") is not None
                         ):
-                            live_publish_status = "success"
                             live_publish_revision = int(published["revision"])
-                            live_publish_warning = None
+                            if published.get("resync_required") is True:
+                                live_publish_status = "recovery_required"
+                                live_publish_warning = (
+                                    published.get("warning")
+                                    or "LIVE recovery verification required."
+                                )
+                            else:
+                                live_publish_status = "success"
+                                live_publish_warning = None
                         else:
                             live_publish_status = "failed"
                             live_publish_revision = None
@@ -1487,8 +1495,11 @@ class ContextorFacade:
         log=None,
         progress_callback=None,
         additional_excludes: list[str] | None = None,
+        publication_result: dict[str, Any] | None = None,
     ) -> str:
         """Analyzes a single file within the context of a project. Returns report output path."""
+        if publication_result is not None:
+            publication_result.update(status="not_attempted", revision=None, warning=None)
         progress = _StagedProgress(progress_callback, total_stages=11, log=log)
         progress.begin("Validating repository and file scope")
         root_resolved, file = _resolve_repository_target(
@@ -1586,12 +1597,32 @@ class ContextorFacade:
             cache_hit = True
             if update_result.status == "UPDATED" and hydrated.client is not None:
                 try:
-                    hydrated.client.publish(
+                    published = hydrated.client.publish(
                         analysis_state,
                         origin="scoped_analysis",
                         timeout=5.0,
                     )
-                except (TimeoutError, OSError, EOFError, ConnectionError, RuntimeError):
+                    if isinstance(published, dict) and published.get("status") == "ok":
+                        if published.get("resync_required") is True:
+                            status = "recovery_required"
+                            warning = published.get("warning") or "LIVE recovery verification required."
+                        else:
+                            status = "success"
+                            warning = None
+                        revision = int(published["revision"]) if published.get("revision") is not None else None
+                    else:
+                        status = "failed"
+                        revision = None
+                        warning = (
+                            published.get("error") if isinstance(published, dict) else None
+                        ) or "Canonical LIVE service rejected publication."
+                    if publication_result is not None:
+                        publication_result.update(status=status, revision=revision, warning=warning)
+                    if status in {"failed", "recovery_required"} and log:
+                        log(f"[WARNING] Single-file LIVE publication: {warning}")
+                except (TimeoutError, OSError, EOFError, ConnectionError, RuntimeError) as exc:
+                    if publication_result is not None:
+                        publication_result.update(status="failed", revision=None, warning=f"{type(exc).__name__}: {exc}")
                     if log:
                         log("[WARNING] Updated single-file state could not be published to LIVE.")
             if log:

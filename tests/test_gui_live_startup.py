@@ -864,6 +864,43 @@ def test_rejected_startup_publication_schedules_recovery_prompt(tmp_path, monkey
     controller.analyze.assert_not_called()
 
 
+def test_accepted_startup_publication_requires_recovery_without_watcher(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    PersistentIdentityRegistry(str(repo))
+    controller = _bind_recovery_prompt(_make_controller(repo, MockTkRoot()))
+    loaded = SimpleNamespace(revision=7, state_id="loaded-generation")
+    remote = SimpleNamespace(revision=6, state_id="remote-generation")
+    releases = []
+
+    class Client:
+        def snapshot(self):
+            return {"state": remote, "revision": 6}
+
+        def publish(self, *_args, **_kwargs):
+            return {"status": "ok", "revision": 7, "resync_required": True}
+
+    monkeypatch.setattr(gui, "connect_or_start", lambda *_a, **_k: Client())
+    monkeypatch.setattr(gui, "migrate_legacy_snapshot", lambda *_a: tmp_path / "cache")
+    monkeypatch.setattr(gui, "acquire_full_analysis", lambda *_a, **_k: object())
+    monkeypatch.setattr(gui, "release_full_analysis", releases.append)
+    monkeypatch.setattr(gui, "DesktopLiveWatcher", lambda *_a, **_k: pytest.fail("watcher started"))
+    monkeypatch.setattr(
+        "contextor.core.analysis.state_manager.load_engine_state",
+        lambda *_a, **_k: loaded,
+    )
+
+    ContextorGUI._start_live_watcher_blocking(controller, str(repo))
+    ContextorGUI._start_live_watcher_blocking(controller, str(repo))
+
+    assert len(releases) == 2
+    assert controller._live_recovery_queue.qsize() == 1
+    assert controller._live_recovery_prompt_pending == {str(repo.resolve())}
+    assert controller._statuses[-1] == "LIVE: recovery required after accepted publish (revision 7)"
+    assert "LIVE: shared state published; watcher active" not in controller._statuses
+    controller.analyze.assert_not_called()
+
+
 
 def test_recovery_request_from_worker_uses_queue_without_tk(tmp_path, monkeypatch):
     repo = tmp_path / "repo"
