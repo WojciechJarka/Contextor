@@ -1,69 +1,61 @@
-# L37_L38_A3C_COMPLETE_RECOVERY_GATE_AND_AUTHORITY_CERTIFICATION
+# L37_L38_DURABLE_VERIFIED_PUBLISH_ATOMICITY_FIX
 
 ## CURRENT_HEAD
 
-DIRECT_EVIDENCE: `de84e7956551063367a7e5754ac60e4a2982c13f`. `git status --short` was empty before this report. The earlier GUI acceptance change is already in HEAD at C:\Temp\Contextor_Repo\contextor\ui\gui.py:1148-1149. No production or test edits were made for this task.
+DIRECT_EVIDENCE: `d62d208b2d5b0b3e6551b634eb53bc4f271d2081`. Before editing, `git status --short` showed only `M walkthrough.md` from the prior report. All production and test files were clean. No production or test edits were made for this task.
 
 ## PRE_EDIT_CONTEXTOR_EVIDENCE
 
-Deferred Contextor MCP tools were actively located. Current MCP documentation for `get_symbol_implementation`, `get_symbol_call_context`, `get_artifact_blast_radius`, `get_symbol_lineage`, and `get_source_range` was read before source verification. Contextor implementations were retrieved for `ContextorGUI.analyze`, `_request_full_analysis_recovery`, `_start_live_watcher_blocking`, `DesktopLiveWatcher.poll_once`, `CanonicalLiveServer._dispatch`, `_execute_publish`, `_execute_update_file`, `LiveStateClient.publish`, `submit_update_file`, `mutation_status`, `read_repository_identity`, `save_snapshot`, `_acquire_lock`, `_release_lock`, `acquire_full_analysis`, and `resolve_authoritative_repository_state`. Contextor reported canonical revision 13 and `workspace_sync=verified` for these resolved source symbols. `load_committed_snapshot_locked` was not found. Static blast radius was queried for `_execute_publish`, `LiveStateClient.publish`, `ContextorGUI.analyze`, and watcher `poll_once`; it expressly cannot exclude dynamic Python callers. Git/source inspection below supplied literal line anchors after Contextor discovery.
+Deferred Contextor MCP tools were actively discovered. Current documentation was read for `get_symbol_implementation`, `get_artifact_blast_radius`, `get_symbol_call_context`, `get_symbol_lineage`, and `get_source_range`. Contextor returned `workspace_sync=verified`, canonical revision 13 for the resolved implementations of C:\Temp\Contextor_Repo\contextor\core\live_state\ipc.py `CanonicalLiveServer._record_event`, `_execute_publish`, `__init__`, `_execute_update_file`; and C:\Temp\Contextor_Repo\contextor\core\live_state\store.py `_acquire_lock`, `_release_lock`. `locked_committed_snapshot` was confirmed absent. The full `load_snapshot` range (store.py:1904-2311) was retrieved with Contextor `get_source_range` and `allow_large_output=true`. Contextor blast radius was queried for `_record_event`, `_execute_publish`, `__init__`, `load_snapshot`, and `_acquire_lock`; static results cannot exclude dynamic Python callers. Git/source then confirmed exact literal anchors.
+
+The required anchors match: C:\Temp\Contextor_Repo\contextor\core\live_state\store.py:1904 starts `load_snapshot`; C:\Temp\Contextor_Repo\contextor\core\live_state\ipc.py:702 defines `persister`, 756 assigns it, and 1203-1205 has the specified `_execute_publish` prefix; C:\Temp\Contextor_Repo\contextor\core\live_state\runtime.py:47 has the specified store import and 1500-1509 constructs the production server. No source drift was found.
 
 ## FILES_CHANGED
 
-- C:\Temp\Contextor_Repo\walkthrough.md (this report only)
+- C:\Temp\Contextor_Repo\walkthrough.md (report only)
 
 Production/test files changed: NONE.
 
 ## FULL_DIFFS
 
-ACTUAL_DIFF=DIFFS=NONE for production and tests. `walkthrough.md` is the report artifact and is excluded from production/test diffs by the repository reporting rule.
+ACTUAL_DIFF=DIFFS=NONE for production and tests. `walkthrough.md` is the report artifact.
 
-## RECOVERY_ADMISSION_ATOMICITY
+## COMMITTED_SNAPSHOT_LOCKING
 
-CODE_PATH_PROVED: C:\Temp\Contextor_Repo\contextor\ui\gui.py:1094-1103 atomically registers a path in `_live_recovery_prompt_pending` under `_live_recovery_lock`. C:\Temp\Contextor_Repo\contextor\core\live_state\watcher.py:827-832 currently submits without that lock; 640-642 polls inflight jobs then drains pending paths. An atomic GUI-to-watcher admission guard is structurally possible only if the same recovery lock covers incident check and the synchronous `submit_update_file` admission call. It is not present in HEAD. No guard was added because the complete task's authority-release contract is blocked below.
+CODE_PATH_PROVED: The supplied context manager's `finally: _release_lock(fd)` would run when leaving the `with` suite, including when the suite executes `return`. Current `_release_lock` at C:\Temp\Contextor_Repo\contextor\core\live_state\store.py:1488-1503 calls `os.lseek`, Windows `msvcrt.locking(..., LK_UNLCK, 1)` or POSIX `fcntl.flock(..., LOCK_UN)`, and `os.close` without suppressing exceptions. The requested reader was not added because its exit behavior makes the supplied publish method unsafe after COMMIT.
 
-## WATCHER_PAUSE_BEHAVIOR
+## EVENT_PREPARATION_ATOMICITY
 
-CODE_PATH_PROVED: watcher.py:640-645 currently drains pending paths and consumes `_startup_pending`; 827-832 submits a mutation. This fails the requested active-recovery pause contract in current HEAD. The watcher was not modified. No pending filesystem state was deliberately discarded by this task.
+The corrected supplied method prepares event timestamp, fields, replacement event list and provenance before four LIVE assignments. C:\Temp\Contextor_Repo\contextor\core\live_state\watcher.py:1039-1046 consumes publish event `operation`, `origin` and `canonical_revision`; `file_path`, `diagnostic_changes` and `message` are read in its `update_file` branch at 1047-1068. C:\Temp\Contextor_Repo\contextor\ui\gui.py:1242-1254 reads canonical operation, revision, status, timestamp and source. No required publish consumer of omitted request metadata was found in these paths. The earlier `_record_event` exception boundary is removed from the supplied method.
 
-## INFLIGHT_JOB_PRESERVATION
+**NEW SOURCE-PROVED STOP CONDITION:** The supplied `_execute_committed_publish` still encloses `with self._committed_snapshot_reader() as loaded:` in a broad `try/except Exception`. It assigns `self._state`, `self._revision`, `self._events`, `self._activity_seq`, then returns from inside that `with`. Python invokes the context manager exit before the return completes. The supplied `locked_committed_snapshot` exits by calling current `_release_lock(fd)`. If `os.lseek`, OS unlock, or `os.close` raises `OSError` after the four assignments, the supplied broad `except` catches it and returns `{"status":"error","error":"committed_publish_failed",...}` although the committed generation and event were already installed. This directly violates the supplied CRITICAL rule that the broad except contain no potentially failing work after canonical assignments.
 
-CODE_PATH_PROVED: watcher.py:570-638 polls `mutation_status`, keeps queued/running jobs, reconciles completed jobs, and requeues failed paths; `poll_once` invokes it before pending drain at 641. Existing jobs can be observed without new submissions in principle, but this task did not change the watcher. C:\Temp\Contextor_Repo\contextor\core\live_state\ipc.py:1530-1533 dispatches asynchronous submission and status as distinct operations.
+Concrete deterministic counterexample: replace the reader's exit release function in a focused fake with one that raises `OSError("unlock failed")` after the yielded committed snapshot. The supplied method completes all four assignments, its `with` exit raises, and the catch returns error for the installed generation. The production `_release_lock` has the same unsuppressed exception boundary at store.py:1488-1503. The counterexample is source-permitted, not a claim that an OS unlock failed in this workspace. No unapproved rollback or alternative lock handling was invented.
 
-## STARTUP_RESYNC_SINGLE_OWNER
+## DURABLE_CATCH_UP
 
-CODE_PATH_PROVED: gui.py:1573-1579 still invokes `run_full_analysis_exclusive` from the Desktop startup `on_resync` callback. watcher.py:669-697 invokes this callback when `_startup_requires_resync` and can mark its baseline trusted only after a successful outcome and further snapshot validation. Thus the requested user-only FULL path is not yet satisfied. It was not changed because Part 10 requires stopping at the incompatible authority boundary.
+NOT IMPLEMENTED / NOT TESTED. The supplied revision-jump rule was not applied because of the post-COMMIT context-manager exit boundary.
 
-## DURABLE_LIVE_AUTHORITY_VERIFICATION
+## MEMORY_ONLY_COMPATIBILITY
 
-**BLOCKING COUNTEREXAMPLE, CODE_PATH_PROVED:**
+UNCHANGED / NOT TESTED. Existing memory-only `_execute_publish` remains at ipc.py:1203-1259.
 
-1. A GUI certification could load a committed snapshot under the OS-owned store lock `_acquire_lock`/`_release_lock` (C:\Temp\Contextor_Repo\contextor\core\live_state\store.py:1444-1503; `save_snapshot` uses it at 1541-1543 and releases it at 1873), then observe matching LIVE state through `LiveStateClient.snapshot` (C:\Temp\Contextor_Repo\contextor\core\live_state\ipc.py:1860-1861).
-2. A second client can call the public `LiveStateClient.publish` at ipc.py:1879-1888. Server dispatch routes `publish` directly to `_execute_publish` at 1516-1537. `_execute_publish` uses the server's `_mutation_execution_lock` and `_lock` at 1203-1205, validates the next revision at 1212-1252, then replaces LIVE `_state` and `_revision` at 1254-1259. That path does not acquire the snapshot store lock or canonical writer admission. It does not persist a snapshot.
-3. A publish of valid next-revision state can therefore run after the GUI's final LIVE observation and before it removes the incident under its own recovery lock. The GUI lock is not used by the server. A later re-read only moves this interval; a full-analysis writer lease does not close it because this generic publish path does not acquire that lease. The GUI can clear based on generation N after LIVE becomes N+1, contradicting required Part 5 item 10 and Part 6 atomic clearing. The same sequence can produce durable-N/LIVE-(N+1) divergence.
+## REJECTION_ATOMICITY
 
-The counterexample is a source-permitted interleaving, not a claim that it occurred in this workspace. C:\Temp\Contextor_Repo\contextor\core\live_state\ipc.py:1594-1611 shows `authority_status` and `snapshot` are separate IPC reads under server `_lock`, while `publish` is another request. There is no exposed compare-and-clear operation sharing that server lock with the GUI recovery lock. C:\Temp\Contextor_Repo\contextor\core\live_state\store.py:1904-1937 `load_snapshot` selects metadata and validates expected repo/root, and 2083-2094 checks embedded state revision/id, but these checks cannot serialize a later LIVE publish. `load_committed_snapshot_locked` is absent at current HEAD; a caller could use the approved lock primitives, but that does not solve the LIVE race.
-
-CONTRACT_PROVED: The task forbids changing backend publication/persistence semantics and `_execute_publish`. It directs STOP if existing primitives cannot guarantee atomic release. The above public path is incompatible with guaranteeing that verified authority remains current through release under only in-scope GUI/watcher changes.
-
-## RECOVERY_INCIDENT_LIFECYCLE
-
-Current HEAD retains the incident after prompt acceptance (gui.py:1148-1149) but has no certified clear operation. No incident generation/token, certification operation, or clearing path was added. This task leaves incidents active, as the fail-closed stop condition requires. GUI `analyze` still calls `run_full_analysis_exclusive` at gui.py:1176-1184 and starts the watcher on completion at 1186-1187; absence of analysis errors does not prove the required authority identity.
+FALSIFIED FOR THE SUPPLIED METHOD: an exception from the reader's `__exit__` after the four assignments produces a failure response with changed `_state`, `_revision`, `_events`, and `_activity_seq`. The task says to STOP before editing if any further source-proved invariant is violated.
 
 ## TARGETED_TEST_RESULTS
 
-TESTS_RUN=NONE. Part 10 STOP applied during pre-edit verification. No new implementation exists to run targeted regressions against, and the user forbids a full suite.
+TESTS_RUN=NONE. The pre-edit STOP condition applied; R1-R23 were not added or run. No full repository suite was run.
 
 ## LIVE_WATCHER_VERIFICATION
 
-No file in the LIVE watched source/test set changed. No `update_file`, runtime restart, or Desktop restart was performed. A manual Desktop restart would be required after any future `gui.py` or `watcher.py` implementation before real integration certification.
+No watched production or test file changed. No manual `update_file`, Desktop/LIVE/MCP restart, or runtime integration certification was performed. A manual LIVE backend restart would be required after any future implementation in these runtime modules.
 
 ## UNRESOLVED_RISKS
 
-- UNKNOWN whether any higher-level operational policy prevents generic `publish` during the exact GUI certification interval; no enforced check appears in the inspected server dispatch/execute path. Such a policy would need an explicit, source-backed contract to resolve the counterexample.
-- UNKNOWN whether all already accepted asynchronous watcher jobs have reached terminal state at any proposed certification point. Their status can be polled, but no release protocol for this task was implemented.
-- Current watcher pause and startup resync requirements remain unsatisfied; they were intentionally left untouched under the STOP condition.
+The supplied contract does not specify how to avoid a failure response if releasing the store lock raises after LIVE commit. Resolving that boundary requires auditor guidance; this agent did not design a substitute.
 
 ## IMPLEMENTATION_VERDICT
 
-BLOCKED / CERTIFICATION_BLOCKED. The existing public LIVE publish path can change authority outside the snapshot lock, GUI recovery lock and full-analysis writer admission between final verification and gate release. The task forbids changing that backend boundary and instructs a fail-closed stop. No production/test edits, no tests, no runtime restart. Await `proceduj`.
+BLOCKED BEFORE EDIT. Exact anchors matched, but the supplied method violates its own post-COMMIT exception rule because `locked_committed_snapshot.__exit__` calls unsuppressed `_release_lock` after the four assignments and inside the broad catch. Production/test edits=NONE; tests=NONE. Await `proceduj`.
