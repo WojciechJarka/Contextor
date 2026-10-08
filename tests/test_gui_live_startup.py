@@ -89,15 +89,36 @@ def _make_controller(repo_path, root=None):
         _live_start_lock=threading.Lock(),
         _live_start_inflight=set(),
         _live_start_threads={},
+        _live_recovery_queue=Queue(),
+        _live_recovery_prompt_pending=set(),
+        _live_recovery_lock=threading.Lock(),
+        _live_recovery_incidents={},
+        _live_recovery_generations={},
         repo_id_var=_GuiFakeVar("Repo ID: unregistered"),
         repo_path_var=_GuiFakeVar(str(repo_path)),
         _selected_live_repo_path=str(repo_path),
         layer_path_var=_GuiFakeVar(""),
         file_path_var=_GuiFakeVar(""),
         theme_mode="light",
-        _set_live_status=lambda msg: statuses.append(msg),
+        _set_live_status=lambda msg, **_kwargs: statuses.append(msg),
         _events=events,
         _statuses=statuses,
+    )
+    controller._live_recovery_incident = (
+        lambda path: ContextorGUI._live_recovery_incident(controller, path)
+    )
+    controller._set_live_recovery_verification_state = (
+        lambda path, generation, state: ContextorGUI._set_live_recovery_verification_state(
+            controller, path, generation, state
+        )
+    )
+    controller._watcher_recovery_admission = (
+        lambda path: ContextorGUI._watcher_recovery_admission(controller, path)
+    )
+    controller._request_full_analysis_recovery = (
+        lambda path, reason, **kwargs: ContextorGUI._request_full_analysis_recovery(
+            controller, path, reason, **kwargs
+        )
     )
     return controller
 
@@ -605,15 +626,194 @@ def _bind_recovery_prompt(controller):
     controller._live_recovery_queue = Queue()
     controller._live_recovery_prompt_pending = set()
     controller._live_recovery_lock = threading.Lock()
+    controller._live_recovery_incidents = {}
+    controller._live_recovery_generations = {}
     controller._request_full_analysis_recovery = (
-        lambda path, reason: ContextorGUI._request_full_analysis_recovery(
-            controller, path, reason
+        lambda path, reason, **kwargs: ContextorGUI._request_full_analysis_recovery(
+            controller, path, reason, **kwargs
         )
     )
     controller._drain_live_recovery_queue = (
         lambda: ContextorGUI._drain_live_recovery_queue(controller)
     )
     return controller
+
+
+def _make_analysis_controller(repo):
+    controller = ContextorGUI.__new__(ContextorGUI)
+    controller.root = MockTkRoot()
+    controller.repo_path_var = _GuiFakeVar(str(repo))
+    controller.progress_bar = SimpleNamespace(is_cancelled=False)
+    controller.log_box = object()
+    controller.cpu_indicator = object()
+    controller.stop_btn = object()
+    controller._closing = False
+    controller._live_recovery_queue = Queue()
+    controller._live_recovery_prompt_pending = set()
+    controller._live_recovery_lock = threading.Lock()
+    controller._live_recovery_incidents = {}
+    controller._live_recovery_generations = {}
+    controller.live_watchers = {}
+    controller._statuses = []
+    controller._set_live_status = lambda message, **_kwargs: controller._statuses.append(message)
+    controller._start_live_watcher = MagicMock()
+    controller._busy_buttons = lambda: []
+    return controller
+
+
+def test_full_analysis_certifies_accepted_degraded_publish_and_preserves_revision(
+    tmp_path, monkeypatch
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    identity = PersistentIdentityRegistry(str(repo))
+    controller = _make_analysis_controller(repo)
+    watcher = SimpleNamespace(complete_recovery_certificate=MagicMock())
+    controller.live_watchers[identity.repo_id] = watcher
+    observations = []
+
+    certificate = {
+        "certificate_id": "certificate-1",
+        "incident_generation": 1,
+        "repo_id": identity.repo_id,
+        "root_path": str(repo.resolve()),
+        "state_id": "state-id",
+        "revision": 4,
+    }
+
+    class Client:
+        def get_events(self, **_kwargs):
+            return {"latest_seq": 9}
+
+        def verify_recovery(self, generation):
+            incident = ContextorGUI._live_recovery_incident(controller, str(repo))
+            observations.append((generation, incident))
+            return {"status": "ok", "certificate": certificate}
+
+        def complete_recovery_verification(self, certificate_id, generation):
+            return {
+                "status": "ok",
+                "released": True,
+                "certificate_id": certificate_id,
+                "incident_generation": generation,
+            }
+
+        def cancel_recovery_verification(self, *_args, **_kwargs):
+            pytest.fail("a valid certificate must not be cancelled")
+
+    client = Client()
+    monkeypatch.setattr("contextor.core.live_state.connect", lambda *_args: client)
+    full_calls = []
+    monkeypatch.setattr(
+        gui,
+        "run_full_analysis_exclusive",
+        lambda *_args, **_kwargs: (
+            full_calls.append(True)
+            or (
+                [],
+                SimpleNamespace(
+                    live_publish_status="recovery_required",
+                    live_publish_revision=4,
+                    live_publish_warning="snapshot_lock_release_unverified",
+                ),
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        gui,
+        "run_with_progress",
+        lambda _root, _progress, task, *, on_success, **_kwargs: on_success(task()),
+    )
+    monkeypatch.setattr(gui.messagebox, "showinfo", MagicMock())
+    monkeypatch.setattr(gui.messagebox, "showwarning", MagicMock())
+
+    ContextorGUI.analyze(controller)
+
+    assert full_calls == [True]
+    assert observations == [
+        (
+            1,
+            {
+                "generation": 1,
+                "reason": "snapshot_lock_release_unverified",
+                "required": True,
+                "verification_state": "verifying",
+                "publication_revision": 4,
+                "publication_outcome": "accepted",
+            },
+        )
+    ]
+    assert ContextorGUI._live_recovery_incident(controller, str(repo)) is None
+    watcher.complete_recovery_certificate.assert_called_once_with()
+    assert controller._statuses[-1] == (
+        "LIVE recovery verified; incremental updates resumed."
+    )
+
+
+def test_older_recovery_certificate_cannot_clear_newer_incident(
+    tmp_path, monkeypatch
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    identity = PersistentIdentityRegistry(str(repo))
+    controller = _make_analysis_controller(repo)
+    controller._request_full_analysis_recovery(
+        str(repo), "first incident"
+    )
+    certificate = {
+        "certificate_id": "old-certificate",
+        "incident_generation": 1,
+        "repo_id": identity.repo_id,
+        "root_path": str(repo.resolve()),
+        "state_id": "state-id",
+        "revision": 4,
+    }
+
+    class Client:
+        def get_events(self, **_kwargs):
+            return {"latest_seq": 9}
+
+        def verify_recovery(self, generation):
+            assert generation == 1
+            ContextorGUI._request_full_analysis_recovery(
+                controller, str(repo), "newer incident"
+            )
+            return {"status": "ok", "certificate": certificate}
+
+        def complete_recovery_verification(self, *_args, **_kwargs):
+            pytest.fail("stale generation must not be completed")
+
+        def cancel_recovery_verification(self, certificate_id, generation):
+            assert certificate_id == "old-certificate"
+            assert generation == 1
+            return {"status": "ok", "released": True}
+
+    client = Client()
+    monkeypatch.setattr("contextor.core.live_state.connect", lambda *_args: client)
+    monkeypatch.setattr(
+        gui,
+        "run_full_analysis_exclusive",
+        lambda *_args, **_kwargs: ([], SimpleNamespace(live_publish_status="success")),
+    )
+    monkeypatch.setattr(
+        gui,
+        "run_with_progress",
+        lambda _root, _progress, task, *, on_success, **_kwargs: on_success(task()),
+    )
+    monkeypatch.setattr(gui.messagebox, "showinfo", MagicMock())
+    monkeypatch.setattr(gui.messagebox, "showwarning", MagicMock())
+
+    ContextorGUI.analyze(
+        controller,
+        recovery_repository=str(repo),
+        recovery_generation=1,
+    )
+
+    incident = ContextorGUI._live_recovery_incident(controller, str(repo))
+    assert incident["generation"] == 2
+    assert incident["reason"] == "newer incident"
+    assert incident["verification_state"] == "required"
+    assert "LIVE recovery verification failed" in controller._statuses[-1]
 
 
 def test_generation_conflict_schedules_one_recovery_prompt(tmp_path, monkeypatch):
@@ -629,6 +829,9 @@ def test_generation_conflict_schedules_one_recovery_prompt(tmp_path, monkeypatch
     class Client:
         def snapshot(self):
             return {"state": remote, "revision": 7}
+
+        def get_events(self, **_kwargs):
+            return {"latest_seq": 0}
 
         def publish(self, *_args, **_kwargs):
             raise AssertionError("generation conflict must not publish")
@@ -646,6 +849,9 @@ def test_generation_conflict_schedules_one_recovery_prompt(tmp_path, monkeypatch
 
     assert controller._statuses.count(
         "LIVE: generation conflict; analysis required"
+    ) == 1
+    assert controller._statuses.count(
+        "LIVE: recovery required; incremental updates are deferred."
     ) == 2
     assert controller._live_recovery_queue.qsize() == 1
     assert root.scheduled == {}
@@ -673,6 +879,7 @@ def test_recovery_prompt_decline_preserves_incident(tmp_path, monkeypatch):
     assert "Canonical state identity mismatch." in ask.call_args.args[1]
     controller.analyze.assert_not_called()
     assert controller._live_recovery_prompt_pending == {str(repo.resolve())}
+    assert controller._live_recovery_incidents[str(repo.resolve())]["required"] is True
 
     ContextorGUI._request_full_analysis_recovery(
         controller, str(repo), "Canonical state identity mismatch."
@@ -697,8 +904,12 @@ def test_recovery_prompt_accept_runs_existing_analyze_once(tmp_path, monkeypatch
     ContextorGUI._drain_live_recovery_queue(controller)
 
     ask.assert_called_once()
-    controller.analyze.assert_called_once_with()
+    controller.analyze.assert_called_once_with(
+        recovery_repository=str(repo.resolve()),
+        recovery_generation=1,
+    )
     assert controller._live_recovery_prompt_pending == {str(repo.resolve())}
+    assert controller._live_recovery_incidents[str(repo.resolve())]["verification_state"] == "required"
     assert controller._live_recovery_queue.qsize() == 0
     assert next(iter(root.scheduled.values()))[0] == 100
 
@@ -706,7 +917,10 @@ def test_recovery_prompt_accept_runs_existing_analyze_once(tmp_path, monkeypatch
         controller, str(repo), "Canonical state identity mismatch."
     )
     assert controller._live_recovery_queue.qsize() == 0
-    controller.analyze.assert_called_once_with()
+    controller.analyze.assert_called_once_with(
+        recovery_repository=str(repo.resolve()),
+        recovery_generation=1,
+    )
 
 
 def test_recovery_prompt_failed_analysis_preserves_incident(tmp_path, monkeypatch):
@@ -725,9 +939,13 @@ def test_recovery_prompt_failed_analysis_preserves_incident(tmp_path, monkeypatc
         ContextorGUI._drain_live_recovery_queue(controller)
 
     ask.assert_called_once()
-    controller.analyze.assert_called_once_with()
+    controller.analyze.assert_called_once_with(
+        recovery_repository=str(repo.resolve()),
+        recovery_generation=1,
+    )
     assert controller._live_recovery_prompt_pending == {str(repo.resolve())}
     assert controller._live_recovery_queue.qsize() == 0
+    assert controller._live_recovery_incidents[str(repo.resolve())]["required"] is True
 
 
 def test_recovery_prompt_suppressed_after_desktop_closes(tmp_path, monkeypatch):
@@ -772,8 +990,42 @@ def test_recovery_prompt_suppressed_after_repository_switch(tmp_path, monkeypatc
     ask.assert_not_called()
     controller.analyze.assert_not_called()
     assert controller._live_recovery_prompt_pending == set()
+    assert str(repo.resolve()) in controller._live_recovery_incidents
     assert controller._live_recovery_queue.qsize() == 0
     assert next(iter(root.scheduled.values()))[0] == 100
+
+
+def test_dialog_exception_preserves_incident_and_allows_a_later_prompt(
+    tmp_path, monkeypatch
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    controller = _bind_recovery_prompt(
+        _make_controller(repo, MockTkRoot())
+    )
+    ContextorGUI._request_full_analysis_recovery(
+        controller, str(repo), "canonical state needs recovery"
+    )
+    monkeypatch.setattr(
+        gui.messagebox,
+        "askyesno",
+        MagicMock(side_effect=RuntimeError("dialog failed")),
+    )
+
+    with pytest.raises(RuntimeError, match="dialog failed"):
+        ContextorGUI._drain_live_recovery_queue(controller)
+
+    incident = controller._live_recovery_incidents[str(repo.resolve())]
+    assert incident["generation"] == 1
+    assert incident["required"] is True
+    assert controller._live_recovery_prompt_pending == set()
+    assert controller._live_recovery_queue.qsize() == 0
+
+    ContextorGUI._request_full_analysis_recovery(
+        controller, str(repo), "canonical state needs recovery"
+    )
+    assert controller._live_recovery_queue.qsize() == 1
+    assert controller._live_recovery_incidents[str(repo.resolve())]["generation"] == 2
 
 
 def test_live_connection_retry_does_not_prompt_for_recovery(tmp_path, monkeypatch):
@@ -897,9 +1149,78 @@ def test_accepted_startup_publication_requires_recovery_without_watcher(tmp_path
     assert controller._live_recovery_queue.qsize() == 1
     assert controller._live_recovery_prompt_pending == {str(repo.resolve())}
     assert controller._statuses[-1] == "LIVE: recovery required after accepted publish (revision 7)"
+    assert controller._live_recovery_incidents[str(repo.resolve())] == {
+        "generation": 2,
+        "reason": "Canonical LIVE publish requires recovery verification.",
+        "required": True,
+        "verification_state": "required",
+        "publication_revision": 7,
+        "publication_outcome": "accepted",
+    }
     assert "LIVE: shared state published; watcher active" not in controller._statuses
     controller.analyze.assert_not_called()
 
+
+
+def test_startup_resync_queues_one_explicit_full_owner_without_running_full(
+    tmp_path, monkeypatch
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    PersistentIdentityRegistry(str(repo))
+    controller = _bind_recovery_prompt(_make_controller(repo, MockTkRoot()))
+    loaded = SimpleNamespace(revision=7, state_id="same-generation")
+    captured = {}
+
+    class Client:
+        def snapshot(self):
+            return {"status": "ok", "state": loaded, "revision": 7}
+
+        def get_events(self, **_kwargs):
+            return {"latest_seq": 0}
+
+    class Watcher:
+        def __init__(self, *_args, **kwargs):
+            captured.update(kwargs)
+
+        def start(self):
+            pass
+
+    class Feed:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def replay_authority_events(self):
+            pass
+
+        def start(self):
+            pass
+
+    monkeypatch.setattr(gui, "connect_or_start", lambda *_a, **_k: Client())
+    monkeypatch.setattr(gui, "migrate_legacy_snapshot", lambda *_a: tmp_path / "cache")
+    monkeypatch.setattr(
+        "contextor.core.analysis.state_manager.load_engine_state",
+        lambda *_a, **_k: loaded,
+    )
+    monkeypatch.setattr(gui, "DesktopLiveWatcher", Watcher)
+    monkeypatch.setattr(gui, "DesktopLiveEventFeed", Feed)
+    monkeypatch.setattr(
+        gui,
+        "run_full_analysis_exclusive",
+        lambda *_a, **_kwargs: pytest.fail("startup resync must not launch FULL"),
+    )
+    monkeypatch.setattr(gui.messagebox, "askyesno", MagicMock(return_value=False))
+
+    ContextorGUI._start_live_watcher_blocking(controller, str(repo))
+    assert captured["on_resync"]() is False
+    assert controller._live_recovery_queue.qsize() == 1
+    assert len(controller._live_recovery_incidents) == 1
+    assert next(iter(controller._live_recovery_incidents.values()))["reason"] == (
+        "Startup canonical baseline requires full analysis."
+    )
+    ContextorGUI._drain_live_recovery_queue(controller)
+    assert "LIVE: recovery required; incremental updates are deferred." in controller._statuses
+    assert next(iter(controller._live_recovery_incidents.values()))["required"] is True
 
 
 def test_recovery_request_from_worker_uses_queue_without_tk(tmp_path, monkeypatch):
@@ -961,7 +1282,7 @@ def test_recovery_request_from_worker_uses_queue_without_tk(tmp_path, monkeypatc
                 "error": "canonical_persistence_revision_conflict",
                 "resync_required": True,
             },
-            "Canonical LIVE consistency error: canonical_persistence_revision_conflict.",
+                "Canonical LIVE publish requires recovery verification.",
         ),
     ],
 )
@@ -1014,7 +1335,12 @@ def test_startup_publication_error_recovery_classification(
     ContextorGUI._start_live_watcher_blocking(controller, str(repo))
 
     assert len(released) == 1
-    assert "LIVE: shared state attach failed; analysis required" in controller._statuses
+    if response.get("resync_required") is True:
+        assert controller._statuses[-1] == (
+            "LIVE: recovery required after rejected publish (revision None)"
+        )
+    else:
+        assert "LIVE: shared state attach failed; analysis required" in controller._statuses
     if expected_reason is None:
         assert controller._live_recovery_queue.qsize() == 0
         assert controller._live_recovery_prompt_pending == set()

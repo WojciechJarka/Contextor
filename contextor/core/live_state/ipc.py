@@ -14,6 +14,7 @@ import time
 import uuid
 from dataclasses import dataclass
 from multiprocessing.connection import Client, Listener
+from pathlib import Path
 from typing import Any, Callable, Mapping
 
 from contextor.core.live_state.runtime_lease import ProcessIdentity
@@ -140,6 +141,7 @@ class CanonicalMutationCoordinator:
         self._accepting = True
         self._stop = False
         self._queue_order = 0
+        self._recovery_verification_fenced = False
 
     def _ensure_started_locked(self) -> None:
         if self._thread is None:
@@ -163,6 +165,12 @@ class CanonicalMutationCoordinator:
             return {"status": "error", "error": "invalid_idempotency_key"}
 
         with self._condition:
+            if self._recovery_verification_fenced:
+                return {
+                    "status": "error",
+                    "error": "recovery_verification_in_progress",
+                    "accepted": False,
+                }
             existing_job_id = self._idempotency_jobs.get(idempotency_key)
             if existing_job_id is not None:
                 existing_job = self._jobs.get(existing_job_id)
@@ -205,6 +213,30 @@ class CanonicalMutationCoordinator:
                 "accepted_revision": accepted_revision,
                 "state": job.state,
             }
+
+    def begin_recovery_verification(self, timeout: float) -> bool:
+        deadline = time.monotonic() + max(0.0, float(timeout))
+        with self._condition:
+            if self._recovery_verification_fenced:
+                return False
+            self._recovery_verification_fenced = True
+            while any(job.state in {"queued", "running"} for job in self._jobs.values()):
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    self._recovery_verification_fenced = False
+                    self._condition.notify_all()
+                    return False
+                self._condition.wait(remaining)
+            return True
+
+    def end_recovery_verification(self) -> None:
+        with self._condition:
+            self._recovery_verification_fenced = False
+            self._condition.notify_all()
+
+    def recovery_verification_active(self) -> bool:
+        with self._condition:
+            return self._recovery_verification_fenced
 
     def status(self, job_id: Any) -> dict[str, Any]:
         if not isinstance(job_id, str) or not job_id:
@@ -717,6 +749,8 @@ class CanonicalLiveServer:
         desktop_claim_acquirer: Callable[[str, int, str], Mapping[str, Any]] | None = None,
         desktop_claim_releaser: Callable[[str, int, str], None] | None = None,
         mutation_guard: Callable[[Mapping[str, Any], threading.Event], Any] | None = None,
+        recovery_verification_guard: Callable[[], Any] | None = None,
+        repository_identity_reader: Callable[[], Any] | None = None,
     ):
         if revision is not None and (
             isinstance(revision, bool)
@@ -766,6 +800,10 @@ class CanonicalLiveServer:
         self._lock = threading.RLock()
         self._mutation_execution_lock = threading.Lock()
         self._mutation_guard = mutation_guard
+        self._recovery_verification_guard = recovery_verification_guard
+        self._repository_identity_reader = repository_identity_reader
+        self._recovery_verification_context = None
+        self._pending_recovery_certificate: dict[str, Any] | None = None
         self._mutation_coordinator = CanonicalMutationCoordinator(
             self._execute_queued_update_file,
             self._read_revision,
@@ -1413,7 +1451,19 @@ class CanonicalLiveServer:
             }
 
     def _execute_publish(self, request: dict[str, Any]) -> dict[str, Any]:
+        if self._mutation_coordinator.recovery_verification_active():
+            return {
+                "status": "error",
+                "error": "recovery_verification_in_progress",
+                "resync_required": True,
+            }
         with self._mutation_execution_lock:
+            if self._mutation_coordinator.recovery_verification_active():
+                return {
+                    "status": "error",
+                    "error": "recovery_verification_in_progress",
+                    "resync_required": True,
+                }
             if self._committed_snapshot_reader is not None:
                 return self._execute_committed_publish(request)
             with self._lock:
@@ -1472,18 +1522,204 @@ class CanonicalLiveServer:
                 _safe_trace_event("LIVE", "CANONICAL_PUBLISH", op=trace_op, rev_before=previous_revision, rev_after=self._revision, seq=evt["seq"], origin=request.get("origin"))
                 return {"status": "ok", "revision": self._revision, "seq": evt["seq"]}
 
+    def _execute_recovery_verification(
+        self, request: dict[str, Any]
+    ) -> dict[str, Any]:
+        generation = request.get("incident_generation")
+        if (
+            isinstance(generation, bool)
+            or not isinstance(generation, int)
+            or generation < 1
+        ):
+            return {"status": "error", "error": "invalid_recovery_generation"}
+        if (
+            self._recovery_verification_guard is None
+            or self._repository_identity_reader is None
+            or self._committed_snapshot_reader is None
+        ):
+            return {"status": "error", "error": "recovery_verification_unavailable"}
+
+        if not self._mutation_coordinator.begin_recovery_verification(0.0):
+            return {"status": "error", "error": "recovery_mutations_pending"}
+
+        guard_context = None
+        guard_entered = False
+        retain_fence = False
+        try:
+            try:
+                identity = self._repository_identity_reader()
+            except Exception:
+                return {"status": "error", "error": "recovery_identity_unreadable"}
+            if identity is None:
+                return {"status": "error", "error": "recovery_identity_missing"}
+
+            expected_repo_id = self._authority_identity.get("repo_id")
+            expected_root = self._authority_identity.get("root_path")
+            try:
+                identity_root = str(Path(identity.root_path).expanduser().resolve())
+                authority_root = str(Path(expected_root).expanduser().resolve())
+            except (AttributeError, OSError, TypeError, ValueError):
+                return {"status": "error", "error": "recovery_identity_mismatch"}
+            if (
+                not isinstance(expected_repo_id, str)
+                or identity.repo_id != expected_repo_id
+                or identity_root != authority_root
+            ):
+                return {"status": "error", "error": "recovery_identity_mismatch"}
+
+            try:
+                guard_context = self._recovery_verification_guard()
+                guard_context.__enter__()
+                guard_entered = True
+                with self._mutation_execution_lock:
+                    with self._lock:
+                        live_state = self._state
+                        live_revision = self._revision
+                        if live_state is None:
+                            return {"status": "error", "error": "recovery_live_missing"}
+                        try:
+                            with self._committed_snapshot_reader() as loaded:
+                                if loaded is None:
+                                    return {"status": "error", "error": "recovery_snapshot_missing"}
+                                committed_state, metadata = loaded
+                                committed_revision = metadata.revision
+                                committed_state_id = metadata.state_id
+                                metadata_root = str(
+                                    Path(metadata.root_path).expanduser().resolve()
+                                )
+                                if (
+                                    metadata.repo_id != expected_repo_id
+                                    or metadata_root != authority_root
+                                ):
+                                    return {"status": "error", "error": "recovery_snapshot_identity_mismatch"}
+                                if (
+                                    isinstance(committed_revision, bool)
+                                    or not isinstance(committed_revision, int)
+                                    or committed_revision < 1
+                                    or not isinstance(committed_state_id, str)
+                                    or not committed_state_id
+                                    or getattr(committed_state, "state_id", None)
+                                    != committed_state_id
+                                    or _extract_state_revision(committed_state)
+                                    != committed_revision
+                                ):
+                                    return {"status": "error", "error": "recovery_snapshot_invalid"}
+                                if (
+                                    isinstance(live_revision, bool)
+                                    or not isinstance(live_revision, int)
+                                    or live_revision < 1
+                                ):
+                                    return {"status": "error", "error": "recovery_live_revision_invalid"}
+                                if _extract_state_revision(live_state) != live_revision:
+                                    return {"status": "error", "error": "recovery_live_revision_mismatch"}
+                                live_state_id = getattr(live_state, "state_id", None)
+                                if (
+                                    not isinstance(live_state_id, str)
+                                    or not live_state_id
+                                    or committed_state_id != live_state_id
+                                ):
+                                    return {"status": "error", "error": "recovery_live_identity_mismatch"}
+                                if committed_revision != live_revision:
+                                    return {"status": "error", "error": "recovery_live_revision_mismatch"}
+                        except Exception:
+                            return {"status": "error", "error": "recovery_snapshot_unreadable"}
+            except Exception:
+                return {"status": "error", "error": "recovery_writer_admission_failed"}
+
+            certificate = {
+                "certificate_id": uuid.uuid4().hex,
+                "incident_generation": generation,
+                "repo_id": expected_repo_id,
+                "root_path": authority_root,
+                "state_id": committed_state_id,
+                "revision": committed_revision,
+            }
+            self._pending_recovery_certificate = certificate
+            self._recovery_verification_context = guard_context
+            guard_entered = False
+            retain_fence = True
+            return {
+                "status": "ok",
+                "certificate": certificate,
+            }
+        finally:
+            if not retain_fence:
+                guard_released = True
+                if guard_entered and guard_context is not None:
+                    try:
+                        guard_context.__exit__(None, None, None)
+                    except Exception:
+                        guard_released = False
+                if guard_released:
+                    self._mutation_coordinator.end_recovery_verification()
+
+    def _finish_recovery_verification(
+        self, request: dict[str, Any], *, cancelled: bool
+    ) -> dict[str, Any]:
+        certificate_id = request.get("certificate_id")
+        generation = request.get("incident_generation")
+        pending = self._pending_recovery_certificate
+        if (
+            not isinstance(pending, dict)
+            or not isinstance(certificate_id, str)
+            or isinstance(generation, bool)
+            or not isinstance(generation, int)
+            or pending.get("certificate_id") != certificate_id
+            or generation != pending.get("incident_generation")
+        ):
+            return {"status": "error", "error": "recovery_certificate_mismatch"}
+
+        guard_context = self._recovery_verification_context
+        if guard_context is None:
+            return {"status": "error", "error": "recovery_fence_missing"}
+        try:
+            guard_context.__exit__(None, None, None)
+        except Exception:
+            return {"status": "error", "error": "recovery_writer_release_failed"}
+
+        self._recovery_verification_context = None
+        self._pending_recovery_certificate = None
+        self._mutation_coordinator.end_recovery_verification()
+        return {
+            "status": "ok",
+            "released": True,
+            "cancelled": cancelled,
+            "certificate_id": certificate_id,
+            "incident_generation": generation,
+        }
+
     def _execute_queued_update_file(self, request: dict[str, Any]) -> dict[str, Any]:
         trace_op = _safe_trace_op(request, "u")
         if trace_op is not None:
             request = {**request, "trace_op": trace_op}
 
         if self._mutation_guard is None:
-            return self._execute_update_file(request)
+            return self._execute_update_file(request, allow_recovery_fence=True)
         with self._mutation_guard(request, self._stop):
-            return self._execute_update_file(request)
+            return self._execute_update_file(request, allow_recovery_fence=True)
 
-    def _execute_update_file(self, request: dict[str, Any]) -> dict[str, Any]:
+    def _execute_update_file(
+        self, request: dict[str, Any], *, allow_recovery_fence: bool = False
+    ) -> dict[str, Any]:
+        if (
+            not allow_recovery_fence
+            and self._mutation_coordinator.recovery_verification_active()
+        ):
+            return {
+                "status": "error",
+                "error": "recovery_verification_in_progress",
+                "accepted": False,
+            }
         with self._mutation_execution_lock:
+            if (
+                not allow_recovery_fence
+                and self._mutation_coordinator.recovery_verification_active()
+            ):
+                return {
+                    "status": "error",
+                    "error": "recovery_verification_in_progress",
+                    "accepted": False,
+                }
             with self._lock:
                 if self._state is None or self._updater is None:
                     return {
@@ -1745,6 +1981,12 @@ class CanonicalLiveServer:
             return self._mutation_coordinator.submit(request)
         if operation == "mutation_status":
             return self._mutation_coordinator.status(request.get("job_id"))
+        if operation == "verify_recovery":
+            return self._execute_recovery_verification(request)
+        if operation == "complete_recovery_verification":
+            return self._finish_recovery_verification(request, cancelled=False)
+        if operation == "cancel_recovery_verification":
+            return self._finish_recovery_verification(request, cancelled=True)
         if operation == "update_file":
             return self._execute_update_file(request)
         if operation == "publish":
@@ -1959,6 +2201,15 @@ class CanonicalLiveServer:
     def close(
         self, *, mutation_join_timeout: float = _MUTATION_WORKER_JOIN_TIMEOUT
     ) -> bool:
+        pending = self._pending_recovery_certificate
+        if isinstance(pending, dict):
+            self._finish_recovery_verification(
+                {
+                    "certificate_id": pending.get("certificate_id"),
+                    "incident_generation": pending.get("incident_generation"),
+                },
+                cancelled=True,
+            )
         self._stop.set()
         try:
             self._listener.close()
@@ -2122,6 +2373,43 @@ class LiveStateClient:
 
     def mutation_status(self, job_id: str) -> dict[str, Any]:
         return self.request("mutation_status", job_id=job_id)
+
+    def verify_recovery(
+        self, incident_generation: int, *, timeout: float = 30.0
+    ) -> dict[str, Any]:
+        return self.request(
+            "verify_recovery",
+            timeout=timeout,
+            incident_generation=incident_generation,
+        )
+
+    def complete_recovery_verification(
+        self,
+        certificate_id: str,
+        incident_generation: int,
+        *,
+        timeout: float = 30.0,
+    ) -> dict[str, Any]:
+        return self.request(
+            "complete_recovery_verification",
+            timeout=timeout,
+            certificate_id=certificate_id,
+            incident_generation=incident_generation,
+        )
+
+    def cancel_recovery_verification(
+        self,
+        certificate_id: str,
+        incident_generation: int,
+        *,
+        timeout: float = 30.0,
+    ) -> dict[str, Any]:
+        return self.request(
+            "cancel_recovery_verification",
+            timeout=timeout,
+            certificate_id=certificate_id,
+            incident_generation=incident_generation,
+        )
 
     def get_events(
         self,

@@ -87,7 +87,7 @@ def _real_watcher_runtime(tmp_path, updater):
     manager = FileStateManager(str(repo_cache_dir(repo)))
     manager.save(identity.repo_id, revision=0)
     server = CanonicalLiveServer(
-        SimpleNamespace(revision=0, state_id=identity.repo_id),
+        SimpleNamespace(revision=0, state_id=identity.repo_id, modules={}),
         revision=0,
         updater=updater,
     )
@@ -741,6 +741,9 @@ def test_update_transport_recovery_revalidates_generation_before_retry(tmp_path)
                 return {"status": "ok", "result": SimpleNamespace(status="UPDATED")}
         client = _QueuedClientAdapter(Client())
         watcher = DesktopLiveWatcher(repo, client)
+        # This case seeds and validates the generation below; startup recovery
+        # is covered by the dedicated startup tests.
+        watcher._startup_requires_resync = False
         watcher._snapshot = {str(source): (0, 1)}
         source.write_text("VALUE = 2\n", encoding="utf-8")
         manager = FileStateManager(str(repo_cache_dir(repo)))
@@ -769,6 +772,8 @@ def test_update_error_result_is_not_acknowledged_into_watcher_snapshot(tmp_path)
             status = "ERROR" if len(calls) == 1 else "UPDATED"
             return {"status": "ok", "result": SimpleNamespace(status=status)}
     watcher = DesktopLiveWatcher(repo, _QueuedClientAdapter(Client()))
+    # This case exercises update-result retry behavior after startup.
+    watcher._startup_requires_resync = False
     watcher._snapshot = {str(source): (0, 1)}
     watcher._candidate_requires_update = lambda *_args: True
     source.write_text("VALUE = 2\n", encoding="utf-8")
@@ -794,6 +799,8 @@ def test_deferred_candidate_does_not_replay_already_reconciled_sibling(tmp_path)
         def snapshot(self): return {"status": "ok", "state": SimpleNamespace(revision=1, state_id="g")}
         def update_file(self, path, **_kwargs): calls.append(path); return {"status": "ok", "result": SimpleNamespace(status="UPDATED")}
     watcher = DesktopLiveWatcher(repo, _QueuedClientAdapter(Client()))
+    # This case exercises deferred sibling reconciliation after startup.
+    watcher._startup_requires_resync = False
     watcher._snapshot = {str(first): (0, 1), str(second): (0, 1)}
     first.write_text("A = 2\n", encoding="utf-8"); second.write_text("B = 2\n", encoding="utf-8")
     manager = FileStateManager(str(repo_cache_dir(repo)))

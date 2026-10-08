@@ -1298,6 +1298,29 @@ def _repository_mutation_guard(root: Path):
     return guard
 
 
+def _repository_recovery_verification_guard(root: Path):
+    @contextlib.contextmanager
+    def guard():
+        from contextor.core.analysis.full_analysis_coordinator import (
+            acquire_full_analysis,
+            release_full_analysis,
+        )
+
+        lease = acquire_full_analysis(
+            root,
+            owner="desktop_recovery_verification",
+            writer_kind="full_analysis",
+            timeout=0.0,
+            poll_interval=0.01,
+        )
+        try:
+            yield
+        finally:
+            release_full_analysis(lease)
+
+    return guard
+
+
 def run_service(
     repo_path: str | Path,
     owner_pid: int | None = None,
@@ -1521,6 +1544,8 @@ def run_service(
                 _repository_canonical_query_handler
             ),
             mutation_guard=_repository_mutation_guard(root),
+            recovery_verification_guard=_repository_recovery_verification_guard(root),
+            repository_identity_reader=lambda: read_repository_identity(root),
             authority_identity=authority_identity,
             desktop_claim=desktop_claim,
             desktop_claim_reader=lambda: manager.read_desktop_claim(lease),

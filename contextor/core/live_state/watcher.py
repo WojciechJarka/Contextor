@@ -9,12 +9,16 @@ from collections import OrderedDict, deque
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 from watchdog.observers.polling import PollingObserver
 
 from .ipc import LiveStateClient
+
+
+RECOVERY_DEFERRED = object()
 
 
 @dataclass(frozen=True)
@@ -116,6 +120,7 @@ class DesktopLiveWatcher:
         on_status: Callable[[str], None] | None = None,
         on_reconnect: Callable[[LiveStateClient], None] | None = None,
         on_resync: Callable[[], object] | None = None,
+        recovery_admission: Callable[[Callable[[], Any]], Any] | None = None,
     ):
         """Watch one repository and route filesystem changes through LIVE.
 
@@ -140,8 +145,10 @@ class DesktopLiveWatcher:
         self.on_status = on_status
         self.on_reconnect = on_reconnect
         self.on_resync = on_resync
+        self.recovery_admission = recovery_admission
         self._startup_requires_resync = False
         self._startup_resync_attempted = False
+        self._recovery_rebaseline_pending = False
         self._ambiguous_updates: set[str] = set()
         self._pending_intents: dict[str, _PendingMutationIntent] = {}
         self._inflight_updates: OrderedDict[str, _WatcherMutationJob] = OrderedDict()
@@ -149,6 +156,20 @@ class DesktopLiveWatcher:
         self._snapshot = self._scan()
         self._startup_pending = self._startup_reconciliation_paths(self._snapshot)
         self._event_handler = _LiveFilesystemEventHandler(self._enqueue_path)
+
+    def _admit_recovery_action(self, action: Callable[[], Any]) -> Any:
+        if self.recovery_admission is None:
+            return action()
+        return self.recovery_admission(action)
+
+    def _recovery_is_active(self) -> bool:
+        return self._admit_recovery_action(lambda: True) is RECOVERY_DEFERRED
+
+    def complete_recovery_certificate(self) -> None:
+        self._startup_requires_resync = False
+        self._startup_resync_attempted = False
+        self._recovery_rebaseline_pending = True
+        self._wake.set()
 
     def _observer_timeout(self) -> float:
         return max(2.0, self.interval * 2)
@@ -487,6 +508,7 @@ class DesktopLiveWatcher:
         state = response["state"]
         modules = getattr(state, "modules", None)
         if not isinstance(modules, dict):
+            self._startup_requires_resync = True
             return []
 
         from contextor.core.analysis.state_manager import FileStateManager
@@ -589,10 +611,15 @@ class DesktopLiveWatcher:
                 result = response.get("result") if isinstance(response, dict) else None
                 result_status = getattr(result, "status", None)
                 if isinstance(response, dict) and response.get("status") == "ok" and result_status in {"UPDATED", "DELETED", "UNCHANGED", "RECOVERED", "SYNTAX_ERROR"}:
-                    if job.observed_state is None:
-                        self._snapshot.pop(job.path, None)
-                    else:
-                        self._snapshot[job.path] = job.observed_state
+                    def trust_completed_path() -> bool:
+                        if job.observed_state is None:
+                            self._snapshot.pop(job.path, None)
+                        else:
+                            self._snapshot[job.path] = job.observed_state
+                        return True
+
+                    if self._admit_recovery_action(trust_completed_path) is RECOVERY_DEFERRED:
+                        self._enqueue_path(job.path, wake=False)
                     completed.append(job.path)
                     from contextor.core.runtime_trace import trace_event
                     try:
@@ -639,10 +666,27 @@ class DesktopLiveWatcher:
 
     def poll_once(self) -> list[str]:
         reconciled = self._poll_inflight_updates()
+        if self._recovery_is_active():
+            return reconciled
+        if self._recovery_rebaseline_pending:
+            current_scan = self._scan()
+            self._snapshot = current_scan
+            previous_startup_pending = set(self._startup_pending)
+            reconciled_startup_pending = self._startup_reconciliation_paths(
+                current_scan
+            )
+            if self._startup_requires_resync:
+                previous_startup_pending.update(reconciled_startup_pending)
+                self._startup_pending = sorted(previous_startup_pending)
+            else:
+                self._startup_pending = reconciled_startup_pending
+            for pending_path in self._startup_pending:
+                self._enqueue_path(pending_path, wake=False)
+            self._recovery_rebaseline_pending = False
         changed = self._drain_pending()
-        if not changed and self._startup_pending:
+        using_startup_pending = not changed and bool(self._startup_pending)
+        if using_startup_pending:
             changed = list(self._startup_pending)
-            self._startup_pending = []
         if not changed and not self._startup_requires_resync:
             return reconciled
         current: dict[str, tuple[int, int]] = {}
@@ -668,26 +712,32 @@ class DesktopLiveWatcher:
             return reconciled
         if self._startup_requires_resync:
             if self._startup_resync_attempted:
+                self._requeue_paths(changed)
                 return reconciled
             self._startup_resync_attempted = True
             if self.on_resync is None:
+                self._requeue_paths(changed)
                 self._emit("LIVE: canonical baseline requires resync")
                 return reconciled
             try:
                 outcome = self.on_resync()
                 if not self._resync_completed(outcome):
+                    self._requeue_paths(changed)
                     self._emit("LIVE: startup resync failed; baseline remains untrusted")
                     return []
             except Exception as exc:
+                self._requeue_paths(changed)
                 self._emit(f"LIVE: startup resync failed: {exc}")
                 return reconciled
             current = self._scan()
             try:
                 snapshot = self.client.snapshot()
             except (OSError, EOFError, TimeoutError, ConnectionError) as exc:
+                self._requeue_paths(changed)
                 self._emit("LIVE: startup resync baseline could not be verified")
                 return reconciled
             if self._trusted_file_state(snapshot) is None:
+                self._requeue_paths(changed)
                 self._emit("LIVE: startup resync baseline remains untrusted")
                 return []
             self._snapshot = current
@@ -720,7 +770,10 @@ class DesktopLiveWatcher:
             self._emit("LIVE: generation revalidation unavailable; deferring watcher update")
             return reconciled
 
-        for path in changed:
+        for path_index, path in enumerate(changed):
+            if self._recovery_is_active():
+                deferred.extend(changed[path_index:])
+                break
             from contextor.core.runtime_trace import new_trace_operation, trace_event
 
             op = new_trace_operation("u")
@@ -751,14 +804,22 @@ class DesktopLiveWatcher:
                     self._emit("LIVE: generation revalidation unavailable; deferring watcher update")
                     continue
                 if not candidate_requires_update:
-                    self._pending_intents.pop(path, None)
+                    def accept_unchanged_path() -> bool:
+                        self._pending_intents.pop(path, None)
+                        if was_ambiguous:
+                            self._ambiguous_updates.discard(path)
+                        if path in current:
+                            self._snapshot[path] = current[path]
+                        else:
+                            self._snapshot.pop(path, None)
+                        return True
+
+                    admitted = self._admit_recovery_action(accept_unchanged_path)
+                    if admitted is RECOVERY_DEFERRED:
+                        deferred.extend(changed[path_index:])
+                        break
                     if was_ambiguous:
-                        self._ambiguous_updates.discard(path)
                         trace_event("LIVE", "WATCH_UPDATE_AMBIGUOUS_RESOLVED", op=op, repo=str(self.root), path=relative, rev=status.get("revision"), retry=False)
-                    if path in current:
-                        self._snapshot[path] = current[path]
-                    else:
-                        self._snapshot.pop(path, None)
                     reconciled.append(path)
                     continue
                 current_state = current.get(path)
@@ -808,8 +869,15 @@ class DesktopLiveWatcher:
                 )
                 if current_inflight is not None:
                     if pending_intent is not None:
-                        self._pending_intents.pop(path, None)
-                        self._ambiguous_updates.discard(path)
+                        def clear_duplicate_intent() -> bool:
+                            self._pending_intents.pop(path, None)
+                            self._ambiguous_updates.discard(path)
+                            return True
+
+                        admitted = self._admit_recovery_action(clear_duplicate_intent)
+                        if admitted is RECOVERY_DEFERRED:
+                            deferred.extend(changed[path_index:])
+                            break
                     continue
                 if pending_intent is None:
                     pending_intent = _PendingMutationIntent(
@@ -821,15 +889,20 @@ class DesktopLiveWatcher:
                         observed_sha256=current_sha256,
                     )
                     self._pending_intents[path] = pending_intent
+                response = self._admit_recovery_action(
+                    lambda: self.client.submit_update_file(
+                        path,
+                        origin="desktop_watcher",
+                        trace_op=pending_intent.trace_op,
+                        idempotency_key=pending_intent.idempotency_key,
+                    )
+                )
+                if response is RECOVERY_DEFERRED:
+                    deferred.extend(changed[path_index:])
+                    break
                 if was_ambiguous:
                     self._ambiguous_updates.discard(path)
                     trace_event("LIVE", "WATCH_UPDATE_AMBIGUOUS_RESOLVED", op=pending_intent.trace_op, repo=str(self.root), path=relative, rev=status.get("revision"), retry=True)
-                response = self.client.submit_update_file(
-                    path,
-                    origin="desktop_watcher",
-                    trace_op=pending_intent.trace_op,
-                    idempotency_key=pending_intent.idempotency_key,
-                )
             except (OSError, EOFError, TimeoutError, ConnectionError) as exc:
                 self._ambiguous_updates.add(path)
                 trace_event("LIVE", "WATCH_UPDATE_AMBIGUOUS", op=pending_intent.trace_op, repo=str(self.root), path=relative, rev=status.get("revision"), exception="transport")
@@ -863,7 +936,8 @@ class DesktopLiveWatcher:
                 deferred.append(path)
         if deferred:
             self._requeue_paths(deferred)
-        self._startup_pending = []
+        elif self._startup_pending and set(self._startup_pending).issubset(set(changed)):
+            self._startup_pending = []
         return reconciled + self._poll_inflight_updates()
 
     def _handle_poll_error(self, exc: OSError | RuntimeError | EOFError) -> None:

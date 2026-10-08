@@ -14,6 +14,7 @@ from datetime import datetime
 from queue import Empty, Queue
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
+from typing import Any
 
 from contextor.core.analysis.full_analysis_coordinator import (
     FullAnalysisBusyError,
@@ -30,8 +31,10 @@ from contextor.core.live_state import (
     DesktopLiveWatcher,
     SecondDesktopActive,
     connect_or_start,
+    connect,
     migrate_legacy_snapshot,
 )
+from contextor.core.live_state.watcher import RECOVERY_DEFERRED
 from contextor.core.repository_identity import (
     RepositoryIdentityError,
     read_repository_identity,
@@ -145,6 +148,8 @@ class ContextorGUI:
         self._live_recovery_queue: Queue[tuple[str, str]] = Queue()
         self._live_recovery_prompt_pending: set[str] = set()
         self._live_recovery_lock = threading.Lock()
+        self._live_recovery_incidents: dict[str, dict[str, Any]] = {}
+        self._live_recovery_generations: dict[str, int] = {}
         self.last_live_state: dict[str, Any] | None = None
 
         self._closing = False
@@ -786,6 +791,54 @@ class ContextorGUI:
             self._selected_live_repo_path = ""
             return
         self._selected_live_repo_path = repo_path_var.get()
+        selected = self._selected_live_repo_path
+        if selected:
+            try:
+                repository_key = str(Path(selected).expanduser().resolve())
+            except (OSError, ValueError):
+                repository_key = str(selected)
+            with self._live_recovery_lock:
+                incident = self._live_recovery_incidents.get(repository_key)
+                if incident is not None and repository_key not in self._live_recovery_prompt_pending:
+                    self._live_recovery_prompt_pending.add(repository_key)
+                    self._live_recovery_queue.put((repository_key, incident["reason"]))
+
+    def _live_recovery_incident(self, repository_path: str) -> dict[str, Any] | None:
+        try:
+            repository_key = str(Path(repository_path).expanduser().resolve())
+        except (OSError, ValueError):
+            repository_key = str(repository_path)
+        with self._live_recovery_lock:
+            incident = self._live_recovery_incidents.get(repository_key)
+            return dict(incident) if incident is not None else None
+
+    def _set_live_recovery_verification_state(
+        self, repository_path: str, generation: int, state: str
+    ) -> bool:
+        try:
+            repository_key = str(Path(repository_path).expanduser().resolve())
+        except (OSError, ValueError):
+            repository_key = str(repository_path)
+        with self._live_recovery_lock:
+            incident = self._live_recovery_incidents.get(repository_key)
+            if incident is None or incident.get("generation") != generation:
+                return False
+            incident["verification_state"] = state
+            return True
+
+    def _watcher_recovery_admission(self, repository_path: str):
+        try:
+            repository_key = str(Path(repository_path).expanduser().resolve())
+        except (OSError, ValueError):
+            repository_key = str(repository_path)
+
+        def admit(submission_callable):
+            with self._live_recovery_lock:
+                if repository_key in self._live_recovery_incidents:
+                    return RECOVERY_DEFERRED
+                return submission_callable()
+
+        return admit
 
     def _is_selected_live_repository(self, path):
         if not hasattr(self, "_selected_live_repo_path"):
@@ -1076,10 +1129,14 @@ class ContextorGUI:
         self,
         repository_path: str,
         reason: str,
-    ) -> None:
+        *,
+        publication_revision: int | None = None,
+        publication_outcome: str | None = None,
+        queue_prompt: bool = True,
+    ) -> int | None:
         """Queue a confirmed recovery incident without calling Tk."""
         if getattr(self, "_closing", False):
-            return
+            return None
 
         try:
             repository_key = str(
@@ -1089,18 +1146,41 @@ class ContextorGUI:
             repository_key = str(repository_path)
 
         if not repository_key:
-            return
+            return None
 
         lock = getattr(self, "_live_recovery_lock", None)
         if lock is None:
-            return
+            return None
 
         with lock:
+            incidents = getattr(self, "_live_recovery_incidents", None)
+            if incidents is None:
+                incidents = self._live_recovery_incidents = {}
+            generations = getattr(self, "_live_recovery_generations", None)
+            if generations is None:
+                generations = self._live_recovery_generations = {}
+            generation = generations.get(repository_key, 0) + 1
+            generations[repository_key] = generation
+            incident = {
+                "generation": generation,
+                "reason": str(reason),
+                "required": True,
+                "verification_state": "required",
+            }
+            if (
+                isinstance(publication_revision, int)
+                and not isinstance(publication_revision, bool)
+                and publication_revision > 0
+            ):
+                incident["publication_revision"] = publication_revision
+            if publication_outcome in {"accepted", "rejected"}:
+                incident["publication_outcome"] = publication_outcome
+            incidents[repository_key] = incident
             pending = self._live_recovery_prompt_pending
-            if repository_key in pending:
-                return
-            pending.add(repository_key)
-            self._live_recovery_queue.put((repository_key, reason))
+            if queue_prompt and repository_key not in pending:
+                pending.add(repository_key)
+                self._live_recovery_queue.put((repository_key, str(reason)))
+            return generation
 
     def _drain_live_recovery_queue(self) -> None:
         """Process recovery dialogs exclusively on the Tk event loop."""
@@ -1114,6 +1194,10 @@ class ContextorGUI:
         except Empty:
             pass
         else:
+            with self._live_recovery_lock:
+                incident = self._live_recovery_incidents.get(repository_key)
+                if incident is not None:
+                    reason = incident["reason"]
             if not ContextorGUI._is_selected_live_repository(
                 self, repository_key
             ):
@@ -1122,6 +1206,9 @@ class ContextorGUI:
                         repository_key
                     )
             else:
+                self._set_live_status(
+                    "LIVE: recovery required; incremental updates are deferred."
+                )
                 try:
                     run_analysis = messagebox.askyesno(
                         "Contextor — Recovery Required",
@@ -1145,8 +1232,14 @@ class ContextorGUI:
                         )
                     raise
 
+                with self._live_recovery_lock:
+                    incident = self._live_recovery_incidents.get(repository_key)
+                    generation = incident["generation"] if incident else None
                 if run_analysis:
-                    self.analyze()
+                    self.analyze(
+                        recovery_repository=repository_key,
+                        recovery_generation=generation,
+                    )
 
         finally:
             if not getattr(self, "_closing", False):
@@ -1154,17 +1247,41 @@ class ContextorGUI:
                     100, self._drain_live_recovery_queue
                 )
 
-    def analyze(self):
-        path = self.repo_path_var.get()
+    def analyze(
+        self,
+        *,
+        recovery_repository: str | None = None,
+        recovery_generation: int | None = None,
+    ):
+        path = recovery_repository or self.repo_path_var.get()
         if not path:
             messagebox.showwarning(
                 "Missing repository", "Please select ROOT directory of scanned project"
             )
             return
 
+        try:
+            path = str(Path(path).expanduser().resolve())
+        except (OSError, ValueError):
+            pass
+        starting_incident = self._live_recovery_incident(path)
+        starting_generation = (
+            starting_incident.get("generation")
+            if starting_incident is not None
+            else None
+        )
+        if (
+            recovery_generation is not None
+            and starting_generation != recovery_generation
+        ):
+            return
+        if recovery_generation is not None:
+            self._set_live_recovery_verification_state(
+                path, recovery_generation, "full_analysis"
+            )
+
         pre_seq = 0
         try:
-            from pathlib import Path
             from contextor.core.live_state import connect
             live_client = connect(Path(path))
             if live_client is not None:
@@ -1174,24 +1291,185 @@ class ContextorGUI:
             pre_seq = 0
 
         def task(log=None, progress_callback=None):
-            errors, _ = run_full_analysis_exclusive(
+            errors, analysis_result = run_full_analysis_exclusive(
                 path,
                 owner="desktop_analysis",
                 log=log,
                 progress_callback=progress_callback,
                 is_cancelled=lambda: getattr(self.progress_bar, "is_cancelled", False),
             )
-            return errors
+            return errors, analysis_result
 
-        def on_success(errors):
-            self._start_live_watcher(path, initial_seq=pre_seq)
-            if not errors:
-                messagebox.showinfo("OK", "No issues found. Repository is healthy!")
+        def on_success(outcome):
+            errors, analysis_result = outcome
+            incident_before_publish_result = self._live_recovery_incident(path)
+            analysis_recovery_generation = None
+            if getattr(analysis_result, "live_publish_status", None) == "recovery_required":
+                analysis_recovery_generation = self._request_full_analysis_recovery(
+                    path,
+                    getattr(analysis_result, "live_publish_warning", None)
+                    or "Canonical LIVE publish requires recovery verification.",
+                    publication_revision=getattr(
+                        analysis_result, "live_publish_revision", None
+                    ),
+                    publication_outcome="accepted",
+                    queue_prompt=False,
+                )
+            current_incident = self._live_recovery_incident(path)
+            if current_incident is None:
+                self._start_live_watcher(path, initial_seq=pre_seq)
+                if not errors:
+                    messagebox.showinfo("OK", "No issues found. Repository is healthy!")
+                    return
+                msg = "\n".join([f"{e.kind}: {e.message}" for e in errors])
+                messagebox.showwarning("Issues Detected", msg)
                 return
-            msg = "\n".join([f"{e.kind}: {e.message}" for e in errors])
-            messagebox.showwarning("Issues Detected", msg)
+
+            self._start_live_watcher(path, initial_seq=pre_seq)
+            generation = None
+            if (
+                analysis_recovery_generation is not None
+                and current_incident["generation"] == analysis_recovery_generation
+                and (
+                    (
+                        incident_before_publish_result is None
+                        and starting_generation is None
+                    )
+                    or (
+                        incident_before_publish_result is not None
+                        and incident_before_publish_result.get("generation")
+                        == starting_generation
+                    )
+                )
+            ):
+                generation = analysis_recovery_generation
+            elif (
+                analysis_recovery_generation is None
+                and starting_generation is not None
+                and current_incident["generation"] == starting_generation
+            ):
+                generation = starting_generation
+            if generation is None:
+                self._set_live_status(
+                    "LIVE recovery verification failed; full repository analysis may be required."
+                )
+                if errors:
+                    msg = "\n".join([f"{e.kind}: {e.message}" for e in errors])
+                    messagebox.showwarning("Issues Detected", msg)
+                else:
+                    messagebox.showinfo(
+                        "Analysis complete",
+                        "No static issues found. LIVE recovery verification failed; "
+                        "full repository analysis may be required.",
+                    )
+                return
+
+            self._set_live_recovery_verification_state(
+                path, generation, "verifying"
+            )
+
+            verification_client = None
+            try:
+                verification_client = connect(Path(path))
+                if verification_client is None:
+                    verification = {"status": "error", "error": "recovery_live_missing"}
+                else:
+                    verification = verification_client.verify_recovery(generation)
+            except Exception as exc:
+                verification = {
+                    "status": "error",
+                    "error": f"{type(exc).__name__}: {exc}",
+                }
+
+            certificate = verification.get("certificate") if isinstance(verification, dict) else None
+            try:
+                identity = read_repository_identity(path)
+            except Exception:
+                identity = None
+            cert_valid = (
+                isinstance(verification, dict)
+                and verification.get("status") == "ok"
+                and isinstance(certificate, dict)
+                and certificate.get("incident_generation") == generation
+                and identity is not None
+                and certificate.get("repo_id") == identity.repo_id
+                and certificate.get("root_path") == str(Path(identity.root_path).resolve())
+                and isinstance(certificate.get("revision"), int)
+                and not isinstance(certificate.get("revision"), bool)
+                and certificate.get("revision", 0) > 0
+                and isinstance(certificate.get("state_id"), str)
+                and bool(certificate.get("state_id"))
+            )
+            cleared = False
+            if cert_valid:
+                with self._live_recovery_lock:
+                    latest = self._live_recovery_incidents.get(path)
+                    if latest is not None and latest.get("generation") == generation:
+                        try:
+                            completed = verification_client.complete_recovery_verification(
+                                certificate["certificate_id"], generation
+                            )
+                        except Exception as exc:
+                            completed = {"status": "error", "error": str(exc)}
+                        if (
+                            isinstance(completed, dict)
+                            and completed.get("status") == "ok"
+                            and completed.get("released") is True
+                            and completed.get("certificate_id")
+                            == certificate["certificate_id"]
+                            and completed.get("incident_generation") == generation
+                        ):
+                            watcher = self.live_watchers.get(identity.repo_id)
+                            if watcher is not None:
+                                watcher.complete_recovery_certificate()
+                            del self._live_recovery_incidents[path]
+                            self._live_recovery_prompt_pending.discard(path)
+                            cleared = True
+
+            if cleared:
+                self._set_live_status(
+                    "LIVE recovery verified; incremental updates resumed."
+                )
+                if not errors:
+                    messagebox.showinfo("OK", "LIVE recovery verified; incremental updates resumed.")
+                else:
+                    msg = "\n".join([f"{e.kind}: {e.message}" for e in errors])
+                    messagebox.showwarning("Issues Detected", msg)
+                return
+
+            if (
+                isinstance(certificate, dict)
+                and isinstance(certificate.get("certificate_id"), str)
+                and verification_client is not None
+            ):
+                try:
+                    verification_client.cancel_recovery_verification(
+                        certificate["certificate_id"], generation
+                    )
+                except Exception:
+                    pass
+            self._set_live_recovery_verification_state(
+                path, generation, "failed"
+            )
+
+            self._set_live_status(
+                "LIVE recovery verification failed; full repository analysis may be required."
+            )
+            if not errors:
+                messagebox.showinfo(
+                    "Analysis complete",
+                    "No static issues found. LIVE recovery verification failed; "
+                    "full repository analysis may be required.",
+                )
+            else:
+                msg = "\n".join([f"{e.kind}: {e.message}" for e in errors])
+                messagebox.showwarning("Issues Detected", msg)
 
         def on_error(exc):
+            if recovery_generation is not None:
+                self._set_live_recovery_verification_state(
+                    path, recovery_generation, "analysis_failed"
+                )
             self._set_live_status(f"Repository analysis failed: {exc}", category="LIVE_STATE")
             messagebox.showerror("error", str(exc))
 
@@ -1377,9 +1655,14 @@ class ContextorGUI:
                 self.live_event_feed = feeds.get(identity.repo_id)
                 if existing_client is not None:
                     self.live_client = existing_client
-                self._set_live_status(
-                    f"[{identity.repo_name}] LIVE: shared state attached; watcher active"
-                )
+                if self._live_recovery_incident(path) is None:
+                    self._set_live_status(
+                        f"[{identity.repo_name}] LIVE: shared state attached; watcher active"
+                    )
+                else:
+                    self._set_live_status(
+                        "LIVE: recovery required; incremental updates are deferred."
+                    )
             if getattr(self, "_live_start_retry_after_id", None) is not None:
                 if hasattr(self, "root") and hasattr(self.root, "after_cancel"):
                     try:
@@ -1463,7 +1746,12 @@ class ContextorGUI:
             if state_revision is not None and live_revision == int(state_revision):
                 if state_id and getattr(live_state, "state_id", None) == state_id:
                     if ContextorGUI._is_selected_live_repository(self, path):
-                        self._set_live_status("LIVE: shared state attached; watcher active")
+                        if self._live_recovery_incident(path) is None:
+                            self._set_live_status("LIVE: shared state attached; watcher active")
+                        else:
+                            self._set_live_status(
+                                "LIVE: recovery required; incremental updates are deferred."
+                            )
                 else:
                     if ContextorGUI._is_selected_live_repository(self, path):
                         self._set_live_status(
@@ -1473,7 +1761,6 @@ class ContextorGUI:
                             path,
                             "Canonical state identity mismatch.",
                         )
-                    return
             else:
                 startup_lease = None
                 try:
@@ -1501,18 +1788,21 @@ class ContextorGUI:
                         isinstance(published, dict)
                         and published.get("resync_required") is True
                     ):
+                        outcome = (
+                            "accepted" if published.get("status") == "ok"
+                            else "rejected"
+                        )
+                        revision = published.get("revision")
                         self._request_full_analysis_recovery(
                             path,
                             "Canonical LIVE publish requires recovery verification.",
+                            publication_revision=revision,
+                            publication_outcome=outcome,
                         )
                         if ContextorGUI._is_selected_live_repository(self, path):
-                            outcome = (
-                                "accepted" if published.get("status") == "ok"
-                                else "rejected"
-                            )
                             self._set_live_status(
                                 f"LIVE: recovery required after {outcome} publish "
-                                f"(revision {published.get('revision')})"
+                                f"(revision {revision})"
                             )
                         return
                     if (
@@ -1559,13 +1849,29 @@ class ContextorGUI:
                 self.live_event_feed = feeds.get(identity.repo_id)
                 if existing_client is not None:
                     self.live_client = existing_client
-                self._set_live_status(
-                    f"[{identity.repo_name}] LIVE: shared state attached; watcher active"
-                )
+                incident = self._live_recovery_incident(path)
+                if incident is None:
+                    self._set_live_status(
+                        f"[{identity.repo_name}] LIVE: shared state attached; watcher active"
+                    )
+                else:
+                    self._set_live_status(
+                        "LIVE: recovery required; incremental updates are deferred."
+                    )
             return
 
         def status_callback(message, event=None, name=identity.repo_name):
             if not ContextorGUI._is_selected_live_repository(self, path):
+                return
+            incident = self._live_recovery_incident(path)
+            if incident is not None and any(
+                marker in message.lower()
+                for marker in (
+                    "watcher active",
+                    "shared state attached",
+                    "shared state published",
+                )
+            ):
                 return
             if event is None and (message.startswith("LIVE update successful:") or message.startswith("Updating LIVE:")):
                 return
@@ -1589,12 +1895,11 @@ class ContextorGUI:
                 feed.client = new_client
 
         def on_resync():
-            from contextor.core.analysis.full_analysis_coordinator import run_full_analysis_exclusive
-            return run_full_analysis_exclusive(
+            self._request_full_analysis_recovery(
                 path,
-                owner="desktop_analysis",
-                timeout=30.0,
+                "Startup canonical baseline requires full analysis.",
             )
+            return False
 
         if getattr(self, "_closing", False):
             return
@@ -1607,6 +1912,7 @@ class ContextorGUI:
             on_status=status_callback,
             on_reconnect=on_reconnect,
             on_resync=on_resync,
+            recovery_admission=self._watcher_recovery_admission(path),
         )
         if initial_seq is not None:
             feed = DesktopLiveEventFeed(
@@ -1633,6 +1939,11 @@ class ContextorGUI:
             return
         watcher.start()
         feed.start()
+        incident = self._live_recovery_incident(path)
+        if incident is not None and ContextorGUI._is_selected_live_repository(self, path):
+            self._set_live_status(
+                "LIVE: recovery required; incremental updates are deferred."
+            )
 
     def _refresh_repo_identity(self, path):
         """Refresh the permanent repository identity shown beside LIVE status."""
