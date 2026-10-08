@@ -1,7 +1,10 @@
 """Unit and integration boundaries for the shared canonical LIVE snapshot store."""
 
 from concurrent.futures import ThreadPoolExecutor
+import multiprocessing
+import os
 from pathlib import Path
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -98,6 +101,158 @@ def test_snapshot_roundtrip_increments_revision_and_records_writer(tmp_path):
     assert read_metadata(tmp_path) == metadata
 
 
+
+def _snapshot_lock_holder(lock_path, ready, release):
+    import contextor.core.live_state.store as store
+
+    fd = store._acquire_lock(Path(lock_path))
+    try:
+        ready.set()
+        release.wait(30)
+    finally:
+        store._release_lock(fd)
+
+
+def _snapshot_lock_probe(lock_path, timeout, connection):
+    import contextor.core.live_state.store as store
+
+    try:
+        try:
+            fd = store._acquire_lock(Path(lock_path), timeout=timeout)
+        except BaseException as exc:
+            connection.send(
+                (type(exc).__name__, str(exc), getattr(exc, "errno", None), getattr(exc, "winerror", None))
+            )
+        else:
+            try:
+                store._release_lock(fd)
+            except BaseException as exc:
+                connection.send(
+                    (type(exc).__name__, str(exc), getattr(exc, "errno", None), getattr(exc, "winerror", None))
+                )
+            else:
+                connection.send(("acquired",))
+    finally:
+        connection.close()
+
+
+def _run_spawned_snapshot_lock_probe(ctx, lock_path, timeout):
+    receiving, sending = ctx.Pipe(duplex=False)
+    process = ctx.Process(target=_snapshot_lock_probe, args=(str(lock_path), timeout, sending))
+    process.start()
+    sending.close()
+    try:
+        assert receiving.poll(15), f"snapshot lock probe exited without a result: {process.exitcode}"
+        result = receiving.recv()
+        process.join(15)
+        assert process.exitcode == 0, result
+        return result
+    finally:
+        receiving.close()
+        if process.is_alive():
+            process.terminate()
+            process.join(5)
+
+
+def _start_spawned_snapshot_lock_holder(ctx, lock_path):
+    ready = ctx.Event()
+    release = ctx.Event()
+    process = ctx.Process(target=_snapshot_lock_holder, args=(str(lock_path), ready, release))
+    process.start()
+    if not ready.wait(15):
+        process.terminate()
+        process.join(5)
+        pytest.fail(f"snapshot lock holder did not acquire the lock: exitcode={process.exitcode}")
+    assert process.is_alive()
+    return process, release
+
+
+def test_snapshot_lock_sequential_acquisition_leaves_stable_file(tmp_path):
+    import contextor.core.live_state.store as store
+
+    lock_path = tmp_path / "engine_state.lock"
+    first = store._acquire_lock(lock_path)
+    store._release_lock(first)
+    assert lock_path.is_file()
+
+    second = store._acquire_lock(lock_path)
+    store._release_lock(second)
+    assert lock_path.is_file()
+
+
+def test_snapshot_lock_same_process_contention_times_out(tmp_path):
+    import contextor.core.live_state.store as store
+
+    lock_path = tmp_path / "engine_state.lock"
+    first = store._acquire_lock(lock_path)
+    try:
+        with pytest.raises(TimeoutError):
+            store._acquire_lock(lock_path, timeout=0.1)
+    finally:
+        store._release_lock(first)
+
+    second = store._acquire_lock(lock_path)
+    store._release_lock(second)
+    assert lock_path.is_file()
+
+
+def test_snapshot_lock_cross_process_exclusion(tmp_path):
+    ctx = multiprocessing.get_context("spawn")
+    lock_path = tmp_path / "engine_state.lock"
+    holder, release = _start_spawned_snapshot_lock_holder(ctx, lock_path)
+    try:
+        result = _run_spawned_snapshot_lock_probe(ctx, lock_path, timeout=0.1)
+        assert result[0] == "TimeoutError", result
+        assert holder.is_alive()
+    finally:
+        release.set()
+        holder.join(10)
+        if holder.is_alive():
+            holder.terminate()
+            holder.join(5)
+    assert holder.exitcode == 0
+    assert lock_path.is_file()
+    assert _run_spawned_snapshot_lock_probe(ctx, lock_path, timeout=1.0) == ("acquired",)
+
+
+def test_snapshot_lock_process_death_releases_ownership(tmp_path):
+    ctx = multiprocessing.get_context("spawn")
+    lock_path = tmp_path / "engine_state.lock"
+    holder, _ = _start_spawned_snapshot_lock_holder(ctx, lock_path)
+    try:
+        holder.terminate()
+        holder.join(10)
+        assert not holder.is_alive()
+        assert lock_path.is_file()
+        assert _run_spawned_snapshot_lock_probe(ctx, lock_path, timeout=1.0) == ("acquired",)
+    finally:
+        if holder.is_alive():
+            holder.terminate()
+            holder.join(5)
+
+
+def test_snapshot_lock_old_mtime_does_not_steal_ownership(tmp_path):
+    ctx = multiprocessing.get_context("spawn")
+    lock_path = tmp_path / "engine_state.lock"
+    holder, release = _start_spawned_snapshot_lock_holder(ctx, lock_path)
+    try:
+        old = time.time() - 3600
+        os.utime(lock_path, (old, old))
+        assert lock_path.stat().st_mtime < time.time() - 30
+        result = _run_spawned_snapshot_lock_probe(ctx, lock_path, timeout=0.1)
+        assert result[0] == "TimeoutError", result
+        assert holder.is_alive()
+    finally:
+        release.set()
+        holder.join(10)
+        if holder.is_alive():
+            holder.terminate()
+            holder.join(5)
+    assert holder.exitcode == 0
+    assert lock_path.is_file()
+    assert _run_spawned_snapshot_lock_probe(ctx, lock_path, timeout=1.0) == ("acquired",)
+
+
 def test_default_snapshot_publishes_final_pickle_via_temp_replace(tmp_path, monkeypatch):
     import contextor.core.live_state.store as store
 
@@ -125,7 +280,7 @@ def test_cleanup_failure_cannot_mask_persistence_failure_or_leak_lock(tmp_path, 
     monkeypatch.setattr(store.os, "replace", failing_replace)
     def failing_unlink(self, *args, **kwargs):
         if self.name == "engine_state.lock":
-            return original_unlink(self, *args, **kwargs)
+            raise AssertionError("stable snapshot lock must not be unlinked")
         raise OSError("cleanup failure")
     monkeypatch.setattr(type(tmp_path), "unlink", failing_unlink)
     with pytest.raises(RuntimeError, match="authoritative persistence failure"):

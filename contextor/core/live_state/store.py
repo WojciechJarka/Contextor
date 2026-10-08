@@ -1442,21 +1442,65 @@ def read_metadata(cache_dir: str | Path) -> LiveStateMetadata | None:
 
 
 def _acquire_lock(lock_file: Path, timeout: float = 5.0) -> int:
+    """Acquire an OS-owned cross-process lock on a stable file."""
     deadline = time.monotonic() + timeout
-    while True:
-        try:
-            return os.open(lock_file, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-        except (FileExistsError, PermissionError):
-            try:
-                if time.time() - lock_file.stat().st_mtime > 30:
-                    lock_file.unlink()
-                    continue
+    lock_file.parent.mkdir(parents=True, exist_ok=True)
 
-            except FileNotFoundError:
-                continue
+    fd = os.open(lock_file, os.O_RDWR | os.O_CREAT, 0o600)
+
+    try:
+        if os.fstat(fd).st_size == 0:
+            os.write(fd, b"\0")
+            os.fsync(fd)
+
+        while True:
+            os.lseek(fd, 0, os.SEEK_SET)
+
+            if os.name == "nt":
+                import msvcrt
+
+                try:
+                    msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+                    return fd
+                except OSError:
+                    pass
+            else:
+                import fcntl
+
+                try:
+                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    return fd
+                except BlockingIOError:
+                    pass
+
             if time.monotonic() >= deadline:
-                raise TimeoutError(f"Timed out waiting for LIVE state lock: {lock_file}")
+                raise TimeoutError(
+                    f"Timed out waiting for LIVE state lock: {lock_file}"
+                )
+
             time.sleep(0.02)
+
+    except BaseException:
+        os.close(fd)
+        raise
+
+
+def _release_lock(fd: int) -> None:
+    """Release the OS lock and close its owning descriptor."""
+    try:
+        os.lseek(fd, 0, os.SEEK_SET)
+
+        if os.name == "nt":
+            import msvcrt
+
+            msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(fd, fcntl.LOCK_UN)
+
+    finally:
+        os.close(fd)
 
 
 def save_snapshot(
@@ -1826,13 +1870,7 @@ def save_snapshot(
                 except OSError:
                     pass
 
-        try:
-            os.close(lock_fd)
-        finally:
-            try:
-                lock_file.unlink()
-            except OSError:
-                pass
+        _release_lock(lock_fd)
 
 
 def _trace_snapshot_load_phase(
