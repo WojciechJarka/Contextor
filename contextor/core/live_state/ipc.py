@@ -94,6 +94,8 @@ ACTIVITY_EVENT_RETENTION = 10_000
 _DIAGNOSTIC_JOURNAL_LIMIT = 3
 _MUTATION_JOB_RETENTION = 256
 _MUTATION_WORKER_JOIN_TIMEOUT = 2.0
+_RECOVERY_CERTIFICATE_VALIDITY_SECONDS = 30.0
+_RECOVERY_SHUTDOWN_WAIT_SECONDS = 5.0
 
 
 _MISSING_REVISION = object()
@@ -804,6 +806,16 @@ class CanonicalLiveServer:
         self._repository_identity_reader = repository_identity_reader
         self._recovery_verification_context = None
         self._pending_recovery_certificate: dict[str, Any] | None = None
+        self._recovery_certificate_deadline: float | None = None
+        self._recovery_certificate_owner: int | None = None
+        self._recovery_certificate_wakeup: threading.Timer | None = None
+        self._recovery_certificate_state = "none"
+        self._last_expired_recovery_certificate: tuple[str, int] | None = None
+        self._recovery_release_degraded = False
+        self._service_thread_identity: int | None = None
+        self._service_finished = threading.Event()
+        self._service_cleanup_ok = True
+        self._service_wakeup_token = secrets.token_hex(32)
         self._mutation_coordinator = CanonicalMutationCoordinator(
             self._execute_queued_update_file,
             self._read_revision,
@@ -1178,6 +1190,40 @@ class CanonicalLiveServer:
         }
 
     def serve_forever(self) -> None:
+        self._service_thread_identity = threading.get_ident()
+        self._service_finished.clear()
+        try:
+            self._serve_requests()
+        finally:
+            try:
+                if self._pending_recovery_certificate is not None:
+                    self._finalize_recovery_certificate(
+                        reason="shutdown",
+                        certificate_id=self._pending_recovery_certificate["certificate_id"],
+                        generation=self._pending_recovery_certificate["incident_generation"],
+                    )
+                    if self._pending_recovery_certificate is not None:
+                        self._service_cleanup_ok = False
+            except Exception:
+                self._service_cleanup_ok = False
+            finally:
+                self._stop.set()
+                try:
+                    self._listener.close()
+                except OSError:
+                    pass
+                try:
+                    worker_closed = self._mutation_coordinator.close()
+                except Exception:
+                    worker_closed = False
+                self._service_cleanup_ok = (
+                    worker_closed
+                    and self._service_cleanup_ok
+                    and not self._recovery_release_degraded
+                )
+                self._service_finished.set()
+
+    def _serve_requests(self) -> None:
         while not self._stop.is_set():
             accept_started = time.monotonic()
             try:
@@ -1198,6 +1244,12 @@ class CanonicalLiveServer:
             request_started = time.monotonic()
             try:
                 try:
+                    while not connection.poll(0.25):
+                        self._expire_recovery_certificate()
+                        if self._stop.is_set():
+                            break
+                    if self._stop.is_set():
+                        continue
                     request = connection.recv()
                 except (OSError, EOFError, ConnectionError, TimeoutError) as exc:
                     _safe_trace_event(
@@ -1216,6 +1268,7 @@ class CanonicalLiveServer:
                 if isinstance(request, dict) and isinstance(request.get("operation"), str):
                     request_type = request["operation"]
                 try:
+                    self._expire_recovery_certificate()
                     response = self._dispatch(request)
                 except Exception as exc:
                     try:
@@ -1522,9 +1575,123 @@ class CanonicalLiveServer:
                 _safe_trace_event("LIVE", "CANONICAL_PUBLISH", op=trace_op, rev_before=previous_revision, rev_after=self._revision, seq=evt["seq"], origin=request.get("origin"))
                 return {"status": "ok", "revision": self._revision, "seq": evt["seq"]}
 
+    def _wake_service(self) -> None:
+        try:
+            connection = Client(
+                self.endpoint.address, family="AF_INET", authkey=self._authkey
+            )
+            try:
+                connection.send({
+                    "operation": "_recovery_lifecycle_wake",
+                    "token": self._service_wakeup_token,
+                })
+            finally:
+                connection.close()
+        except (OSError, EOFError, ConnectionError):
+            pass
+
+    def _cancel_recovery_wakeup(self) -> None:
+        wakeup = self._recovery_certificate_wakeup
+        self._recovery_certificate_wakeup = None
+        if wakeup is not None:
+            wakeup.cancel()
+
+    def _expire_recovery_certificate(self) -> None:
+        pending = self._pending_recovery_certificate
+        deadline = self._recovery_certificate_deadline
+        if (
+            pending is not None
+            and self._recovery_certificate_state == "pending"
+            and deadline is not None
+            and time.monotonic() >= deadline
+        ):
+            self._finalize_recovery_certificate(
+                reason="expired",
+                certificate_id=pending["certificate_id"],
+                generation=pending["incident_generation"],
+            )
+
+    def _finalize_recovery_certificate(
+        self, *, reason: str, certificate_id: Any, generation: Any
+    ) -> dict[str, Any]:
+        pending = self._pending_recovery_certificate
+        if (
+            not isinstance(pending, dict)
+            or not isinstance(certificate_id, str)
+            or isinstance(generation, bool)
+            or not isinstance(generation, int)
+            or pending.get("certificate_id") != certificate_id
+            or pending.get("incident_generation") != generation
+        ):
+            if (
+                reason == "complete"
+                and (certificate_id, generation)
+                == self._last_expired_recovery_certificate
+            ):
+                return {"status": "error", "error": "recovery_certificate_expired"}
+            return {"status": "error", "error": "recovery_certificate_mismatch"}
+        if (
+            self._recovery_certificate_owner != threading.get_ident()
+            or (
+                self._service_thread_identity is not None
+                and self._service_thread_identity != threading.get_ident()
+            )
+        ):
+            return {"status": "error", "error": "recovery_owner_thread_mismatch"}
+        if self._recovery_release_degraded:
+            return {"status": "error", "error": "recovery_writer_release_unverified"}
+        if self._recovery_certificate_state != "pending":
+            return {"status": "error", "error": "recovery_finalization_unavailable"}
+        deadline = self._recovery_certificate_deadline
+        expired = deadline is not None and time.monotonic() >= deadline
+        if reason == "expired" and not expired:
+            return {"status": "error", "error": "recovery_certificate_not_expired"}
+        if expired:
+            reason = "expired"
+        guard_context = self._recovery_verification_context
+        if guard_context is None:
+            self._recovery_release_degraded = True
+            self._recovery_certificate_state = "release_unverified"
+            return {"status": "error", "error": "recovery_fence_missing"}
+        self._cancel_recovery_wakeup()
+        self._recovery_certificate_state = "finalizing"
+        try:
+            guard_context.__exit__(None, None, None)
+        except Exception:
+            self._recovery_release_degraded = True
+            self._recovery_certificate_state = "release_unverified"
+            return {
+                "status": "error",
+                "error": "recovery_writer_release_failed",
+                "resync_required": True,
+            }
+        self._recovery_verification_context = None
+        self._pending_recovery_certificate = None
+        self._recovery_certificate_deadline = None
+        self._recovery_certificate_owner = None
+        self._mutation_coordinator.end_recovery_verification()
+        self._recovery_certificate_state = reason
+        if reason == "expired":
+            self._last_expired_recovery_certificate = (
+                certificate_id, generation
+            )
+            return {"status": "error", "error": "recovery_certificate_expired"}
+        return {
+            "status": "ok",
+            "released": True,
+            "cancelled": reason != "complete",
+            "certificate_id": certificate_id,
+            "incident_generation": generation,
+        }
+
     def _execute_recovery_verification(
         self, request: dict[str, Any]
     ) -> dict[str, Any]:
+        if (
+            self._service_thread_identity is not None
+            and threading.get_ident() != self._service_thread_identity
+        ):
+            return {"status": "error", "error": "recovery_owner_thread_mismatch"}
         generation = request.get("incident_generation")
         if (
             isinstance(generation, bool)
@@ -1636,6 +1803,27 @@ class CanonicalLiveServer:
             }
             self._pending_recovery_certificate = certificate
             self._recovery_verification_context = guard_context
+            self._recovery_certificate_owner = threading.get_ident()
+            self._recovery_certificate_state = "pending"
+            self._recovery_certificate_deadline = (
+                time.monotonic() + _RECOVERY_CERTIFICATE_VALIDITY_SECONDS
+            )
+            wakeup = threading.Timer(
+                _RECOVERY_CERTIFICATE_VALIDITY_SECONDS, self._wake_service
+            )
+            wakeup.daemon = True
+            self._recovery_certificate_wakeup = wakeup
+            try:
+                wakeup.start()
+            except Exception:
+                self._cancel_recovery_wakeup()
+                self._pending_recovery_certificate = None
+                self._recovery_verification_context = None
+                self._recovery_certificate_deadline = None
+                self._recovery_certificate_owner = None
+                self._recovery_certificate_state = "none"
+                guard_entered = True
+                raise
             guard_entered = False
             retain_fence = True
             return {
@@ -1652,41 +1840,18 @@ class CanonicalLiveServer:
                         guard_released = False
                 if guard_released:
                     self._mutation_coordinator.end_recovery_verification()
+                else:
+                    self._recovery_release_degraded = True
+                    self._recovery_certificate_state = "release_unverified"
 
     def _finish_recovery_verification(
         self, request: dict[str, Any], *, cancelled: bool
     ) -> dict[str, Any]:
-        certificate_id = request.get("certificate_id")
-        generation = request.get("incident_generation")
-        pending = self._pending_recovery_certificate
-        if (
-            not isinstance(pending, dict)
-            or not isinstance(certificate_id, str)
-            or isinstance(generation, bool)
-            or not isinstance(generation, int)
-            or pending.get("certificate_id") != certificate_id
-            or generation != pending.get("incident_generation")
-        ):
-            return {"status": "error", "error": "recovery_certificate_mismatch"}
-
-        guard_context = self._recovery_verification_context
-        if guard_context is None:
-            return {"status": "error", "error": "recovery_fence_missing"}
-        try:
-            guard_context.__exit__(None, None, None)
-        except Exception:
-            return {"status": "error", "error": "recovery_writer_release_failed"}
-
-        self._recovery_verification_context = None
-        self._pending_recovery_certificate = None
-        self._mutation_coordinator.end_recovery_verification()
-        return {
-            "status": "ok",
-            "released": True,
-            "cancelled": cancelled,
-            "certificate_id": certificate_id,
-            "incident_generation": generation,
-        }
+        return self._finalize_recovery_certificate(
+            reason="cancel" if cancelled else "complete",
+            certificate_id=request.get("certificate_id"),
+            generation=request.get("incident_generation"),
+        )
 
     def _execute_queued_update_file(self, request: dict[str, Any]) -> dict[str, Any]:
         trace_op = _safe_trace_op(request, "u")
@@ -1967,6 +2132,16 @@ class CanonicalLiveServer:
         if not isinstance(request, dict) or not isinstance(request.get("operation"), str):
             return {"status": "error", "error": "invalid_request"}
         operation = request["operation"]
+        if operation == "_recovery_lifecycle_wake":
+            if request.get("token") != self._service_wakeup_token:
+                return {"status": "error", "error": "invalid_lifecycle_wake"}
+            deadline = self._recovery_certificate_deadline
+            if deadline is not None and not self._stop.is_set():
+                remaining = deadline - time.monotonic()
+                if remaining > 0:
+                    self._stop.wait(remaining)
+            self._expire_recovery_certificate()
+            return {"status": "ok"}
 
         # Desktop authority callbacks cross the RuntimeLease/observability
         # boundary and may synchronously emit back into record_authority_event.
@@ -2201,21 +2376,55 @@ class CanonicalLiveServer:
     def close(
         self, *, mutation_join_timeout: float = _MUTATION_WORKER_JOIN_TIMEOUT
     ) -> bool:
-        pending = self._pending_recovery_certificate
-        if isinstance(pending, dict):
-            self._finish_recovery_verification(
-                {
-                    "certificate_id": pending.get("certificate_id"),
-                    "incident_generation": pending.get("incident_generation"),
-                },
-                cancelled=True,
-            )
         self._stop.set()
-        try:
-            self._listener.close()
-        except OSError:
-            pass
-        return self._mutation_coordinator.close(join_timeout=mutation_join_timeout)
+        if self._service_thread_identity is None:
+            if self._pending_recovery_certificate is not None:
+                if self._recovery_certificate_owner != threading.get_ident():
+                    return False
+                pending = self._pending_recovery_certificate
+                self._finalize_recovery_certificate(
+                    reason="shutdown",
+                    certificate_id=pending["certificate_id"],
+                    generation=pending["incident_generation"],
+                )
+                if self._pending_recovery_certificate is not None:
+                    return False
+            try:
+                self._listener.close()
+            except OSError:
+                pass
+            return self._mutation_coordinator.close(
+                join_timeout=mutation_join_timeout
+            )
+        if threading.get_ident() == self._service_thread_identity:
+            # Never join the service thread from itself. The loop's finally
+            # block closes the listener and mutation coordinator.
+            if self._pending_recovery_certificate is not None:
+                pending = self._pending_recovery_certificate
+                self._finalize_recovery_certificate(
+                    reason="shutdown",
+                    certificate_id=pending["certificate_id"],
+                    generation=pending["incident_generation"],
+                )
+                return self._pending_recovery_certificate is None
+            return not self._recovery_release_degraded
+        threading.Thread(
+            target=self._wake_service,
+            name="contextor-live-shutdown-wake",
+            daemon=True,
+        ).start()
+        if not self._service_finished.wait(_RECOVERY_SHUTDOWN_WAIT_SECONDS):
+            return False
+        # The owner thread already closed admission. A later runtime finally
+        # may allow a longer join for a mutation worker still draining.
+        worker_closed = self._mutation_coordinator.close(
+            join_timeout=mutation_join_timeout
+        )
+        return (
+            worker_closed
+            and self._pending_recovery_certificate is None
+            and not self._recovery_release_degraded
+        )
 
     def __enter__(self) -> "CanonicalLiveServer":
         return self

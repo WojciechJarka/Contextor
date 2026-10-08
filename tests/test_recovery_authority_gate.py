@@ -1,10 +1,13 @@
 from contextlib import contextmanager
+import multiprocessing
+from multiprocessing.connection import Client
 import threading
 from types import SimpleNamespace
 
 import pytest
 
 from contextor.core.live_state.ipc import CanonicalLiveServer, LiveStateClient
+import contextor.core.live_state.ipc as live_ipc
 
 
 def _recovery_server(
@@ -147,6 +150,9 @@ def test_concurrent_publish_cannot_cross_recovery_fence(tmp_path):
     recovery_fence_started = threading.Event()
     publish_result = {}
     verify_result = {}
+    finish_result = {}
+    verified = threading.Event()
+    allow_finish = threading.Event()
     original_active = server._mutation_coordinator.recovery_verification_active
     original_begin = server._mutation_coordinator.begin_recovery_verification
 
@@ -179,6 +185,9 @@ def test_concurrent_publish_cannot_cross_recovery_fence(tmp_path):
 
     def verify():
         verify_result.update(_verify(server))
+        verified.set()
+        if allow_finish.wait(2) and verify_result.get("status") == "ok":
+            finish_result.update(_finish(server, verify_result["certificate"]))
 
     publish_thread = threading.Thread(target=publish, name="racing-publish")
     verify_thread = threading.Thread(target=verify, name="recovery-verification")
@@ -196,16 +205,19 @@ def test_concurrent_publish_cannot_cross_recovery_fence(tmp_path):
             execution_lock_held = False
 
         publish_thread.join(2)
-        verify_thread.join(2)
+        assert verified.wait(2)
         assert not publish_thread.is_alive()
-        assert not verify_thread.is_alive()
         assert verify_result["status"] == "ok"
         assert publish_result["status"] == "error"
         assert publish_result["error"] == "recovery_verification_in_progress"
         assert server._revision == 1
         assert server._mutation_coordinator.recovery_verification_active()
-        assert _finish(server, verify_result["certificate"])["released"] is True
+        allow_finish.set()
+        verify_thread.join(2)
+        assert not verify_thread.is_alive()
+        assert finish_result["released"] is True
     finally:
+        allow_finish.set()
         if execution_lock_held:
             execution_lock.release()
         if publish_thread.ident is not None:
@@ -400,4 +412,279 @@ def test_recovery_verification_and_ack_round_trip_through_live_ipc(tmp_path):
         assert not server._mutation_coordinator.recovery_verification_active()
     finally:
         server.close()
+        thread.join(2)
+
+
+@pytest.mark.parametrize("operation", ["complete", "cancel"])
+def test_certificate_finalization_stays_on_service_thread(tmp_path, operation):
+    server = _recovery_server(tmp_path)
+    owner_threads = []
+    release_threads = []
+
+    @contextmanager
+    def guarded():
+        owner_threads.append(threading.get_ident())
+        try:
+            yield
+        finally:
+            release_threads.append(threading.get_ident())
+
+    server._recovery_verification_guard = guarded
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    client = LiveStateClient(server.endpoint)
+    try:
+        certificate = client.verify_recovery(7)["certificate"]
+        if operation == "complete":
+            result = client.complete_recovery_verification(certificate["certificate_id"], 7)
+        else:
+            result = client.cancel_recovery_verification(certificate["certificate_id"], 7)
+        assert result["released"] is True
+        assert owner_threads == release_threads == [thread.ident]
+        duplicate = client.complete_recovery_verification(certificate["certificate_id"], 7)
+        assert duplicate["status"] == "error"
+        assert release_threads == [thread.ident]
+    finally:
+        assert server.close()
+        thread.join(2)
+        assert not thread.is_alive()
+
+
+def test_disconnected_certificate_expires_on_owner_thread(tmp_path, monkeypatch):
+    monkeypatch.setattr(live_ipc, "_RECOVERY_CERTIFICATE_VALIDITY_SECONDS", 0.05)
+    server = _recovery_server(tmp_path)
+    entered = threading.Event()
+    exited = threading.Event()
+    threads = []
+
+    @contextmanager
+    def guarded():
+        threads.append(threading.get_ident())
+        entered.set()
+        try:
+            yield
+        finally:
+            threads.append(threading.get_ident())
+            exited.set()
+
+    server._recovery_verification_guard = guarded
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    client = LiveStateClient(server.endpoint)
+    try:
+        certificate = client.verify_recovery(8)["certificate"]
+        assert entered.wait(2)
+        # request() has already closed the original connection.
+        assert exited.wait(2)
+        assert threads == [thread.ident, thread.ident]
+        rejected = client.complete_recovery_verification(certificate["certificate_id"], 8)
+        assert rejected == {"status": "error", "error": "recovery_certificate_expired"}
+        assert not server._mutation_coordinator.recovery_verification_active()
+    finally:
+        assert server.close()
+        thread.join(2)
+
+
+def test_foreign_thread_close_wakes_service_and_releases_on_owner(tmp_path):
+    server = _recovery_server(tmp_path)
+    exited = threading.Event()
+    exit_threads = []
+
+    @contextmanager
+    def guarded():
+        try:
+            yield
+        finally:
+            exit_threads.append(threading.get_ident())
+            exited.set()
+
+    server._recovery_verification_guard = guarded
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    client = LiveStateClient(server.endpoint)
+    client.verify_recovery(9)
+    close_result = []
+    watchdog = threading.Thread(
+        target=lambda: close_result.append(server.close()),
+        name="contextor-live-watchdog-test",
+    )
+    watchdog.start()
+    watchdog.join(2)
+    assert not watchdog.is_alive()
+    assert close_result == [True]
+    assert exited.wait(2)
+    thread.join(2)
+    assert not thread.is_alive()
+    assert exit_threads == [thread.ident]
+
+
+def test_foreign_close_interrupts_client_that_never_sends_request(tmp_path):
+    server = _recovery_server(tmp_path)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    client = LiveStateClient(server.endpoint)
+    client.verify_recovery(15)
+    silent_connection = Client(
+        server.endpoint.address, family="AF_INET", authkey=server.endpoint.authkey
+    )
+    try:
+        assert server.close()
+        thread.join(2)
+        assert not thread.is_alive()
+        assert server._test_guard_exited == [True]
+    finally:
+        silent_connection.close()
+
+
+def test_release_failure_never_reopens_mutation_fence(tmp_path):
+    server = _recovery_server(tmp_path)
+
+    @contextmanager
+    def failing_guard():
+        yield
+        raise OSError("injected unlock failure")
+
+    server._recovery_verification_guard = failing_guard
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    client = LiveStateClient(server.endpoint)
+    certificate = client.verify_recovery(10)["certificate"]
+    result = client.complete_recovery_verification(certificate["certificate_id"], 10)
+    assert result["status"] == "error"
+    assert result["error"] == "recovery_writer_release_failed"
+    assert result.get("released") is not True
+    assert server._mutation_coordinator.recovery_verification_active()
+    assert server._recovery_certificate_state == "release_unverified"
+    assert not server.close()
+    thread.join(2)
+    assert not thread.is_alive()
+
+
+def test_service_thread_shutdown_finalizes_without_self_join(tmp_path):
+    server = _recovery_server(tmp_path)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    client = LiveStateClient(server.endpoint)
+    client.verify_recovery(11)
+    response = client.request("shutdown")
+    assert response["status"] == "ok"
+    thread.join(2)
+    assert not thread.is_alive()
+    assert server._test_guard_exited == [True]
+    assert server._service_cleanup_ok
+    assert not server._mutation_coordinator.recovery_verification_active()
+
+
+@pytest.mark.parametrize("operation", ["complete", "cancel"])
+def test_expiry_competing_with_ack_releases_once(tmp_path, monkeypatch, operation):
+    monkeypatch.setattr(live_ipc, "_RECOVERY_CERTIFICATE_VALIDITY_SECONDS", 30.0)
+    server = _recovery_server(tmp_path)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    client = LiveStateClient(server.endpoint)
+    try:
+        certificate = client.verify_recovery(12)["certificate"]
+        # Concurrent authenticated wake and ack requests meet at the service
+        # thread after the deadline; only that thread may release the guard.
+        server._recovery_certificate_deadline = live_ipc.time.monotonic() - 1
+        barrier = threading.Barrier(3)
+        response_holder = {}
+
+        def acknowledge():
+            barrier.wait(2)
+            if operation == "complete":
+                response_holder.update(
+                    client.complete_recovery_verification(certificate["certificate_id"], 12)
+                )
+            else:
+                response_holder.update(
+                    client.cancel_recovery_verification(certificate["certificate_id"], 12)
+                )
+
+        def wake():
+            barrier.wait(2)
+            server._wake_service()
+
+        ack_thread = threading.Thread(target=acknowledge)
+        wake_thread = threading.Thread(target=wake)
+        ack_thread.start()
+        wake_thread.start()
+        barrier.wait(2)
+        ack_thread.join(2)
+        wake_thread.join(2)
+        assert not ack_thread.is_alive()
+        assert not wake_thread.is_alive()
+        response = response_holder
+        assert response["status"] == "error"
+        assert server._test_guard_exited == [True]
+        assert not server._mutation_coordinator.recovery_verification_active()
+        assert server._recovery_certificate_wakeup is None
+        assert client.complete_recovery_verification(
+            certificate["certificate_id"], 12
+        )["status"] == "error"
+        assert server._test_guard_exited == [True]
+    finally:
+        assert server.close()
+        thread.join(2)
+
+
+def test_next_committed_update_after_certificate_release_is_normal(tmp_path):
+    server = _recovery_server(
+        tmp_path, updater=lambda _candidate, _path: SimpleNamespace(status="UPDATED")
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    client = LiveStateClient(server.endpoint)
+    try:
+        certificate = client.verify_recovery(13)["certificate"]
+        acknowledged = client.complete_recovery_verification(
+            certificate["certificate_id"], 13
+        )
+        assert acknowledged["released"] is True
+        updated = client.update_file(str(tmp_path / "change.py"))
+        assert updated["status"] == "ok"
+        assert updated["revision"] == certificate["revision"] + 1
+        assert server._test_persists == [True]
+        assert client.snapshot()["revision"] == updated["revision"]
+    finally:
+        assert server.close()
+        thread.join(2)
+
+
+def test_one_certificate_wakeup_is_cancelled_after_ack(tmp_path):
+    server = _recovery_server(tmp_path)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    client = LiveStateClient(server.endpoint)
+    try:
+        certificate = client.verify_recovery(14)["certificate"]
+        wakeup = server._recovery_certificate_wakeup
+        assert isinstance(wakeup, threading.Timer)
+        assert wakeup.is_alive()
+        assert client.complete_recovery_verification(
+            certificate["certificate_id"], 14
+        )["released"] is True
+        assert server._recovery_certificate_wakeup is None
+        assert wakeup.finished.is_set()
+    finally:
+        assert server.close()
+        thread.join(2)
+
+
+def test_certificate_lifecycle_starts_no_process(tmp_path, monkeypatch):
+    def forbidden_start(_process):
+        pytest.fail("certificate lifecycle must not start a process")
+
+    monkeypatch.setattr(multiprocessing.process.BaseProcess, "start", forbidden_start)
+    server = _recovery_server(tmp_path)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    client = LiveStateClient(server.endpoint)
+    try:
+        certificate = client.verify_recovery(16)["certificate"]
+        assert client.cancel_recovery_verification(
+            certificate["certificate_id"], 16
+        )["released"] is True
+    finally:
+        assert server.close()
         thread.join(2)

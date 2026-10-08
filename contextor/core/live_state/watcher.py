@@ -665,24 +665,55 @@ class DesktopLiveWatcher:
         return completed
 
     def poll_once(self) -> list[str]:
-        reconciled = self._poll_inflight_updates()
-        if self._recovery_is_active():
-            return reconciled
         if self._recovery_rebaseline_pending:
-            current_scan = self._scan()
+            if self._recovery_is_active():
+                return []
+            try:
+                live_snapshot = self.client.snapshot()
+                if not isinstance(live_snapshot, dict) or live_snapshot.get("status") != "ok":
+                    return []
+                state = live_snapshot.get("state")
+                revision = live_snapshot.get("revision")
+                state_id = getattr(state, "state_id", None)
+                modules = getattr(state, "modules", None)
+                if (
+                    isinstance(revision, bool)
+                    or not isinstance(revision, int)
+                    or revision < 1
+                    or getattr(state, "revision", None) != revision
+                    or not isinstance(state_id, str)
+                    or not state_id
+                    or not isinstance(modules, dict)
+                ):
+                    return []
+                manager = self._trusted_file_state(live_snapshot)
+                if manager is None:
+                    return []
+                current_scan = self._scan()
+                pending = set(self._startup_pending)
+                pending.update(self._pending_intents)
+                pending.update(self._ambiguous_updates)
+                pending.update(
+                    path for path in current_scan
+                    if manager.has_changed(path)
+                    or self._module_name(Path(path)) not in modules
+                )
+                for tracked_path in manager.tracked_paths():
+                    normalized = self._normalize_watch_path(tracked_path)
+                    if normalized is not None and normalized not in current_scan:
+                        pending.add(normalized)
+            except Exception:
+                return []
+            # Every path above was compared with the verified LIVE generation.
+            # Commit the local scan only after preserving all outstanding work.
             self._snapshot = current_scan
-            previous_startup_pending = set(self._startup_pending)
-            reconciled_startup_pending = self._startup_reconciliation_paths(
-                current_scan
-            )
-            if self._startup_requires_resync:
-                previous_startup_pending.update(reconciled_startup_pending)
-                self._startup_pending = sorted(previous_startup_pending)
-            else:
-                self._startup_pending = reconciled_startup_pending
+            self._startup_pending = sorted(pending)
             for pending_path in self._startup_pending:
                 self._enqueue_path(pending_path, wake=False)
             self._recovery_rebaseline_pending = False
+        reconciled = self._poll_inflight_updates()
+        if self._recovery_is_active():
+            return reconciled
         changed = self._drain_pending()
         using_startup_pending = not changed and bool(self._startup_pending)
         if using_startup_pending:

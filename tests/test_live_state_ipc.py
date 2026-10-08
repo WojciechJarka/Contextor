@@ -388,6 +388,7 @@ def test_server_dispatch_transport_shaped_error_is_not_ipc_failure(monkeypatch, 
     events, sent = [], []
     server = CanonicalLiveServer(SimpleNamespace(files=[]))
     class Connection:
+        def poll(self, _timeout): return True
         def recv(self): return {"operation": "ping"}
         def send(self, value): sent.append(value)
         def close(self): server._stop.set()
@@ -408,6 +409,7 @@ def test_server_transport_boundary_emits_once(monkeypatch, stage):
     server = CanonicalLiveServer(SimpleNamespace(files=[]))
     class Connection:
         closed = False
+        def poll(self, _timeout): return True
         def recv(self):
             if stage == "recv": raise ConnectionResetError("recv")
             return {"operation": "ping"}
@@ -451,6 +453,7 @@ def test_server_recv_and_send_trace_emitter_failure_are_fail_open(monkeypatch, s
 
     class Connection:
         closed = False
+        def poll(self, _timeout): return True
 
         def recv(self):
             if stage == "recv":

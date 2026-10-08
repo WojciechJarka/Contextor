@@ -15,6 +15,12 @@ from contextor.ui.gui import ContextorGUI
 
 
 class _Manager:
+    def has_changed(self, path):
+        return True
+
+    def tracked_paths(self):
+        return []
+
     def get_current_file_state(self, path, *, compute_hash):
         stat = Path(path).stat()
         return SimpleNamespace(
@@ -241,6 +247,77 @@ def test_recovery_release_rescans_and_revalidates_against_current_live(
     assert seen_revisions == [2]
     assert client.submissions[0][0] == path
     assert not watcher._recovery_rebaseline_pending
+
+
+@pytest.mark.parametrize(
+    "failure",
+    ["read_error", "malformed", "stale_revision", "identity_missing", "untrusted"],
+)
+def test_rebaseline_failure_preserves_work_and_retries(tmp_path, failure):
+    client = _Client()
+    watcher, source = _watcher(tmp_path, client)
+    path = str(source.resolve())
+    old_snapshot = dict(watcher._snapshot)
+    intent = _PendingMutationIntent(
+        "intent-1", path, "trace-1", (1, 1), 1.0, "sha"
+    )
+    job = _WatcherMutationJob(
+        "job-1", path, "trace-1", "intent-1", (1, 1), 1.0, "sha"
+    )
+    watcher._pending_intents[path] = intent
+    watcher._ambiguous_updates.add(path)
+    watcher._startup_pending = [path]
+    watcher._inflight_updates[job.job_id] = job
+    watcher._enqueue_path(path)
+    watcher.complete_recovery_certificate()
+    healthy_snapshot = client.snapshot
+
+    def failed_snapshot():
+        if failure == "read_error":
+            raise ConnectionError("snapshot unavailable")
+        response = healthy_snapshot()
+        if failure == "malformed":
+            return {"status": "ok", "revision": client.revision, "state": None}
+        if failure == "stale_revision":
+            response["state"].revision -= 1
+        if failure == "identity_missing":
+            response["state"].state_id = ""
+        return response
+
+    client.snapshot = failed_snapshot
+    if failure == "untrusted":
+        watcher._trusted_file_state = lambda _snapshot=None: None
+    assert watcher.poll_once() == []
+    assert watcher._recovery_rebaseline_pending
+    assert watcher._snapshot == old_snapshot
+    assert watcher._startup_pending == [path]
+    assert watcher._pending_intents[path] is intent
+    assert path in watcher._ambiguous_updates
+    assert watcher._inflight_updates[job.job_id] is job
+    assert list(watcher._pending_paths) == [path]
+    assert client.submissions == []
+    assert client.mutation_status_calls == []
+
+    client.snapshot = healthy_snapshot
+    watcher._trusted_file_state = lambda _snapshot=None: _Manager()
+    watcher.poll_once()
+    assert not watcher._recovery_rebaseline_pending
+    assert client.mutation_status_calls
+    assert set(client.mutation_status_calls) == {job.job_id}
+
+
+def test_rebaseline_queues_change_even_when_old_scan_looks_current(tmp_path):
+    client = _Client()
+    watcher, source = _watcher(tmp_path, client)
+    path = str(source.resolve())
+    watcher._snapshot = watcher._scan()
+    watcher.complete_recovery_certificate()
+
+    watcher.poll_once()
+
+    assert not watcher._recovery_rebaseline_pending
+    assert client.submissions
+    assert client.submissions[0][0] == path
 
 
 def test_gui_admission_serializes_registration_with_submission():
