@@ -2137,3 +2137,68 @@ def test_mcp_and_desktop_resolve_the_same_repository_cache(monkeypatch, tmp_path
     monkeypatch.setattr("contextor.core.paths.app_cache_dir", lambda: tmp_path)
 
     assert analysis_jobs._mcp_cache_root(tmp_path / "repo") == tmp_path
+
+
+def _snapshot_lock_simultaneous_worker(lock_path, start, results):
+    import contextor.core.live_state.store as store
+
+    start.wait(10)
+
+    try:
+        fd = store._acquire_lock(
+            Path(lock_path),
+            timeout=0.3,
+        )
+    except TimeoutError:
+        results.put("timeout")
+        return
+    except BaseException as exc:
+        results.put(f"unexpected:{type(exc).__name__}:{exc}")
+        return
+
+    try:
+        time.sleep(0.6)
+        results.put("acquired")
+    finally:
+        store._release_lock(fd)
+
+
+def test_snapshot_lock_concurrent_initial_creation(tmp_path):
+    ctx = multiprocessing.get_context("spawn")
+    lock_path = tmp_path / "engine_state.lock"
+
+    assert not lock_path.exists()
+
+    start = ctx.Event()
+    results = ctx.Queue()
+
+    def verify(result_list):
+        assert sorted(result_list) == ["acquired", "timeout"]
+        assert lock_path.is_file()
+
+    processes = [
+        ctx.Process(
+            target=_snapshot_lock_simultaneous_worker,
+            args=(str(lock_path), start, results),
+        )
+        for _ in range(2)
+    ]
+
+    for process in processes:
+        process.start()
+
+    try:
+        start.set()
+        outcomes = [
+            results.get(timeout=15)
+            for _ in processes
+        ]
+        for process in processes:
+            process.join(10)
+        assert all(process.exitcode == 0 for process in processes)
+        verify(outcomes)
+    finally:
+        for process in processes:
+            if process.is_alive():
+                process.terminate()
+                process.join(5)
