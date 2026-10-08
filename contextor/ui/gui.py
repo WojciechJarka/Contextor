@@ -1146,10 +1146,6 @@ class ContextorGUI:
                     raise
 
                 if run_analysis:
-                    with self._live_recovery_lock:
-                        self._live_recovery_prompt_pending.discard(
-                            repository_key
-                        )
                     self.analyze()
 
         finally:

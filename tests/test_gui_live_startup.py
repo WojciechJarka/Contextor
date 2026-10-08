@@ -698,9 +698,36 @@ def test_recovery_prompt_accept_runs_existing_analyze_once(tmp_path, monkeypatch
 
     ask.assert_called_once()
     controller.analyze.assert_called_once_with()
-    assert controller._live_recovery_prompt_pending == set()
+    assert controller._live_recovery_prompt_pending == {str(repo.resolve())}
     assert controller._live_recovery_queue.qsize() == 0
     assert next(iter(root.scheduled.values()))[0] == 100
+
+    ContextorGUI._request_full_analysis_recovery(
+        controller, str(repo), "Canonical state identity mismatch."
+    )
+    assert controller._live_recovery_queue.qsize() == 0
+    controller.analyze.assert_called_once_with()
+
+
+def test_recovery_prompt_failed_analysis_preserves_incident(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    root = MockTkRoot()
+    controller = _bind_recovery_prompt(_make_controller(repo, root))
+    controller.analyze.side_effect = RuntimeError("analysis failed")
+    ask = MagicMock(return_value=True)
+    monkeypatch.setattr(gui.messagebox, "askyesno", ask)
+
+    ContextorGUI._request_full_analysis_recovery(
+        controller, str(repo), "Canonical state identity mismatch."
+    )
+    with pytest.raises(RuntimeError, match="analysis failed"):
+        ContextorGUI._drain_live_recovery_queue(controller)
+
+    ask.assert_called_once()
+    controller.analyze.assert_called_once_with()
+    assert controller._live_recovery_prompt_pending == {str(repo.resolve())}
+    assert controller._live_recovery_queue.qsize() == 0
 
 
 def test_recovery_prompt_suppressed_after_desktop_closes(tmp_path, monkeypatch):
