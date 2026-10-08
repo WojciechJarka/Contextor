@@ -1506,8 +1506,12 @@ class ContextorGUI:
                             "Canonical LIVE publish requires recovery verification.",
                         )
                         if ContextorGUI._is_selected_live_repository(self, path):
+                            outcome = (
+                                "accepted" if published.get("status") == "ok"
+                                else "rejected"
+                            )
                             self._set_live_status(
-                                "LIVE: recovery required after accepted publish "
+                                f"LIVE: recovery required after {outcome} publish "
                                 f"(revision {published.get('revision')})"
                             )
                         return
