@@ -44,7 +44,13 @@ from .ipc import (
     LiveEndpoint,
     LiveStateClient,
 )
-from .store import load_snapshot, migrate_legacy_snapshot, read_metadata, save_snapshot
+from .store import (
+    load_snapshot,
+    locked_committed_snapshot,
+    migrate_legacy_snapshot,
+    read_metadata,
+    save_snapshot,
+)
 
 
 class EndpointSchemaError(RuntimeError):
@@ -1505,6 +1511,11 @@ def run_service(
                 root,
                 adapter_holder,
                 previous_state=state,
+            ),
+            committed_snapshot_reader=lambda: locked_committed_snapshot(
+                cache,
+                expected_repo_id=identity.repo_id,
+                expected_root_path=identity.root_path,
             ),
             canonical_query_handler=(
                 _repository_canonical_query_handler

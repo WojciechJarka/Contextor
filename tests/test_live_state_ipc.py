@@ -1333,10 +1333,13 @@ def test_startup_backfill_preserves_filestate_content_and_revision_parity(tmp_pa
     manager.save("sid", revision=metadata.revision)
     before = dict(manager._state)
 
+    captured_reader = {}
+
     class StubServer:
         def __init__(self, state, revision, **_kwargs):
             self._state = state
             self._revision = revision
+            captured_reader["value"] = _kwargs.get("committed_snapshot_reader")
             self.endpoint = SimpleNamespace(host="127.0.0.1", port=1, authkey_hex="00")
             self._stop = threading.Event()
             self.activity_epoch = "startup-backfill-test"
@@ -1369,6 +1372,12 @@ def test_startup_backfill_preserves_filestate_content_and_revision_parity(tmp_pa
     monkeypatch.setattr(materialization, "module_usages_require_materialization", lambda _state: True)
     monkeypatch.setattr(materialization, "ensure_module_usages", lambda value: setattr(value, "module_usages", {"a.py": SimpleNamespace(symbol_calls_materialized=True, reference_evidence_materialized=True)}))
     runtime.run_service(repo)
+
+    assert callable(captured_reader["value"])
+    with captured_reader["value"]() as committed:
+        assert committed is not None
+        assert committed[1].repo_id == identity.repo_id
+        assert committed[1].root_path == identity.root_path
 
     after = FileStateManager(str(cache))
     loaded_state, loaded_metadata = load_snapshot(cache, "sid")

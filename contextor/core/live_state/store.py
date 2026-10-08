@@ -11,6 +11,7 @@ import pickle
 import shutil
 import time
 import uuid
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any
@@ -1899,6 +1900,27 @@ def _trace_snapshot_load_phase(
         )
     except Exception:
         pass
+
+
+@contextmanager
+def locked_committed_snapshot(
+    cache_dir: str | Path,
+    *,
+    expected_repo_id: str,
+    expected_root_path: str,
+):
+    """Read one durable generation under the snapshot store lock."""
+    _, _, lock_file = _paths(cache_dir)
+    fd = _acquire_lock(lock_file)
+
+    try:
+        yield load_snapshot(
+            cache_dir,
+            expected_repo_id=expected_repo_id,
+            expected_root_path=expected_root_path,
+        )
+    finally:
+        _release_lock(fd)
 
 
 def load_snapshot(

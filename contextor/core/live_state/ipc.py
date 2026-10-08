@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 from collections import OrderedDict, deque
 from contextlib import contextmanager
+from datetime import datetime, timezone
 import hashlib
 import json
 import secrets
@@ -700,6 +701,7 @@ class CanonicalLiveServer:
         revision: int | None = None,
         updater: Callable[[Any, str], Any] | None = None,
         persister: Callable[[Any, int], Any] | None = None,
+        committed_snapshot_reader: Callable[[], Any] | None = None,
         canonical_query_handler: (
             Callable[
                 [Any, str, Mapping[str, Any]],
@@ -754,6 +756,7 @@ class CanonicalLiveServer:
         self._activity_epoch = uuid.uuid4().hex
         self._updater = updater
         self._persister = persister
+        self._committed_snapshot_reader = committed_snapshot_reader
         self._canonical_query_handler = (
             canonical_query_handler
         )
@@ -1200,8 +1203,219 @@ class CanonicalLiveServer:
             finally:
                 connection.close()
 
+    def _execute_committed_publish(
+        self,
+        request: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Install only a committed durable snapshot generation."""
+        with self._lock:
+            previous_revision = self._revision
+            candidate = request.get("state")
+
+            try:
+                candidate_revision = _extract_state_revision(candidate)
+            except ValueError:
+                return {
+                    "status": "error",
+                    "error": "invalid_canonical_revision",
+                    "revision": previous_revision,
+                }
+
+            candidate_state_id = getattr(
+                candidate, "state_id", None
+            )
+
+            if (
+                candidate_revision is None
+                or not isinstance(candidate_state_id, str)
+                or not candidate_state_id
+            ):
+                return {
+                    "status": "error",
+                    "error": "committed_publish_identity_required",
+                    "revision": previous_revision,
+                }
+
+            origin = request.get("origin", "unknown")
+            if not isinstance(origin, str):
+                return {
+                    "status": "error",
+                    "error": "invalid_publish_origin",
+                    "revision": previous_revision,
+                }
+
+            trace_op = request.get("trace_op")
+            if trace_op is not None and not isinstance(
+                trace_op, str
+            ):
+                return {
+                    "status": "error",
+                    "error": "invalid_publish_trace_op",
+                    "revision": previous_revision,
+                }
+
+            committed = False
+            committed_revision = None
+            committed_seq = None
+
+            try:
+                with self._committed_snapshot_reader() as loaded:
+                    if loaded is None:
+                        return {
+                            "status": "error",
+                            "error": "committed_snapshot_unavailable",
+                            "revision": previous_revision,
+                            "resync_required": True,
+                        }
+
+                    committed_state, metadata = loaded
+                    committed_revision = metadata.revision
+                    committed_state_id = metadata.state_id
+
+                    if (
+                        isinstance(committed_revision, bool)
+                        or not isinstance(committed_revision, int)
+                        or committed_revision < 1
+                        or not isinstance(committed_state_id, str)
+                        or not committed_state_id
+                    ):
+                        return {
+                            "status": "error",
+                            "error": "committed_snapshot_invalid",
+                            "revision": previous_revision,
+                            "resync_required": True,
+                        }
+
+                    if (
+                        getattr(committed_state, "state_id", None)
+                        != committed_state_id
+                        or _extract_state_revision(committed_state)
+                        != committed_revision
+                    ):
+                        return {
+                            "status": "error",
+                            "error": "committed_snapshot_identity_mismatch",
+                            "revision": previous_revision,
+                            "resync_required": True,
+                        }
+
+                    if (
+                        candidate_revision != committed_revision
+                        or candidate_state_id != committed_state_id
+                    ):
+                        return {
+                            "status": "error",
+                            "error": "committed_publish_generation_mismatch",
+                            "revision": previous_revision,
+                            "candidate_revision": candidate_revision,
+                            "committed_revision": committed_revision,
+                            "resync_required": True,
+                        }
+
+                    if committed_revision <= previous_revision:
+                        return {
+                            "status": "error",
+                            "error": "non_monotonic_canonical_revision",
+                            "revision": previous_revision,
+                            "candidate_revision": candidate_revision,
+                            "expected_revision": previous_revision + 1,
+                        }
+
+                    next_seq = self._activity_seq + 1
+                    source = origin or "unknown"
+
+                    event = {
+                        "seq": next_seq,
+                        "timestamp": datetime.now(
+                            timezone.utc
+                        ).isoformat(),
+                        "category": "LIVE_STATE",
+                        "operation": "publish",
+                        "source": source,
+                        "origin": source,
+                        "canonical_revision": committed_revision,
+                        "revision": committed_revision,
+                        "status": "PUBLISHED",
+                    }
+
+                    if trace_op is not None:
+                        event["trace_op"] = trace_op
+
+                    next_events = (
+                        self._events + [event]
+                    )[-self._retention:]
+
+                    _mark_live_state_provenance(committed_state)
+
+                    # COMMIT BOUNDARY
+                    #
+                    # All event construction and validation
+                    # is complete.
+                    #
+                    # The store lock and server mutation lock
+                    # are both held at this point.
+
+                    self._state = committed_state
+                    self._revision = committed_revision
+                    self._events = next_events
+                    self._activity_seq = next_seq
+
+                    committed_seq = next_seq
+                    committed = True
+
+            except Exception as exc:
+                if committed:
+                    # The generation is already installed.
+                    # Never report a rejected publication.
+                    try:
+                        _safe_trace_event(
+                            "LIVE",
+                            "COMMITTED_PUBLISH_RELEASE_FAIL",
+                            rev=committed_revision,
+                            seq=committed_seq,
+                            err=exc,
+                        )
+                    except Exception:
+                        pass
+
+                    return {
+                        "status": "ok",
+                        "revision": committed_revision,
+                        "seq": committed_seq,
+                        "source": "committed_snapshot",
+                        "resync_required": True,
+                        "warning": "snapshot_lock_release_unverified",
+                    }
+
+                try:
+                    _safe_trace_event(
+                        "LIVE",
+                        "COMMITTED_PUBLISH_FAIL",
+                        rev=previous_revision,
+                        status="committed_publish_failed",
+                        err=exc,
+                    )
+                except Exception:
+                    pass
+
+                return {
+                    "status": "error",
+                    "error": "committed_publish_failed",
+                    "revision": previous_revision,
+                    "resync_required": True,
+                }
+
+            return {
+                "status": "ok",
+                "revision": committed_revision,
+                "seq": committed_seq,
+                "source": "committed_snapshot",
+            }
+
     def _execute_publish(self, request: dict[str, Any]) -> dict[str, Any]:
         with self._mutation_execution_lock:
+            if self._committed_snapshot_reader is not None:
+                return self._execute_committed_publish(request)
             with self._lock:
                 previous_revision = self._revision
                 trace_op = _safe_trace_op(request, "p")
