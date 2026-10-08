@@ -1068,6 +1068,75 @@ class ContextorGUI:
 
         self._run_test_suite()
 
+    def _request_full_analysis_recovery(
+        self,
+        repository_path: str,
+        reason: str,
+    ) -> None:
+        """Offer manual FULL recovery after a confirmed LIVE consistency failure."""
+        if getattr(self, "_closing", False):
+            return
+
+        try:
+            repository_key = str(
+                Path(repository_path).expanduser().resolve()
+            )
+        except (OSError, ValueError):
+            repository_key = str(repository_path)
+
+        if not repository_key:
+            return
+
+        pending = getattr(self, "_live_recovery_prompt_pending", None)
+        if pending is None:
+            pending = self._live_recovery_prompt_pending = set()
+
+        if repository_key in pending:
+            return
+
+        pending.add(repository_key)
+
+        def show_prompt():
+            if getattr(self, "_closing", False):
+                pending.discard(repository_key)
+                return
+
+            if not ContextorGUI._is_selected_live_repository(
+                self, repository_path
+            ):
+                pending.discard(repository_key)
+                return
+
+            try:
+                run_analysis = messagebox.askyesno(
+                    "Contextor — Recovery Required",
+                    (
+                        "A potential inconsistency has been detected "
+                        "in the repository's canonical LIVE state.\n\n"
+                        "A full repository analysis is recommended "
+                        "to restore a consistent architectural baseline.\n\n"
+                        "Incremental LIVE updates may be unreliable "
+                        "until recovery is complete.\n\n"
+                        f"Repository: {repository_key}\n\n"
+                        f"Reason: {reason}\n\n"
+                        "Run a full repository analysis now?"
+                    ),
+                    parent=self.root,
+                )
+            except Exception:
+                pending.discard(repository_key)
+                raise
+
+            if run_analysis:
+                pending.discard(repository_key)
+                self.analyze()
+
+        try:
+            self.root.after(0, show_prompt)
+        except Exception:
+            pending.discard(repository_key)
+            raise
+
     def analyze(self):
         path = self.repo_path_var.get()
         if not path:
@@ -1380,7 +1449,13 @@ class ContextorGUI:
                         self._set_live_status("LIVE: shared state attached; watcher active")
                 else:
                     if ContextorGUI._is_selected_live_repository(self, path):
-                        self._set_live_status("LIVE: generation conflict; analysis required")
+                        self._set_live_status(
+                            "LIVE: generation conflict; analysis required"
+                        )
+                        self._request_full_analysis_recovery(
+                            path,
+                            "Canonical state identity mismatch.",
+                        )
                     return
             else:
                 startup_lease = None
@@ -1417,6 +1492,10 @@ class ContextorGUI:
                         if ContextorGUI._is_selected_live_repository(self, path):
                             self._set_live_status(
                                 "LIVE: shared state attach failed; analysis required"
+                            )
+                            self._request_full_analysis_recovery(
+                                path,
+                                "Canonical LIVE publication was rejected.",
                             )
         else:
             if ContextorGUI._is_selected_live_repository(self, path):

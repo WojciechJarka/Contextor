@@ -181,6 +181,7 @@ def test_same_revision_different_state_id_does_not_attach_as_same_generation(tmp
     controller = SimpleNamespace(
         live_watcher=None, live_event_feed=None, live_watchers={},
         live_event_feeds={}, repo_id_var=_LiveIntegrationFakeVar(),
+        _request_full_analysis_recovery=MagicMock(),
         _set_live_status=statuses.append,
     )
     monkeypatch.setattr(gui, "connect_or_start", lambda *_args, **_kwargs: Client())
@@ -195,6 +196,7 @@ def test_same_revision_different_state_id_does_not_attach_as_same_generation(tmp
 
     assert events == []
     assert "LIVE: generation conflict; analysis required" in statuses
+    controller._request_full_analysis_recovery.assert_called_once_with(str(repo), "Canonical state identity mismatch.")
     assert watcher_starts == []
     assert feed_starts == []
 
@@ -227,6 +229,7 @@ def test_same_revision_missing_state_id_does_not_start_live_components(tmp_path,
     controller = SimpleNamespace(
         live_watcher=None, live_event_feed=None, live_watchers={},
         live_event_feeds={}, repo_id_var=_LiveIntegrationFakeVar(),
+        _request_full_analysis_recovery=MagicMock(),
         _set_live_status=statuses.append,
     )
     monkeypatch.setattr(gui, "connect_or_start", lambda *_args, **_kwargs: Client())
@@ -240,6 +243,7 @@ def test_same_revision_missing_state_id_does_not_start_live_components(tmp_path,
     gui.ContextorGUI._start_live_watcher_blocking(controller, str(repo))
 
     assert "LIVE: generation conflict; analysis required" in statuses
+    controller._request_full_analysis_recovery.assert_called_once_with(str(repo), "Canonical state identity mismatch.")
     assert watcher_starts == []
     assert feed_starts == []
 
@@ -256,6 +260,7 @@ def test_desktop_publishes_latest_snapshot_and_replaces_existing_watcher(
     class Client:
         def publish(self, published, *, origin="unknown"):
             events.append(("publish", published, origin))
+            return {"status": "ok"}
 
     class Watcher:
         def __init__(self, root, client, *, on_status=None, **_kwargs):
@@ -466,6 +471,7 @@ def test_switching_repositories_keeps_previous_watcher_active(tmp_path, monkeypa
     class Client:
         def publish(self, _state, *, origin="unknown"):
             events.append(("publish", origin))
+            return {"status": "ok"}
 
     class Watcher:
         def __init__(self, root, _client, *, on_status=None, **_kwargs):

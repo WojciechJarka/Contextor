@@ -234,7 +234,7 @@ def test_initial_success(tmp_path, monkeypatch):
 
     class Client:
         def publish(self, state, *, origin="unknown"):
-            pass
+            return {"status": "ok"}
 
     watcher_instances = []
 
@@ -328,7 +328,7 @@ def test_timeout_then_success(tmp_path, monkeypatch):
 
     class Client:
         def publish(self, state, *, origin="unknown"):
-            pass
+            return {"status": "ok"}
 
     watcher_instances = []
 
@@ -403,7 +403,7 @@ def test_late_service_connection(tmp_path, monkeypatch):
 
     class Client:
         def publish(self, state, *, origin="unknown"):
-            pass
+            return {"status": "ok"}
 
     def mock_connect_or_start(path, *, owner_pid=None, owner_token=None):
         connect_calls.append((path, owner_pid, owner_token))
@@ -596,3 +596,214 @@ def test_shutdown_cancels_pending_retry(tmp_path, monkeypatch):
     assert controller._live_start_retry_after_id is None
     assert controller._live_start_retry_attempt == 0
     assert root.destroyed is True
+
+
+
+def _bind_recovery_prompt(controller):
+    controller.analyze = MagicMock()
+    controller._request_full_analysis_recovery = (
+        lambda path, reason: ContextorGUI._request_full_analysis_recovery(
+            controller, path, reason
+        )
+    )
+    return controller
+
+
+def test_generation_conflict_schedules_one_recovery_prompt(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    PersistentIdentityRegistry(str(repo))
+    root = MockTkRoot()
+    controller = _bind_recovery_prompt(_make_controller(repo, root))
+    loaded = SimpleNamespace(revision=7, state_id="loaded-generation")
+    remote = SimpleNamespace(revision=7, state_id="remote-generation")
+    ask = MagicMock(return_value=False)
+
+    class Client:
+        def snapshot(self):
+            return {"state": remote, "revision": 7}
+
+        def publish(self, *_args, **_kwargs):
+            raise AssertionError("generation conflict must not publish")
+
+    monkeypatch.setattr(gui, "connect_or_start", lambda *_a, **_k: Client())
+    monkeypatch.setattr(gui, "migrate_legacy_snapshot", lambda *_a: tmp_path / "cache")
+    monkeypatch.setattr(
+        "contextor.core.analysis.state_manager.load_engine_state",
+        lambda *_a, **_k: loaded,
+    )
+    monkeypatch.setattr(gui.messagebox, "askyesno", ask)
+
+    ContextorGUI._start_live_watcher_blocking(controller, str(repo))
+    ContextorGUI._start_live_watcher_blocking(controller, str(repo))
+
+    assert controller._statuses.count(
+        "LIVE: generation conflict; analysis required"
+    ) == 2
+    assert len(root.scheduled) == 1
+    assert next(iter(root.scheduled.values()))[0] == 0
+    assert controller._live_recovery_prompt_pending == {str(repo.resolve())}
+    ask.assert_not_called()
+    controller.analyze.assert_not_called()
+
+
+def test_recovery_prompt_decline_preserves_incident(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    root = MockTkRoot()
+    controller = _bind_recovery_prompt(_make_controller(repo, root))
+    ask = MagicMock(return_value=False)
+    monkeypatch.setattr(gui.messagebox, "askyesno", ask)
+
+    ContextorGUI._request_full_analysis_recovery(
+        controller, str(repo), "Canonical state identity mismatch."
+    )
+    assert root.run_next_scheduled() is True
+
+    ask.assert_called_once()
+    assert ask.call_args.kwargs["parent"] is root
+    assert "Canonical state identity mismatch." in ask.call_args.args[1]
+    controller.analyze.assert_not_called()
+    assert controller._live_recovery_prompt_pending == {str(repo.resolve())}
+
+    ContextorGUI._request_full_analysis_recovery(
+        controller, str(repo), "Canonical state identity mismatch."
+    )
+    assert root.scheduled == {}
+    ask.assert_called_once()
+
+
+def test_recovery_prompt_accept_runs_existing_analyze_once(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    root = MockTkRoot()
+    controller = _bind_recovery_prompt(_make_controller(repo, root))
+    ask = MagicMock(return_value=True)
+    monkeypatch.setattr(gui.messagebox, "askyesno", ask)
+
+    ContextorGUI._request_full_analysis_recovery(
+        controller, str(repo), "Canonical state identity mismatch."
+    )
+    assert root.run_next_scheduled() is True
+
+    ask.assert_called_once()
+    controller.analyze.assert_called_once_with()
+    assert controller._live_recovery_prompt_pending == set()
+
+
+def test_recovery_prompt_suppressed_after_desktop_closes(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    root = MockTkRoot()
+    controller = _bind_recovery_prompt(_make_controller(repo, root))
+    ask = MagicMock()
+    monkeypatch.setattr(gui.messagebox, "askyesno", ask)
+
+    ContextorGUI._request_full_analysis_recovery(
+        controller, str(repo), "Canonical state identity mismatch."
+    )
+    controller._closing = True
+    assert root.run_next_scheduled() is True
+
+    ask.assert_not_called()
+    controller.analyze.assert_not_called()
+    assert controller._live_recovery_prompt_pending == set()
+
+
+def test_recovery_prompt_suppressed_after_repository_switch(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    other = tmp_path / "other"
+    repo.mkdir()
+    other.mkdir()
+    root = MockTkRoot()
+    controller = _bind_recovery_prompt(_make_controller(repo, root))
+    ask = MagicMock()
+    monkeypatch.setattr(gui.messagebox, "askyesno", ask)
+
+    ContextorGUI._request_full_analysis_recovery(
+        controller, str(repo), "Canonical state identity mismatch."
+    )
+    controller._selected_live_repo_path = str(other)
+    assert root.run_next_scheduled() is True
+
+    ask.assert_not_called()
+    controller.analyze.assert_not_called()
+    assert controller._live_recovery_prompt_pending == set()
+
+
+def test_live_connection_retry_does_not_prompt_for_recovery(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    PersistentIdentityRegistry(str(repo))
+    root = MockTkRoot()
+    controller = _bind_recovery_prompt(_make_controller(repo, root))
+    ask = MagicMock()
+    monkeypatch.setattr(gui.messagebox, "askyesno", ask)
+    monkeypatch.setattr(
+        gui, "connect_or_start",
+        lambda *_a, **_k: (_ for _ in ()).throw(TimeoutError("transient")),
+    )
+
+    ContextorGUI._start_live_watcher_blocking(controller, str(repo))
+
+    assert controller._live_start_retry_attempt == 1
+    assert len(root.scheduled) == 1
+    assert next(iter(root.scheduled.values()))[0] == LIVE_START_RETRY_DELAYS_MS[0]
+    assert not hasattr(controller, "_live_recovery_prompt_pending")
+    ask.assert_not_called()
+    controller.analyze.assert_not_called()
+
+
+def test_rejected_startup_publication_schedules_recovery_prompt(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    PersistentIdentityRegistry(str(repo))
+    root = MockTkRoot()
+    controller = _bind_recovery_prompt(_make_controller(repo, root))
+    loaded = SimpleNamespace(revision=7, state_id="loaded-generation")
+    remote = SimpleNamespace(revision=6, state_id="remote-generation")
+    ask = MagicMock(return_value=False)
+    released = []
+
+    class Client:
+        def snapshot(self):
+            return {"state": remote, "revision": 6}
+
+        def publish(self, *_args, **_kwargs):
+            return {"status": "rejected"}
+
+    class Watcher:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def start(self):
+            pass
+
+    class Feed:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def start(self):
+            pass
+
+    monkeypatch.setattr(gui, "connect_or_start", lambda *_a, **_k: Client())
+    monkeypatch.setattr(gui, "migrate_legacy_snapshot", lambda *_a: tmp_path / "cache")
+    monkeypatch.setattr(gui, "acquire_full_analysis", lambda *_a, **_k: object())
+    monkeypatch.setattr(gui, "release_full_analysis", released.append)
+    monkeypatch.setattr(gui, "DesktopLiveWatcher", Watcher)
+    monkeypatch.setattr(gui, "DesktopLiveEventFeed", Feed)
+    monkeypatch.setattr(gui.messagebox, "askyesno", ask)
+    monkeypatch.setattr(
+        "contextor.core.analysis.state_manager.load_engine_state",
+        lambda *_a, **_k: loaded,
+    )
+
+    ContextorGUI._start_live_watcher_blocking(controller, str(repo))
+
+    assert released and len(released) == 1
+    assert "LIVE: shared state attach failed; analysis required" in controller._statuses
+    assert len(root.scheduled) == 1
+    assert next(iter(root.scheduled.values()))[0] == 0
+    assert root.run_next_scheduled() is True
+    assert "Canonical LIVE publication was rejected." in ask.call_args.args[1]
+    controller.analyze.assert_not_called()
