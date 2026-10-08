@@ -142,6 +142,9 @@ class ContextorGUI:
         self.repo_id_var = tk.StringVar(value="Repo ID: unregistered")
         self._live_status_queue: Queue[str] = Queue()
         self._live_status_draining = False
+        self._live_recovery_queue: Queue[tuple[str, str]] = Queue()
+        self._live_recovery_prompt_pending: set[str] = set()
+        self._live_recovery_lock = threading.Lock()
         self.last_live_state: dict[str, Any] | None = None
 
         self._closing = False
@@ -151,6 +154,7 @@ class ContextorGUI:
         self._build_ui()
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
         self.root.after(50, self._start_post_paint_tasks)
+        self.root.after(100, self._drain_live_recovery_queue)
 
     def _claim_current_backend_for_desktop(self):
         claim = claim_backend_owner(
@@ -1073,7 +1077,7 @@ class ContextorGUI:
         repository_path: str,
         reason: str,
     ) -> None:
-        """Offer manual FULL recovery after a confirmed LIVE consistency failure."""
+        """Queue a confirmed recovery incident without calling Tk."""
         if getattr(self, "_closing", False):
             return
 
@@ -1087,55 +1091,72 @@ class ContextorGUI:
         if not repository_key:
             return
 
-        pending = getattr(self, "_live_recovery_prompt_pending", None)
-        if pending is None:
-            pending = self._live_recovery_prompt_pending = set()
-
-        if repository_key in pending:
+        lock = getattr(self, "_live_recovery_lock", None)
+        if lock is None:
             return
 
-        pending.add(repository_key)
-
-        def show_prompt():
-            if getattr(self, "_closing", False):
-                pending.discard(repository_key)
+        with lock:
+            pending = self._live_recovery_prompt_pending
+            if repository_key in pending:
                 return
+            pending.add(repository_key)
+            self._live_recovery_queue.put((repository_key, reason))
 
-            if not ContextorGUI._is_selected_live_repository(
-                self, repository_path
-            ):
-                pending.discard(repository_key)
-                return
-
-            try:
-                run_analysis = messagebox.askyesno(
-                    "Contextor — Recovery Required",
-                    (
-                        "A potential inconsistency has been detected "
-                        "in the repository's canonical LIVE state.\n\n"
-                        "A full repository analysis is recommended "
-                        "to restore a consistent architectural baseline.\n\n"
-                        "Incremental LIVE updates may be unreliable "
-                        "until recovery is complete.\n\n"
-                        f"Repository: {repository_key}\n\n"
-                        f"Reason: {reason}\n\n"
-                        "Run a full repository analysis now?"
-                    ),
-                    parent=self.root,
-                )
-            except Exception:
-                pending.discard(repository_key)
-                raise
-
-            if run_analysis:
-                pending.discard(repository_key)
-                self.analyze()
+    def _drain_live_recovery_queue(self) -> None:
+        """Process recovery dialogs exclusively on the Tk event loop."""
+        if getattr(self, "_closing", False):
+            return
 
         try:
-            self.root.after(0, show_prompt)
-        except Exception:
-            pending.discard(repository_key)
-            raise
+            repository_key, reason = (
+                self._live_recovery_queue.get_nowait()
+            )
+        except Empty:
+            pass
+        else:
+            if not ContextorGUI._is_selected_live_repository(
+                self, repository_key
+            ):
+                with self._live_recovery_lock:
+                    self._live_recovery_prompt_pending.discard(
+                        repository_key
+                    )
+            else:
+                try:
+                    run_analysis = messagebox.askyesno(
+                        "Contextor — Recovery Required",
+                        (
+                            "A potential inconsistency has been detected "
+                            "in the repository's canonical LIVE state.\n\n"
+                            "A full repository analysis is recommended "
+                            "to restore a consistent architectural baseline.\n\n"
+                            "Incremental LIVE updates may be unreliable "
+                            "until recovery is complete.\n\n"
+                            f"Repository: {repository_key}\n\n"
+                            f"Reason: {reason}\n\n"
+                            "Run a full repository analysis now?"
+                        ),
+                        parent=self.root,
+                    )
+                except Exception:
+                    with self._live_recovery_lock:
+                        self._live_recovery_prompt_pending.discard(
+                            repository_key
+                        )
+                    raise
+
+                if run_analysis:
+                    with self._live_recovery_lock:
+                        self._live_recovery_prompt_pending.discard(
+                            repository_key
+                        )
+                    self.analyze()
+
+        finally:
+            if not getattr(self, "_closing", False):
+                self.root.after(
+                    100, self._drain_live_recovery_queue
+                )
 
     def analyze(self):
         path = self.repo_path_var.get()
@@ -1493,10 +1514,26 @@ class ContextorGUI:
                             self._set_live_status(
                                 "LIVE: shared state attach failed; analysis required"
                             )
-                            self._request_full_analysis_recovery(
-                                path,
-                                "Canonical LIVE publication was rejected.",
+                            recovery_errors = frozenset({
+                                "canonical_persistence_revision_conflict",
+                                "canonical_persistence_failed",
+                                "canonical_revision_discontinuity",
+                                "canonical_revision_changed_during_update",
+                            })
+                            error_code = (
+                                published.get("error")
+                                if isinstance(published, dict)
+                                else None
                             )
+                            if (
+                                published.get("resync_required") is True
+                                if isinstance(published, dict)
+                                else False
+                            ) or error_code in recovery_errors:
+                                self._request_full_analysis_recovery(
+                                    path,
+                                    f"Canonical LIVE consistency error: {error_code or 'resync_required'}.",
+                                )
         else:
             if ContextorGUI._is_selected_live_repository(self, path):
                 self._set_live_status("LIVE: no snapshot; waiting for analysis")
