@@ -1,80 +1,76 @@
-# L14_SEMANTIC_FIXPOINT_CURRENT_CODE_DISCOVERY
+# L33/L34 snapshot manifest integrity discovery
 
-MODE=READ_ONLY
-NO_IMPLEMENTATION
-NO_TESTS_RUN
+MODE: READ-ONLY ARCHITECTURAL AUDIT. No implementation, tests, FULL analysis, restart or update_file.
 
-CURRENT_HEAD
-- `faf62a71591147f8757f58da851428db7a9bffb5`
-- Contextor MCP resolved the exact target `contextor.core.analysis.incremental.plan_executor::execute_refresh_plan` at lines 758-1273. Its implementation preview reported canonical revision 114, canonical state fresh, and `workspace_sync=verified`; the exact source ranges below came from Contextor `get_source_range`.
-- Git status before this report showed only pre-existing modifications to `CHANGELOG.md` and `walkthrough.md`; target source and test files were clean. No source/test/docs file was changed for this task.
-- Contextor discovery: inspected the available tool inventory for Contextor/deferred/tool-search entries, read current MCP documentation before use, and used implementation, source-range, lineage, call-context, and module-context queries. No separate deferred-tool discovery endpoint was exposed. `get_symbol_call_context` returned zero intra-module call edges for this function; it is not evidence that there are no cross-module callers. Contextor module context separately lists `incremental.engine` and `incremental.__init__` as inbound module dependencies.
+## CURRENT_HEAD
 
-CURRENT_ALGORITHM
-- Before RECOMPUTE, `execute_refresh_plan` copies the state, applies the delta module's candidate module/artifact/usage/re-export facts, and validates the candidate re-export domain (`plan_executor.py:789-878`).
-- It then derives `expected_targets`, the dotted-target index, and the consumer-to-target reverse index once (`879-885`). When recomputation or artifact-consumption patching is planned, it assembles the re-export map and module export surfaces once from the candidate re-export facts (`895-904`).
-- The queue starts with `deque(plan.recompute_modules)`; `scheduled_recompute` and `processed_recompute` are execution-local sets (`914-916`). Each consumer is popped, skipped if already processed, marked processed, and rebuilt from its `ModuleUsageFacts` (`918-952`).
-- The canonical slice signature is taken before and after rebuilding. Equal signatures stop propagation for that node; a changed signature discovers consumers of that module from candidate module usages (`932-968`). The executor sorts discoveries, excludes the changed delta module, and queues only paths that are neither processed nor already scheduled (`970-984`).
+`1a1efaee06aa927385821617dc72b889f436cf80` (`git rev-parse HEAD`). Initial `git status --short` was empty. Contextor MCP discovery included deferred-tool inventory, tool documentation, symbol lookup, implementation/source ranges, and lineage. Canonical owner: `contextor.core.live_state.store`; inspected Contextor records: canonical revision 114, `workspace_sync=verified`. Git working-tree source/test files supplied literal anchors; `git diff --name-only -- contextor tests` was empty.
 
-EXACT_SYMBOLS_AND_PATHS
-- `contextor.core.analysis.incremental.plan_executor::execute_refresh_plan`: `contextor/core/analysis/incremental/plan_executor.py:758-1273`.
-- `_build_consumer_target_index`: same file, lines 108-158; execution-local reverse index, not persisted state.
-- `_consumer_slice_signature`: same file, lines 160-238.
-- `_resolve_canonical_target_keys` and singular compatibility wrapper `_resolve_canonical_target_key`: same file, lines 277-390.
-- `_rebuild_consumer_slice`: same file, lines 401-678.
-- `_find_dependent_consumers`: `contextor/core/analysis/refresh_planner.py:14-67`; the planner uses it to seed recomputation and the executor uses it for downstream expansion.
-- Relevant oracle and regression code: `tests/test_completeness_freshness_parity_proof.py:40-111` and lines 1023-1560.
+## CANONICAL_SOURCE_DOMAIN_CONTRACT
 
-PROCESSED_RECOMPUTE_SEMANTICS
-- Lifetime: `processed_recompute` is initialized once before the while-loop and is never cleared (`plan_executor.py:914-924`). A module is added before its facts are checked or its slice is rebuilt.
-- A later discovery of an already processed consumer is explicitly discarded at lines 975-976. Therefore a previously processed consumer cannot be scheduled or recomputed a second time in this execution. A scheduled-but-not-yet-processed consumer is also not duplicated (`978-984`).
-- This is at-most-once traversal, not a repeated-until-no-signature-changes loop. In the current implementation this does not leave a stale consumer slice: the candidate artifacts, usages, expected target domain, dotted index, and re-export/export-surface maps are prepared before the queue and are not changed by its iterations (`789-910`). `_rebuild_consumer_slice` reconstructs one consumer from its own fixed usage facts and those shared fixed inputs (`401-678`). Target resolution receives the already-built `expected_targets` and `dotted_target_index` at every rebuild call, so resolution does not consult another consumer's slice. Its mutations remove/install only the named consumer's membership/channels and update that consumer's reverse-index entry.
-- Consequently, rebuilding consumer X cannot change the canonical result that rebuilding consumer Y would produce. If Y was processed before X's downstream discovery, Y already saw the final candidate inputs; it also already performed its own changed-slice downstream discovery on that first pass. If Y's slice did not change, its dependents are not invalidated by Y's unchanged slice. This is the source-level reason an at-most-once visited set is sufficient here.
+- CONTRACT_PROVED: `RepositoryAnalysisState.modules` and `lineage_facts_by_source` are canonical state fields (`contextor/core/analysis/state_manager.py:83-102`). The full producer derives eligible keys as `Path(str(module.path)).as_posix()` over `modules.values()`, and marks the family `deferred` when an eligible key is absent (`contextor/core/api/facade.py:291-300,430-439`). Incremental refresh derives the same domain from `candidate.modules` and marks missing keys `deferred` or preserves `stale` (`contextor/core/analysis/incremental/engine.py:234-238,381-414`). These checks do not run in `load_snapshot`.
+- DIRECT_EVIDENCE: `not_materialized` requires an empty lineage mapping and no semantic version; materialized family states require the current version (`contextor/core/live_state/store.py:347-395`). Thus an unmaterialized optional lineage family is distinct from an omitted source in a `fresh` materialized family.
+- DIRECT_EVIDENCE: A valid intentionally empty source has a manifest entry/chunk and zero anchor/flow/surface counts (`contextor/core/domain/lineage_facts.py:428-465,483-499`; `tests/test_live_state_store.py:45-89`). An omitted source has no key. Malformed manifest or chunk is a separate corruption case.
 
-FAN_IN_ORDERING_EVIDENCE
-- `test_semantic_fan_in_recompute_is_once_only_and_order_independent` (`tests/test_completeness_freshness_parity_proof.py:1023-1234`) starts with the direct queue `("m_consumer", "z_bridge")`, then forcibly runs both that order and its reverse.
-- In the m-before-z case, processing `z_bridge` later discovers `m_consumer` after it was already processed (`1190-1199`); the test asserts each module was rebuilt exactly once (`1178-1183`). It then compares each ordered result to a real full-analysis oracle and asserts the two ordered snapshots are equal (`1200-1226`).
-- This fixture is a direct witness that a late discovery does occur and is skipped, while the resulting exact artifact-consumption map still matches the full oracle. The general order-independence conclusion comes from the fixed-input/per-consumer-local transform above; the test alone covers this fixture, not every possible repository.
+## SAVE_LOAD_GENERATION_BOUNDARY
 
-TERMINATION_INVARIANT
-- `_find_dependent_consumers` returns paths from the finite `module_usages` mapping and excludes the source path itself (`refresh_planner.py:31-67`). The queue's scheduled set admits each path once and the processed set prevents revisits (`plan_executor.py:914-984`). Thus the loop terminates after at most the finite number of initially planned and discoverable consumer paths; cycles cannot cause repeat work.
-- The cycle regression `test_transitive_propagation_cycle_terminates_without_duplicate_recompute` asserts the execution trace has no duplicates and matches the full oracle (`tests/test_completeness_freshness_parity_proof.py:1308-1386`).
+- CODE_PATH_PROVED: `save_snapshot` creates revision/token engine, file-state and lineage-manifest names (`contextor/core/live_state/store.py:1620-1654`). `LiveStateMetadata` carries schema, state_id, revision, writer, repo_id, root_path, and all three file references (`:469-479,1667-1688`). Split mode requires a dict lineage map (`:482-495`). Only present mapping keys are serialized into source chunks and manifest `sources`; the core pickle copy gets an empty lineage map (`:813-839,873-892,981-1025`). The pickle embeds metadata (`:1721-1755`). Save validates file-state `_meta.state_id/revision` (`:1757-1797`); `engine_state.meta.json` is committed last by `os.replace` (`:1813-1842`), with failed exact-generation cleanup (`:1854-1872`).
+- CODE_PATH_PROVED: `load_snapshot` reads outer metadata, optionally checks caller-expected state/repository/root, then follows outer `state_file` (`:1926-1963`). Split load follows outer manifest reference, validates its schema/state_id/revision and each *listed* chunk (`:1040-1116,1175-1393,2004-2049`). The loaded map replaces the deliberately empty core map before normalization (`:2042-2067`), then the state/metadata pair is returned (`:2224-2229`).
+- CODE_PATH_PROVED: Disk hydration delegates to `load_snapshot` and requires nonempty modules and a dependency graph, but does not check lineage domain (`contextor/core/analysis/state_manager.py:485-504`; `contextor/core/live_state/hydration.py:59-82`). LIVE startup calls the loader with expected repo/root, then constructs the server (`contextor/core/live_state/runtime.py:1431-1441,1528-1540`). Committed LIVE publication checks loaded state_id/revision against outer metadata and candidate, then installs the state (`contextor/core/live_state/ipc.py:1353-1404,1439-1451`).
 
-AMBIGUITY_REEXPORT_AND_INVALIDATION
-- Signature: sorted canonical target rows encode target identity, consumer membership, and sorted channel set (`plan_executor.py:160-238`). The reverse index is updated to the rebuilt target set for that consumer by `_rebuild_consumer_slice` (`401-678`), so additions and removals participate in the before/after comparison.
-- Ambiguous dotted spellings: the plural resolver preserves every exact canonical identity sharing the spelling (`277-357`); the singular compatibility helper reports `ambiguous` when multiple identities match (`359-390`). Rebuilding uses the plural resolver. The tests cover a late second provider and consumer-last ordering with parity to full analysis (`test_natural_dotted_identity_ambiguity_transition_lifecycle`, lines 355-477; `test_natural_dotted_identity_ambiguity_consumer_last`, lines 479-526).
-- Re-exports: candidate maps/surfaces are assembled before the queue (`895-904`). Rebuild handles star-import surfaces and explicit `__all__` (`465-524`), then resolves aliases/re-export chains for usage references (`526-567`). The invalidation selector scans imports, aliases, direct/runtime calls, qualified refs, callback calls, event bindings, and inheritance refs with alias/package canonicalization (`refresh_planner.py:14-67`).
-- Existing invalidation regressions include unchanged-slice stop (`test_transitive_propagation_stops_when_direct_consumer_slice_is_unchanged`, lines 1237-1305), transitive re-export late-provider parity (line 954), re-export symbol removal (lines 1390-1465), retargeting (lines 1468-1560), star visibility (lines 2428-2524), and package-init star visibility (lines 2525-2615).
+## MANIFEST_COMPLETENESS_EVIDENCE
 
-FULL_VERSUS_INCREMENTAL_PARITY
-- The test oracle invokes the real `ContextorFacade.analyze_project`, then hydrates the repository engine (`tests/test_completeness_freshness_parity_proof.py:40-50`). `_assert_full_parity` compares canonical modules, artifacts, usage facts, re-export facts, and exact artifact-consumption target/consumer/channel data (`52-111`).
-- The fan-in test compares the full exact snapshot for both forced queue orders (above). Separate ambiguity and re-export regressions also compare to that oracle.
-- These are focused parity contracts for the listed static fact paths; this audit did not run tests and does not claim that those tests exhaust all possible inputs or prove parity for unrelated state families.
+- DIRECT_EVIDENCE: The manifest holds schema_version, state_id, revision, sources, but no required-source count/domain (`contextor/core/live_state/store.py:993-1000`). Save iterates `sorted(sources)` without comparing to `state.modules` (`:823-839,873-892`).
+- CODE_PATH_PROVED: Load requires `sources` to be a dict and iterates only its keys (`:1104-1116,1206-1245`). It checks each listed entry/chunk file, fingerprint, semantic version and key (`:1248-1355`). The validation cache compares its keys to manifest keys, not module paths (`:1379-1385`). Normalization validates only present source slices and preserves family state (`:357-430`). Index normalization builds from present sources and sets `lineage_query_index_state="fresh"` for a materialized family when index building succeeds (`:441-466`).
+- INFERENCE from complete code path: Removing a valid entry from `manifest.sources` leaves a structurally valid manifest; the omitted chunk is never read. A validation-cache mismatch may revalidate/rewrite the remaining entries, but does not establish module-domain completeness. Persisted `lineage_facts_state="fresh"` and derived index `"fresh"` can remain after partial hydration.
 
-EXISTING_REGRESSIONS
-- `test_semantic_fan_in_recompute_is_once_only_and_order_independent`: both queue orders, late downstream discovery after prior processing, one rebuild per consumer, exact full-oracle parity (1023-1234).
-- `test_transitive_propagation_stops_when_direct_consumer_slice_is_unchanged`: unchanged slice does not expand work; full-oracle parity (1237-1305).
-- `test_transitive_propagation_cycle_terminates_without_duplicate_recompute`: cycle termination/no duplicate trace/full-oracle parity (1308-1386).
-- Ambiguous dotted target tests: late provider transition and consumer-last order (355-526); plural backfill resolver regression (2120-2197).
-- Re-export regressions: late provider (954-1019), removal and retargeting (1390-1560), star visibility and package-init star visibility (2428-2615).
-- `test_true_order_independence_three_way_equality` also compares full analysis, provider-first, and consumer-first update histories (2014-2065); it is file-update order coverage, distinct from the forced worklist-order fan-in test.
-- Tests run in this task: NONE (read-only discovery).
+## METADATA_BINDING_MATRIX
 
-MINIMAL_COUNTEREXAMPLE
-- NONE found in the current implementation for consumer-slice recomputation. The closest apparent counterexample is the committed fan-in fixture: `m_consumer` is rebuilt, then `z_bridge` changes and discovers it late; the visited-set guard suppresses a second rebuild. It still matches full analysis because the changed bridge slice is not an input to m_consumer's deterministic rebuild; both consumers already rebuild against the final candidate target/re-export context.
-- No source/test execution was performed to manufacture another case. A gap would require another consumer's rebuild to mutate an input read by a previously processed consumer; the inspected executor/helper path does not do that.
+| Field | Save | Load comparison before assignment | Finding |
+|---|---|---|---|
+| repo_id / canonical root_path | Outer and embedded (`store.py:1667-1688,1740-1751`) | Caller expectations checked against outer only (`:1949-1957`); embedded parsed with empty defaults (`:1972-1987`) | Missing/mismatched embedded values accepted. |
+| state_id | Outer, embedded, core, manifest, file-state _meta | Manifest vs outer (`:1084-1092`); *present* core vs outer (`:2109-2116`); embedded not compared and then assigned to core (`:2117-2123`) | Embedded omission defaults to empty string. Loader can return outer sid with state id empty; committed publish separately rejects (`ipc.py:1380-1391`). |
+| revision | Same generation layers | Embedded vs outer (`store.py:1988-1989`), manifest vs outer (`:1094-1102`), present core vs outer (`:2105-2116`) | Embedded mismatch rejected; missing embedded revision defaults to 0 and fails for positive revisions. Missing core revision can be filled after check. |
+| schema_version | Outer, embedded; manifest has own schema | Outer supported-set check (`:1416-1424`), split requires current outer schema (`:2004-2009`), manifest checks own schema (`:1074-1082`); no embedded comparison (`:1972-1994`) | Embedded omission/mismatch accepted. |
+| engine state_file | Outer and embedded generation name | Outer selects pickle (`:1958-1963`); no embedded comparison (`:1972-1994`) | Embedded omission/mismatch accepted. |
+| file_state_file / file-state generation | Outer and embedded; file JSON _meta | Save checks JSON id/revision (`:1757-1797`). `load_snapshot` does not read file JSON or compare embedded reference. Separate `FileStateManager._load` follows outer reference and checks JSON identity (`contextor/core/analysis/state_manager.py:293-375`) | Embedded reference mismatch accepted by snapshot loader. |
+| lineage_manifest_file | Outer and embedded; manifest id/revision/schema | Embedded ref must equal outer (`store.py:1990-1994`); referenced manifest fields checked (`:1074-1102`) | Wrong/missing embedded split reference rejected. |
+| writer | Outer and embedded | Parsed, not compared (`:1972-1994`) | Mismatch accepted; informational field. |
 
-EVIDENCE_CLASSIFICATION
-- DIRECT_EVIDENCE: HEAD hash, clean target/test paths in Git status, Contextor freshness envelope (`workspace_sync=verified`), exact source ranges, and existing test assertions.
-- CODE_PATH_PROVED: processed-once guard; before/after slice comparison; fixed candidate inputs; per-consumer updates; finite queue domain.
-- CONTRACT_PROVED: focused tests assert exact artifact-consumption parity against full analysis for the forced fan-in orders, ambiguity transitions, and selected re-export/cycle scenarios.
-- INFERENCE: general order independence for this consumer-slice pass follows from the inspected fixed-input, per-consumer-local rebuild contract.
-- UNKNOWN: exhaustive parity over all potential static/dynamic repository facts was not established; tests were not run in this read-only task.
+CODE_PATH_PROVED: The hypothesized mechanism “embedded metadata overwritten with trusted outer values before validation” is **not** what the code does. Embedded fields receive defaults; only embedded revision and manifest reference are compared. Present core state_id/revision are checked against outer, then core values are assigned from embedded values (`store.py:1972-1994,2105-2123`). This can mask missing core revision and inject an unverified embedded state_id. Embedded repo/root/schema/file names are not checked later by `load_snapshot`.
 
-L14_VERDICT
-CLOSED_BY_CURRENT_CODE
+## EXISTING_NEGATIVE_TEST_COVERAGE
 
-Rationale: `processed_recompute` prevents a second visit, but current consumer-slice rebuilding is a deterministic per-consumer projection over candidate inputs fixed before queue execution. A later rebuild mutates only its own consumer rows and cannot invalidate a previously completed row. Changed signatures still expand discovery to downstream consumers, while the visited set terminates cycles. The forced-order fan-in regression demonstrates the precise late-discovery case and compares both results with full analysis.
+- DIRECT_EVIDENCE: Complete split roundtrip asserts both manifest source keys and equality of loaded and saved maps, but its fixture has no active modules domain (`tests/test_live_state_store.py:45-89,337-435`). Lifecycle roundtrip checks endpoint types and index freshness (`tests/test_lineage_state_lifecycle.py:172-207`). Neither tests omitted-but-valid source detection.
+- DIRECT_EVIDENCE: Split corruption parameterization covers missing *listed chunk*, manifest revision mismatch and corrupt listed chunk, all asserting `load_snapshot is None` (`tests/test_live_state_store.py:1725-1808`). It never removes a source entry. Invalid family/version pairs and mapping/manifest source-key mismatch are covered (`tests/test_lineage_state_lifecycle.py:319-355`). Empty valid slices occur in the split fixture/roundtrip, without a check against active module paths.
+- DIRECT_EVIDENCE: The embedded metadata roundtrip test asserts only successful revision equality (`tests/test_live_state_store.py:330-334`). Repository identity/root negatives pass expectations that disagree with **outer** metadata (`:2074-2094`). No inspected assertion tampers with embedded repo_id/root/schema/state_id/state_file/file_state_file or removes an embedded identity field. Manifest revision mismatch has a negative test (`:1784-1808`); embedded revision mismatch and wrong embedded manifest reference are rejected by code (`store.py:1988-1994`) but have no corresponding negative assertion in inspected snapshot tests.
+- DIRECT_EVIDENCE: Interrupted metadata commit test asserts old revision remains and new generation files are absent (`tests/test_live_state_store.py:1811-1913`). Missing/invalid file-state generation and absent _meta have separate tests (`:2003-2048`). Legacy not-materialized lineage is asserted empty after hydration (`tests/test_lineage_state_lifecycle.py:430-505`). Search of test definitions found no omitted-manifest-source or embedded/outer metadata tamper assertion. This is a coverage observation, not a claim about every possible indirect test.
+
+## MINIMAL_FAILURE_CASES
+
+1. **L33, CODE_PATH_PROVED; unexecuted:** Take a valid schema-1.4 exact-revision snapshot with active module paths `a.py`, `b.py`, valid slices for both (each may have zero facts), and family state/version `fresh`/current. Remove only `"b.py"` from committed manifest `sources`; leave outer metadata, core pickle, remaining entry/chunk and manifest id/revision intact. Load iterates `a.py` only, assigns the reduced map, preserves family `fresh`, builds index state `fresh`, and returns a state with active `b.py` but no `b.py` lineage slice (`store.py:1104-1116,1222-1245,1375-1393,2042-2067,382-430,441-466,2224-2229`). A valid empty `b.py` slice would retain a manifest entry and differs from this case.
+2. **L34, CODE_PATH_PROVED; unexecuted:** Save a valid split generation with outer `repo_id=R`, `root_path=P`, `state_id=sid`, `revision=1`. Change only the pickle's embedded repo_id to `R2` (or remove it); retain embedded revision, state_id and manifest reference, outer metadata and core state. `load_snapshot(..., expected_repo_id=R, expected_root_path=P)` compares expectations to outer, checks only embedded revision/manifest reference, and returns the snapshot (`store.py:1949-1957,1970-1994,2224-2229`). Committed-publish id/revision checks do not inspect embedded repo_id (`ipc.py:1362-1404`). No claim that normal save produces this mismatch.
+3. **L34 distinction, CODE_PATH_PROVED; unexecuted:** Remove only embedded state_id. It defaults to empty string; the preassignment core `state_id=sid` passes outer comparison, then is replaced with empty string and returned alongside outer metadata `sid` (`store.py:1972-1994,2109-2123`). Committed publication rejects this particular returned state (`ipc.py:1380-1391`).
+
+## L33_VERDICT
+
+**PROVED_GAP.** Loader validates listed sources but never checks coverage of the active-module source domain. It can accept an omitted valid source while retaining `fresh` lineage family and index classifications. Code-path proof; counterexample not executed.
+
+## L34_VERDICT
+
+**PROVED_GAP.** Embedded revision and manifest reference are bound to outer metadata; embedded repository identity, root, state_id, schema, engine and file-state references are not fully bound. Embedded repo_id/root mismatch is accepted under matching outer caller expectations. Missing embedded state_id also yields a return-time inconsistency. Code-path proof; counterexamples not executed.
+
+## REQUIRED_SOURCE_RANGES
+
+`contextor/core/live_state/store.py:337-466,469-495,813-1037,1040-1116,1175-1393,1411-1442,1620-1688,1721-1874,1926-2123,2210-2229`; `contextor/core/analysis/state_manager.py:83-105,293-375,485-504`; `contextor/core/api/facade.py:291-300,430-439`; `contextor/core/analysis/incremental/engine.py:234-238,381-414`; `contextor/core/domain/lineage_facts.py:75-80,428-465,483-499`; `contextor/core/live_state/hydration.py:59-112`; `contextor/core/live_state/runtime.py:1431-1441,1528-1540`; `contextor/core/live_state/ipc.py:1353-1451`; `tests/test_live_state_store.py:45-89,330-435,1725-1913,2003-2048,2068-2094`; `tests/test_lineage_state_lifecycle.py:172-207,319-355,430-505`.
+
+## ACTIONS / RESULT / NEXT STEP
+
+Actions: Contextor-first discovery/lineage, Git HEAD and source-anchor verification, relevant test assertions read. Result: read-only code-path audit complete; no tests run. Next step: await `proceduj`.
 
 FILES_CHANGED=NONE
+
 ACTUAL_DIFF=NONE
+
+DIFFS=NONE
+
