@@ -956,6 +956,11 @@ def test_recovery_decline_reprompts_once_after_reselection_with_real_tk(
         controller.analyze.assert_not_called()
     finally:
         controller._closing = True
+        recovery_after_id = controller._live_recovery_after_id
+        if recovery_after_id is not None:
+            root.after_cancel(recovery_after_id)
+        controller._live_recovery_after_id = None
+        assert recovery_after_id not in root.tk.call("after", "info")
         root.destroy()
 
 

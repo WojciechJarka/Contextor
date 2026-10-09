@@ -14,7 +14,7 @@ from contextor.core.analysis.full_analysis_coordinator import (
 )
 from contextor.core.analysis.state_manager import FileStateManager
 from contextor.core.errors import AnalysisCancelled
-from contextor.core.live_state.watcher import DesktopLiveWatcher
+from contextor.core.live_state.watcher import RECOVERY_DEFERRED, DesktopLiveWatcher
 from contextor.core.paths import repo_cache_dir
 from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
 from contextor.core.repository_identity import read_repository_identity
@@ -170,36 +170,41 @@ def test_same_revision_startup_attaches_without_redundant_publish(tmp_path, monk
     assert "LIVE: shared state attached; watcher active" in statuses
 
 
-def test_same_revision_different_state_id_does_not_attach_as_same_generation(tmp_path, monkeypatch):
+def test_same_revision_different_state_id_registers_recovery_and_defers_updates(tmp_path, monkeypatch):
     repo = tmp_path / "repo"
     repo.mkdir()
     PersistentIdentityRegistry(str(repo))
     loaded = SimpleNamespace(modules={}, revision=7, state_id="loaded-generation")
     remote = SimpleNamespace(modules={}, revision=7, state_id="remote-generation")
-    events = []
+    publish_calls = []
     statuses = []
     watcher_starts = []
     feed_starts = []
+    watcher_kwargs = []
 
     class Client:
         def snapshot(self):
             return {"state": remote, "revision": 7}
 
         def publish(self, *_args, **_kwargs):
-            events.append("publish")
+            publish_calls.append(True)
+            return {"status": "ok"}
 
     class Watcher:
-        def __init__(self, *_args, **_kwargs): watcher_starts.append(True)
+        def __init__(self, *_args, **kwargs):
+            watcher_kwargs.append(kwargs)
+            watcher_starts.append("constructed")
+
         def start(self): watcher_starts.append("started")
 
     class Feed:
-        def __init__(self, *_args, **_kwargs): feed_starts.append(True)
+        def __init__(self, *_args, **_kwargs): feed_starts.append("constructed")
+
         def start(self): feed_starts.append("started")
 
     controller = _with_live_recovery_contract(SimpleNamespace(
         live_watcher=None, live_event_feed=None, live_watchers={},
         live_event_feeds={}, repo_id_var=_LiveIntegrationFakeVar(),
-        _request_full_analysis_recovery=MagicMock(),
         _set_live_status=statuses.append,
     ))
     controller._request_full_analysis_recovery = MagicMock(
@@ -217,42 +222,66 @@ def test_same_revision_different_state_id_does_not_attach_as_same_generation(tmp
 
     gui.ContextorGUI._start_live_watcher_blocking(controller, str(repo))
 
-    assert events == []
+    assert publish_calls == []
     assert "LIVE: generation conflict; analysis required" in statuses
     controller._request_full_analysis_recovery.assert_called_once_with(str(repo), "Canonical state identity mismatch.")
-    assert watcher_starts == []
-    assert feed_starts == []
+    incident = controller._live_recovery_incident(str(repo))
+    assert incident is not None
+    assert isinstance(incident["generation"], int) and not isinstance(incident["generation"], bool)
+    assert incident["generation"] > 0
+    assert incident["required"] is True
+    assert controller._live_recovery_incidents[str(repo.resolve())] == incident
+    assert watcher_starts == ["constructed", "started"]
+    assert feed_starts == ["constructed", "started"]
+    recovery_admission = watcher_kwargs[0]["recovery_admission"]
+    assert callable(recovery_admission)
+    assert recovery_admission.__name__ == "admit"
+
+    mutation_actions = []
+
+    def mutation_action():
+        mutation_actions.append("executed")
+
+    assert recovery_admission(mutation_action) is RECOVERY_DEFERRED
+    assert mutation_actions == []
+    assert controller._live_recovery_incident(str(repo)) == incident
 
 
-def test_same_revision_missing_state_id_does_not_start_live_components(tmp_path, monkeypatch):
+def test_same_revision_missing_state_id_registers_recovery_and_defers_updates(tmp_path, monkeypatch):
     repo = tmp_path / "repo"
     repo.mkdir()
     PersistentIdentityRegistry(str(repo))
     loaded = SimpleNamespace(modules={}, revision=7, state_id="loaded-generation")
     remote = SimpleNamespace(modules={}, revision=7)
+    publish_calls = []
     statuses = []
     watcher_starts = []
     feed_starts = []
+    watcher_kwargs = []
 
     class Client:
         def snapshot(self):
             return {"state": remote, "revision": 7}
 
         def publish(self, *_args, **_kwargs):
-            raise AssertionError("same-revision generation conflict must not publish")
+            publish_calls.append(True)
+            return {"status": "ok"}
 
     class Watcher:
-        def __init__(self, *_args, **_kwargs): watcher_starts.append(True)
+        def __init__(self, *_args, **kwargs):
+            watcher_kwargs.append(kwargs)
+            watcher_starts.append("constructed")
+
         def start(self): watcher_starts.append("started")
 
     class Feed:
-        def __init__(self, *_args, **_kwargs): feed_starts.append(True)
+        def __init__(self, *_args, **_kwargs): feed_starts.append("constructed")
+
         def start(self): feed_starts.append("started")
 
     controller = _with_live_recovery_contract(SimpleNamespace(
         live_watcher=None, live_event_feed=None, live_watchers={},
         live_event_feeds={}, repo_id_var=_LiveIntegrationFakeVar(),
-        _request_full_analysis_recovery=MagicMock(),
         _set_live_status=statuses.append,
     ))
     controller._request_full_analysis_recovery = MagicMock(
@@ -270,10 +299,29 @@ def test_same_revision_missing_state_id_does_not_start_live_components(tmp_path,
 
     gui.ContextorGUI._start_live_watcher_blocking(controller, str(repo))
 
+    assert publish_calls == []
     assert "LIVE: generation conflict; analysis required" in statuses
     controller._request_full_analysis_recovery.assert_called_once_with(str(repo), "Canonical state identity mismatch.")
-    assert watcher_starts == []
-    assert feed_starts == []
+    incident = controller._live_recovery_incident(str(repo))
+    assert incident is not None
+    assert isinstance(incident["generation"], int) and not isinstance(incident["generation"], bool)
+    assert incident["generation"] > 0
+    assert incident["required"] is True
+    assert controller._live_recovery_incidents[str(repo.resolve())] == incident
+    assert watcher_starts == ["constructed", "started"]
+    assert feed_starts == ["constructed", "started"]
+    recovery_admission = watcher_kwargs[0]["recovery_admission"]
+    assert callable(recovery_admission)
+    assert recovery_admission.__name__ == "admit"
+
+    mutation_actions = []
+
+    def mutation_action():
+        mutation_actions.append("executed")
+
+    assert recovery_admission(mutation_action) is RECOVERY_DEFERRED
+    assert mutation_actions == []
+    assert controller._live_recovery_incident(str(repo)) == incident
 
 
 def test_desktop_publishes_latest_snapshot_and_replaces_existing_watcher(
