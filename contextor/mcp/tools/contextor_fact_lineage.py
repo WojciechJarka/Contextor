@@ -27,6 +27,7 @@ def _symbol(module: str, name: str) -> str:
 _SPECS: dict[str, dict[str, Any]] = {
     "artifact_consumption": {
         "state_field": "artifact_consumption",
+        "projection_field": "artifact_consumption",
         "state_state_field": "artifact_consumption_state",
         "branches": (
             {
@@ -96,6 +97,7 @@ _SPECS: dict[str, dict[str, Any]] = {
     },
     "syntax_diagnostics": {
         "state_field": "syntax_diagnostics_by_path",
+        "projection_field": "syntax_diagnostics_by_path",
         "state_state_field": "syntax_diagnostics_state",
         "branches": (
             {
@@ -151,6 +153,7 @@ _SPECS: dict[str, dict[str, Any]] = {
     },
     "symbol_calls": {
         "state_field": "module_usages[*].symbol_calls",
+        "projection_field": "symbol_calls",
         "state_state_field": "module_usages[*].symbol_calls_materialized",
         "branches": (
             {
@@ -451,7 +454,7 @@ def _build_contract(
                 "TRANSFORMS",
                 _evidence(
                     "named_field_projection",
-                    field="symbol_calls",
+                    field=spec["projection_field"],
                     branch=branch["branch"],
                 ),
                 via=branch["producer"],

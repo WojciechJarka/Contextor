@@ -1,144 +1,206 @@
-# L33/L34 startup backfill test fixture repair
+# L29/L30 targeted contract hardening
 
 ## CURRENT_HEAD
-`99f9f0aac13e8f9c96a3eef1498b564e585a66ca` (`main`, `origin/main`). The test file matched its HEAD blob before editing.
-
-## ROOT_CAUSE_CONFIRMATION
-DIRECT_EVIDENCE: Contextor confirmed that the split-lineage loader in `contextor/core/live_state/store.py:2054` reads `module.path` from every active module in `raw_state.modules` and returns `None` on `AttributeError`. Both affected fixtures had `modules={"a.py": SimpleNamespace()}` with no path. The real `Module` dataclass supplies the required path; production validation remained unchanged.
+eacdd668aba63b2255770127e75b889866ba28fd. Before edits, only walkthrough.md was modified from the preceding audit; exact three source anchors matched the supplied instructions. Contextor discovery: LIVE revision 121; the existing artifact_consumption TRANSFORMS edge incorrectly reported field=symbol_calls. get_file_edit_context found the MCP tool's direct consumers as contextor.mcp_server and tests.mcp.tools.test_contextor_fact_lineage. Public MCP documentation and contract tests were reviewed; documentation does not specify the erroneous field values, so no documentation edit was required.
 
 ## FILES_CHANGED
-- `tests/test_live_state_ipc.py` — corrected only the two named startup backfill fixtures, added real-loader preconditions and a metadata-commit hit marker.
-- `walkthrough.md` is this task report and is excluded from changed-file diffs.
+- contextor/mcp/tools/contextor_fact_lineage.py
+- tests/mcp/tools/test_contextor_fact_lineage.py
+- tests/test_completeness_freshness_parity_proof.py
+
+walkthrough.md is this task report and is excluded from FILES_CHANGED.
 
 ## FULL_DIFFS
+Exact git diff against CURRENT_HEAD for every file in FILES_CHANGED follows:
+
 ```diff
-diff --git a/tests/test_live_state_ipc.py b/tests/test_live_state_ipc.py
-index 6a47ec6..ab6ec5b 100644
---- a/tests/test_live_state_ipc.py
-+++ b/tests/test_live_state_ipc.py
-@@ -1299,6 +1299,7 @@ def test_persistence_trace_operation_is_propagated_across_successful_real_update
- def test_startup_backfill_preserves_filestate_content_and_revision_parity(tmp_path, monkeypatch):
-     import contextor.core.live_state.runtime as runtime
-     from contextor.core.analysis.state_manager import FileState, FileStateManager, RepositoryAnalysisState
-+    from contextor.core.domain.module import Module
-     from contextor.core.live_state.store import load_snapshot, read_metadata, save_snapshot
-     from contextor.core.paths import repo_cache_dir
-     from contextor.core.repository_identity import ensure_repository_identity
-@@ -1309,7 +1310,14 @@ def test_startup_backfill_preserves_filestate_content_and_revision_parity(tmp_pa
-     monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(tmp_path / "cache"))
-     cache = repo_cache_dir(repo)
-     state = RepositoryAnalysisState(
--        modules={"a.py": SimpleNamespace()},
-+        modules={
-+            "a.py": Module(
-+                module_id="a.py",
-+                path="a.py",
-+                absolute_path=str(repo / "a.py"),
-+                imports=[],
-+            )
-+        },
-         reexport_facts_by_module={
-             "a.py": {
-                 "exporter": "a.py",
-@@ -1328,6 +1336,20 @@ def test_startup_backfill_preserves_filestate_content_and_revision_parity(tmp_pa
-         repo_id=identity.repo_id,
-         root_path=identity.root_path,
-     )
-+    initial = load_snapshot(
-+        cache,
-+        "sid",
-+        expected_repo_id=identity.repo_id,
-+        expected_root_path=identity.root_path,
+diff --git a/contextor/mcp/tools/contextor_fact_lineage.py b/contextor/mcp/tools/contextor_fact_lineage.py
+index c2a4ad9..86a98c7 100644
+--- a/contextor/mcp/tools/contextor_fact_lineage.py
++++ b/contextor/mcp/tools/contextor_fact_lineage.py
+@@ -27,6 +27,7 @@ def _symbol(module: str, name: str) -> str:
+ _SPECS: dict[str, dict[str, Any]] = {
+     "artifact_consumption": {
+         "state_field": "artifact_consumption",
++        "projection_field": "artifact_consumption",
+         "state_state_field": "artifact_consumption_state",
+         "branches": (
+             {
+@@ -96,6 +97,7 @@ _SPECS: dict[str, dict[str, Any]] = {
+     },
+     "syntax_diagnostics": {
+         "state_field": "syntax_diagnostics_by_path",
++        "projection_field": "syntax_diagnostics_by_path",
+         "state_state_field": "syntax_diagnostics_state",
+         "branches": (
+             {
+@@ -151,6 +153,7 @@ _SPECS: dict[str, dict[str, Any]] = {
+     },
+     "symbol_calls": {
+         "state_field": "module_usages[*].symbol_calls",
++        "projection_field": "symbol_calls",
+         "state_state_field": "module_usages[*].symbol_calls_materialized",
+         "branches": (
+             {
+@@ -451,7 +454,7 @@ def _build_contract(
+                 "TRANSFORMS",
+                 _evidence(
+                     "named_field_projection",
+-                    field="symbol_calls",
++                    field=spec["projection_field"],
+                     branch=branch["branch"],
+                 ),
+                 via=branch["producer"],
+diff --git a/tests/mcp/tools/test_contextor_fact_lineage.py b/tests/mcp/tools/test_contextor_fact_lineage.py
+index b366507..fdfeddb 100644
+--- a/tests/mcp/tools/test_contextor_fact_lineage.py
++++ b/tests/mcp/tools/test_contextor_fact_lineage.py
+@@ -597,6 +597,29 @@ def test_confirmed_state_writers_match_real_owners_and_staging_chains(
+     assert _edge(syntax, "MATERIALIZES", source=syntax_installer, target=syntax_state)
+     assert _edge(syntax, "UPDATES", source=syntax_updater, target=syntax_state)
+ 
++    for result, expected_field in (
++        (artifact, "artifact_consumption"),
++        (syntax, "syntax_diagnostics_by_path"),
++        (symbols, "symbol_calls"),
++    ):
++        projection_edges = [
++            edge
++            for edge in result["edges"]
++            if edge["type"] == "TRANSFORMS"
++            and edge["evidence"]["kind"] == "named_field_projection"
++        ]
++        assert projection_edges
++        assert all(
++            edge["evidence"]["field"] == expected_field
++            for edge in projection_edges
++        )
++    for result in (artifact, syntax):
++        assert not any(
++            edge["type"] == "TRANSFORMS"
++            and edge["evidence"].get("field") == "symbol_calls"
++            for edge in result["edges"]
++        )
++
+     for result in (artifact, symbols, syntax):
+         assert all(edge["confidence"] == "confirmed" for edge in result["edges"])
+         _assert_all_references_resolve(result)
+diff --git a/tests/test_completeness_freshness_parity_proof.py b/tests/test_completeness_freshness_parity_proof.py
+index ebda63e..f251be9 100644
+--- a/tests/test_completeness_freshness_parity_proof.py
++++ b/tests/test_completeness_freshness_parity_proof.py
+@@ -27,7 +27,10 @@ from contextor.core.domain.refresh_plan import RefreshPlan
+ from contextor.core.domain.usage_facts import ModuleUsageFacts, UsageDelta
+ from contextor.core.live_state.hydration import hydrate_repository_engine
+ from contextor.core.lineage_query.live_query import query_live_symbol_lineage
+-from contextor.core.reference.engine import extract_module_usage_facts
++from contextor.core.reference.engine import (
++    build_symbol_references_from_canonical,
++    extract_module_usage_facts,
++)
+ from contextor.core.reporting_engine.graph_analytics import (
+     _CALL_USAGE_CHANNELS,
+     _IMPORT_USAGE_CHANNELS,
+@@ -2425,6 +2428,70 @@ def test_fail_closed_on_unsupported_plan_item(tmp_path):
+             )
+ 
+ 
++def test_star_import_removal_clears_reference_evidence_and_consumption(
++    tmp_path, monkeypatch
++):
++    monkeypatch.setenv("CONTEXTOR_DISABLE_PROCESS_POOL", "1")
++    provider = tmp_path / "a.py"
++    reexporter = tmp_path / "b.py"
++    consumer = tmp_path / "c.py"
++    provider.write_text("def imported():\n    pass\n", encoding="utf-8")
++    reexporter.write_text(
++        'from a import imported\n__all__ = ["imported"]\n',
++        encoding="utf-8",
 +    )
-+    assert initial is not None
-+    initial_state, initial_metadata = initial
-+    assert initial_metadata.repo_id == identity.repo_id
-+    assert initial_metadata.root_path == identity.root_path
-+    assert initial_metadata.revision == metadata.revision
-+    assert initial_state.modules["a.py"].path == "a.py"
-+    assert initial_state.lineage_facts_state == "not_materialized"
-+    assert initial_state.lineage_facts_by_source == {}
-     manager = FileStateManager(str(cache))
-     manager._state = {
-         "a.py": FileState(10, 3, "aaa"),
-@@ -1395,6 +1417,7 @@ def test_startup_backfill_preserves_filestate_content_and_revision_parity(tmp_pa
- def test_startup_backfill_failure_leaves_previous_generation_authoritative(tmp_path, monkeypatch):
-     import contextor.core.live_state.runtime as runtime
-     from contextor.core.analysis.state_manager import FileState, FileStateManager, RepositoryAnalysisState
-+    from contextor.core.domain.module import Module
-     from contextor.core.live_state.store import load_snapshot, read_metadata, save_snapshot
-     from contextor.core.paths import repo_cache_dir
-     from contextor.core.repository_identity import ensure_repository_identity
-@@ -1405,7 +1428,14 @@ def test_startup_backfill_failure_leaves_previous_generation_authoritative(tmp_p
-     monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(tmp_path / "cache"))
-     cache = repo_cache_dir(repo)
-     state = RepositoryAnalysisState(
--        modules={"a.py": SimpleNamespace()},
-+        modules={
-+            "a.py": Module(
-+                module_id="a.py",
-+                path="a.py",
-+                absolute_path=str(repo / "a.py"),
-+                imports=[],
-+            )
-+        },
-         reexport_facts_by_module={
-             "a.py": {
-                 "exporter": "a.py",
-@@ -1417,6 +1447,20 @@ def test_startup_backfill_failure_leaves_previous_generation_authoritative(tmp_p
-     )
-     state.revision = 1
-     metadata = save_snapshot(state, cache, "sid", repo_id=identity.repo_id, root_path=identity.root_path)
-+    initial = load_snapshot(
-+        cache,
-+        "sid",
-+        expected_repo_id=identity.repo_id,
-+        expected_root_path=identity.root_path,
++    consumer.write_text("from b import *\n", encoding="utf-8")
++
++    errors, _ = ContextorFacade().analyze_project(str(tmp_path))
++    assert not errors, errors
++    hydrated = hydrate_repository_engine(tmp_path)
++    assert hydrated is not None
++    engine = hydrated.engine
++
++    before_facts = engine.state.module_usages["c"]
++    assert before_facts.reference_evidence_materialized is True
++    star_evidence = tuple(
++        item
++        for item in before_facts.reference_evidence
++        if item[0] == "b.*" and item[1] == "api_imports"
 +    )
-+    assert initial is not None
-+    initial_state, initial_metadata = initial
-+    assert initial_metadata.repo_id == identity.repo_id
-+    assert initial_metadata.root_path == identity.root_path
-+    assert initial_metadata.revision == metadata.revision
-+    assert initial_state.modules["a.py"].path == "a.py"
-+    assert initial_state.lineage_facts_state == "not_materialized"
-+    assert initial_state.lineage_facts_by_source == {}
-     manager = FileStateManager(str(cache))
-     manager._state = {"a.py": FileState(10, 3, "aaa"), "b.py": FileState(20, 4, "bbb")}
-     manager.save("sid", revision=metadata.revision)
-@@ -1427,13 +1471,17 @@ def test_startup_backfill_failure_leaves_previous_generation_authoritative(tmp_p
-     monkeypatch.setattr(materialization, "ensure_module_usages", lambda _state: None)
-     import contextor.core.live_state.store as store
-     original_replace = store.os.replace
-+    metadata_commit_hit = False
-     def fail_only_authoritative_metadata_commit(source, target):
-+        nonlocal metadata_commit_hit
-         if Path(target).name == "engine_state.meta.json":
-+            metadata_commit_hit = True
-             raise RuntimeError("synthetic metadata commit failure")
-         return original_replace(source, target)
-     monkeypatch.setattr(store.os, "replace", fail_only_authoritative_metadata_commit)
-     with pytest.raises(RuntimeError, match="synthetic metadata commit failure"):
-         runtime.run_service(repo)
-+    assert metadata_commit_hit
-     assert read_metadata(cache).revision == metadata.revision
-     assert load_snapshot(cache, "sid")[1].revision == metadata.revision
-     reloaded = FileStateManager(str(cache))
++    assert star_evidence
++    before_entry = engine.state.artifact_consumption["a::imported"]
++    assert "c" in before_entry["consumers"]
++    assert "api_imports" in before_entry["channels"]["c"]
++    unrelated_consumers = set(before_entry["consumers"]) - {"c"}
++    assert "b" in unrelated_consumers
++
++    replacement = "VALUE = 1\n"
++    consumer.write_text(replacement, encoding="utf-8")
++    result = engine.update_file(str(consumer))
++    assert result.status == "UPDATED"
++
++    after_facts = engine.state.module_usages["c"]
++    assert after_facts.reference_evidence_materialized is True
++    assert not set(star_evidence).intersection(after_facts.reference_evidence)
++    assert after_facts.reference_evidence == extract_module_usage_facts(
++        "c", replacement
++    ).reference_evidence
++    after_entry = engine.state.artifact_consumption["a::imported"]
++    assert "c" not in after_entry["consumers"]
++    assert "c" not in after_entry["channels"]
++    assert unrelated_consumers <= set(after_entry["consumers"])
++
++    references = build_symbol_references_from_canonical(
++        definer_module="a",
++        symbols=["imported"],
++        artifact_consumption=engine.state.artifact_consumption,
++        module_usages=engine.state.module_usages,
++        current_modules=set(engine.state.modules),
++    )
++    assert "c" not in references["imported"]["imported_from"]
++
++    oracle = _build_full_static_state(tmp_path)
++    _assert_full_parity(engine.state, oracle)
++    assert after_facts.reference_evidence == oracle.module_usages["c"].reference_evidence
++
++
+ def test_star_import_visibility_changes_match_full_oracle(tmp_path, monkeypatch):
+     monkeypatch.setenv("CONTEXTOR_DISABLE_PROCESS_POOL", "1")
+     provider = tmp_path / "a.py"
 ```
 
-## INITIAL_SNAPSHOT_LOAD_RESULT
-PASS in both named tests: immediately after `save_snapshot`, the real `load_snapshot` returned the committed generation with the expected repository ID, root path and revision. Each loaded module has `path == "a.py"`; lineage state is `not_materialized` and the source mapping is `{}`.
+## L29_REMOVAL_BEFORE_AFTER
+DIRECT TEST EVIDENCE (new exact node passed): before edit, c's reference_evidence is materialized and contains b.* / api_imports, while a::imported lists c with api_imports. After replacing only c.py with VALUE = 1 and a successful real update_file (UPDATED), c's evidence remains materialized, old star evidence is absent, and its exact tuple equals independent extraction of the new source. c is removed from a::imported consumers/channels; unrelated consumer b remains. Canonical reference projection no longer reports c as an importer.
 
-## BACKFILL_SUCCESS_RESULT
-PASS: `test_startup_backfill_preserves_filestate_content_and_revision_parity` retained its committed-reader identity checks and all existing FileState content/count and revision-parity assertions. The committed generation advanced by one revision.
+## L29_FULL_ORACLE_PARITY
+DIRECT TEST EVIDENCE: independent full analysis of the isolated temporary a.py/b.py/c.py fixture matched the incremental state under the existing _assert_full_parity helper. c's exact reference_evidence also matched the oracle. No full analysis of the Contextor repository was run.
 
-## BACKFILL_FAILURE_INJECTION_RESULT
-PASS: the local `metadata_commit_hit` marker was asserted after the synthetic `os.replace` error at `engine_state.meta.json`. Existing assertions confirmed the previous metadata/snapshot revision and FileState content/revision remained authoritative.
+## L30_PROJECTION_FIELD_MATRIX
+- artifact_consumption -> artifact_consumption
+- syntax_diagnostics -> syntax_diagnostics_by_path
+- symbol_calls -> symbol_calls
+
+The existing staging regression now checks every named_field_projection TRANSFORMS edge for each queried family and excludes symbol_calls from artifact_consumption and syntax_diagnostics. Edge identities, directions, producers, state fields, branch definitions, schema, freshness and installation ownership were preserved. This corrects MCP evidence metadata; it does not make the three fact domains equal.
 
 ## TARGETED_TEST_RESULTS
-- Exact two named startup backfill tests: `2 passed in 5.24s`.
-- `tests/test_live_state_ipc.py`, `tests/test_live_state_store.py`, `tests/test_lineage_state_lifecycle.py`: `196 passed, 1 warning in 85.23s`. The warning is an external `AuthlibDeprecationWarning` from FastMCP's Authlib import.
-- No full repository pytest suite was run.
+Exact nodes: 2 passed, 1 external AuthlibDeprecationWarning, 11.02s.
+Command: .venv/Scripts/python.exe -m pytest -q tests/test_completeness_freshness_parity_proof.py::test_star_import_removal_clears_reference_evidence_and_consumption tests/mcp/tools/test_contextor_fact_lineage.py::test_confirmed_state_writers_match_real_owners_and_staging_chains
+
+Focused three-file gate: 89 passed, 1 external AuthlibDeprecationWarning, 142.67s.
+Command: .venv/Scripts/python.exe -m pytest -q tests/mcp/tools/test_contextor_fact_lineage.py tests/test_completeness_freshness_parity_proof.py tests/test_canonical_reference_projection.py
+
+No repository-wide pytest suite was run. git diff --check reported no whitespace errors (only Git's LF/CRLF advisory).
+
+## REGRESSION_FAILURES
+NONE in the exact-node and focused three-file gates.
+
+## MCP_RESTART_REQUIREMENT
+MANUAL_MCP_BACKEND_RESTART_REQUIRED=YES before LIVE runtime certification, because contextor_fact_lineage.py is MCP server implementation code. No Desktop/LIVE/MCP restart was performed. The pre-edit LIVE revision 121 is discovery evidence, not post-edit runtime certification. No manual update_file was invoked.
 
 ## FINAL_VERDICT
-`PASS` for the approved test-only correction and the specified targeted gate. `git diff --check` exited successfully. No production file, `store.py`, LIVE IPC, runtime code or snapshot schema changed; no service restart or manual `update_file` occurred.
+PASS for the scoped source/test contract and targeted tests. LIVE MCP behavior remains uncertified until a separate authorized manual backend restart and fresh runtime check. No canonical extraction, materialization, watcher, persistence, or authority code changed.

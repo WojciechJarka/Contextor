@@ -27,7 +27,10 @@ from contextor.core.domain.refresh_plan import RefreshPlan
 from contextor.core.domain.usage_facts import ModuleUsageFacts, UsageDelta
 from contextor.core.live_state.hydration import hydrate_repository_engine
 from contextor.core.lineage_query.live_query import query_live_symbol_lineage
-from contextor.core.reference.engine import extract_module_usage_facts
+from contextor.core.reference.engine import (
+    build_symbol_references_from_canonical,
+    extract_module_usage_facts,
+)
 from contextor.core.reporting_engine.graph_analytics import (
     _CALL_USAGE_CHANNELS,
     _IMPORT_USAGE_CHANNELS,
@@ -2423,6 +2426,70 @@ def test_fail_closed_on_unsupported_plan_item(tmp_path):
                 {},
                 ModuleUsageFacts(),
             )
+
+
+def test_star_import_removal_clears_reference_evidence_and_consumption(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("CONTEXTOR_DISABLE_PROCESS_POOL", "1")
+    provider = tmp_path / "a.py"
+    reexporter = tmp_path / "b.py"
+    consumer = tmp_path / "c.py"
+    provider.write_text("def imported():\n    pass\n", encoding="utf-8")
+    reexporter.write_text(
+        'from a import imported\n__all__ = ["imported"]\n',
+        encoding="utf-8",
+    )
+    consumer.write_text("from b import *\n", encoding="utf-8")
+
+    errors, _ = ContextorFacade().analyze_project(str(tmp_path))
+    assert not errors, errors
+    hydrated = hydrate_repository_engine(tmp_path)
+    assert hydrated is not None
+    engine = hydrated.engine
+
+    before_facts = engine.state.module_usages["c"]
+    assert before_facts.reference_evidence_materialized is True
+    star_evidence = tuple(
+        item
+        for item in before_facts.reference_evidence
+        if item[0] == "b.*" and item[1] == "api_imports"
+    )
+    assert star_evidence
+    before_entry = engine.state.artifact_consumption["a::imported"]
+    assert "c" in before_entry["consumers"]
+    assert "api_imports" in before_entry["channels"]["c"]
+    unrelated_consumers = set(before_entry["consumers"]) - {"c"}
+    assert "b" in unrelated_consumers
+
+    replacement = "VALUE = 1\n"
+    consumer.write_text(replacement, encoding="utf-8")
+    result = engine.update_file(str(consumer))
+    assert result.status == "UPDATED"
+
+    after_facts = engine.state.module_usages["c"]
+    assert after_facts.reference_evidence_materialized is True
+    assert not set(star_evidence).intersection(after_facts.reference_evidence)
+    assert after_facts.reference_evidence == extract_module_usage_facts(
+        "c", replacement
+    ).reference_evidence
+    after_entry = engine.state.artifact_consumption["a::imported"]
+    assert "c" not in after_entry["consumers"]
+    assert "c" not in after_entry["channels"]
+    assert unrelated_consumers <= set(after_entry["consumers"])
+
+    references = build_symbol_references_from_canonical(
+        definer_module="a",
+        symbols=["imported"],
+        artifact_consumption=engine.state.artifact_consumption,
+        module_usages=engine.state.module_usages,
+        current_modules=set(engine.state.modules),
+    )
+    assert "c" not in references["imported"]["imported_from"]
+
+    oracle = _build_full_static_state(tmp_path)
+    _assert_full_parity(engine.state, oracle)
+    assert after_facts.reference_evidence == oracle.module_usages["c"].reference_evidence
 
 
 def test_star_import_visibility_changes_match_full_oracle(tmp_path, monkeypatch):

@@ -597,6 +597,29 @@ def test_confirmed_state_writers_match_real_owners_and_staging_chains(
     assert _edge(syntax, "MATERIALIZES", source=syntax_installer, target=syntax_state)
     assert _edge(syntax, "UPDATES", source=syntax_updater, target=syntax_state)
 
+    for result, expected_field in (
+        (artifact, "artifact_consumption"),
+        (syntax, "syntax_diagnostics_by_path"),
+        (symbols, "symbol_calls"),
+    ):
+        projection_edges = [
+            edge
+            for edge in result["edges"]
+            if edge["type"] == "TRANSFORMS"
+            and edge["evidence"]["kind"] == "named_field_projection"
+        ]
+        assert projection_edges
+        assert all(
+            edge["evidence"]["field"] == expected_field
+            for edge in projection_edges
+        )
+    for result in (artifact, syntax):
+        assert not any(
+            edge["type"] == "TRANSFORMS"
+            and edge["evidence"].get("field") == "symbol_calls"
+            for edge in result["edges"]
+        )
+
     for result in (artifact, symbols, syntax):
         assert all(edge["confidence"] == "confirmed" for edge in result["edges"])
         _assert_all_references_resolve(result)
