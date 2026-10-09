@@ -1,3 +1,11 @@
+## 2026-10-09 Patch - L37/L38 and A3C recovery hardening
+
+Completed the L37/L38 durable-verified canonical publication and persistence-first publication/recovery work. A3C now finalizes recovery certificates on the owner thread, bounds certificate expiry and fences mutations until recovery admission is certified. The watcher performs trusted rebaseline and defers updates during recovery; GUI recovery incidents retain generation-aware handling.
+
+Corrected the T7 recovery reprompt and T9 Tk timer lifecycle. Native Windows watchdog and in-flight recovery behavior passed certification. The global regression checkpoint passed: 2,951 passed, 1 skipped, 0 failed, one external Authlib warning, in 775.67 seconds.
+
+Parallel second-Desktop startup remains unverified because MCP backend ownership and TCP port 8765 are shared.
+
 ## 2026-10-07 Patch - Desktop MCP backend restart control
 
 Added a `Restart Backend` control to the Contextor Desktop header next to `MCP Logs`, allowing the persistent MCP backend to be restarted directly from the GUI without restarting Desktop or using the command line.
