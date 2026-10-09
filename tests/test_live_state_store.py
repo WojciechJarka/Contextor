@@ -1,6 +1,7 @@
 """Unit and integration boundaries for the shared canonical LIVE snapshot store."""
 
 from concurrent.futures import ThreadPoolExecutor
+from copy import deepcopy
 import multiprocessing
 import os
 from pathlib import Path
@@ -10,6 +11,8 @@ from types import SimpleNamespace
 import pytest
 
 from contextor.mcp import analysis_jobs
+from contextor.core.api.facade import ContextorFacade
+from contextor.core.analysis.state_manager import canonical_artifact_consumption_targets
 from contextor.core.live_state import (
     load_snapshot,
     migrate_legacy_snapshot,
@@ -17,14 +20,179 @@ from contextor.core.live_state import (
     save_snapshot,
     SnapshotRevisionConflict,
 )
+from contextor.core.live_state.hydration import hydrate_repository_engine
 from contextor.core.paths import app_cache_dir, legacy_repo_cache_dir, repo_cache_dir
 from contextor.core.analysis.state_manager import FileStateManager, RepositoryAnalysisState
 from contextor.core.domain.usage_facts import MODULE_USAGE_FACTS_SEMANTIC_VERSION
 from contextor.core.reporting_engine.persistent_registry import (
     PersistentIdentityRegistry,
 )
+from contextor.core.repository_identity import read_repository_identity
 
 pytestmark = pytest.mark.live
+
+
+def test_artifact_consumption_exact_full_and_incremental_roundtrip(tmp_path, monkeypatch):
+    monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setenv("CONTEXTOR_DISABLE_PROCESS_POOL", "1")
+    monkeypatch.setattr("contextor.core.live_state.runtime.connect", lambda _root: None)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    a = repo / "a.py"
+    b = repo / "b.py"
+    c = repo / "c.py"
+    a.write_text(
+        "def used():\n    return 1\n\n"
+        "def spare():\n    return 2\n\n"
+        "def unused():\n    return 3\n",
+        encoding="utf-8",
+    )
+    b.write_text("from a import used\n\ndef call_b():\n    return used()\n", encoding="utf-8")
+    c.write_text(
+        "from a import used, spare\n\ndef call_c():\n    return used()\n",
+        encoding="utf-8",
+    )
+
+    errors, _ = ContextorFacade().analyze_project(str(repo))
+    assert not errors, errors
+    cache = repo_cache_dir(repo)
+    identity = read_repository_identity(repo)
+    assert identity is not None
+    metadata = read_metadata(cache)
+    assert metadata is not None
+    hydrated = hydrate_repository_engine(repo)
+    assert hydrated is not None
+    assert hydrated.source == "snapshot"
+    engine = hydrated.engine
+    state = engine.state
+    assert state.artifact_consumption_state == "fresh"
+    assert set(state.artifact_consumption) == canonical_artifact_consumption_targets(state.artifacts)
+    used_entry = state.artifact_consumption["a::used"]
+    assert set(used_entry["consumers"]) == {"b", "c"}
+    assert set(used_entry["channels"]["b"]) == {"api_imports", "direct_calls"}
+    assert set(used_entry["channels"]["c"]) == {"api_imports", "direct_calls"}
+    assert state.artifact_consumption["a::spare"]["channels"]["c"] == ["api_imports"]
+    assert state.artifact_consumption["a::unused"] == {"consumers": [], "channels": {}}
+    full_map = deepcopy(state.artifact_consumption)
+    full_marker = state.artifact_consumption_state
+
+    loaded = load_snapshot(
+        cache,
+        metadata.state_id,
+        expected_repo_id=identity.repo_id,
+        expected_root_path=identity.root_path,
+    )
+    assert loaded is not None
+    loaded_state, loaded_metadata = loaded
+    assert loaded_state.artifact_consumption == full_map
+    assert loaded_state.artifact_consumption_state == full_marker
+    missing_consumer = deepcopy(full_map)
+    missing_consumer["a::used"]["consumers"].remove("b")
+    assert loaded_state.artifact_consumption != missing_consumer
+    missing_channel = deepcopy(full_map)
+    missing_channel["a::used"]["channels"]["c"].remove("direct_calls")
+    assert loaded_state.artifact_consumption != missing_channel
+    assert loaded_state.state_id == loaded_metadata.state_id == metadata.state_id
+    assert loaded_state.revision == loaded_metadata.revision == metadata.revision
+
+    rehydrated = hydrate_repository_engine(repo)
+    assert rehydrated is not None
+    assert rehydrated.source == "snapshot"
+    assert rehydrated.engine.state.artifact_consumption == full_map
+    assert rehydrated.engine.state.artifact_consumption_state == full_marker
+    assert rehydrated.engine.state.artifact_consumption["a::unused"] == {
+        "consumers": [], "channels": {}
+    }
+
+    b.write_text("B_VALUE = 1\n", encoding="utf-8")
+    result = engine.update_file(str(b))
+    assert result.status == "UPDATED"
+    state = engine.state
+    assert state.artifact_consumption_state == "fresh"
+    assert set(state.artifact_consumption) == canonical_artifact_consumption_targets(state.artifacts)
+    updated_used = state.artifact_consumption["a::used"]
+    assert "b" not in updated_used["consumers"]
+    assert "b" not in updated_used["channels"]
+    assert "c" in updated_used["consumers"]
+    assert updated_used["channels"]["c"] == full_map["a::used"]["channels"]["c"]
+    assert state.artifact_consumption["a::spare"] == full_map["a::spare"]
+    assert state.artifact_consumption["a::unused"] == full_map["a::unused"]
+    updated_map = deepcopy(state.artifact_consumption)
+    updated_marker = state.artifact_consumption_state
+
+    next_revision = metadata.revision + 1
+    saved = save_snapshot(
+        state,
+        cache,
+        metadata.state_id,
+        writer="test-incremental-roundtrip",
+        repo_id=identity.repo_id,
+        root_path=identity.root_path,
+        exact_revision=next_revision,
+        file_state_payload=engine.state_manager.build_payload(
+            metadata.state_id, next_revision
+        ),
+    )
+    assert saved.revision == next_revision
+    assert read_metadata(cache) == saved
+    updated_loaded = load_snapshot(
+        cache,
+        metadata.state_id,
+        expected_repo_id=identity.repo_id,
+        expected_root_path=identity.root_path,
+    )
+    assert updated_loaded is not None
+    updated_state, updated_metadata = updated_loaded
+    assert updated_state.artifact_consumption == updated_map
+    assert updated_state.artifact_consumption_state == updated_marker
+    assert updated_state.state_id == updated_metadata.state_id == metadata.state_id
+    assert updated_state.revision == updated_metadata.revision == next_revision
+
+    updated_hydrated = hydrate_repository_engine(repo)
+    assert updated_hydrated is not None
+    assert updated_hydrated.source == "snapshot"
+    assert updated_hydrated.engine.state.artifact_consumption == updated_map
+    assert updated_hydrated.engine.state.artifact_consumption_state == updated_marker
+    assert set(updated_hydrated.engine.state.artifact_consumption) == (
+        canonical_artifact_consumption_targets(updated_hydrated.engine.state.artifacts)
+    )
+    assert "b" not in updated_hydrated.engine.state.artifact_consumption["a::used"]["consumers"]
+    assert "b" not in updated_hydrated.engine.state.artifact_consumption["a::used"]["channels"]
+
+
+def test_artifact_consumption_fresh_empty_roundtrip(tmp_path, monkeypatch):
+    monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setenv("CONTEXTOR_DISABLE_PROCESS_POOL", "1")
+    monkeypatch.setattr("contextor.core.live_state.runtime.connect", lambda _root: None)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "empty.py").write_text("pass\n", encoding="utf-8")
+
+    errors, _ = ContextorFacade().analyze_project(str(repo))
+    assert not errors, errors
+    cache = repo_cache_dir(repo)
+    identity = read_repository_identity(repo)
+    assert identity is not None
+    metadata = read_metadata(cache)
+    assert metadata is not None
+    loaded = load_snapshot(
+        cache,
+        metadata.state_id,
+        expected_repo_id=identity.repo_id,
+        expected_root_path=identity.root_path,
+    )
+    assert loaded is not None
+    state, loaded_metadata = loaded
+    assert canonical_artifact_consumption_targets(state.artifacts) == set()
+    assert state.artifact_consumption == {}
+    assert state.artifact_consumption_state == "fresh"
+    assert loaded_metadata == metadata
+
+    hydrated = hydrate_repository_engine(repo)
+    assert hydrated is not None
+    assert hydrated.source == "snapshot"
+    assert hydrated.engine.state.artifact_consumption == {}
+    assert hydrated.engine.state.artifact_consumption_state == "fresh"
 
 
 def test_module_usage_manifest_roundtrips_with_repository_state(tmp_path):
