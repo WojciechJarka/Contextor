@@ -1,69 +1,77 @@
-# L37/L38 A3C runtime certification — stage 2
+# L37/L38 A3C — Final watcher/GUI integration
 
 ## CURRENT_HEAD
 
-- DIRECT_EVIDENCE: `git rev-parse HEAD` = `9f0be4951d46f0ab4f3cbe98b5e59afb25637870`; `git status --porcelain=v1 --untracked-files=normal` returned no entries before this report.
-- DIRECT_EVIDENCE: The commit after Stage 1 changed only `walkthrough.md` relative to `88df5b4db5088b66fa7da23a71f19e0cec15ed15`. No production/test source changed after the observed restart.
-- ACTION: No analysis, tests, publish, update_file, mutation submission, valid recovery verification, or service restart was performed.
+- Git HEAD: `013deb917c39852156bd3eaa13d7f8fa8d348cb3` (DIRECT_EVIDENCE, `git rev-parse HEAD`). No production, test, or documentation source was edited in this task. The only workspace write is this overwritten report.
+- Current active production service: LIVE PID 11484, service instance `49c8405bd2ec4897b29c987af6b916d6`, lease generation 6; Desktop interpreter PID 9676; MCP interpreter PID 2140. Read-only OS/process and LIVE `authority_status` evidence. No Desktop, LIVE, or MCP restart was performed.
+- Architectural discovery used Contextor MCP first, including deferred tool discovery and current tool documentation. Exact implementation was then checked in Git source. The focused tests were run only after the isolated integration.
 
-## CURRENT_RUNTIME_IDENTITY
+## ISOLATION_EVIDENCE
 
-- DIRECT_EVIDENCE: OS process census still identifies MCP interpreter PID 812 (started `2026-10-08T15:00:46.1025190Z`), Desktop PID 14348 (`15:00:50.1506050Z`) and LIVE service PID 5416 (`15:00:54.7086360Z`), with the same parent relationships and commands recorded in Stage 1.
-- DIRECT_EVIDENCE: Fresh `authority_status` from the verified existing LIVE connection returned `protocol_version=4`, `revision=102`, `service_pid=5416`, `service_instance_id=e373683f22ea4743819ead98b8bdfb33`, `lease_generation=4`, `process_start_identity=134359452547086364`, `runtime_domain_id=rd1_4bb21e833272147f29727f8174356b437bdb3dbcba1b2d4965637b97183f8654`.
-- DIRECT_EVIDENCE: `desktop_claim_status` names Desktop PID 14348, Desktop instance `b334e620817148b0b3b9af13890902b7`, LIVE PID 5416, the same LIVE service instance and lease generation. This proves the current claim identity; it does not expose watcher queues.
+- Isolated temporary repository: `C:\Users\DafoO\AppData\Local\Temp\contextor_final_gui_watcher_ogn3_6ev\repo`, permanent repo ID `ctx_4120055c`. Its separate cache was `C:\Users\DafoO\AppData\Local\Temp\contextor_final_gui_watcher_ogn3_6ev\cache\repositories\ctx_4120055c`. `CONTEXTOR_STATE_DIR`, `CONTEXTOR_CACHE_DIR`, `CONTEXTOR_OUTPUT_DIR`, and `CONTEXTOR_REGISTRY_DIR` all pointed below that temporary root.
+- The driver was PID 13412; a distinct real LIVE service process was PID 8892 with service instance `824b5416fc524f24a64d9461ea7b0b9f`. No second Desktop application, Tk mainloop, or MCP backend was launched. The active production root `C:\Temp\Contextor_Repo` was never a mutation target.
+- An explicitly controlled initial `ContextorFacade.analyze_project` built revision 1 for the temporary repository. It returned zero errors and `live_publish_status=not_attempted`; the real isolated service then loaded the committed snapshot. No FULL analysis was launched automatically during recovery.
+- File changes were placed into the real `DesktopLiveWatcher` by deterministic `_enqueue_path` calls. The operating-system watchdog event observer was not exercised. The watcher itself, its `poll_once` logic, FileStateManager trust checks, real LIVE IPC mutation submission/status, and real service persistence were exercised.
+- GUI recovery methods were called on a controlled in-process `ContextorGUI.__new__` controller. Only FULL/progress/Tk UI interactions were stubbed; recovery certificate verify/complete/cancel went through real IPC. No actual Desktop window or backend ownership claim was used.
 
-## DURABLE_AUTHORITY_EVIDENCE
+## REAL_LIVE_IPC_EVIDENCE
 
-- DIRECT_EVIDENCE: `read_repository_identity(C:\\Temp\\Contextor_Repo)` returned permanent `repo_id=ctx_8efc50d8`, `root_path=C:\\Temp\\Contextor_Repo`, `repo_name=Contextor_Repo`.
-- DIRECT_EVIDENCE: `repo_cache_dir` resolved to `C:\\Users\\DafoO\\AppData\\Local\\Contextor\\cache\\repositories\\ctx_8efc50d8`.
-- DIRECT_EVIDENCE: `read_metadata` before and after snapshot load returned the same metadata: `schema_version=1.4`, `state_id=20261008_150726`, `revision=102`, `writer=live-service`, `repo_id=ctx_8efc50d8`, `root_path=C:\\Temp\\Contextor_Repo`, `state_file=engine_state.r102.1902e21a70f84c0994fb7097092f13eb.pkl`, `file_state_file=file_state.r102.1902e21a70f84c0994fb7097092f13eb.json`, `lineage_manifest_file=lineage_manifest.r102.1902e21a70f84c0994fb7097092f13eb.json`.
-- DIRECT_EVIDENCE: `load_snapshot(cache, expected_repo_id=ctx_8efc50d8, expected_root_path=C:\\Temp\\Contextor_Repo)` returned a `RepositoryAnalysisState` with embedded `state_id=20261008_150726` and `revision=102`; returned metadata matched the separate metadata reads.
-- CODE_PATH_PROVED: Identity lookup and validation are at `C:\\Temp\\Contextor_Repo\\contextor\\core\\repository_identity.py:26-91`; identity-keyed cache selection at `C:\\Temp\\Contextor_Repo\\contextor\\core\\paths.py:185-198`; metadata read at `C:\\Temp\\Contextor_Repo\\contextor\\core\\live_state\\store.py:1411`; metadata-selected snapshot load at `:1926`.
-- LIMIT: This was an observational read without the store lock. Matching metadata before/after and matching loaded state establish parity for the observed generation, not a general atomicity proof for concurrent future commits.
+- Initial real LIVE snapshot: revision 1, state_id `20261009_102121`; real watcher startup had no pending paths, no startup resync, and trusted file-state for this generation.
+- Real watcher submission for `module.py` change `VALUE = 1` to `VALUE = 2` returned accepted job `mu-951580f739c546cd8220b5015e5a2ec4`. Real mutation-status reconciliation advanced LIVE to revision 2. A recording client forwarded calls to real `LiveStateClient`; its event barrier delayed forwarding one status request while an incident was registered, without fabricating the IPC result.
+- Real `verify_recovery(1)` returned a certificate for isolated repo ID/root/state_id and LIVE revision 2. Mismatched certificate ID and generation each returned `status=error`, `error=recovery_certificate_mismatch`; completion after 31.5 seconds returned `recovery_certificate_expired`.
+- The controlled GUI later obtained a fresh real certificate and completed it through real IPC. The matching acknowledgement cleared incident generation 1, set watcher `_recovery_rebaseline_pending=True`, and retained LIVE revision 2 until deferred watcher work was submitted.
+- The next real watcher poll read a fresh LIVE snapshot at revision 2, validated state identity and trusted file-state, rescanned the filesystem, and submitted deferred job `mu-6da81a9616584adebd2b732c6fc6586c`. Real LIVE and durable metadata then reached revision 3 with state_id `20261009_102121`.
+- Source anchors: `C:\Temp\Contextor_Repo\contextor\core\live_state\watcher.py:111-172` (watcher state/certificate flag), `:533-591` (trusted file-state), `:592-666` (inflight reconciliation), `:667-972` (poll/rebaseline/admission/submission); `C:\Temp\Contextor_Repo\contextor\ui\gui.py:829` (recovery admission), `:1128-1183` (incident registration), `:1250-1489` (certificate-driven analyze path).
 
-## LIVE_AUTHORITY_EVIDENCE
+## GUI_WATCHER_INTEGRATION
 
-- DIRECT_EVIDENCE: `authority_status` returned `repo_id=ctx_8efc50d8`, `root_path=C:\\Temp\\Contextor_Repo`, `revision=102`, status `ok`.
-- DIRECT_EVIDENCE: LIVE `snapshot` returned status `ok`, outer revision 102, `RepositoryAnalysisState.state_id=20261008_150726`, and embedded state revision 102.
-- DIRECT_EVIDENCE: Fresh Contextor `get_live_events` returned canonical revision 102, `resync_required=false`; the retained event feed was not used as proof of quiescence. A final metadata and authority read still returned revision 102 and the same identities.
-- CODE_PATH_PROVED: `C:\\Temp\\Contextor_Repo\\contextor\\core\\live_state\\ipc.py:2225-2242` exposes `authority_status` and `snapshot` as separate read responses under the server lock.
+| Scenario | Result / level | Revision before → after | Exact evidence |
+|---|---|---|---|
+| 1. Healthy LIVE and watcher baseline | PASS / REAL_PROCESS + IN_PROCESS watcher | 1 → 1 | Real service snapshot and FileStateManager trusted status; watcher startup pending empty and resync false. |
+| 2. Normal file change reaches LIVE IPC | PASS / REAL_PROCESS + IN_PROCESS watcher | 1 → 2 | Real accepted mutation job `mu-951580f739c546cd8220b5015e5a2ec4`, subsequent real mutation-status and LIVE revision 2. Filesystem event was injected with `_enqueue_path`. |
+| 3. Register GUI incident | PASS / IN_PROCESS GUI | 2 → 2 | `_request_full_analysis_recovery` registered isolated repository incident generation 1. |
+| 4. Subsequent change remains pending | PASS / IN_PROCESS watcher + REAL_PROCESS LIVE | 2 → 2 | `VALUE = 3` was enqueued; recovery admission deferred it; submission count remained 1 and path remained pending. |
+| 5. Accepted inflight job reconciles without incident loss | PASS / REAL_PROCESS IPC + IN_PROCESS watcher/GUI | 1 → 2 | Barrier held first status forwarding after accepted job; incident was registered; real status reconciliation emptied inflight, requeued path, retained incident generation 1. |
+| 6. Real certificate obtained | PASS / REAL_PROCESS IPC | 2 → 2 | `verify_recovery(1)` returned matching repo ID, state ID, and revision 2. |
+| 7. Mismatch and expiry cannot clear incident | PASS / REAL_PROCESS IPC + IN_PROCESS GUI | 2 → 2 | Wrong ID/generation returned `recovery_certificate_mismatch`; after 31.5 seconds old completion returned `recovery_certificate_expired`; incident generation 1 remained. |
+| 8. Matching completion through IPC | PASS / REAL_PROCESS IPC + IN_PROCESS GUI | 2 → 2 | Controlled `ContextorGUI.analyze` used actual connect/verify/complete; matched ACK cleared generation 1 and set rebaseline pending. FULL was stubbed and did not run. |
+| 9. Fresh evidence before deferred submission | PASS / REAL_PROCESS IPC + IN_PROCESS watcher | 2 → 2 at snapshot validation, then submission | Recording client saw fresh snapshot revision 2; `_trusted_file_state` succeeded; poll cleared rebaseline flag only after scan/reconcile and then submitted. |
+| 10. Pending change reaches durable LIVE | PASS / REAL_PROCESS IPC + IN_PROCESS watcher | 2 → 3 | Real accepted job `mu-6da81a9616584adebd2b732c6fc6586c`; LIVE rev3, metadata rev3, embedded durable state rev3 and same state ID; two total submissions. |
+| 11. Newer incident defeats older certificate | PASS / REAL_PROCESS IPC + IN_PROCESS GUI | 3 → 3 | Incident gen2 verification followed by controlled gen3 registration; old certificate `f72b6a41431f46e29ee8bbd1a9ba7bb4` cancelled through real IPC; gen3/reason `newer incident` remained. |
+| 12. Isolated shutdown / foreign-thread lease | PASS for no stranded lease; UNKNOWN for direct thread identity / REAL_PROCESS | 3 → 3 | With gen3 certificate outstanding, real shutdown ACK `status=ok`, revision 3; service disconnected; independent `acquire_full_analysis(..., timeout=3)` succeeded. No direct runtime trace identified the OS thread executing release, so foreign-thread absence is not independently certified by this observation. |
 
-## PARITY_COMPARISON
+## RECOVERY_FENCE_RESULTS
 
-| Field | Permanent identity | Durable metadata/state | LIVE authority/state | Result |
-|---|---|---|---|---|
-| repo_id | `ctx_8efc50d8` | `ctx_8efc50d8` | `ctx_8efc50d8` | PASS |
-| root_path | `C:\\Temp\\Contextor_Repo` | `C:\\Temp\\Contextor_Repo` | `C:\\Temp\\Contextor_Repo` | PASS |
-| state_id | N/A | `20261008_150726` in metadata and loaded state | `20261008_150726` in LIVE state | PASS |
-| canonical revision | N/A | 102 in metadata and loaded state | 102 in authority and LIVE state | PASS |
+- During generation 1 recovery, watcher submission count stayed at 1 despite a second filesystem change; the second path remained pending. The first accepted job could still reconcile from real mutation status. (CODE_PATH_PROVED and isolated integration DIRECT_EVIDENCE.)
+- Wrong ID, wrong generation, and expired certificates did not release recovery through GUI; completion errors were real LIVE IPC results. The controlled GUI cleared only the matching generation 1 incident after a fresh certificate's successful real IPC completion.
+- A newer GUI incident generation 3 survived the older generation 2 certificate path, which issued real IPC cancellation. The isolated shutdown with an outstanding generation 3 certificate left the writer lease reacquirable.
 
-## MUTATION_AND_FENCE_EVIDENCE
+## PENDING_INFLIGHT_RESULTS
 
-- CODE_PATH_PROVED: `CanonicalMutationCoordinator` keeps `_queue`, `_jobs`, and `_recovery_verification_fenced` privately in `C:\\Temp\\Contextor_Repo\\contextor\\core\\live_state\\ipc.py:127-147`. `begin_recovery_verification` checks queued/running jobs at `:219-231`; `recovery_verification_active` is an in-process method at `:239-241`.
-- CODE_PATH_PROVED: Public `mutation_status` requires a specific nonempty job_id and returns only that job or `unknown_mutation_job` (`ipc.py:243-268`, dispatch `:2157-2158`). The dispatch also exposes authority, snapshot, events and desktop claim; it does not expose a safe remote enumeration of all jobs, fence flag or pending certificate (`ipc.py:2131-2355`).
-- CODE_PATH_PROVED: Outstanding certificate data are private `_pending_recovery_certificate` and `_recovery_certificate_state` (`ipc.py:808-815`). Their absence cannot be established from `authority_status` or `snapshot`.
-- DIRECT_EVIDENCE: `desktop_claim_status` confirms the Desktop owns the current claim. It does not report watcher pending paths or inflight jobs.
-- DIRECT_EVIDENCE: The complete retained LIVE event window at observation had 48 records, revision 102 and no recorded mutation or recovery operation. This is activity history only. It cannot prove an empty current queue, no recovery fence, or no watcher work.
-- UNKNOWN: No safe remote read-only interface was found for all active mutation jobs, current certificate/fence state, or Desktop watcher pending/inflight work. No admission probe or private-process introspection was attempted.
+- Accepted job `mu-951580f739c546cd8220b5015e5a2ec4` was inflight when the GUI incident was registered. Real status completion advanced revision 1 → 2; watcher inflight became empty, path was requeued, incident generation 1 remained.
+- The later `VALUE = 3` change remained pending throughout recovery. After matching completion, watcher validated fresh revision 2/file-state evidence, then delivered the deferred change; revision advanced 2 → 3. No watcher submission occurred before that verified rebaseline.
 
-## UNRESOLVED_RISKS
+## RECOVERY_RELEASE_RESULTS
 
-- Current queued/running mutation count, recovery certificate existence, mutation-admission fence and Desktop watcher pending/inflight state remain UNKNOWN.
-- Parity is an observed generation snapshot, not a guarantee that no later writer can advance it.
-- No production state was intentionally mutated to probe admission or recovery behavior.
+- The matching real IPC acknowledgement caused the in-process GUI controller to clear only its matching incident and call `DesktopLiveWatcher.complete_recovery_certificate`; the latter requested rebaseline. It did not assume the verified revision remained latest after fence release.
+- The older generation 2 certificate was cancelled when generation 3 appeared. The gen3 incident was still registered at isolated service shutdown.
+- Real process shutdown and successful separate writer reacquisition show no stranded writer ownership. The exact release thread was not externally observed; source `CanonicalLiveServer` owner-thread finalization and focused foreign-thread-close regression are supporting evidence, not a substitute for a direct thread trace.
 
-## STAGE_2_VERDICT
+## DURABLE_LIVE_PARITY
 
-- `REPOSITORY_IDENTITY=PASS`
-- `DURABLE_METADATA=PASS`
-- `DURABLE_LIVE_PARITY=PASS`
-- `CANONICAL_REVISION=PASS`
-- `MUTATION_QUIESCENCE=UNKNOWN`
-- `RECOVERY_FENCE_STATE=UNKNOWN`
-- `WATCHER_ACTIVITY=UNKNOWN`
-- `TESTS_RUN=NONE`
-- `PRODUCTION_EDITS=NONE`
-- `FILES_CHANGED=NONE` for production/tests/docs; only this report was overwritten.
-- `ACTUAL_DIFF=DIFFS=NONE` for production/tests/docs.
-- Stage 2 ends here; await `proceduj`.
+- Isolated repository after deferred mutation: repo ID `ctx_4120055c`; LIVE revision 3/state_id `20261009_102121`; metadata revision 3/state_id `20261009_102121`; loaded durable embedded state revision 3/state_id `20261009_102121`. PASS / REAL_PROCESS IPC plus durable store reads.
+- Active production read-only observation after the isolated run: permanent repo ID `ctx_8efc50d8`, canonical root `C:\Temp\Contextor_Repo`; durable metadata revision 104/state_id `20261009_100948`; loaded embedded durable state revision 104/same state ID; LIVE `authority_status` revision 104, repo ID and root match; LIVE snapshot envelope and embedded state revision 104, embedded state ID `20261009_100948`. LIVE service PID 11484, instance `49c8405bd2ec4897b29c987af6b916d6`, lease generation 6. PASS for observed parity; no causation is inferred for revision 104.
+- Contextor `get_live_events(after_revision=103, limit=10)` returned revision 104, `continuity=continuous`, `resync_required=false`, event `publish` with origin `desktop_analysis`, status `PUBLISHED`. This is direct retained-event continuity evidence, not proof of private queue emptiness.
 
+## EVIDENCE_LIMITS
+
+- The actual OS watchdog event observer, actual Desktop Tk mainloop, real GUI prompt rendering, and Desktop backend ownership claim were intentionally not started. Their full cross-process cooperation remains UNKNOWN beyond the tested in-process controller/watcher logic.
+- The in-process GUI FULL analysis callback was deliberately stubbed to avoid automatic FULL; thus this run certifies recovery gate handling and IPC completion, not real user-directed FULL work.
+- The service owner thread's identity at lease release was not directly exposed in the real-process integration. Successful reacquisition proves release occurred, while owner-thread safety remains supported by source and focused regression rather than runtime thread-ID evidence.
+- No private production mutation coordinator or Desktop watcher queue was inspected. Active production quiescence is UNKNOWN even though durable/LIVE parity and retained-event continuity passed.
+- Focused regressions: `tests/test_recovery_authority_gate.py::test_disconnected_certificate_expires_on_owner_thread`, `::test_foreign_thread_close_wakes_service_and_releases_on_owner`; `tests/test_gui_live_startup.py::test_older_recovery_certificate_cannot_clear_newer_incident`; `tests/test_watcher_recovery_admission.py::test_recovery_release_rescans_and_revalidates_against_current_live`, `::test_rebaseline_failure_preserves_work_and_retries`, `::test_inflight_status_reconciles_during_recovery_without_trusting_baseline`. Result: **10 passed**, 1 external Authlib deprecation warning, 3.51 seconds. No full pytest suite.
+
+## FINAL_VERDICT
+
+- **PARTIAL CERTIFICATION.** Scenarios 1–11 passed at the evidence levels specified above. Scenario 12 passed for isolated service shutdown and writer lease reacquisition; direct proof of the releasing OS thread is UNKNOWN. Actual watchdog notification and Tk Desktop runtime integration were outside the safe isolated harness and remain UNKNOWN. No production defect was observed in the exercised real LIVE IPC and watcher/GUI recovery path.
+- Production/test/docs files changed: `FILES_CHANGED=NONE`. `ACTUAL_DIFF=DIFFS=NONE` for production/test/docs. This report is the sole task artifact. No services were restarted and no active-repository canonical mutation was submitted.
