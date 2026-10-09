@@ -1,417 +1,143 @@
-# L32C_CACHED_ANALYTICS_PREREQUISITE_TRUST_GATE
+# L32D_REMAINING_FRESHNESS_BOUNDARY_AUDIT
 
 ## CURRENT_HEAD
 
-`8927890c31676c34d3187931cc46785a8ecb748e` (user-specified verified starting HEAD). Contextor MCP first: retrieved complete `ensure_cached_analytics`, `dependency_matrix_inputs_are_fresh`, and `materialize_incremental_state`; all source lookups reported `workspace_sync=verified`, canonical LIVE revision 133. Blast-radius lookup confirms runtime consumers in the incremental engine and hydration chain. Git confirmed the exact anchor before edits. No full analysis, actual-repository update_file, or service restart.
+`78fe915166c92ff44079d7c5d0ef52f5d8b7ae0e` (`main`, 2026-10-09 20:54:11 +02:00). `git status --short` was empty. The inspected source files matched HEAD (`git diff --exit-code` clean).
 
-## FILES_CHANGED
+## RUNTIME_IDENTITY
 
-- `contextor/core/analysis/incremental/materialization.py`
-- `tests/test_cached_facts_live_analytics.py`
-
-## PRE_FIX_RED_RESULTS
-
-Added negative and isolated durable repro tests before production change. Exact new regression command:
-
-```text
-python -m pytest -q tests/test_cached_facts_live_analytics.py -k 'requires_trusted_artifact or untrusted_artifact_consumption_invalidates or isolated_snapshot_hydration_does_not_publish'
-8 failed, 15 deselected, 1 external Authlib warning
-```
-
-All eight failures were expected: UNKNOWN, stale, None, list and dict artifact-consumption markers, pre-populated fresh cache invalidation, and both persisted/hydrated cases (UNKNOWN and stale) incorrectly ended with `cached_analytics_state='fresh'`.
-
-## ARTIFACT_PREREQUISITE_MATRIX
-
-| Prerequisite state | Cache before materialization | Result |
+| Component | Directly observed identity | Endpoint / relation |
 |---|---|---|
-| Valid fresh artifact consumption + valid graph | Empty/deferred | Successful RAM compute may yield fresh |
-| Valid fresh artifact consumption + valid graph | Fresh/populated | Preserved; no unnecessary recompute |
-| artifact state UNKNOWN, stale, None, list or dict | Empty/deferred | stale; no computation |
-| artifact state UNKNOWN/stale/invalid | Fresh/populated | stale; payload retained but untrusted |
-| artifact state deferred | Fresh/populated | deferred; payload retained |
-| artifact state deferred | Previously stale/populated | stale preserved |
-| resync_required=True | Any cache | stale |
-| Missing/invalid graph | Empty/deferred | stale; no computation |
+| MCP backend | PID 7220; `C:\SpiralProphet\python\WPy64-31090\python-3.10.9.amd64\python.exe -u -m contextor.mcp_main`; started 2026-10-09 20:56:13 Europe/Warsaw | Owns listener `127.0.0.1:8765`; parent PID 11600 (`C:\Temp\Contextor_Repo\.venv\Scripts\python.exe`), whose parent is Desktop GUI PID 2684. |
+| LIVE authority | Endpoint metadata: PID 7048, `127.0.0.1:59858`, service instance `9f9fa783c97848fca0073f7103a1490a`, lease generation 10, owner PID 2684; endpoint listener is PID 7048 | PID 7048 started 2026-10-09 17:33:50 Europe/Warsaw; parent PID 9040, whose parent is Desktop GUI PID 2684. This process predates the L32C source edit and is reported separately from the MCP backend. |
+| Desktop owner | PID 2684, `C:\SpiralProphet\python\WPy64-31090\python-3.10.9.amd64\python.exe C:\Temp\Contextor_Repo\main.py --gui`; started 17:33:47 Europe/Warsaw | Parent of the LIVE launcher and MCP launcher. |
 
-Production guard calls existing `dependency_matrix_inputs_are_fresh`, which requires no resync, genuinely fresh/validated artifact-consumption coverage, and a graph with dict `hard_edges` (`state_manager.py:686-707`). The existing analytics algorithm is unchanged.
+The `materialization.py` source last-write time was 2026-10-09 19:58:39 Europe/Warsaw; the MCP backend started afterward, at 20:56:13. The endpoint file and OS listener agree for the LIVE authority. No restart or process mutation was performed.
 
-## OLD_FRESH_CACHE_INVALIDATION
+## L32C_RUNTIME_CERTIFICATION
 
-New direct regression sets cache state fresh with a populated visibility payload and stale artifact consumption. Result: marker becomes stale and payload remains byte-for-byte/value-equal. Direct negative matrix also checks UNKNOWN, stale, None, list and dict with structurally valid canonical map and nonempty module domain; all become stale and leave empty cache empty.
+**L32C_RUNTIME=PASS (source/process evidence; no loaded-function-object introspection).**
 
-## ISOLATED_SNAPSHOT_REPRODUCTION
+Contextor MCP returned the complete current `ensure_cached_analytics` implementation at `contextor/core/analysis/incremental/materialization.py:164-208`; its source response reports `workspace_sync=verified`, revision 139, provenance `live`. The implementation calls `dependency_matrix_inputs_are_fresh`; that predicate rejects `resync_required`, requires genuinely fresh artifact consumption, and requires a non-null graph with a `hard_edges` dict. The correction is therefore present in current source and the MCP process started after the source modification. I did not inspect an imported Python function object's `__code__` inside PID 7220, so this is not direct in-process code introspection.
 
-Temporary repository contains real `contextor/core/analysis/mod.py` defining `foo` and `contextor/ui/consumer.py` defining `VALUE`. Real incremental updates establish modules/artifacts/graph and initially classify the definer visibility as private. A separate deep-copied state retains exact canonical target-key coverage, replaces only `mod::foo` consumer facts with the structurally valid obsolete `contextor.ui.consumer` / `api_imports` entry, and uses UNKNOWN or stale artifact marker, deferred cached marker, empty cache, resync false.
+Direct `get_project_architecture` MCP response:
 
-Real `save_snapshot` writes revision 1 with repository identity and matching FileState generation. Real `load_snapshot` preserves selected marker, entry and revision. Real `IncrementalAnalysisEngine` initialization now results in stale cached analytics, retains no computed cache, and isolated in-process `get_module_context` does not expose public visibility. Before patch both parameter cases failed because hydration produced fresh cache and the public path could consume the obsolete consumer-derived visibility. Only tmp_path state was mutated; actual LIVE state was untouched.
+- `canonical_revision=139`
+- `provenance=live`
+- `canonical_state=fresh`
+- `resync_required=false`
+- `workspace_sync=unverified` **exactly as returned**
+- `module_count=427`, `parse_stale_modules={}`
+- reported module, graph, topology, artifact-consumption, cycles, collisions, and lineage families are all `fresh`
 
-## POST_HYDRATION_RESULT
+The same response's persisted report bundle references older analysis HEAD `99f9f0a…`; that report snapshot is not current-source certification. Current-source identity is established by Git HEAD and the MCP symbol fetch. Symbol-fetch `workspace_sync=verified` applies to that exact source target and does not replace the project-overlay value `unverified`.
 
-Both isolated roundtrips pass for artifact marker UNKNOWN and stale. The prerequisite guard invalidates freshness before recompute and preserves the empty cache. FileState state_id/revision are asserted equal to the committed snapshot metadata.
+Evidence labels: process/listener and MCP payload are **DIRECT_EVIDENCE**; source-to-consumer paths below are **CODE_PATH_PROVED**; that PID 7220 is the process serving the Contextor tool connection is a process/endpoint correlation, not introspection of its loaded function objects.
 
-## PUBLIC_VISIBILITY_RESULT
+## GRAPH_AUTHORITY_ANALYSIS
 
-For both persisted failure cases, the isolated module-context response contains no `visibility='public'` certification from the obsolete consumer entry. The sentinel is not computed into cached analytics. This is test-based local MCP projection evidence, not a live malformed-state request.
+`ProjectGraph` documents `hard_edges: dict[str, set[str]]` (`contextor/core/domain/graph.py:10-18`), while `RepositoryAnalysisState.dependency_graph` is typed `Any` (`contextor/core/analysis/state_manager.py:89`). The stricter `dependency_matrix_inputs_are_fresh` (`state_manager.py:686-707`) checks `resync_required`, artifact-consumption freshness, graph presence, and `hard_edges` being a dict. `ensure_topology_analytics` and `ensure_cycles` do not call this predicate or equivalent authority checks.
 
-## LEGACY_MIGRATION_RESULT
+Both materializers return early for a fresh marker; topology returns for fresh populated analytics, and cycles preserves any fresh state, including empty. Both preserve an exact `stale` marker. For any other marker they only require `dependency_graph is not None`; they use `getattr(..., "hard_edges", {}) or {}` and set the family marker to `fresh` after computation. Neither checks `resync_required`, source/module freshness, graph type, or edge-map structure before certifying.
 
-Changed only `_CachedAnalyticsLegacySnapshotState.artifact_consumption` from empty dict to recognized `{"_report": {}}`. The existing `test_snapshot_lifecycle_and_consumer_projection` now asserts migrated `artifact_consumption_state='fresh'` before accepting cached analytics fresh; its source-free reconstruction and public projection assertions still pass. No legacy exemption was added to the production trust gate.
+This is publicly reachable. `get_project_architecture` calls `_live_state_overlay`; the overlay gets the engine and calls `diagnostics_summary(root, state)` before independently building a freshness envelope. `get_or_init_engine` obtains a LIVE snapshot without a resync filter and constructs `IncrementalAnalysisEngine`; its constructor unconditionally calls `materialize_incremental_state`. The snapshot IPC returns the state and revision without a resync gate. Thus a resync-required state can enter these materializers, and the public architecture response can carry `canonical_state=stale` alongside fresh family/diagnostic output.
 
-## VALID_INPUT_PARITY
+For a parse-stale module without a lost-resync condition, graph-derived facts can describe retained last-known-good canonical truth. `module_current_truth` explicitly labels that provenance `last_known_good`, and `get_project_architecture` includes `parse_stale_modules` plus an advisory warning. This is not the same as proving current disk truth; by itself it is an explicitly surfaced stale-source/LKG condition. `resync_required=true` is different: the derived graph is not certified authoritative, yet topology/cycles can still be labeled fresh.
 
-Positive control asserts deferred empty-cache computation with fresh artifact map and graph equals the `compute_cached_analytics` RAM oracle. Existing fresh populated data remains preserved; stale data remains stale. New controls verify resync and missing graph fail closed, deferred prerequisites downgrade fresh to deferred and preserve stale, and unrelated topology/cycle markers remain unchanged.
+Topology consumers `get_module_context` and `get_file_edit_context` reject `resync_required` before returning their normal projections and use exact `topology_metrics_state == "fresh"` checks. The public `get_project_architecture` path does not reject resync and exposes a cycles diagnostic summary plus raw family labels.
 
-## TARGETED_TEST_RESULTS
+## TOPOLOGY_AND_CYCLES_RECOMPUTATION_MATRIX
 
-After production patch and fixture correction, exact relevant subset: **13 passed, 10 deselected, 1 external Authlib warning**. Entire `tests/test_cached_facts_live_analytics.py`: **27 passed, 1 external Authlib warning**. Required five-file gate:
+| Condition | Current behavior | Assessment |
+|---|---|---|
+| `resync_required=True`, existing fresh payload | Fresh payload is preserved without checking graph authority. | **PROVED_DEFECT**: stale canonical envelope can accompany fresh family/diagnostic output. |
+| `resync_required=True`, deferred marker, non-null graph | Recomputes and writes `fresh`; no resync gate. | **PROVED_DEFECT**, directly reproduced on an isolated object. |
+| Falsey malformed `hard_edges=[]` | `or {}` converts it to an empty map; topology/cycle computation succeeds and marks fresh. `dependency_matrix_inputs_are_fresh` would reject the same shape. | **PROVED_DEFECT**, directly reproduced. Store save/load has no graph-specific shape validation (`git grep` found no `dependency_graph` handling in `store.py`); no persisted malformed-graph roundtrip was executed. |
+| Truthy malformed graph | Exceptions from the compute path are caught; for deferred markers the observed code leaves them non-fresh. Some malformed dict/value shapes may still be iterable and are not validated. | **UNKNOWN** for untested truthy malformed shapes; graph authority is not established by existence. |
+| Exact stale marker | Returns without recompute and retains stale payload/marker. | Fail-closed for that marker. |
+| Missing/`None`/unknown/list/dict marker, trusted valid graph, successful computation | Missing/`None` becomes deferred; other non-stale values fall through. A successful recomputation replaces the marker with `fresh`. | Legitimate recomputation; not marker-only promotion when the graph is authoritative. |
+| Valid graph with parse-stale source | May derive fresh analytics from last-known-good graph; aggregate source/canonical status is stale and identifies LKG facts. | Explicit LKG semantics, not a proof of current disk freshness. |
 
-```text
-tests/test_cached_facts_live_analytics.py
-tests/test_matrix_clusters_state_lifecycle.py
-tests/test_graph_only_live_analytics.py
-tests/test_mcp_incremental_hydration.py
-tests/test_freshness_preservation.py
-97 passed, 1 external Authlib warning, 48.17 seconds
-```
+## PUBLIC_MARKER_RESPONSE_CONTRACT
 
-`git diff --check` passed. No full repository suite.
+`build_state_freshness` sets aggregate `canonical_state=stale` when `resync_required` is true, but directly copies topology, artifact-consumption, cycles, collisions, and lineage markers into `families` (`query_helpers.py:345-347,443-451`). It does not validate their type or vocabulary. `get_project_architecture` serializes this envelope with `json.dumps`.
 
-## REMAINING_GAPS
+Documentation describes these fields as per-family freshness flags/states. It explicitly enumerates `get_name_collisions.availability` as `fresh|stale|deferred|unavailable`, and `get_file_edit_context.syntax_diagnostics.availability` as `fresh|not_materialized|deferred|stale|unavailable`; it does not publish a complete enum for every `state_freshness.families` key. A list/dict marker is therefore emitted as JSON-valid list/dict, but it is not a scalar freshness flag and violates the documented field shape. Unknown strings, bools, integers, lists, and dicts are not normalized by `build_state_freshness`.
 
-No remaining gap in the requested trust-gate contract was identified in the focused paths. The gate intentionally relies on the existing dependency-matrix prerequisite predicate; unsupported malformed structures outside that predicate's documented graph/artifact coverage are not certified by this test scope.
+L32A guards remain effective in the diagnostics-specific projection: `_availability` accepts only the four string statuses and returns `unavailable` otherwise; syntax status also checks `isinstance(str)`. `get_name_collisions` normalizes malformed availability before its fresh/nonfresh branch. These guards prevent malformed markers from becoming fresh in those branches and avoid list/dict membership `TypeError` there.
 
-## MCP_RESTART_REQUIRED
+They do not close the resync boundary:
 
-**YES.** The changed core runtime module requires a manual MCP backend restart before runtime certification. No restart was performed.
+- `diagnostics_summary_for_state` counts cycles whenever `cycles_state == "fresh"`; it does not check `resync_required`.
+- `ensure_collisions` has no resync gate, and `get_name_collisions` has no resync gate. With complete collision facts, a fresh collision marker remains fresh during engine materialization; the public tool can then return collision facts with `availability="fresh"` while canonical state requires resync.
+- `lookup_artifact_by_symbol` rejects a resync-required engine before projecting results. If consumption is unavailable for another reason, it returns `consumers.available=false` and a reason, but echoes the raw marker in `consumers.state`; the response does not report consumer facts as available. The nested `state` field's client contract is not separately documented.
+
+The `get_symbol_lineage` public path has a separate, directly confirmed resync gap. Its docs say resync fails closed, but `query_live_symbol_lineage` builds a target catalog and selected facts without rejecting `state.resync_required`; the state freshness helper merely sets `canonical_state=stale`. IPC dispatch invokes the handler without a resync gate. The isolated query below resolved and returned selected facts while reporting stale canonical state and fresh lineage/index families. This is a proved public freshness-boundary defect, not a malformed-marker defect.
+
+**PUBLIC_MARKERS=PROVED_DEFECT.**
+
+## LINEAGE_INDEX_PUBLIC_REACHABILITY
+
+`RepositoryStateLineageBackend.__init__` validates lineage source mapping but does not inspect the query-index marker (`backend.py:66-87`). `metadata()` performs `query_index_state not in {"not_materialized", "fresh", "stale"}` (`backend.py:151-162`); a list/dict raises `TypeError` at this membership test. The canonical query IPC catches handler exceptions and returns `canonical_query_failed`; it does not terminate the service.
+
+For supported hydration, `_normalize_lineage_query_index_state` ignores the stored query-index marker and rebuilds both indexes from lineage facts, then sets `fresh` or `not_materialized` (`store.py:441-466`; called within `load_snapshot` at 2122 and 2271). `ensure_lineage_query_index` likewise rebuilds non-fresh/inconsistent indexes and writes an allowed status (`materialization.py:15-46`). Incremental/full-analysis writers use `fresh`/`not_materialized` states. The public `get_symbol_lineage` path uses the already-running LIVE owner's state and has no public argument that can set this marker; normal snapshot hydration and supported producers normalize/write it.
+
+Therefore **LINEAGE_INDEX=NOT_PUBLICLY_REACHABLE** for an unhashable list/dict query-index marker through the supported public MCP inputs. Direct internal Python state construction/mutation can reach the `TypeError`; it is not evidence of a public MCP input defect. This verdict does not close the separate resync bug described above.
+
+## ISOLATED_PROBE_RESULTS
+
+1. **Graph probe (synthetic in-memory state only):** `resync_required=True`, deferred topology/cycles markers, and `hard_edges=[]`, `soft_edges=[]` produced `topology_metrics_state="fresh"`, `cycles_state="fresh"`, empty computed facts, and `diagnostics_summary.cycles={count:0, availability:"fresh"}`. A separate `build_state_freshness` call on the same synthetic condition returned `canonical_state="stale"`, with topology and cycles still `fresh`.
+2. **Public marker-shape probe (synthetic state only):** list, dict, unknown-string, and bool family markers passed through `build_state_freshness`; `json.dumps` succeeded and preserved those wrong-shaped values in `families`.
+3. **Lineage resync probe (existing in-memory fixture; no pytest):** `query_live_symbol_lineage(..., "A17/2", ("interface",))` with `resync_required=True` returned `resolution="resolved"`, selected facts present, `canonical_state="stale"`, and lineage/index families `fresh`.
+4. The cycle detector's empty-graph hash cache entry already existed with matching hash and empty result; its last-write time was 18:54:02 Europe/Warsaw, before the probe. The detector returned that cache entry, so no cache write occurred. Post-probe Git status and source diff remained clean. No active LIVE state or snapshot was modified.
+
+The first lineage probe invocation stopped before query because the fixture return arity was unpacked incorrectly; the corrected isolated invocation produced the result above.
+
+## EXACT_SOURCE_PATHS_AND_LINES
+
+- `contextor/core/analysis/incremental/materialization.py:15-46,121-208,211-245,314-357,548-569`
+- `contextor/core/analysis/incremental/engine.py:92-104,453-463,780-791,981-1002`
+- `contextor/core/analysis/state_manager.py:89-98,227-243,667-707`
+- `contextor/core/domain/graph.py:10-18`
+- `contextor/core/reporting_engine/graph_analytics.py:2024-2091`
+- `contextor/core/graph/cycles.py:47-110,157-273`
+- `contextor/mcp/runtime.py:210-268,311-419`
+- `contextor/mcp/query_helpers.py:302-483`
+- `contextor/core/diagnostics_projection.py:8-29,32-175`
+- `contextor/mcp/tools/get_project_architecture.py:162-237,277-369`
+- `contextor/mcp/tools/get_module_context.py:185-208,289-337`
+- `contextor/mcp/tools/get_file_edit_context.py:232-328,454-477`
+- `contextor/mcp/tools/get_name_collisions.py:73-247`
+- `contextor/mcp/tools/lookup_artifact_by_symbol.py:10-225`
+- `contextor/core/lineage_query/backend.py:63-178`
+- `contextor/core/lineage_query/live_query.py:229-282,338-428,471-685`
+- `contextor/mcp/tools/get_symbol_lineage.py:105-191`
+- `contextor/core/live_state/runtime.py:1045-1081`
+- `contextor/core/live_state/ipc.py:2171-2216,2241-2242`
+- `contextor/core/live_state/store.py:441-466,1926-2371` (query-index normalizer call sites at 2122 and 2271)
+- `contextor/core/live_state/hydration.py:29-112`
+- Existing regressions read: `tests/test_topology_bootstrap_and_consumer_truth.py:346-429`; `tests/test_cycles_live_lifecycle.py:103-149,423-458`; `tests/test_mcp_diagnostics.py:41-126`; `tests/analysis/test_lineage_query_backend.py:233-257`; `tests/analysis/test_lineage_live_query.py:1343-1410`.
+
+Existing graph tests cover valid deferred recomputation, exact stale preservation, and compute exceptions, but not resync-required or malformed graph shape. The lineage resync test checks only the stale freshness envelope, not whether selected facts are still returned. Backend tests cover valid, stale, and not-materialized index markers, not list/dict markers. No pytest suite was run.
+
+## UNRESOLVED_GAPS
+
+- `L32C_RUNTIME` is source/process certified; no direct loaded-code-object inspection was performed. The separate LIVE authority PID 7048 predates the source edit; the MCP backend PID 7220 is post-edit.
+- The probe establishes a concrete false-fresh graph case; it does not exhaust all truthy malformed edge-map/value shapes. Those shapes lack validation, and their outcomes vary between caught compute errors and successful iteration.
+- `state_freshness.families` has no fully enumerated per-family public enum in the retrieved documentation. Raw JSON type leakage is proved, but the documentation does not define behavior for every unknown string/status.
+- Query-index list/dict input is not publicly reachable via supported writers/hydration, but direct internal Python callers can still trigger the metadata `TypeError`.
+- No pytest execution was requested or performed. Existing regression assertions were read only.
+
+## FILES_CHANGED=NONE
+
+No source, test, or documentation files changed. `walkthrough.md` is the required task report and is excluded from the changed-source list.
+
+## ACTUAL_DIFF=NONE
 
 ## FINAL_VERDICT
 
-**FOCUSED_IMPLEMENTATION_PASS.** Exact auditor-designed prerequisite gate, isolated durable repro, legacy migration contract, positive oracle and required targeted regressions pass.
-
-## FULL_DIFFS
-
-```diff
-diff --git a/contextor/core/analysis/incremental/materialization.py b/contextor/core/analysis/incremental/materialization.py
-index 07eeaaa..a3c8a01 100644
---- a/contextor/core/analysis/incremental/materialization.py
-+++ b/contextor/core/analysis/incremental/materialization.py
-@@ -172,6 +172,21 @@ def ensure_cached_analytics(state: RepositoryAnalysisState) -> None:
-     if not hasattr(state, "cached_analytics") or state.cached_analytics is None:
-         state.cached_analytics = {}
- 
-+    from contextor.core.analysis.state_manager import (
-+        dependency_matrix_inputs_are_fresh,
-+    )
-+
-+    if not dependency_matrix_inputs_are_fresh(state):
-+        if (
-+            not getattr(state, "resync_required", False)
-+            and getattr(state, "artifact_consumption_state", None) == "deferred"
-+        ):
-+            if state.cached_analytics_state != "stale":
-+                state.cached_analytics_state = "deferred"
-+        else:
-+            state.cached_analytics_state = "stale"
-+        return
-+
-     if (
-         state.cached_analytics_state != "stale"
-         and not state.cached_analytics
-diff --git a/tests/test_cached_facts_live_analytics.py b/tests/test_cached_facts_live_analytics.py
-index e54ee94..938b93b 100644
---- a/tests/test_cached_facts_live_analytics.py
-+++ b/tests/test_cached_facts_live_analytics.py
-@@ -9,6 +9,7 @@ and zero-call execution minimality for pure implementation-body changes.
- """
- 
- from pathlib import Path
-+from copy import deepcopy
- from unittest.mock import patch, MagicMock
- import json
- import time
-@@ -22,6 +23,9 @@ from contextor.core.analysis.incremental.materialization import ensure_cached_an
- from contextor.core.analysis.state_manager import (
-     RepositoryAnalysisState,
-     FileStateManager,
-+    canonical_artifact_consumption_targets,
-+    validate_canonical_artifact_consumption,
-+    validate_canonical_artifact_consumption_coverage,
- )
- from contextor.core.domain.graph import ProjectGraph
- from contextor.core.domain.module import Module
-@@ -38,6 +42,7 @@ from contextor.core.reporting_engine.graph_analytics import (
- )
- from contextor.core.validator.layers import validate_layer_rules
- from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
-+from contextor.core.repository_identity import ensure_repository_identity
- from contextor.mcp_server import get_module_context
- from contextor.mcp.runtime import _live_engines
- 
-@@ -298,7 +303,7 @@ class _CachedAnalyticsLegacySnapshotState:
-         self.dependency_graph = graph
-         self.metrics = metrics
-         self.artifacts = {"contextor.core.analysis.mod": {"own_symbols": ["foo"]}}
--        self.artifact_consumption = {}
-+        self.artifact_consumption = {"_report": {}}
- 
- 
- def test_snapshot_lifecycle_and_consumer_projection(tmp_path):
-@@ -331,6 +336,7 @@ def test_snapshot_lifecycle_and_consumer_projection(tmp_path):
-         )
- 
-     # Reconstructed to fresh with zero disk reads
-+    assert engine.state.artifact_consumption_state == "fresh"
-     assert engine.state.cached_analytics_state == "fresh"
-     assert "contextor.core.analysis.mod" in engine.state.cached_analytics["module_layers"]
-     assert engine.state.cached_analytics["export_degree"]["contextor.core.analysis.mod"] == 1
-@@ -378,8 +384,17 @@ def test_none_cached_marker_preserves_obsolete_payload_without_certifying_it():
- 
- 
- def test_missing_cached_marker_with_populated_legacy_cache_is_not_fresh():
--    state = _CachedAnalyticsLegacySnapshotState({}, ProjectGraph({}, {}), {})
-+    module_name = "contextor.core.analysis.mod"
-+    state = _CachedAnalyticsLegacySnapshotState(
-+        {module_name: Module(module_name, "mod.py", "/tmp/mod.py", [])},
-+        ProjectGraph({module_name: set()}, {module_name: set()}),
-+        {},
-+    )
-     state.cached_analytics = {"module_layers": {"legacy.mod": "obsolete_layer"}}
-+    state.artifact_consumption = {
-+        f"{module_name}::foo": {"consumers": [], "channels": {}}
-+    }
-+    state.artifact_consumption_state = "fresh"
-     assert not hasattr(state, "cached_analytics_state")
- 
-     ensure_cached_analytics(state)
-@@ -477,6 +492,11 @@ def test_cached_marker_positive_lifecycle_preserves_other_families():
-     for marker in ("fresh", "stale"):
-         state = RepositoryAnalysisState(
-             modules={module_name: module},
-+            artifacts={module_name: {"own_symbols": ["foo"]}},
-+            artifact_consumption={
-+                f"{module_name}::foo": {"consumers": [], "channels": {}}
-+            },
-+            artifact_consumption_state="fresh",
-             dependency_graph=graph,
-             cached_analytics_state=marker,
-             cached_analytics=sentinel.copy(),
-@@ -491,6 +511,11 @@ def test_cached_marker_positive_lifecycle_preserves_other_families():
- 
-     deferred = RepositoryAnalysisState(
-         modules={module_name: module},
-+        artifacts={module_name: {"own_symbols": ["foo"]}},
-+        artifact_consumption={
-+            f"{module_name}::foo": {"consumers": [], "channels": {}}
-+        },
-+        artifact_consumption_state="fresh",
-         dependency_graph=graph,
-         cached_analytics_state="deferred",
-         cached_analytics={},
-@@ -498,12 +523,205 @@ def test_cached_marker_positive_lifecycle_preserves_other_families():
-         cycles_state="stale",
-     )
-     ensure_cached_analytics(deferred)
-+    oracle = compute_cached_analytics(
-+        modules=deferred.modules,
-+        artifacts=deferred.artifacts,
-+        artifact_consumption=deferred.artifact_consumption,
-+        hard_edges=deferred.dependency_graph.hard_edges,
-+    )
-     assert deferred.cached_analytics_state == "fresh"
--    assert deferred.cached_analytics["module_layers"][module_name] == "runtime"
-+    assert deferred.cached_analytics == oracle
-     assert deferred.topology_metrics_state == "stale"
-     assert deferred.cycles_state == "stale"
- 
- 
-+@pytest.mark.parametrize("missing_graph", [False, True], ids=["resync", "missing_graph"])
-+def test_cached_analytics_requires_valid_graph_and_no_resync(missing_graph):
-+    module_name = "contextor.core.analysis.mod"
-+    graph = None if missing_graph else ProjectGraph({module_name: set()}, {module_name: set()})
-+    state = RepositoryAnalysisState(
-+        modules={module_name: Module(module_name, "mod.py", "/tmp/mod.py", [])},
-+        artifacts={module_name: {"own_symbols": ["foo"]}},
-+        artifact_consumption={
-+            f"{module_name}::foo": {"consumers": [], "channels": {}}
-+        },
-+        artifact_consumption_state="fresh",
-+        dependency_graph=graph,
-+        cached_analytics_state="deferred",
-+        cached_analytics={},
-+    )
-+    state.resync_required = not missing_graph
-+
-+    ensure_cached_analytics(state)
-+
-+    assert state.cached_analytics_state == "stale"
-+    assert state.cached_analytics == {}
-+
-+
-+@pytest.mark.parametrize(
-+    ("cached_state", "expected_state"),
-+    [("fresh", "deferred"), ("stale", "stale")],
-+)
-+def test_deferred_artifact_prerequisite_degrades_only_fresh_cache(cached_state, expected_state):
-+    module_name = "contextor.core.analysis.mod"
-+    payload = {"visibility": {module_name: "public"}}
-+    state = RepositoryAnalysisState(
-+        modules={module_name: Module(module_name, "mod.py", "/tmp/mod.py", [])},
-+        artifacts={module_name: {"own_symbols": ["foo"]}},
-+        artifact_consumption={
-+            f"{module_name}::foo": {"consumers": [], "channels": {}}
-+        },
-+        artifact_consumption_state="deferred",
-+        dependency_graph=ProjectGraph({module_name: set()}, {module_name: set()}),
-+        cached_analytics_state=cached_state,
-+        cached_analytics=deepcopy(payload),
-+    )
-+
-+    ensure_cached_analytics(state)
-+
-+    assert state.cached_analytics_state == expected_state
-+    assert state.cached_analytics == payload
-+
-+
-+@pytest.mark.parametrize("artifact_state", ["UNKNOWN", "stale", None, [], {}], ids=repr)
-+def test_cached_analytics_requires_trusted_artifact_consumption(artifact_state):
-+    module_name = "contextor.core.analysis.mod"
-+    target = f"{module_name}::foo"
-+    state = RepositoryAnalysisState(
-+        modules={
-+            module_name: Module(
-+                module_name,
-+                "contextor/core/analysis/mod.py",
-+                "/tmp/mod.py",
-+                [],
-+            )
-+        },
-+        artifacts={module_name: {"own_symbols": ["foo"]}},
-+        artifact_consumption={target: {"consumers": [], "channels": {}}},
-+        artifact_consumption_state=artifact_state,
-+        dependency_graph=ProjectGraph({module_name: set()}, {module_name: set()}),
-+        cached_analytics_state="deferred",
-+        cached_analytics={},
-+    )
-+    assert validate_canonical_artifact_consumption(state.artifact_consumption)
-+    assert validate_canonical_artifact_consumption_coverage(
-+        state.artifact_consumption,
-+        state.artifacts,
-+    )
-+    assert set(state.artifact_consumption) == canonical_artifact_consumption_targets(
-+        state.artifacts
-+    )
-+
-+    ensure_cached_analytics(state)
-+
-+    assert state.cached_analytics_state == "stale"
-+    assert state.cached_analytics == {}
-+
-+
-+def test_untrusted_artifact_consumption_invalidates_existing_fresh_cached_payload():
-+    module_name = "contextor.core.analysis.mod"
-+    cached = {"visibility": {module_name: "public"}, "sentinel": "retain"}
-+    state = RepositoryAnalysisState(
-+        modules={module_name: Module(module_name, "mod.py", "/tmp/mod.py", [])},
-+        artifact_consumption_state="stale",
-+        dependency_graph=ProjectGraph({module_name: set()}, {module_name: set()}),
-+        cached_analytics_state="fresh",
-+        cached_analytics=deepcopy(cached),
-+    )
-+
-+    ensure_cached_analytics(state)
-+
-+    assert state.cached_analytics_state == "stale"
-+    assert state.cached_analytics == cached
-+
-+
-+@pytest.mark.parametrize("artifact_state", ["UNKNOWN", "stale"])
-+def test_isolated_snapshot_hydration_does_not_publish_visibility_from_untrusted_consumers(
-+    tmp_path,
-+    artifact_state,
-+):
-+    repo = tmp_path / "repo"
-+    mod_file = repo / "contextor" / "core" / "analysis" / "mod.py"
-+    consumer_file = repo / "contextor" / "ui" / "consumer.py"
-+    mod_file.parent.mkdir(parents=True)
-+    consumer_file.parent.mkdir(parents=True)
-+    mod_file.write_text("def foo():\n    return 1\n", encoding="utf-8")
-+    consumer_file.write_text("VALUE = 2\n", encoding="utf-8")
-+
-+    identity = ensure_repository_identity(repo)[0]
-+    cache_dir = tmp_path / "cache"
-+    state_manager = FileStateManager(str(cache_dir))
-+    engine = IncrementalAnalysisEngine(
-+        RepositoryAnalysisState(modules={}),
-+        PersistentIdentityRegistry(str(repo)),
-+        state_manager,
-+        str(repo),
-+    )
-+    assert engine.update_file(str(mod_file)).status == "UPDATED"
-+    assert engine.update_file(str(consumer_file)).status == "UPDATED"
-+    definer = "contextor.core.analysis.mod"
-+    consumer = "contextor.ui.consumer"
-+    target = f"{definer}::foo"
-+    assert engine.state.cached_analytics["visibility"][definer] == "private"
-+
-+    candidate = deepcopy(engine.state)
-+    assert set(candidate.artifact_consumption) == canonical_artifact_consumption_targets(
-+        candidate.artifacts
-+    )
-+    candidate.artifact_consumption[target] = {
-+        "consumers": [consumer],
-+        "channels": {consumer: ["api_imports"]},
-+    }
-+    candidate.artifact_consumption_state = artifact_state
-+    candidate.cached_analytics_state = "deferred"
-+    candidate.cached_analytics = {}
-+    candidate.resync_required = False
-+    assert validate_canonical_artifact_consumption(candidate.artifact_consumption)
-+    assert validate_canonical_artifact_consumption_coverage(
-+        candidate.artifact_consumption,
-+        candidate.artifacts,
-+    )
-+    assert target in candidate.artifact_consumption
-+    assert candidate.artifact_consumption[target]["channels"][consumer] == ["api_imports"]
-+
-+    state_id = "l32c-prerequisite-trust"
-+    metadata = save_snapshot(
-+        candidate,
-+        cache_dir,
-+        state_id,
-+        repo_id=identity.repo_id,
-+        root_path=identity.root_path,
-+        exact_revision=1,
-+        file_state_payload=state_manager.build_payload(state_id, 1),
-+    )
-+    loaded = load_snapshot(
-+        cache_dir,
-+        expected_state_id=state_id,
-+        expected_repo_id=identity.repo_id,
-+        expected_root_path=identity.root_path,
-+    )
-+    assert loaded is not None
-+    loaded_state, loaded_metadata = loaded
-+    assert loaded_metadata.revision == metadata.revision == 1
-+    assert loaded_state.artifact_consumption_state == artifact_state
-+    hydrated_files = FileStateManager(str(cache_dir))
-+    assert hydrated_files.revision == loaded_metadata.revision
-+    assert hydrated_files.state_id == loaded_metadata.state_id
-+    hydrated = IncrementalAnalysisEngine(
-+        loaded_state,
-+        PersistentIdentityRegistry(str(repo)),
-+        hydrated_files,
-+        str(repo),
-+    )
-+
-+    assert hydrated.state.cached_analytics_state == "stale"
-+    assert hydrated.state.cached_analytics == {}
-+    fn = getattr(get_module_context, "fn", get_module_context)
-+    with patch.dict(_live_engines, {str(repo.resolve()): hydrated}):
-+        projected = json.loads(fn(str(repo), definer, compact=True))
-+    assert projected["metrics"].get("visibility") != "public"
-+
-+
- def test_atomicity_and_isolation_on_failure(tmp_path):
-     """6. Failure during cached analytics computation does not corrupt published state."""
-     models_py, service_py, _, _ = _setup_multi_layer_repo(tmp_path)
-```
+- `L32C_RUNTIME=PASS` — process/source evidence confirms the MCP backend started after the source edit and Contextor returned the verified corrected implementation; no direct imported-function introspection.
+- `GRAPH_TRUST=PROVED_DEFECT` — topology/cycles can be certified fresh when resync is required; a falsey invalid graph is silently converted to empty and certified fresh.
+- `PUBLIC_MARKERS=PROVED_DEFECT` — malformed markers pass raw into the public family envelope, and resync-required cycles/collisions/lineage paths can still expose fresh labels or selected facts.
+- `LINEAGE_INDEX=NOT_PUBLICLY_REACHABLE` — unhashable marker TypeError exists for direct internal state, but supported snapshot hydration and marker writers normalize it before public query access.
+- `OVERALL_L32=PARTIAL` — final pass is blocked by the proved graph and public resync freshness defects; the current observed LIVE state itself is revision 139, fresh, and not resync-required.
