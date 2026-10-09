@@ -1,203 +1,230 @@
-# L37/L38 A3C T9 Tk recovery timer lifecycle fix
+# L37_L38_A3C_GLOBAL_REGRESSION_REPAIR — checkpoint
+
+## CURRENT_HEAD
+`908bf1cf45769a9f5280d0489ac7670a513089e8` (unchanged). Target source was clean at this HEAD before fixture edits. Contextor canonical LIVE source was fresh and `workspace_sync=verified`; latest inspected revision 111.
+
+## Stage
+Focused diagnosis and fixture-only work. Stopped at a proven source/test behavior divergence in Group B before any production edit. No full repository suite, service restart, or manual LIVE update was run.
+
+## T9_CALLBACK_ORIGIN
+**Classification: UNKNOWN / not reproduced.** The exact T9 node passed in the corrected ten-node run after the fixture helper change. No invalid Tcl diagnostic appeared in that run. Direct source evidence: `ContextorGUI.__init__` stores the ID returned by `root.after(100, self._drain_live_recovery_queue)`; the drain reschedule also stores the new ID; `on_closing` clears and cancels the stored recovery ID before `root.destroy()`. T9 additionally schedules a test-harness post-paint lambda at 50 ms (the real post-paint method is monkeypatched to a no-op); that callback is not the recovery callback and its origin is not evidence for the reported Tcl diagnostic. The preceding real-Tk test's cleanup is a possible test-harness lead, but no causal link was demonstrated. A1 production defect, A2 harness contamination, and A3 shared-state interference are therefore not proven.
+
+## T9_CORRECTION
+None. Do not change production or remove diagnostic assertions on current evidence. Full `tests/test_gui_live_startup.py` was not run at this checkpoint; T9 origin remains unresolved.
+
+## DESKTOP_FIXTURE_CONTRACT
+A helper was added to initialize the GUI recovery fields used by the real methods: retry/recovery timer IDs, queue, pending-prompt set, lock, incident registry, generation registry, and closing flag. It binds `_live_recovery_incident` and `_watcher_recovery_admission` using the real `ContextorGUI` function descriptors. The two generation-conflict fixtures retain call assertions with a `MagicMock(wraps=real_bound_method)` spy for `_request_full_analysis_recovery`; the production method executes and creates the actual recovery incident, so the spy does not bypass incident identity or admission.
+
+**Direct source evidence / Group B divergence:** `contextor/ui/gui.py:1772-1778` reports a generation conflict and requests full-analysis recovery, but that branch has no return. The method then constructs `DesktopLiveWatcher` with the real recovery-admission closure (`:1925-1931`), creates the event feed, and calls `watcher.start()` / `feed.start()` (`:1955-1956`). `DesktopLiveWatcher._recovery_is_active` is checked by `poll_once` at lines 669, 715, and 805, so subsequent recovery actions are gated; that gate does not prevent startup itself. The two existing tests explicitly expect neither watcher nor feed to start. With the real request method executing, both tests still fail at `watcher_starts == []` and observe `[True, 'started']`. The source/test startup contract conflict is proven; whether the intended contract is “do not start components” or “start but defer incremental actions” requires the auditor's design decision. No production file was changed.
 
 ## FILES_CHANGED
-
-- `C:\Temp\Contextor_Repo\contextor\ui\gui.py`
-- `C:\Temp\Contextor_Repo\tests\test_gui_live_startup.py`
-- HEAD before edits: `21db1dd4ef53e890317e386cdd20f25ab48cacd6`. No other source/test/documentation file changed. This `walkthrough.md` is the task report.
-
-## T9_ROOT_CAUSE
-
-- Contextor MCP was used first, including deferred discovery and current tool documentation. `get_symbol_implementation` returned complete `ContextorGUI.__init__` (`gui.py:99-162`), `_drain_live_recovery_queue` (`:1185-1259`) and `on_closing` (`:2131-2244`) with `workspace_sync=verified` at canonical revision 106. Git verified the exact anchors and focused test consumers before edits. (DIRECT_EVIDENCE / CODE_PATH_PROVED.)
-- The initial recovery `root.after(100, ...)` and recurring recovery `root.after(100, ...)` were untracked. `on_closing` canceled the separate LIVE retry timer but had no recovery timer ID to cancel. The prior real-Tk audit found a pending Tcl `after` command at root destruction; processing the post-destroy Tcl queue emitted `invalid command name`. (CODE_PATH_PROVED plus prior DIRECT_EVIDENCE.)
-
-## TIMER_LIFECYCLE_CHANGE
-
-- `ContextorGUI.__init__` initializes `_live_recovery_after_id=None` and stores the first recovery timer ID.
-- `_drain_live_recovery_queue` clears the executing callback's ID at entry and stores the next scheduled ID only when `_closing` is false. Incident, prompt, generation and certificate logic is unchanged.
-- `on_closing` sets `_closing=True`, copies and clears the recovery timer ID, then cancels that timer before the existing long-running shutdown operations. Cancellation catches only `tk.TclError` and `RuntimeError`; a second shutdown has no recovery timer to cancel. The existing LIVE retry timer logic was not modified.
-- IPC, watcher, durable storage, backend ownership and publication semantics were not edited. No Desktop/LIVE/MCP restart or manual `update_file` occurred.
-
-## REAL_TK_TEST_EVIDENCE
-
-- New focused test creates a real Tk root and `ContextorGUI(root)` with UI construction, backend startup and unrelated external shutdown side effects stubbed. It observes the initial stored recovery timer ID in Tcl `after info`, runs the actual Tk event loop, processes one controlled recovery dialog, then enters actual `on_closing` while the recurring recovery callback is pending. It confirms the recurring ID was present before shutdown, cleared by shutdown, and no timer remains in `after info` afterward. A post-destroy `root.tk.eval('update')` produced no `invalid command name` diagnostic under `capfd`; no callback/dialog ran after close; the recovery incident generation remained. (DIRECT_EVIDENCE / REAL_TK_EVENT_LOOP; the modal answer itself is controlled.)
-- The first test run found an unrelated LIVE-status `after` callback left by `_set_live_status`, not the recovery callback. The test now stubs only that separate status timer chain and explicitly documents why, so the `after info` assertion attributes the absence of callbacks to the recovery timer under test. The corrected real-Tk test passed; the initial harness assertion failure is not presented as a production failure.
-- A separate idempotence test invokes `on_closing` twice with a controlled root and verifies the recovery ID is canceled exactly once and remains `None`.
-
-## T7_REGRESSION
-
-- The existing real-Tk A → B → A decline/reselection regression passed. Decline still preserves the incident, clears prompt-pending state, and queues exactly one later prompt on reselection. Focused accept, worker-to-Tk handoff, stale queue, failure and switched-repository tests passed as listed below. The timer change did not modify watcher admission or generation matching.
-
-## TARGETED_TEST_RESULTS
-
-- First focused run: the new real-Tk test failed because an unrelated LIVE-status timer remained after root destruction; the recovery timer itself was canceled. The harness was narrowed to stub the unrelated `_set_live_status` timer.
-- Corrected focused run: **7 passed** in 5.36 s (new real-Tk shutdown, cancellation idempotence, real-Tk T7, decline, accept, worker queue, closed Desktop).
-- Adjacent focused run: **5 passed** in 2.88 s (stale queued dialog, failed analysis, dialog exception, repository switch, existing LIVE retry cancellation). Each run emitted one external Authlib deprecation warning. No full pytest suite was run.
-- `git diff --check` passed. Contextor `get_live_events(after_revision=106)` returned `continuity=continuous`, `resync_required=false`, desktop_watcher updates for `gui.py` at revision 107 and `test_gui_live_startup.py` at revisions 108–109. This proves source-file LIVE observation; the already-running Desktop process has not been restarted and therefore its loaded Tk code is not certified by this event.
-
-## FINAL_VERDICT
-
-- **PASS for the focused T9 timer lifecycle contract in an isolated real-Tk event loop.** Pending recovery `after` IDs are tracked and canceled before root destruction; the tested post-destroy Tcl queue has no orphan recovery command. T7 and adjacent focused recovery behavior passed. Active Desktop loaded-code certification requires a separately authorized restart and is not claimed here.
+- `tests/test_live_desktop_integration.py`
+- `walkthrough.md` is this report and excluded from the code/test diff list.
 
 ## FULL_DIFFS
-
-Complete actual Git diff for every changed source/test file follows:
-
-diff --git a/contextor/ui/gui.py b/contextor/ui/gui.py
-index a42c539..2b1ebbd 100644
---- a/contextor/ui/gui.py
-+++ b/contextor/ui/gui.py
-@@ -141,6 +141,7 @@ class ContextorGUI:
-         self.live_event_feeds = {}
-         self._live_start_retry_attempt = 0
-         self._live_start_retry_after_id = None
-+        self._live_recovery_after_id = None
-         self.live_status_var = tk.StringVar(value="LIVE: waiting for analysis")
-         self.repo_id_var = tk.StringVar(value="Repo ID: unregistered")
-         self._live_status_queue: Queue[str] = Queue()
-@@ -159,7 +160,9 @@ class ContextorGUI:
-         self._build_ui()
-         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
-         self.root.after(50, self._start_post_paint_tasks)
--        self.root.after(100, self._drain_live_recovery_queue)
-+        self._live_recovery_after_id = self.root.after(
-+            100, self._drain_live_recovery_queue
-+        )
- 
-     def _claim_current_backend_for_desktop(self):
-         claim = claim_backend_owner(
-@@ -1184,6 +1187,7 @@ class ContextorGUI:
- 
-     def _drain_live_recovery_queue(self) -> None:
-         """Process recovery dialogs exclusively on the Tk event loop."""
-+        self._live_recovery_after_id = None
-         if getattr(self, "_closing", False):
-             return
- 
-@@ -1254,7 +1258,7 @@ class ContextorGUI:
- 
-         finally:
-             if not getattr(self, "_closing", False):
--                self.root.after(
-+                self._live_recovery_after_id = self.root.after(
-                     100, self._drain_live_recovery_queue
-                 )
- 
-@@ -2133,6 +2137,17 @@ class ContextorGUI:
-         import time
- 
-         self._closing = True
-+        recovery_after_id = getattr(
-+            self, "_live_recovery_after_id", None
-+        )
-+        self._live_recovery_after_id = None
-+
-+        if recovery_after_id is not None:
-+            try:
-+                self.root.after_cancel(recovery_after_id)
-+            except (tk.TclError, RuntimeError):
-+                pass
-+
-         close_cmd_log()
- 
-         # Route Desktop shutdown through the same cancellation path as Stop
-diff --git a/tests/test_gui_live_startup.py b/tests/test_gui_live_startup.py
-index c64d7e5..5d3975a 100644
---- a/tests/test_gui_live_startup.py
-+++ b/tests/test_gui_live_startup.py
-@@ -959,6 +959,94 @@ def test_recovery_decline_reprompts_once_after_reselection_with_real_tk(
-         root.destroy()
+```diff
+diff --git a/tests/test_live_desktop_integration.py b/tests/test_live_desktop_integration.py
+index 5653635..b616e62 100644
+--- a/tests/test_live_desktop_integration.py
++++ b/tests/test_live_desktop_integration.py
+@@ -31,6 +31,24 @@ class _LiveIntegrationFakeVar:
+         self.value = value
  
  
-+def test_recovery_timer_is_cancelled_before_real_tk_shutdown(
-+    tmp_path, monkeypatch, capfd
-+):
-+    repo = tmp_path / "repo"
-+    repo.mkdir()
-+    try:
-+        root = tk.Tk()
-+    except tk.TclError as exc:
-+        pytest.skip(f"Tk display unavailable: {exc}")
-+    root.withdraw()
-+    monkeypatch.setattr(gui, "load_state", lambda: {"repository": str(repo)})
-+    monkeypatch.setattr(gui, "apply_theme", lambda *_args: None)
-+    monkeypatch.setattr(ContextorGUI, "_build_ui", lambda _self: None)
-+    monkeypatch.setattr(ContextorGUI, "_start_post_paint_tasks", lambda _self: None)
-+    # LIVE status has its own after chain; isolate the recovery timer here.
-+    monkeypatch.setattr(ContextorGUI, "_set_live_status", lambda *_args: None)
-+    monkeypatch.setattr(gui, "close_cmd_log", lambda: None)
-+    monkeypatch.setattr(gui, "terminate_active_process_pools", lambda **_kwargs: None)
-+    monkeypatch.setattr(gui, "save_state", lambda **_kwargs: None)
-+    dialogs = []
-+    monkeypatch.setattr(
-+        gui.messagebox,
-+        "askyesno",
-+        lambda *_args, **_kwargs: dialogs.append(threading.get_ident()) or False,
++def _with_live_recovery_contract(controller):
++    controller._live_start_retry_after_id = None
++    controller._live_recovery_after_id = None
++    controller._live_recovery_queue = gui.Queue()
++    controller._live_recovery_prompt_pending = set()
++    controller._live_recovery_lock = threading.Lock()
++    controller._live_recovery_incidents = {}
++    controller._live_recovery_generations = {}
++    controller._closing = False
++    controller._live_recovery_incident = (
++        gui.ContextorGUI._live_recovery_incident.__get__(controller, gui.ContextorGUI)
 +    )
-+
-+    controller = ContextorGUI(root)
-+    initial_id = controller._live_recovery_after_id
-+    assert initial_id in root.tk.call("after", "info")
-+    generation = controller._request_full_analysis_recovery(
-+        str(repo), "Recovery required."
++    controller._watcher_recovery_admission = (
++        gui.ContextorGUI._watcher_recovery_admission.__get__(controller, gui.ContextorGUI)
 +    )
-+    close_evidence = {}
-+
-+    def close_on_tk_thread():
-+        pending_id = controller._live_recovery_after_id
-+        close_evidence["pending_id"] = pending_id
-+        close_evidence["pending_scripts"] = root.tk.call("after", "info")
-+        close_evidence["dialogs_before"] = len(dialogs)
-+        close_evidence["incident_before"] = controller._live_recovery_incident(
-+            str(repo)
-+        )
-+        controller.on_closing()
-+        close_evidence["id_after"] = controller._live_recovery_after_id
-+
-+    try:
-+        root.after(130, close_on_tk_thread)
-+        root.mainloop()
-+        assert initial_id != close_evidence["pending_id"]
-+        assert close_evidence["pending_id"] in close_evidence["pending_scripts"]
-+        assert close_evidence["dialogs_before"] == 1
-+        assert close_evidence["incident_before"]["generation"] == generation
-+        assert close_evidence["id_after"] is None
-+        assert root.tk.call("after", "info") == ""
-+
-+        root.tk.eval("update")
-+        assert root.tk.call("after", "info") == ""
-+        assert len(dialogs) == 1
-+        assert controller._live_recovery_incident(str(repo))["generation"] == generation
-+        output = capfd.readouterr()
-+        assert "invalid command name" not in output.err
-+        assert "invalid command name" not in output.out
-+    finally:
-+        controller._closing = True
-+        try:
-+            root.destroy()
-+        except tk.TclError:
-+            pass
++    return controller
 +
 +
-+def test_recovery_timer_cancellation_is_idempotent(tmp_path, monkeypatch):
-+    repo = tmp_path / "repo"
-+    repo.mkdir()
-+    root = MockTkRoot()
-+    controller = _make_controller(repo, root)
-+    monkeypatch.setattr(gui, "close_cmd_log", lambda: None)
-+    monkeypatch.setattr(gui, "terminate_active_process_pools", lambda **_kwargs: None)
-+    monkeypatch.setattr(gui, "save_state", lambda **_kwargs: None)
-+    recovery_id = root.after(100, lambda: None)
-+    controller._live_recovery_after_id = recovery_id
-+
-+    ContextorGUI.on_closing(controller)
-+    ContextorGUI.on_closing(controller)
-+
-+    assert root.cancelled.count(recovery_id) == 1
-+    assert controller._live_recovery_after_id is None
-+
-+
- def test_stale_recovery_queue_item_does_not_open_dialog(tmp_path, monkeypatch):
+ def test_watcher_recovery_emits_start_and_existing_result(tmp_path, monkeypatch):
      repo = tmp_path / "repo"
      repo.mkdir()
-ACTUAL_DIFF=the complete diff above.
+@@ -133,11 +151,11 @@ def test_same_revision_startup_attaches_without_redundant_publish(tmp_path, monk
+         def start(self): pass
+ 
+     statuses = []
+-    controller = SimpleNamespace(
++    controller = _with_live_recovery_contract(SimpleNamespace(
+         live_watcher=None, live_event_feed=None, live_watchers={},
+         live_event_feeds={}, repo_id_var=_LiveIntegrationFakeVar(),
+         _set_live_status=statuses.append,
+-    )
++    ))
+     monkeypatch.setattr(gui, "connect_or_start", lambda *_args, **_kwargs: Client())
+     monkeypatch.setattr(gui, "DesktopLiveWatcher", Watcher)
+     monkeypatch.setattr(gui, "DesktopLiveEventFeed", Feed)
+@@ -178,11 +196,16 @@ def test_same_revision_different_state_id_does_not_attach_as_same_generation(tmp
+         def __init__(self, *_args, **_kwargs): feed_starts.append(True)
+         def start(self): feed_starts.append("started")
+ 
+-    controller = SimpleNamespace(
++    controller = _with_live_recovery_contract(SimpleNamespace(
+         live_watcher=None, live_event_feed=None, live_watchers={},
+         live_event_feeds={}, repo_id_var=_LiveIntegrationFakeVar(),
+         _request_full_analysis_recovery=MagicMock(),
+         _set_live_status=statuses.append,
++    ))
++    controller._request_full_analysis_recovery = MagicMock(
++        wraps=gui.ContextorGUI._request_full_analysis_recovery.__get__(
++            controller, gui.ContextorGUI
++        )
+     )
+     monkeypatch.setattr(gui, "connect_or_start", lambda *_args, **_kwargs: Client())
+     monkeypatch.setattr(gui, "DesktopLiveWatcher", Watcher)
+@@ -226,11 +249,16 @@ def test_same_revision_missing_state_id_does_not_start_live_components(tmp_path,
+         def __init__(self, *_args, **_kwargs): feed_starts.append(True)
+         def start(self): feed_starts.append("started")
+ 
+-    controller = SimpleNamespace(
++    controller = _with_live_recovery_contract(SimpleNamespace(
+         live_watcher=None, live_event_feed=None, live_watchers={},
+         live_event_feeds={}, repo_id_var=_LiveIntegrationFakeVar(),
+         _request_full_analysis_recovery=MagicMock(),
+         _set_live_status=statuses.append,
++    ))
++    controller._request_full_analysis_recovery = MagicMock(
++        wraps=gui.ContextorGUI._request_full_analysis_recovery.__get__(
++            controller, gui.ContextorGUI
++        )
+     )
+     monkeypatch.setattr(gui, "connect_or_start", lambda *_args, **_kwargs: Client())
+     monkeypatch.setattr(gui, "DesktopLiveWatcher", Watcher)
+@@ -282,14 +310,14 @@ def test_desktop_publishes_latest_snapshot_and_replaces_existing_watcher(
+         def stop(self):
+             events.append(("feed-stop",))
+ 
+-    controller = SimpleNamespace(
++    controller = _with_live_recovery_contract(SimpleNamespace(
+         live_watcher=None,
+         live_event_feed=None,
+         live_watchers={},
+         live_event_feeds={},
+         repo_id_var=_LiveIntegrationFakeVar(),
+         _set_live_status=lambda message: events.append(("status", message)),
+-    )
++    ))
+     monkeypatch.setattr(gui, "connect_or_start", lambda *args, **kwargs: Client())
+     monkeypatch.setattr(gui, "DesktopLiveWatcher", Watcher)
+     monkeypatch.setattr(gui, "DesktopLiveEventFeed", EventFeed)
+@@ -322,7 +350,10 @@ def test_desktop_skips_cache_publish_when_canonical_writer_is_busy_but_starts_wa
+     class Feed:
+         def __init__(self, *_args, **_kwargs): pass
+         def start(self): starts.append("feed")
+-    controller = SimpleNamespace(live_watcher=None, live_event_feed=None, live_watchers={}, live_event_feeds={}, repo_id_var=_LiveIntegrationFakeVar(), _set_live_status=statuses.append)
++    controller = _with_live_recovery_contract(SimpleNamespace(
++        live_watcher=None, live_event_feed=None, live_watchers={}, live_event_feeds={},
++        repo_id_var=_LiveIntegrationFakeVar(), _set_live_status=statuses.append,
++    ))
+     monkeypatch.setattr(gui, "connect_or_start", lambda *_a, **_k: Client())
+     monkeypatch.setattr(gui, "DesktopLiveWatcher", Watcher)
+     monkeypatch.setattr(gui, "DesktopLiveEventFeed", Feed)
+@@ -353,7 +384,10 @@ def test_desktop_startup_publish_uses_startup_publish_writer_kind(tmp_path, monk
+     class Feed:
+         def __init__(self, *_a, **_k): pass
+         def start(self): pass
+-    controller = SimpleNamespace(live_watcher=None, live_event_feed=None, live_watchers={}, live_event_feeds={}, repo_id_var=_LiveIntegrationFakeVar(), _set_live_status=lambda _m: None)
++    controller = _with_live_recovery_contract(SimpleNamespace(
++        live_watcher=None, live_event_feed=None, live_watchers={}, live_event_feeds={},
++        repo_id_var=_LiveIntegrationFakeVar(), _set_live_status=lambda _m: None,
++    ))
+     monkeypatch.setattr(gui, "connect_or_start", lambda *_a, **_k: Client())
+     monkeypatch.setattr(gui, "DesktopLiveWatcher", Watcher)
+     monkeypatch.setattr(gui, "DesktopLiveEventFeed", Feed)
+@@ -494,14 +528,14 @@ def test_switching_repositories_keeps_previous_watcher_active(tmp_path, monkeypa
+         def stop(self):
+             pass
+ 
+-    controller = SimpleNamespace(
++    controller = _with_live_recovery_contract(SimpleNamespace(
+         live_watcher=None,
+         live_event_feed=None,
+         live_watchers={},
+         live_event_feeds={},
+         repo_id_var=_LiveIntegrationFakeVar(),
+         _set_live_status=lambda message: events.append(("status", message)),
+-    )
++    ))
+     monkeypatch.setattr(gui, "connect_or_start", lambda *args, **kwargs: Client())
+     monkeypatch.setattr(gui, "DesktopLiveWatcher", Watcher)
+     monkeypatch.setattr(gui, "DesktopLiveEventFeed", EventFeed)
+@@ -581,7 +615,7 @@ def test_inactive_repository_callbacks_do_not_overwrite_selected_live_state(
+         lambda *_args, **_kwargs: None,
+     )
+ 
+-    controller = SimpleNamespace(
++    controller = _with_live_recovery_contract(SimpleNamespace(
+         repo_path_var=SimpleNamespace(get=lambda: str(first)),
+         _selected_live_repo_path=str(first),
+         repo_id_var=_LiveIntegrationFakeVar(),
+@@ -592,7 +626,7 @@ def test_inactive_repository_callbacks_do_not_overwrite_selected_live_state(
+         live_clients={},
+         live_client=None,
+         _set_live_status=lambda message, **_kwargs: statuses.append(message),
+-    )
++    ))
+ 
+     gui.ContextorGUI._start_live_watcher_blocking(controller, str(first))
+     first_client = controller.live_clients[first_registry.repo_id]
+@@ -856,7 +890,7 @@ def test_closing_gui_waits_for_active_analysis_lease_release(
+ 
+     root = FakeRoot()
+     progress_bar = FakeProgress()
+-    controller = SimpleNamespace(
++    controller = _with_live_recovery_contract(SimpleNamespace(
+         root=root,
+         progress_bar=progress_bar,
+         log_box=None,
+@@ -871,7 +905,7 @@ def test_closing_gui_waits_for_active_analysis_lease_release(
+         layer_path_var=SimpleNamespace(get=lambda: ""),
+         file_path_var=SimpleNamespace(get=lambda: ""),
+         _busy_buttons=lambda: [],
+-    )
++    ))
+ 
+     gui.ContextorGUI.analyze(controller)
+     assert analysis_started.wait(timeout=2.0)
+```
+
+## EXACT_TEN_TEST_RESULTS
+The exact ten nodes were selected from the reported ten-node checkpoint: T9 plus the eight watcher-startup fixture nodes that failed with missing recovery methods and the direct `ContextorGUI.analyze` lease consumer.
+
+Nodes:
+1. `tests/test_gui_live_startup.py::test_recovery_timer_is_cancelled_before_real_tk_shutdown`
+2. `tests/test_live_desktop_integration.py::test_same_revision_startup_attaches_without_redundant_publish`
+3. `tests/test_live_desktop_integration.py::test_same_revision_different_state_id_does_not_attach_as_same_generation`
+4. `tests/test_live_desktop_integration.py::test_same_revision_missing_state_id_does_not_start_live_components`
+5. `tests/test_live_desktop_integration.py::test_desktop_publishes_latest_snapshot_and_replaces_existing_watcher`
+6. `tests/test_live_desktop_integration.py::test_desktop_skips_cache_publish_when_canonical_writer_is_busy_but_starts_watcher`
+7. `tests/test_live_desktop_integration.py::test_desktop_startup_publish_uses_startup_publish_writer_kind`
+8. `tests/test_live_desktop_integration.py::test_switching_repositories_keeps_previous_watcher_active`
+9. `tests/test_live_desktop_integration.py::test_inactive_repository_callbacks_do_not_overwrite_selected_live_state`
+10. `tests/test_live_desktop_integration.py::test_closing_gui_waits_for_active_analysis_lease_release`
+
+- Before fixture repair: `9 failed, 1 passed`; T9 passed, nine desktop consumers failed on absent real recovery methods.
+- After descriptor/state helper: `8 passed, 2 failed`; the two generation-conflict tests failed their existing no-start assertion. T9 passed.
+- After replacing each recovery-request stub with a spy that wraps the actual bound method, the two affected nodes were rerun: `2 failed` at the same no-start assertion, with watcher start records `[True, 'started']`.
+- The exact ten were not rerun after the final spy-only adjustment; no claim is made that the final tree has a complete ten-node pass.
+
+## TARGETED_REGRESSION_RESULTS
+Not run: the checkpoint stopped after the real recovery-request path confirmed the two existing startup assertions conflict with current production control flow. Required files still pending: `tests/test_gui_live_startup.py`, `tests/test_live_desktop_integration.py`, `tests/test_watcher_recovery_admission.py`, `tests/test_recovery_authority_gate.py`.
+
+## REMAINING_RISKS
+- T9's original Tcl diagnostic origin remains unproven; the exact node does not reproduce it.
+- Two desktop tests cannot be made to pass through faithful fixture binding while preserving their current “no watcher/feed start” assertions and the current GUI source path. The production behavior is gated after startup, but startup itself occurs.
+- The test-only diff is a partial checkpoint and does not constitute a final regression repair. No production edit was attempted.
+
+## FINAL_VERDICT
+`BLOCKED_AT_CONTRACT_DIVERGENCE`. Evidence proves that the generation-conflict branch requests recovery but continues to start LIVE components, while the two existing tests require no components to start. Following the task gate, production code is untouched and work stops for auditor direction. Continue only after the next `proceduj`.

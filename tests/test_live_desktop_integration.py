@@ -31,6 +31,24 @@ class _LiveIntegrationFakeVar:
         self.value = value
 
 
+def _with_live_recovery_contract(controller):
+    controller._live_start_retry_after_id = None
+    controller._live_recovery_after_id = None
+    controller._live_recovery_queue = gui.Queue()
+    controller._live_recovery_prompt_pending = set()
+    controller._live_recovery_lock = threading.Lock()
+    controller._live_recovery_incidents = {}
+    controller._live_recovery_generations = {}
+    controller._closing = False
+    controller._live_recovery_incident = (
+        gui.ContextorGUI._live_recovery_incident.__get__(controller, gui.ContextorGUI)
+    )
+    controller._watcher_recovery_admission = (
+        gui.ContextorGUI._watcher_recovery_admission.__get__(controller, gui.ContextorGUI)
+    )
+    return controller
+
+
 def test_watcher_recovery_emits_start_and_existing_result(tmp_path, monkeypatch):
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -133,11 +151,11 @@ def test_same_revision_startup_attaches_without_redundant_publish(tmp_path, monk
         def start(self): pass
 
     statuses = []
-    controller = SimpleNamespace(
+    controller = _with_live_recovery_contract(SimpleNamespace(
         live_watcher=None, live_event_feed=None, live_watchers={},
         live_event_feeds={}, repo_id_var=_LiveIntegrationFakeVar(),
         _set_live_status=statuses.append,
-    )
+    ))
     monkeypatch.setattr(gui, "connect_or_start", lambda *_args, **_kwargs: Client())
     monkeypatch.setattr(gui, "DesktopLiveWatcher", Watcher)
     monkeypatch.setattr(gui, "DesktopLiveEventFeed", Feed)
@@ -178,11 +196,16 @@ def test_same_revision_different_state_id_does_not_attach_as_same_generation(tmp
         def __init__(self, *_args, **_kwargs): feed_starts.append(True)
         def start(self): feed_starts.append("started")
 
-    controller = SimpleNamespace(
+    controller = _with_live_recovery_contract(SimpleNamespace(
         live_watcher=None, live_event_feed=None, live_watchers={},
         live_event_feeds={}, repo_id_var=_LiveIntegrationFakeVar(),
         _request_full_analysis_recovery=MagicMock(),
         _set_live_status=statuses.append,
+    ))
+    controller._request_full_analysis_recovery = MagicMock(
+        wraps=gui.ContextorGUI._request_full_analysis_recovery.__get__(
+            controller, gui.ContextorGUI
+        )
     )
     monkeypatch.setattr(gui, "connect_or_start", lambda *_args, **_kwargs: Client())
     monkeypatch.setattr(gui, "DesktopLiveWatcher", Watcher)
@@ -226,11 +249,16 @@ def test_same_revision_missing_state_id_does_not_start_live_components(tmp_path,
         def __init__(self, *_args, **_kwargs): feed_starts.append(True)
         def start(self): feed_starts.append("started")
 
-    controller = SimpleNamespace(
+    controller = _with_live_recovery_contract(SimpleNamespace(
         live_watcher=None, live_event_feed=None, live_watchers={},
         live_event_feeds={}, repo_id_var=_LiveIntegrationFakeVar(),
         _request_full_analysis_recovery=MagicMock(),
         _set_live_status=statuses.append,
+    ))
+    controller._request_full_analysis_recovery = MagicMock(
+        wraps=gui.ContextorGUI._request_full_analysis_recovery.__get__(
+            controller, gui.ContextorGUI
+        )
     )
     monkeypatch.setattr(gui, "connect_or_start", lambda *_args, **_kwargs: Client())
     monkeypatch.setattr(gui, "DesktopLiveWatcher", Watcher)
@@ -282,14 +310,14 @@ def test_desktop_publishes_latest_snapshot_and_replaces_existing_watcher(
         def stop(self):
             events.append(("feed-stop",))
 
-    controller = SimpleNamespace(
+    controller = _with_live_recovery_contract(SimpleNamespace(
         live_watcher=None,
         live_event_feed=None,
         live_watchers={},
         live_event_feeds={},
         repo_id_var=_LiveIntegrationFakeVar(),
         _set_live_status=lambda message: events.append(("status", message)),
-    )
+    ))
     monkeypatch.setattr(gui, "connect_or_start", lambda *args, **kwargs: Client())
     monkeypatch.setattr(gui, "DesktopLiveWatcher", Watcher)
     monkeypatch.setattr(gui, "DesktopLiveEventFeed", EventFeed)
@@ -322,7 +350,10 @@ def test_desktop_skips_cache_publish_when_canonical_writer_is_busy_but_starts_wa
     class Feed:
         def __init__(self, *_args, **_kwargs): pass
         def start(self): starts.append("feed")
-    controller = SimpleNamespace(live_watcher=None, live_event_feed=None, live_watchers={}, live_event_feeds={}, repo_id_var=_LiveIntegrationFakeVar(), _set_live_status=statuses.append)
+    controller = _with_live_recovery_contract(SimpleNamespace(
+        live_watcher=None, live_event_feed=None, live_watchers={}, live_event_feeds={},
+        repo_id_var=_LiveIntegrationFakeVar(), _set_live_status=statuses.append,
+    ))
     monkeypatch.setattr(gui, "connect_or_start", lambda *_a, **_k: Client())
     monkeypatch.setattr(gui, "DesktopLiveWatcher", Watcher)
     monkeypatch.setattr(gui, "DesktopLiveEventFeed", Feed)
@@ -353,7 +384,10 @@ def test_desktop_startup_publish_uses_startup_publish_writer_kind(tmp_path, monk
     class Feed:
         def __init__(self, *_a, **_k): pass
         def start(self): pass
-    controller = SimpleNamespace(live_watcher=None, live_event_feed=None, live_watchers={}, live_event_feeds={}, repo_id_var=_LiveIntegrationFakeVar(), _set_live_status=lambda _m: None)
+    controller = _with_live_recovery_contract(SimpleNamespace(
+        live_watcher=None, live_event_feed=None, live_watchers={}, live_event_feeds={},
+        repo_id_var=_LiveIntegrationFakeVar(), _set_live_status=lambda _m: None,
+    ))
     monkeypatch.setattr(gui, "connect_or_start", lambda *_a, **_k: Client())
     monkeypatch.setattr(gui, "DesktopLiveWatcher", Watcher)
     monkeypatch.setattr(gui, "DesktopLiveEventFeed", Feed)
@@ -494,14 +528,14 @@ def test_switching_repositories_keeps_previous_watcher_active(tmp_path, monkeypa
         def stop(self):
             pass
 
-    controller = SimpleNamespace(
+    controller = _with_live_recovery_contract(SimpleNamespace(
         live_watcher=None,
         live_event_feed=None,
         live_watchers={},
         live_event_feeds={},
         repo_id_var=_LiveIntegrationFakeVar(),
         _set_live_status=lambda message: events.append(("status", message)),
-    )
+    ))
     monkeypatch.setattr(gui, "connect_or_start", lambda *args, **kwargs: Client())
     monkeypatch.setattr(gui, "DesktopLiveWatcher", Watcher)
     monkeypatch.setattr(gui, "DesktopLiveEventFeed", EventFeed)
@@ -581,7 +615,7 @@ def test_inactive_repository_callbacks_do_not_overwrite_selected_live_state(
         lambda *_args, **_kwargs: None,
     )
 
-    controller = SimpleNamespace(
+    controller = _with_live_recovery_contract(SimpleNamespace(
         repo_path_var=SimpleNamespace(get=lambda: str(first)),
         _selected_live_repo_path=str(first),
         repo_id_var=_LiveIntegrationFakeVar(),
@@ -592,7 +626,7 @@ def test_inactive_repository_callbacks_do_not_overwrite_selected_live_state(
         live_clients={},
         live_client=None,
         _set_live_status=lambda message, **_kwargs: statuses.append(message),
-    )
+    ))
 
     gui.ContextorGUI._start_live_watcher_blocking(controller, str(first))
     first_client = controller.live_clients[first_registry.repo_id]
@@ -856,7 +890,7 @@ def test_closing_gui_waits_for_active_analysis_lease_release(
 
     root = FakeRoot()
     progress_bar = FakeProgress()
-    controller = SimpleNamespace(
+    controller = _with_live_recovery_contract(SimpleNamespace(
         root=root,
         progress_bar=progress_bar,
         log_box=None,
@@ -871,7 +905,7 @@ def test_closing_gui_waits_for_active_analysis_lease_release(
         layer_path_var=SimpleNamespace(get=lambda: ""),
         file_path_var=SimpleNamespace(get=lambda: ""),
         _busy_buttons=lambda: [],
-    )
+    ))
 
     gui.ContextorGUI.analyze(controller)
     assert analysis_started.wait(timeout=2.0)
