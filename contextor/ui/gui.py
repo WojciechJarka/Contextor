@@ -1196,9 +1196,15 @@ class ContextorGUI:
         else:
             with self._live_recovery_lock:
                 incident = self._live_recovery_incidents.get(repository_key)
-                if incident is not None:
+                if incident is None:
+                    self._live_recovery_prompt_pending.discard(
+                        repository_key
+                    )
+                else:
                     reason = incident["reason"]
-            if not ContextorGUI._is_selected_live_repository(
+            if incident is None:
+                pass
+            elif not ContextorGUI._is_selected_live_repository(
                 self, repository_key
             ):
                 with self._live_recovery_lock:
@@ -1240,6 +1246,11 @@ class ContextorGUI:
                         recovery_repository=repository_key,
                         recovery_generation=generation,
                     )
+                else:
+                    with self._live_recovery_lock:
+                        self._live_recovery_prompt_pending.discard(
+                            repository_key
+                        )
 
         finally:
             if not getattr(self, "_closing", False):

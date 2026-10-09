@@ -1,73 +1,192 @@
-# L37/L38 A3C final native Desktop runtime certification
+# L37/L38 A3C T7 recovery reprompt fix
 
-## CURRENT_HEAD
+## FILES_CHANGED
 
-- Git HEAD: `3068d66fa478832e1356e6efb0c8c429218d6688` (`Auto-commit: Cleanup and update`). Worktree was clean before this report. No source/test/documentation file was edited.
-- Discovery began with deferred Contextor MCP tool enumeration and `get_mcp_documentation`. `get_symbol_implementation` examined the requested GUI, watcher, LIVE, and backend entry points at canonical revision 104 with `workspace_sync=verified`; `get_source_range` supplied exact recovery queue anchors. Git/source was used afterward for literal verification. `DesktopLiveEventFeed.start/stop` resolve to inherited `_PollingLiveWorker.start/stop` at `C:\Temp\Contextor_Repo\contextor\core\live_state\watcher.py:67-84`, rather than methods defined on the subclass.
+- `C:\Temp\Contextor_Repo\contextor\ui\gui.py`
+- `C:\Temp\Contextor_Repo\tests\test_gui_live_startup.py`
+- Git HEAD before edits: `c7e2d479ba41a86e66835bcc6d62337896ef2d1a`. No other source/test/documentation changes. `walkthrough.md` is this report.
 
-## PRE_FLIGHT_CONTEXTOR_EVIDENCE
+## T7_ROOT_CAUSE
 
-- `C:\Temp\Contextor_Repo\contextor\ui\gui.py:99-162`: `ContextorGUI.__init__` creates real Tk variables, UI, root callbacks and backend/post-paint startup schedule. `:357-373`: `_start_post_paint_tasks` calls `_start_backend_owner_claim`, then starts the selected repo watcher. `:178-244`: `_claim_backend_owner_on_startup` calls `start_backend`, claims the current backend, and on `BackendOwnerInstanceRevoked` waits for shutdown then calls `start_backend` again. `:246-355`: owner claim worker. `:1626-1946`: LIVE watcher/feed startup. (CODE_PATH_PROVED.)
-- `C:\Temp\Contextor_Repo\contextor\mcp_backend_control.py:45` fixes `BACKEND_PORT=8765`; `:125-130` uses a backend-state `control.lock`; `:768-863` starts or attaches the persistent backend; `:1007-1090` can stop it. A second full Desktop cannot be proven unable to claim/revoke/replace the active backend merely by changing repository/state directories. (CODE_PATH_PROVED.)
-- `C:\Temp\Contextor_Repo\contextor\core\live_state\watcher.py:210-240` starts `watchdog.observers.Observer` and falls back to `PollingObserver` only on observer failure; `:277-343` starts/stops the observer and worker; `:441-451` deduplicates enqueued paths; `:667-972` handles recovery admission, trusted rebaseline, real IPC submission and inflight reconciliation. `DesktopLiveEventFeed` is at `:978`; its inherited polling lifecycle is at `:67-84`. (CODE_PATH_PROVED.)
-- `C:\Temp\Contextor_Repo\contextor\ui\gui.py:1128-1183` registers repository-keyed incidents without Tk calls; `:1185-1248` drains prompts on Tk; `:1250-1489` handles recovery certification. `:788-805` only requeues on repository selection if the repository is absent from `_live_recovery_prompt_pending`. (CODE_PATH_PROVED.)
+- Contextor MCP was used first: deferred tools were enumerated, current documentation was read, and `get_symbol_implementation` resolved `ContextorGUI._drain_live_recovery_queue` (`gui.py:1185-1248`), `_request_full_analysis_recovery` (`:1128-1183`), and `_sync_selected_live_repository_path` (`:788-804`) at canonical revision 104 with `workspace_sync=verified`. A bounded call-context query returned no static intra-module caller edge for the Tk callback; Git verified the dynamic `root.after` schedule in `gui.py:162` and the source/test anchors. (DIRECT_EVIDENCE / CODE_PATH_PROVED.)
+- Before the fix, a declined `messagebox.askyesno` retained the repository in `_live_recovery_prompt_pending` (`gui.py:1234-1245`). Reselection queues an existing incident only when the repository is absent from that set (`gui.py:799-804`). The previous native Tk run observed one prompt before and after A → B → A; the focused old test asserted the defective pending state. (CODE_PATH_PROVED plus prior real-Tk DIRECT_EVIDENCE.)
+- A queued item whose incident had already disappeared could still reach the dialog because the old drain path changed the reason only when the incident existed and then continued to selection/dialog handling. (CODE_PATH_PROVED.)
 
-## ACTIVE_RUNTIME_BASELINE
+## EXACT_FIX
 
-- Active Desktop interpreter PID 9676 (venv wrapper PID 7724), started 2026-10-09 10:08:46 local; active MCP interpreter PID 2140 (wrapper PID 1412), started 10:08:42 local; active LIVE interpreter PID 11484 (wrapper PID 8564), started 10:08:51 local. MCP listener `127.0.0.1:8765` belonged to PID 2140. (DIRECT_EVIDENCE: `Win32_Process`, `Get-NetTCPConnection`.)
-- Production permanent repo ID `ctx_8efc50d8`; root `C:\Temp\Contextor_Repo`; durable cache `C:\Users\DafoO\AppData\Local\Contextor\cache\repositories\ctx_8efc50d8`. Production uses its configured APPDATA state/cache/registry domains; exact registry path was not separately read, so that path is UNKNOWN.
-- Baseline durable metadata and embedded snapshot revision 104/state_id `20261009_100948`; LIVE authority and embedded LIVE snapshot revision 104/same state_id. LIVE instance `49c8405bd2ec4897b29c987af6b916d6`, lease generation 6, PID 11484. (DIRECT_EVIDENCE: read-only store and IPC reads.)
+- `gui.py`: when a queued repository has no current incident, discard its stale prompt-pending marker and skip the dialog. After a `False` answer, discard only that repository's prompt-pending marker under `_live_recovery_lock`. The incident and generation remain, and no immediate queue insertion or FULL call occurs. A `True` answer keeps the existing `analyze(recovery_repository=..., recovery_generation=...)` call and its pending deduplication state. `_sync_selected_live_repository_path` and watcher admission were not changed.
+- `tests/test_gui_live_startup.py`: corrected the decline expectations; checked incident/generation persistence and blocked watcher admission; added a real Tk event-loop reselection test with a controlled nonblocking dialog decision and a worker-thread request; added a stale queued item regression. Existing accept, error, switched-repo, and worker-thread tests remain in place.
+- The Tk regression exercises actual `Tk.mainloop()` and root callbacks. Its `askyesno` decision is a controlled replacement to avoid an unattended native modal; it does not claim a human-operated dialog. The test skips only if a Tk display cannot be created.
 
-## RESOURCE_ISOLATION_PROOF
+## TARGETED_TEST_RESULTS
 
-- **FULL_DESKTOP_STARTUP=BLOCKED_BY_SHARED_BACKEND.** Real GUI startup necessarily invokes `start_backend()` and the backend ownership claim (`gui.py:178-244,357-373`). The backend TCP port is process-global and fixed at 8765 (`mcp_backend_control.py:45`); the active backend already listens there. The startup claim path can interact with the current backend and, on revocation, start a replacement. Separate repo IDs and filesystem domains do not prove that a second Desktop cannot disturb the active backend. No second Desktop was launched. (CODE_PATH_PROVED plus active-port DIRECT_EVIDENCE.)
-- Temporary repositories in the native watcher run had separate permanent identities, state, cache, output and registry directories, supplied as child-process environment values only. No global Windows environment variable was changed. The successful run used `C:\Users\DafoO\AppData\Local\Temp\contextor_native_watch_i4_qfj1t\repo`, repo ID `ctx_ba1717ca`, separate LIVE PID 1776, instance `55b9b4f4c65a4df7b7ca2410d3b119d5`, lease generation 1. No Desktop owner claim or MCP backend was started there. (DIRECT_EVIDENCE.)
-- Potential shared resources inventoried: backend TCP listener, backend owner claim, backend control lock and state/record, process registry, LIVE runtime lease/endpoints, Desktop ownership identity, GUI persisted state, and process environment. Exact named-mutex inventory was not established (UNKNOWN); the fixed port/claim path alone blocks full startup.
+- New/changed and direct focused tests: seven passed in 5.32 s: decline persistence/admission, real Tk A → B → A reprompt, stale queued item, accept deduplication, worker-thread queue, switched-repository suppression, and older-certificate isolation.
+- Additional adjacent GUI recovery branches: four passed in 3.14 s: failed analysis, closed Desktop, dialog exception, and generation-conflict deduplication.
+- `git diff --check` passed. Both runs emitted one external Authlib deprecation warning. No full repository pytest suite was run.
+- LIVE watcher verification: Contextor `get_live_events(after_revision=104)` returned continuous revision 105, `resync_required=false`, `update_file` origin `desktop_watcher`, status `UPDATED`, path `C:\Temp\Contextor_Repo\contextor\ui\gui.py`. No manual `update_file` was called. A separate test-file event was not required by the canonical source scope and was not claimed.
+- Production LIVE/IPC, durable storage, watcher mutation logic, and recovery certificate protocol were not edited. No process restart was performed.
 
-## REAL_TK_RESULTS
+## REGRESSION_VERDICT
 
-- Used an actual Windows Tk 8.6.12 root and `root.mainloop()` in the test process; no `MockTkRoot`, no second Desktop. A controlled `ContextorGUI.__new__` controller provided recovery fields without running backend startup. `messagebox.askyesno` was replaced by a synchronous return of `False` so no unattended native modal could block. This tests actual Tk callback dispatch but **does not certify native dialog rendering or a human click**. No FULL was run.
-- T1 PASS / REAL_TK_EVENT_LOOP + IN_PROCESS: worker thread registered the incident; worker and Tk callback thread IDs differed (2452 vs 12248 in first run). T2 PASS / IN_PROCESS: worker executed only `_request_full_analysis_recovery`; dialog callback ran on Tk thread. T3 PASS / REAL_TK_EVENT_LOOP: queue item reached root callback. T4 PASS for actual Tk callback / REAL_TK_EVENT_LOOP, but modal decision MOCKED. T5 PASS / REAL_TK_EVENT_LOOP + MOCKED decision: two requests produced one dialog call. T6 PASS / REAL_TK_EVENT_LOOP + MOCKED decision: declining preserved incident generation 2.
-- **T7 FAIL / REAL_TK_EVENT_LOOP + MOCKED decision.** In the second run, after one prompt, switching selected repository A → B → A left dialog count at **1**; no later A prompt appeared. Incident A still existed (generation 2), and `_live_recovery_prompt_pending` still held A. `gui.py:1212-1242` clears pending on selection mismatch or dialog exception, but not after an ordinary `False` response; `gui.py:799-804` consequently refuses to requeue A on reselection. This is a source-supported behavior failure for the requested T7. No production change was made.
-- T8 PASS / REAL_TK_EVENT_LOOP + IN_PROCESS: separate A and B incidents remained registered during selection changes; first run produced two controlled prompt callbacks, one per selected repo. T9 UNKNOWN: root was destroyed with `_closing=True`, but a real post-destroy scheduled-callback safety trace was not obtained. Tests were stopped after the T7 failure.
-- Test process IDs were transient and not captured by the harness; Tk callback thread IDs above identify the observed execution boundary. This is in-process Tk certification, not a separate real Desktop process.
+- **PASS for the specified focused T7 behavior.** Decline retains the incident and watcher fence, clears the prompt marker, and does not immediately reopen; A → B → A queues exactly one later prompt. Accepted FULL remains deduplicated. Stale queued dialogs are discarded. Worker-origin recovery registration reaches the real Tk callback without a worker Tk call. No broader Desktop runtime certification is claimed.
 
-## NATIVE_WATCHDOG_RESULTS
+## FULL_DIFFS
 
-- Actual observer backend: `watchdog.observers.read_directory_changes.WindowsApiObserver`; `fallback=False`, `is_alive=True`. The event handler's enqueue callback was instrumented to record paths while forwarding each native event to the original enqueue method. No path was manually enqueued. Real isolated LIVE IPC handled submissions. Process: service PID 1776, instance `55b9b4f4c65a4df7b7ca2410d3b119d5`.
-- W1 PASS / NATIVE_WATCHDOG: observer started alive. W2 PASS / NATIVE_WATCHDOG + REAL_LIVE_IPC: create `new.py`, native callback recorded the path twice; one accepted submission advanced LIVE revision 1 → 2. W3 PASS / NATIVE_WATCHDOG + REAL_LIVE_IPC: modify `module.py`, native callback recorded the path twice; one further submission advanced 2 → 3. W4 PASS / NATIVE_WATCHDOG + REAL_LIVE_IPC: delete `new.py`, native callback recorded the path; submission count advanced 2 → 3 and LIVE 3 → 4.
-- W5 PASS for the observed burst / NATIVE_WATCHDOG + IN_PROCESS: five consecutive writes to `module.py` during recovery left one pending path and no added submission before release; after release only one added submission was observed. This is one concrete coalescing run, not a universal burst guarantee.
-- W6 PASS / NATIVE_WATCHDOG + IN_PROCESS admission: recovery flag blocked new submissions, count held at 3. W7 PASS / NATIVE_WATCHDOG: native modifications during recovery left `module.py` pending. W8 UNKNOWN for an explicit accepted-inflight reconciliation during recovery: an inflight job ID was observed when recovery began, but the harness did not capture an unambiguous completion/incident coexistence trace. Earlier focused regression passed, but it is not this native runtime proof.
-- W9 PASS / REAL_LIVE_IPC + IN_PROCESS watcher: real isolated `verify_recovery(1)` returned a certificate, `complete_recovery_verification` returned `status=ok,released=True`, and watcher completed a trusted rebaseline. W10 PASS / NATIVE_WATCHDOG + REAL_LIVE_IPC: deferred work produced a fourth submission and LIVE revision 4 → 5. W11 PASS / REAL_LIVE_IPC + durable store read: LIVE revision 5, metadata revision 5, embedded durable revision 5, state_id `20261009_103800`. W12 PASS / NATIVE_WATCHDOG: `watcher.stop()` left observer and worker references `None`; real isolated LIVE shutdown acknowledged revision 5. No fallback was used.
-- The first stdin-based attempt could not run Windows multiprocessing spawn (`<stdin>` not importable); a first file-based attempt failed to import `contextor` without process-local PYTHONPATH; a later file-based run used the wrong response key for `certificate_id`. These were harness errors, not certified product failures. The final run used a temporary script outside the repository, a proper `__main__` boundary and `verify_recovery()['certificate']` contract. The earlier delete race disappeared when each preceding revision was awaited. No source/test file was edited.
+Complete actual Git diff for every changed source/test file:
 
-## FULL_DESKTOP_STARTUP_RESULTS
-
-- D1–D12: **BLOCKED / REAL_GUI_PROCESS not attempted**. `FULL_DESKTOP_STARTUP=BLOCKED_BY_SHARED_BACKEND`, for the fixed port and backend owner/replacement path established above. No second Desktop, backend claim, event feed, or ownership transition was initiated. Correct isolated repo selection, startup LIVE/feed/watcher, GUI close, and whole Desktop process cleanup therefore remain UNKNOWN as native full-process behavior. The in-process Tk and isolated watcher results must not be promoted to full Desktop PASS.
-
-## RECOVERY_END_TO_END_RESULTS
-
-- Largest safe subset: native filesystem create/modify/delete reached a real isolated watcher and service; during an in-process recovery admission block, native modified path remained pending without a new submission; real IPC certificate verification/completion returned success; trusted watcher rebaseline delivered the deferred work; isolated durable and LIVE reached revision 5. PASS for this subset / NATIVE_WATCHDOG + REAL_LIVE_IPC + IN_PROCESS controller.
-- Complete Desktop GUI recovery flow: BLOCKED by shared backend. Actual native recovery dialog interaction: UNKNOWN because the modal decision was controlled by a replacement callback. T7 repository-reselection prompt behavior: FAIL. W8 real native inflight/incident reconciliation: UNKNOWN. No fabricated complete certification is claimed.
-- Six focused regressions were run (no full suite): `tests/test_gui_live_startup.py::{test_recovery_request_from_worker_uses_queue_without_tk,test_recovery_prompt_decline_preserves_incident,test_recovery_prompt_suppressed_after_repository_switch,test_shutdown_cancels_pending_retry}` and `tests/test_watcher_recovery_admission.py::{test_inflight_status_reconciles_during_recovery_without_trusting_baseline,test_recovery_release_rescans_and_revalidates_against_current_live}`. Result **6 passed**, one external Authlib deprecation warning, 3.07 seconds. Passing mocked/unit tests do not erase T7's real-Tk observation.
-
-## PRODUCTION_INTEGRITY_AFTER
-
-- After isolated runs, Desktop PID 9676, MCP PID 2140 and LIVE PID 11484 retained the same startup identities. MCP listener at 127.0.0.1:8765 remained owned by PID 2140; LIVE instance stayed `49c8405bd2ec4897b29c987af6b916d6`, lease generation 6. No unexpected process replacement observed. (DIRECT_EVIDENCE.)
-- Production repo ID `ctx_8efc50d8`, root `C:\Temp\Contextor_Repo`; durable metadata and embedded snapshot revision 104/state_id `20261009_100948`; LIVE authority and embedded snapshot revision 104/same state_id. `get_live_events(after_revision=103)` returned `continuity=continuous`, `resync_required=false`, retained publish event for revision 104. PASS for observed parity/continuity; private mutation queue quiescence remains UNKNOWN.
-
-## TEST_PROCESS_CLEANUP
-
-- Isolated watcher `stop()` returned with observer/thread references cleared; real isolated LIVE `shutdown` acknowledged revision 5. Service PIDs from all isolated attempts (4816, 9220, 1776) were absent at cleanup. Verified temporary paths under `%TEMP%` were recursively removed with PowerShell `Remove-Item -LiteralPath`; the temporary harness script was removed. Temporary Tk test directories were removed. No test-owned orphan process was observed.
-
-## EVIDENCE_LIMITS
-
-- T7 is a directly observed in-process real-Tk failure with a controlled dialog answer, supported by exact source control flow; native messagebox UI itself was not certified. T9 callback-after-destroy behavior remains UNKNOWN.
-- Full Desktop ownership and shutdown were deliberately not exercised because a second instance could touch the active global backend. No inference from isolated repository paths was used to override that risk.
-- Native watcher W8 did not capture a deterministic real-process inflight/incident completion interleaving. The focused test is narrower evidence.
-- No production/test/docs changes; no manual update_file against an active Desktop watcher; no automatic FULL or active service restart.
-
-## FINAL_CERTIFICATION_VERDICT
-
-- **NOT CERTIFIED.** Native Windows watchdog plus isolated LIVE mutation/recovery subset passed. The full Desktop startup boundary is **BLOCKED_BY_SHARED_BACKEND**. The real-Tk controller run **FAILS T7** (later prompt after repository reselection). Actual native dialog interaction, T9 shutdown callback safety, and W8 real inflight coexistence remain UNKNOWN. No architectural or production correction was attempted.
-- `FILES_CHANGED=NONE` (source/test/docs). `ACTUAL_DIFF=NONE`. This overwritten `walkthrough.md` is the sole task artifact.
+diff --git a/contextor/ui/gui.py b/contextor/ui/gui.py
+index 91fb6ac..a42c539 100644
+--- a/contextor/ui/gui.py
++++ b/contextor/ui/gui.py
+@@ -1196,9 +1196,15 @@ class ContextorGUI:
+         else:
+             with self._live_recovery_lock:
+                 incident = self._live_recovery_incidents.get(repository_key)
+-                if incident is not None:
++                if incident is None:
++                    self._live_recovery_prompt_pending.discard(
++                        repository_key
++                    )
++                else:
+                     reason = incident["reason"]
+-            if not ContextorGUI._is_selected_live_repository(
++            if incident is None:
++                pass
++            elif not ContextorGUI._is_selected_live_repository(
+                 self, repository_key
+             ):
+                 with self._live_recovery_lock:
+@@ -1240,6 +1246,11 @@ class ContextorGUI:
+                         recovery_repository=repository_key,
+                         recovery_generation=generation,
+                     )
++                else:
++                    with self._live_recovery_lock:
++                        self._live_recovery_prompt_pending.discard(
++                            repository_key
++                        )
+ 
+         finally:
+             if not getattr(self, "_closing", False):
+diff --git a/tests/test_gui_live_startup.py b/tests/test_gui_live_startup.py
+index aec5314..c64d7e5 100644
+--- a/tests/test_gui_live_startup.py
++++ b/tests/test_gui_live_startup.py
+@@ -5,6 +5,7 @@ from types import SimpleNamespace
+ from unittest.mock import MagicMock
+ import threading
+ import time
++import tkinter as tk
+ 
+ import pytest
+ 
+@@ -878,17 +879,106 @@ def test_recovery_prompt_decline_preserves_incident(tmp_path, monkeypatch):
+     assert ask.call_args.kwargs["parent"] is root
+     assert "Canonical state identity mismatch." in ask.call_args.args[1]
+     controller.analyze.assert_not_called()
+-    assert controller._live_recovery_prompt_pending == {str(repo.resolve())}
++    assert controller._live_recovery_prompt_pending == set()
+     assert controller._live_recovery_incidents[str(repo.resolve())]["required"] is True
++    assert controller._live_recovery_incidents[str(repo.resolve())]["generation"] == 1
++    assert ContextorGUI._watcher_recovery_admission(controller, str(repo))(
++        lambda: True
++    ) is gui.RECOVERY_DEFERRED
++
++    ContextorGUI._drain_live_recovery_queue(controller)
++    ask.assert_called_once()
++    assert controller._live_recovery_queue.qsize() == 0
+ 
+     ContextorGUI._request_full_analysis_recovery(
+         controller, str(repo), "Canonical state identity mismatch."
+     )
+-    assert controller._live_recovery_queue.qsize() == 0
++    assert controller._live_recovery_queue.qsize() == 1
++    assert controller._live_recovery_incidents[str(repo.resolve())]["generation"] == 2
+     assert next(iter(root.scheduled.values()))[0] == 100
+     ask.assert_called_once()
+ 
+ 
++def test_recovery_decline_reprompts_once_after_reselection_with_real_tk(
++    tmp_path, monkeypatch
++):
++    repo = tmp_path / "repo"
++    other = tmp_path / "other"
++    repo.mkdir()
++    other.mkdir()
++    try:
++        root = tk.Tk()
++    except tk.TclError as exc:
++        pytest.skip(f"Tk display unavailable: {exc}")
++    root.withdraw()
++    controller = _bind_recovery_prompt(_make_controller(repo, root))
++    main_thread = threading.get_ident()
++    dialog_threads = []
++
++    def decline(*_args, **kwargs):
++        dialog_threads.append(threading.get_ident())
++        assert kwargs["parent"] is root
++        return False
++
++    monkeypatch.setattr(gui.messagebox, "askyesno", decline)
++    worker = threading.Thread(
++        target=lambda: ContextorGUI._request_full_analysis_recovery(
++            controller, str(repo), "Recovery required."
++        )
++    )
++    try:
++        worker.start()
++        worker.join(5)
++        assert not worker.is_alive()
++        assert dialog_threads == []
++
++        root.after(10, controller._drain_live_recovery_queue)
++        root.after(250, root.quit)
++        root.mainloop()
++        assert dialog_threads == [main_thread]
++        assert controller._live_recovery_prompt_pending == set()
++        assert controller._live_recovery_incidents[str(repo.resolve())]["generation"] == 1
++
++        root.after(250, root.quit)
++        root.mainloop()
++        assert dialog_threads == [main_thread]
++
++        controller.repo_path_var.set(str(other))
++        ContextorGUI._sync_selected_live_repository_path(controller)
++        controller.repo_path_var.set(str(repo))
++        ContextorGUI._sync_selected_live_repository_path(controller)
++        ContextorGUI._sync_selected_live_repository_path(controller)
++        assert controller._live_recovery_queue.qsize() == 1
++        root.after(250, root.quit)
++        root.mainloop()
++        assert dialog_threads == [main_thread, main_thread]
++        assert controller._live_recovery_prompt_pending == set()
++        controller.analyze.assert_not_called()
++    finally:
++        controller._closing = True
++        root.destroy()
++
++
++def test_stale_recovery_queue_item_does_not_open_dialog(tmp_path, monkeypatch):
++    repo = tmp_path / "repo"
++    repo.mkdir()
++    controller = _bind_recovery_prompt(_make_controller(repo, MockTkRoot()))
++    ask = MagicMock()
++    monkeypatch.setattr(gui.messagebox, "askyesno", ask)
++
++    ContextorGUI._request_full_analysis_recovery(
++        controller, str(repo), "Recovery required."
++    )
++    with controller._live_recovery_lock:
++        controller._live_recovery_incidents.pop(str(repo.resolve()))
++    ContextorGUI._drain_live_recovery_queue(controller)
++
++    ask.assert_not_called()
++    controller.analyze.assert_not_called()
++    assert controller._live_recovery_prompt_pending == set()
++    assert controller._live_recovery_incidents == {}
++
++
+ def test_recovery_prompt_accept_runs_existing_analyze_once(tmp_path, monkeypatch):
+     repo = tmp_path / "repo"
+     repo.mkdir()
+ACTUAL_DIFF=the complete diff above.

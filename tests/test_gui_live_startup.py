@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 import threading
 import time
+import tkinter as tk
 
 import pytest
 
@@ -878,15 +879,104 @@ def test_recovery_prompt_decline_preserves_incident(tmp_path, monkeypatch):
     assert ask.call_args.kwargs["parent"] is root
     assert "Canonical state identity mismatch." in ask.call_args.args[1]
     controller.analyze.assert_not_called()
-    assert controller._live_recovery_prompt_pending == {str(repo.resolve())}
+    assert controller._live_recovery_prompt_pending == set()
     assert controller._live_recovery_incidents[str(repo.resolve())]["required"] is True
+    assert controller._live_recovery_incidents[str(repo.resolve())]["generation"] == 1
+    assert ContextorGUI._watcher_recovery_admission(controller, str(repo))(
+        lambda: True
+    ) is gui.RECOVERY_DEFERRED
+
+    ContextorGUI._drain_live_recovery_queue(controller)
+    ask.assert_called_once()
+    assert controller._live_recovery_queue.qsize() == 0
 
     ContextorGUI._request_full_analysis_recovery(
         controller, str(repo), "Canonical state identity mismatch."
     )
-    assert controller._live_recovery_queue.qsize() == 0
+    assert controller._live_recovery_queue.qsize() == 1
+    assert controller._live_recovery_incidents[str(repo.resolve())]["generation"] == 2
     assert next(iter(root.scheduled.values()))[0] == 100
     ask.assert_called_once()
+
+
+def test_recovery_decline_reprompts_once_after_reselection_with_real_tk(
+    tmp_path, monkeypatch
+):
+    repo = tmp_path / "repo"
+    other = tmp_path / "other"
+    repo.mkdir()
+    other.mkdir()
+    try:
+        root = tk.Tk()
+    except tk.TclError as exc:
+        pytest.skip(f"Tk display unavailable: {exc}")
+    root.withdraw()
+    controller = _bind_recovery_prompt(_make_controller(repo, root))
+    main_thread = threading.get_ident()
+    dialog_threads = []
+
+    def decline(*_args, **kwargs):
+        dialog_threads.append(threading.get_ident())
+        assert kwargs["parent"] is root
+        return False
+
+    monkeypatch.setattr(gui.messagebox, "askyesno", decline)
+    worker = threading.Thread(
+        target=lambda: ContextorGUI._request_full_analysis_recovery(
+            controller, str(repo), "Recovery required."
+        )
+    )
+    try:
+        worker.start()
+        worker.join(5)
+        assert not worker.is_alive()
+        assert dialog_threads == []
+
+        root.after(10, controller._drain_live_recovery_queue)
+        root.after(250, root.quit)
+        root.mainloop()
+        assert dialog_threads == [main_thread]
+        assert controller._live_recovery_prompt_pending == set()
+        assert controller._live_recovery_incidents[str(repo.resolve())]["generation"] == 1
+
+        root.after(250, root.quit)
+        root.mainloop()
+        assert dialog_threads == [main_thread]
+
+        controller.repo_path_var.set(str(other))
+        ContextorGUI._sync_selected_live_repository_path(controller)
+        controller.repo_path_var.set(str(repo))
+        ContextorGUI._sync_selected_live_repository_path(controller)
+        ContextorGUI._sync_selected_live_repository_path(controller)
+        assert controller._live_recovery_queue.qsize() == 1
+        root.after(250, root.quit)
+        root.mainloop()
+        assert dialog_threads == [main_thread, main_thread]
+        assert controller._live_recovery_prompt_pending == set()
+        controller.analyze.assert_not_called()
+    finally:
+        controller._closing = True
+        root.destroy()
+
+
+def test_stale_recovery_queue_item_does_not_open_dialog(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    controller = _bind_recovery_prompt(_make_controller(repo, MockTkRoot()))
+    ask = MagicMock()
+    monkeypatch.setattr(gui.messagebox, "askyesno", ask)
+
+    ContextorGUI._request_full_analysis_recovery(
+        controller, str(repo), "Recovery required."
+    )
+    with controller._live_recovery_lock:
+        controller._live_recovery_incidents.pop(str(repo.resolve()))
+    ContextorGUI._drain_live_recovery_queue(controller)
+
+    ask.assert_not_called()
+    controller.analyze.assert_not_called()
+    assert controller._live_recovery_prompt_pending == set()
+    assert controller._live_recovery_incidents == {}
 
 
 def test_recovery_prompt_accept_runs_existing_analyze_once(tmp_path, monkeypatch):
