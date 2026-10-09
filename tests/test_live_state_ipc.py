@@ -1299,6 +1299,7 @@ def test_persistence_trace_operation_is_propagated_across_successful_real_update
 def test_startup_backfill_preserves_filestate_content_and_revision_parity(tmp_path, monkeypatch):
     import contextor.core.live_state.runtime as runtime
     from contextor.core.analysis.state_manager import FileState, FileStateManager, RepositoryAnalysisState
+    from contextor.core.domain.module import Module
     from contextor.core.live_state.store import load_snapshot, read_metadata, save_snapshot
     from contextor.core.paths import repo_cache_dir
     from contextor.core.repository_identity import ensure_repository_identity
@@ -1309,7 +1310,14 @@ def test_startup_backfill_preserves_filestate_content_and_revision_parity(tmp_pa
     monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(tmp_path / "cache"))
     cache = repo_cache_dir(repo)
     state = RepositoryAnalysisState(
-        modules={"a.py": SimpleNamespace()},
+        modules={
+            "a.py": Module(
+                module_id="a.py",
+                path="a.py",
+                absolute_path=str(repo / "a.py"),
+                imports=[],
+            )
+        },
         reexport_facts_by_module={
             "a.py": {
                 "exporter": "a.py",
@@ -1328,6 +1336,20 @@ def test_startup_backfill_preserves_filestate_content_and_revision_parity(tmp_pa
         repo_id=identity.repo_id,
         root_path=identity.root_path,
     )
+    initial = load_snapshot(
+        cache,
+        "sid",
+        expected_repo_id=identity.repo_id,
+        expected_root_path=identity.root_path,
+    )
+    assert initial is not None
+    initial_state, initial_metadata = initial
+    assert initial_metadata.repo_id == identity.repo_id
+    assert initial_metadata.root_path == identity.root_path
+    assert initial_metadata.revision == metadata.revision
+    assert initial_state.modules["a.py"].path == "a.py"
+    assert initial_state.lineage_facts_state == "not_materialized"
+    assert initial_state.lineage_facts_by_source == {}
     manager = FileStateManager(str(cache))
     manager._state = {
         "a.py": FileState(10, 3, "aaa"),
@@ -1395,6 +1417,7 @@ def test_startup_backfill_preserves_filestate_content_and_revision_parity(tmp_pa
 def test_startup_backfill_failure_leaves_previous_generation_authoritative(tmp_path, monkeypatch):
     import contextor.core.live_state.runtime as runtime
     from contextor.core.analysis.state_manager import FileState, FileStateManager, RepositoryAnalysisState
+    from contextor.core.domain.module import Module
     from contextor.core.live_state.store import load_snapshot, read_metadata, save_snapshot
     from contextor.core.paths import repo_cache_dir
     from contextor.core.repository_identity import ensure_repository_identity
@@ -1405,7 +1428,14 @@ def test_startup_backfill_failure_leaves_previous_generation_authoritative(tmp_p
     monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(tmp_path / "cache"))
     cache = repo_cache_dir(repo)
     state = RepositoryAnalysisState(
-        modules={"a.py": SimpleNamespace()},
+        modules={
+            "a.py": Module(
+                module_id="a.py",
+                path="a.py",
+                absolute_path=str(repo / "a.py"),
+                imports=[],
+            )
+        },
         reexport_facts_by_module={
             "a.py": {
                 "exporter": "a.py",
@@ -1417,6 +1447,20 @@ def test_startup_backfill_failure_leaves_previous_generation_authoritative(tmp_p
     )
     state.revision = 1
     metadata = save_snapshot(state, cache, "sid", repo_id=identity.repo_id, root_path=identity.root_path)
+    initial = load_snapshot(
+        cache,
+        "sid",
+        expected_repo_id=identity.repo_id,
+        expected_root_path=identity.root_path,
+    )
+    assert initial is not None
+    initial_state, initial_metadata = initial
+    assert initial_metadata.repo_id == identity.repo_id
+    assert initial_metadata.root_path == identity.root_path
+    assert initial_metadata.revision == metadata.revision
+    assert initial_state.modules["a.py"].path == "a.py"
+    assert initial_state.lineage_facts_state == "not_materialized"
+    assert initial_state.lineage_facts_by_source == {}
     manager = FileStateManager(str(cache))
     manager._state = {"a.py": FileState(10, 3, "aaa"), "b.py": FileState(20, 4, "bbb")}
     manager.save("sid", revision=metadata.revision)
@@ -1427,13 +1471,17 @@ def test_startup_backfill_failure_leaves_previous_generation_authoritative(tmp_p
     monkeypatch.setattr(materialization, "ensure_module_usages", lambda _state: None)
     import contextor.core.live_state.store as store
     original_replace = store.os.replace
+    metadata_commit_hit = False
     def fail_only_authoritative_metadata_commit(source, target):
+        nonlocal metadata_commit_hit
         if Path(target).name == "engine_state.meta.json":
+            metadata_commit_hit = True
             raise RuntimeError("synthetic metadata commit failure")
         return original_replace(source, target)
     monkeypatch.setattr(store.os, "replace", fail_only_authoritative_metadata_commit)
     with pytest.raises(RuntimeError, match="synthetic metadata commit failure"):
         runtime.run_service(repo)
+    assert metadata_commit_hit
     assert read_metadata(cache).revision == metadata.revision
     assert load_snapshot(cache, "sid")[1].revision == metadata.revision
     reloaded = FileStateManager(str(cache))
