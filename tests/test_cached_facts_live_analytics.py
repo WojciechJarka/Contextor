@@ -18,6 +18,7 @@ from contextor.core.analysis.incremental_engine import (
     IncrementalAnalysisEngine,
     IncrementalUpdateResult,
 )
+from contextor.core.analysis.incremental.materialization import ensure_cached_analytics
 from contextor.core.analysis.state_manager import (
     RepositoryAnalysisState,
     FileStateManager,
@@ -359,6 +360,148 @@ def test_snapshot_lifecycle_and_consumer_projection(tmp_path):
         str(tmp_path),
     )
     assert engine_stale.state.cached_analytics_state == "stale"
+
+
+def test_none_cached_marker_preserves_obsolete_payload_without_certifying_it():
+    obsolete = {"module_layers": {"contextor.core.analysis.mod": "obsolete_layer"}}
+    state = RepositoryAnalysisState(
+        modules={},
+        cached_analytics_state=None,
+        cached_analytics=obsolete,
+    )
+
+    ensure_cached_analytics(state)
+
+    assert state.cached_analytics_state == "deferred"
+    assert state.cached_analytics is obsolete
+    assert state.cached_analytics["module_layers"]["contextor.core.analysis.mod"] == "obsolete_layer"
+
+
+def test_missing_cached_marker_with_populated_legacy_cache_is_not_fresh():
+    state = _CachedAnalyticsLegacySnapshotState({}, ProjectGraph({}, {}), {})
+    state.cached_analytics = {"module_layers": {"legacy.mod": "obsolete_layer"}}
+    assert not hasattr(state, "cached_analytics_state")
+
+    ensure_cached_analytics(state)
+
+    assert state.cached_analytics_state == "deferred"
+    assert state.cached_analytics["module_layers"]["legacy.mod"] == "obsolete_layer"
+
+
+def test_explicit_none_cached_marker_snapshot_hydration_and_public_projection(tmp_path):
+    repo = tmp_path / "repo"
+    module_file = repo / "contextor" / "core" / "analysis" / "mod.py"
+    module_file.parent.mkdir(parents=True)
+    module_file.write_text("def foo():\n    return 1\n", encoding="utf-8")
+    cache_dir = tmp_path / "cache"
+    state_manager = FileStateManager(str(cache_dir))
+    engine = IncrementalAnalysisEngine(
+        RepositoryAnalysisState(modules={}),
+        PersistentIdentityRegistry(str(repo)),
+        state_manager,
+        str(repo),
+    )
+    assert engine.update_file(str(module_file)).status == "UPDATED"
+    module_name = "contextor.core.analysis.mod"
+    assert engine.state.cached_analytics_state == "fresh"
+    assert module_name in engine.state.cached_analytics["module_layers"]
+
+    base = save_snapshot(
+        engine.state,
+        cache_dir,
+        "cached-analytics-test",
+        repo_id="isolated-cached-analytics",
+        root_path=str(repo),
+        exact_revision=1,
+        file_state_payload=state_manager.build_payload("cached-analytics-test", 1),
+    )
+    assert base.revision == 1
+    committed = load_snapshot(
+        cache_dir,
+        expected_state_id="cached-analytics-test",
+        expected_repo_id="isolated-cached-analytics",
+        expected_root_path=str(repo),
+    )
+    assert committed is not None
+    isolated_state, metadata = committed
+    assert metadata.revision == 1
+    assert isolated_state.cached_analytics_state == "fresh"
+
+    isolated_state.cached_analytics_state = None
+    isolated_state.cached_analytics["module_layers"][module_name] = "obsolete_layer"
+    next_revision = metadata.revision + 1
+    saved = save_snapshot(
+        isolated_state,
+        cache_dir,
+        metadata.state_id,
+        repo_id=metadata.repo_id,
+        root_path=metadata.root_path,
+        exact_revision=next_revision,
+        file_state_payload=state_manager.build_payload(metadata.state_id, next_revision),
+    )
+    assert saved.revision == next_revision
+    loaded = load_snapshot(
+        cache_dir,
+        expected_state_id=metadata.state_id,
+        expected_repo_id=metadata.repo_id,
+        expected_root_path=metadata.root_path,
+    )
+    assert loaded is not None
+    loaded_state, loaded_metadata = loaded
+    assert loaded_metadata.revision == next_revision
+    assert loaded_state.cached_analytics_state is None
+    assert loaded_state.cached_analytics["module_layers"][module_name] == "obsolete_layer"
+
+    hydrated_file_state = FileStateManager(str(cache_dir))
+    assert hydrated_file_state.revision == loaded_metadata.revision
+    assert hydrated_file_state.state_id == loaded_metadata.state_id
+    hydrated = IncrementalAnalysisEngine(
+        loaded_state,
+        PersistentIdentityRegistry(str(repo)),
+        hydrated_file_state,
+        str(repo),
+    )
+    assert hydrated.state.cached_analytics_state == "deferred"
+    assert hydrated.state.cached_analytics["module_layers"][module_name] == "obsolete_layer"
+    fn = getattr(get_module_context, "fn", get_module_context)
+    with patch.dict(_live_engines, {str(repo.resolve()): hydrated}):
+        projected = json.loads(fn(str(repo), module_name, compact=True))
+    assert projected["metrics"].get("layer") != "obsolete_layer"
+
+
+def test_cached_marker_positive_lifecycle_preserves_other_families():
+    module_name = "contextor.core.analysis.mod"
+    module = Module(module_name, "contextor/core/analysis/mod.py", "/tmp/mod.py", [])
+    graph = ProjectGraph({module_name: set()}, {module_name: set()})
+    sentinel = {"module_layers": {module_name: "runtime"}}
+    for marker in ("fresh", "stale"):
+        state = RepositoryAnalysisState(
+            modules={module_name: module},
+            dependency_graph=graph,
+            cached_analytics_state=marker,
+            cached_analytics=sentinel.copy(),
+            topology_metrics_state="stale",
+            cycles_state="stale",
+        )
+        ensure_cached_analytics(state)
+        assert state.cached_analytics_state == marker
+        assert state.cached_analytics == sentinel
+        assert state.topology_metrics_state == "stale"
+        assert state.cycles_state == "stale"
+
+    deferred = RepositoryAnalysisState(
+        modules={module_name: module},
+        dependency_graph=graph,
+        cached_analytics_state="deferred",
+        cached_analytics={},
+        topology_metrics_state="stale",
+        cycles_state="stale",
+    )
+    ensure_cached_analytics(deferred)
+    assert deferred.cached_analytics_state == "fresh"
+    assert deferred.cached_analytics["module_layers"][module_name] == "runtime"
+    assert deferred.topology_metrics_state == "stale"
+    assert deferred.cycles_state == "stale"
 
 
 def test_atomicity_and_isolation_on_failure(tmp_path):

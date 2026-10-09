@@ -167,9 +167,7 @@ def ensure_cached_analytics(state: RepositoryAnalysisState) -> None:
     RAM ONLY — ZERO source I/O.
     """
     if not hasattr(state, "cached_analytics_state") or state.cached_analytics_state is None:
-        state.cached_analytics_state = (
-            "fresh" if bool(getattr(state, "cached_analytics", None)) else "deferred"
-        )
+        state.cached_analytics_state = "deferred"
 
     if not hasattr(state, "cached_analytics") or state.cached_analytics is None:
         state.cached_analytics = {}

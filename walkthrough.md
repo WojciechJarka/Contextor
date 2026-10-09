@@ -1,239 +1,240 @@
-# L32A_DIAGNOSTICS_MARKER_FAIL_CLOSED
+# L32B_CACHED_ANALYTICS_FALSE_FRESH_FIX
 
 ## CURRENT_HEAD
 
-`079cdc16a214155b08b5f362bcaad8da03ff7039`. Contextor MCP deferred symbol retrieval resolved the three affected owners at LIVE revision 126 with `workspace_sync=verified` for symbol source. Contextor lineage and blast-radius retrieval identified `diagnostics_summary_for_state` consumers including LIVE runtime, MCP diagnostics and tests. Git confirmed exact current anchors before edits. No FULL analysis, update_file or service restart.
+`fe097fff93cb4b4b2149913dcd2560606f8144d3`. Contextor MCP first: complete `ensure_cached_analytics` implementation at `contextor/core/analysis/incremental/materialization.py:164-195`, `workspace_sync=verified`, LIVE revision 130; symbol lineage and blast radius found direct runtime consumers in incremental engine. Git confirmed the exact literal anchor. No active LIVE state, cache or snapshot was modified.
 
-## PRE_FIX_NEGATIVE_RESULTS
+## PRE_FIX_RED_RESULTS
 
-New tests were added first, then run with `& .\.venv\Scripts\python.exe -m pytest -q tests/test_mcp_diagnostics.py -k 'malformed or missing_markers'`: **27 failed, 6 passed, 20 deselected, 1 external Authlib warning**. The failures were expected red results. Six passing cases were scalar syntax markers already treated as unavailable. The other cases proved false-fresh collision/cycle summaries, unhashable list/dict exceptions, and malformed public collision availability.
-
-## FALSE_FRESH_REPRODUCTION
-
-With a nonempty collision or cycle payload, marker `None`, empty string, `UNKNOWN`, `Fresh`, `True`, `7`, `[]`, or `{}` caused the pre-fix `_availability` fallback to report `fresh` or throw. A missing marker with a present payload also reported `fresh`. This incorrectly exposed counts and attention classification without freshness certification.
-
-## UNHASHABLE_MARKER_REPRODUCTION
-
-Pre-fix `[]` and `{}` hit `TypeError: unhashable type` in `diagnostics_projection._availability`; syntax list/dict hit the membership check in `diagnostics_summary_for_state` or `syntax_diagnostics_for_path`. The new exact tests exercise these paths without modifying durable state.
-
-## POST_FIX_MARKER_MATRIX
-
-| Marker | Collisions/cycles summary | Syntax summary/path | Public collision tool |
-|---|---|---|---|
-| None, empty, UNKNOWN, Fresh, True, 7, [], {} | unavailable, count None | unavailable, not materialized | valid JSON, unavailable, no details |
-| Missing attribute, existing payload | unavailable, count None | unavailable, not materialized | valid JSON, unavailable, no details |
-| fresh | existing positive tests retain fresh counts/details | existing positive tests retain materialized syntax | existing positive tests retain details |
-| stale/deferred | existing nonfresh behavior retained | existing accepted status set retained | existing nonfresh branch retained |
-
-No unknown marker is promoted to fresh from payload presence. The four production edits implement only the auditor-specified guards and fallback.
-
-## PUBLIC_MCP_AVAILABILITY_RESULT
-
-The isolated in-memory `get_name_collisions` test now parses valid JSON and observes `availability=unavailable`, `total=None`, `details=[]`, and a fail-closed diagnostics summary for every malformed marker. This tests the local tool function, not the still-running MCP server; runtime certification requires a later manual restart.
-
-## TARGETED_TEST_RESULTS
-
-Post-fix new tests: **33 passed, 20 deselected, 1 external Authlib warning**. Targeted gate: `tests/test_mcp_diagnostics.py tests/test_syntax_diagnostics_full_analysis.py tests/test_collisions_live_lifecycle.py tests/test_cycles_live_lifecycle.py` — **103 passed, 1 external Authlib warning**. `git diff --check` found no whitespace errors. No full suite.
-
-## REGRESSION_FAILURES
-
-None in the required targeted gate. The expected 27 pre-fix red cases are documented above.
-
-## RESTART_REQUIRED
-
-**YES** — manual MCP backend restart is required before certifying runtime responses against the changed server code. No restart was performed.
+After adding the focused tests and before editing production, the exact new subset ran with `& .\.venv\Scripts\python.exe -m pytest -q tests/test_cached_facts_live_analytics.py -k 'none_cached_marker or missing_cached_marker or explicit_none_cached_marker or cached_marker_positive_lifecycle' --tb=short`: **3 failed, 1 passed, 11 deselected, 1 external Authlib warning**. The three failures each showed `fresh` where `deferred` was required. The isolated snapshot case passed real save/load preconditions and failed at post-hydration false-fresh promotion. An earlier test-authoring run had one unrelated test-fixture constructor error; it was corrected before the recorded red gate.
 
 ## FILES_CHANGED
 
-- `contextor/core/diagnostics_projection.py`
-- `contextor/mcp/diagnostics.py`
-- `contextor/mcp/tools/get_name_collisions.py`
-- `tests/test_mcp_diagnostics.py`
+- `contextor/core/analysis/incremental/materialization.py`
+- `tests/test_cached_facts_live_analytics.py`
+
+## CACHED_ANALYTICS_MARKER_MATRIX
+
+| Marker/payload | Result after fix |
+|---|---|
+| None + nonempty obsolete payload | deferred; payload retained, untrusted |
+| genuinely missing legacy marker + nonempty payload | deferred; payload retained, untrusted |
+| None/missing + empty payload + valid modules | normal RAM computation may produce fresh |
+| fresh + populated payload | fresh preserved, no forced recomputation |
+| stale + populated payload | stale preserved, no auto-promotion |
+| deferred + empty payload + valid modules | computed fresh from canonical RAM inputs |
+
+The production change is exactly the specified replacement: None/missing state becomes `deferred`; the existing compute branch and all other families remain unchanged.
+
+## SNAPSHOT_LOAD_RESULT
+
+The new isolated test builds canonical state by updating a Python file only inside `tmp_path`, then saves a valid first generation with repository ID/root and FileState payload at revision 1. It loads that generation and confirms the cache is fresh. It sets only the loaded test state's cached marker to None and injects `module_layers[contextor.core.analysis.mod]=obsolete_layer`, saves revision 2 with matching repository identity and FileState revision, and reloads it. Real `load_snapshot` retains explicit None and the obsolete sentinel; metadata and FileState revisions match 2.
+
+## POST_HYDRATION_RESULT
+
+Real `IncrementalAnalysisEngine` initialization with the loaded state and revision-matched `FileStateManager` now yields `cached_analytics_state=deferred`. The sentinel payload remains present but untrusted. Before the fix, this exact assertion failed because hydration set `fresh`.
+
+## PUBLIC_PROJECTION_RESULT
+
+An isolated in-process `get_module_context` projection bound to the hydrated test engine does not return `obsolete_layer` in `metrics.layer`. The pre-fix red test reached and failed the marker assertion before this projection; the after-fix test proves the public sentinel guard. The active MCP backend was not restarted or mutated, so its current runtime is not certified for this change.
+
+## LEGACY_COMPATIBILITY_RESULT
+
+Existing `test_snapshot_lifecycle_and_consumer_projection` remains passing: a genuinely missing legacy cache is reconstructed from canonical RAM inputs and becomes fresh. New separate missing-marker + populated-cache test proves such payload alone no longer certifies freshness. Positive tests confirm existing fresh/stale behavior, successful deferred recomputation, and unchanged topology/cycle markers.
+
+## TARGETED_TEST_RESULTS
+
+Post-fix exact new subset: **4 passed, 11 deselected, 1 external Authlib warning**. Required focused gate `tests/test_cached_facts_live_analytics.py tests/test_graph_only_live_analytics.py tests/test_freshness_preservation.py tests/test_mcp_incremental_hydration.py`: **31 passed, 1 external Authlib warning**. `git diff --check` found no whitespace errors. No full suite.
+
+## REGRESSION_FAILURES
+
+None in the required focused gate.
+
+## RUNTIME_RESTART_REQUIREMENT
+
+**Manual MCP backend restart required** before runtime certification of changed core module. No automatic restart occurred.
 
 ## FINAL_VERDICT
 
-**FOCUSED_FIX_PASS** for source and targeted regression gate. Runtime MCP certification remains pending a manual backend restart.
+**FOCUSED_FIX_PASS**: exact production patch, red/green proof, valid isolated snapshot and FileState contract, public projection guard, legacy and positive lifecycle, and focused regression gate completed. Active MCP runtime certification remains pending manual restart.
 
 ## FULL_DIFFS
 
 ```diff
-diff --git a/contextor/core/diagnostics_projection.py b/contextor/core/diagnostics_projection.py
-index e581125..b390fc6 100644
---- a/contextor/core/diagnostics_projection.py
-+++ b/contextor/core/diagnostics_projection.py
-@@ -16,21 +16,17 @@ def _availability(
-         None,
-     )
+diff --git a/contextor/core/analysis/incremental/materialization.py b/contextor/core/analysis/incremental/materialization.py
+index 5a72dff..07eeaaa 100644
+--- a/contextor/core/analysis/incremental/materialization.py
++++ b/contextor/core/analysis/incremental/materialization.py
+@@ -167,9 +167,7 @@ def ensure_cached_analytics(state: RepositoryAnalysisState) -> None:
+     RAM ONLY — ZERO source I/O.
+     """
+     if not hasattr(state, "cached_analytics_state") or state.cached_analytics_state is None:
+-        state.cached_analytics_state = (
+-            "fresh" if bool(getattr(state, "cached_analytics", None)) else "deferred"
+-        )
++        state.cached_analytics_state = "deferred"
  
--    if values is None and status == "fresh":
--        return "unavailable"
--
--    if status in {
-+    if isinstance(status, str) and status in {
-         "fresh",
-         "stale",
-         "deferred",
-         "unavailable",
-     }:
-+        if status == "fresh" and values is None:
-+            return "unavailable"
-         return status
- 
--    if values is None:
--        return "unavailable"
--
--    return "fresh"
-+    return "unavailable"
- 
- 
- def diagnostics_summary_for_state(
-@@ -85,7 +81,7 @@ def diagnostics_summary_for_state(
-         )
-         syntax_availability = "fresh"
- 
--    elif syntax_state in {
-+    elif isinstance(syntax_state, str) and syntax_state in {
-         "not_materialized",
-         "deferred",
-         "stale",
-diff --git a/contextor/mcp/diagnostics.py b/contextor/mcp/diagnostics.py
-index 4760280..7118cdb 100644
---- a/contextor/mcp/diagnostics.py
-+++ b/contextor/mcp/diagnostics.py
-@@ -36,7 +36,7 @@ def syntax_diagnostics_for_path(
-     if family_state != "fresh" or not isinstance(facts, dict):
-         return {
-             "status": "unavailable",
--            "availability": family_state if family_state in {"not_materialized", "deferred", "stale", "unavailable"} else "unavailable",
-+            "availability": family_state if isinstance(family_state, str) and family_state in {"not_materialized", "deferred", "stale", "unavailable"} else "unavailable",
-             "materialized": False,
-             "source_path": canonical_path,
-             "errors": None,
-diff --git a/contextor/mcp/tools/get_name_collisions.py b/contextor/mcp/tools/get_name_collisions.py
-index c6f5f30..114dda8 100644
---- a/contextor/mcp/tools/get_name_collisions.py
-+++ b/contextor/mcp/tools/get_name_collisions.py
-@@ -98,6 +98,16 @@ def get_name_collisions(
-     engine = mcp_runtime.get_or_init_engine(root)
-     state = getattr(engine, "state", None) if engine is not None else None
-     availability = getattr(state, "collisions_state", "unavailable") if state is not None else "unavailable"
-+    if not (
-+        isinstance(availability, str)
-+        and availability in {
-+            "fresh",
-+            "stale",
-+            "deferred",
-+            "unavailable",
-+        }
-+    ):
-+        availability = "unavailable"
-     if availability != "fresh":
-         payload = {
-             "total": None,
-diff --git a/tests/test_mcp_diagnostics.py b/tests/test_mcp_diagnostics.py
-index 05c14de..5ba4560 100644
---- a/tests/test_mcp_diagnostics.py
-+++ b/tests/test_mcp_diagnostics.py
-@@ -1,12 +1,15 @@
- import json
- from types import SimpleNamespace
- 
-+import pytest
-+
- from contextor import mcp_server
- from contextor.mcp.diagnostics import (
-     diagnostics_summary,
-     diagnostics_summary_for_completed_job,
-     diagnostics_summary_for_state,
-     inject_diagnostics_summary,
-+    syntax_diagnostics_for_path,
+     if not hasattr(state, "cached_analytics") or state.cached_analytics is None:
+         state.cached_analytics = {}
+diff --git a/tests/test_cached_facts_live_analytics.py b/tests/test_cached_facts_live_analytics.py
+index b4d1226..e54ee94 100644
+--- a/tests/test_cached_facts_live_analytics.py
++++ b/tests/test_cached_facts_live_analytics.py
+@@ -18,6 +18,7 @@ from contextor.core.analysis.incremental_engine import (
+     IncrementalAnalysisEngine,
+     IncrementalUpdateResult,
  )
- from contextor.mcp.output_guard import LARGE_OUTPUT_WARNING_BYTES
- from contextor.mcp import runtime as mcp_runtime
-@@ -27,6 +30,85 @@ def _collision(kind="NAME_COLLISION", identical=False, module="pkg.a"):
-     )
++from contextor.core.analysis.incremental.materialization import ensure_cached_analytics
+ from contextor.core.analysis.state_manager import (
+     RepositoryAnalysisState,
+     FileStateManager,
+@@ -361,6 +362,148 @@ def test_snapshot_lifecycle_and_consumer_projection(tmp_path):
+     assert engine_stale.state.cached_analytics_state == "stale"
  
  
-+INVALID_MARKERS = [None, "", "UNKNOWN", "Fresh", True, 7, [], {}]
-+
-+
-+@pytest.mark.parametrize("marker", INVALID_MARKERS, ids=repr)
-+@pytest.mark.parametrize(
-+    ("family", "payload"),
-+    [("collisions", [_collision()]), ("cycles", [["a", "b", "a"]])],
-+)
-+def test_malformed_collision_or_cycle_marker_never_certifies_payload(marker, family, payload):
-+    state = SimpleNamespace(
-+        collisions_state="fresh",
-+        collisions=[_collision()],
-+        cycles_state="fresh",
-+        cycles=[["a", "b", "a"]],
++def test_none_cached_marker_preserves_obsolete_payload_without_certifying_it():
++    obsolete = {"module_layers": {"contextor.core.analysis.mod": "obsolete_layer"}}
++    state = RepositoryAnalysisState(
++        modules={},
++        cached_analytics_state=None,
++        cached_analytics=obsolete,
 +    )
-+    setattr(state, f"{family}_state", marker)
-+    setattr(state, family, payload)
 +
-+    summary = diagnostics_summary_for_state(state)
-+    key = "name_collisions" if family == "collisions" else "cycles"
-+    assert summary[key]["availability"] == "unavailable"
-+    assert summary[key]["count"] is None
-+    assert summary["availability"][key] == "unavailable"
++    ensure_cached_analytics(state)
++
++    assert state.cached_analytics_state == "deferred"
++    assert state.cached_analytics is obsolete
++    assert state.cached_analytics["module_layers"]["contextor.core.analysis.mod"] == "obsolete_layer"
 +
 +
-+@pytest.mark.parametrize("marker", INVALID_MARKERS, ids=repr)
-+def test_malformed_syntax_marker_never_materializes_facts(marker):
-+    state = SimpleNamespace(
-+        syntax_diagnostics_state=marker,
-+        syntax_diagnostics_by_path={
-+            "broken.py": {"status": "checked_with_errors", "errors": [{"message": "bad"}]}
-+        },
-+    )
-+    summary = diagnostics_summary_for_state(state)
-+    projection = syntax_diagnostics_for_path(state, "broken.py")
-+    assert summary["syntax_errors"] == {"count": None, "availability": "unavailable"}
-+    assert projection["status"] == "unavailable"
-+    assert projection["availability"] == "unavailable"
-+    assert projection["materialized"] is False
-+    assert projection["errors"] is None
++def test_missing_cached_marker_with_populated_legacy_cache_is_not_fresh():
++    state = _CachedAnalyticsLegacySnapshotState({}, ProjectGraph({}, {}), {})
++    state.cached_analytics = {"module_layers": {"legacy.mod": "obsolete_layer"}}
++    assert not hasattr(state, "cached_analytics_state")
++
++    ensure_cached_analytics(state)
++
++    assert state.cached_analytics_state == "deferred"
++    assert state.cached_analytics["module_layers"]["legacy.mod"] == "obsolete_layer"
 +
 +
-+@pytest.mark.parametrize("marker", INVALID_MARKERS, ids=repr)
-+def test_name_collision_tool_normalizes_malformed_marker(tmp_path, monkeypatch, marker):
++def test_explicit_none_cached_marker_snapshot_hydration_and_public_projection(tmp_path):
 +    repo = tmp_path / "repo"
-+    repo.mkdir()
-+    state = SimpleNamespace(collisions_state=marker, collisions=[_collision()])
-+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: SimpleNamespace(state=state))
-+    result = json.loads(get_name_collisions(str(repo)))
-+    assert result["availability"] == "unavailable"
-+    assert result["total"] is None
-+    assert result["details"] == []
-+    assert result["diagnostics_summary"]["name_collisions"] == {
-+        "count": None, "critical": None, "warning": None, "info": None,
-+        "availability": "unavailable",
-+    }
-+
-+
-+def test_missing_markers_with_payload_do_not_certify_diagnostics(tmp_path, monkeypatch):
-+    repo = tmp_path / "repo"
-+    repo.mkdir()
-+    state = SimpleNamespace(
-+        collisions=[_collision()],
-+        cycles=[["a", "b", "a"]],
-+        syntax_diagnostics_by_path={
-+            "broken.py": {"status": "checked_with_errors", "errors": [{"message": "bad"}]}
-+        },
++    module_file = repo / "contextor" / "core" / "analysis" / "mod.py"
++    module_file.parent.mkdir(parents=True)
++    module_file.write_text("def foo():\n    return 1\n", encoding="utf-8")
++    cache_dir = tmp_path / "cache"
++    state_manager = FileStateManager(str(cache_dir))
++    engine = IncrementalAnalysisEngine(
++        RepositoryAnalysisState(modules={}),
++        PersistentIdentityRegistry(str(repo)),
++        state_manager,
++        str(repo),
 +    )
-+    summary = diagnostics_summary_for_state(state)
-+    for key in ("name_collisions", "cycles", "syntax_errors"):
-+        assert summary[key]["availability"] == "unavailable"
-+        assert summary[key]["count"] is None
-+    assert syntax_diagnostics_for_path(state, "broken.py")["materialized"] is False
-+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: SimpleNamespace(state=state))
-+    result = json.loads(get_name_collisions(str(repo)))
-+    assert result["availability"] == "unavailable"
-+    assert result["details"] == []
++    assert engine.update_file(str(module_file)).status == "UPDATED"
++    module_name = "contextor.core.analysis.mod"
++    assert engine.state.cached_analytics_state == "fresh"
++    assert module_name in engine.state.cached_analytics["module_layers"]
++
++    base = save_snapshot(
++        engine.state,
++        cache_dir,
++        "cached-analytics-test",
++        repo_id="isolated-cached-analytics",
++        root_path=str(repo),
++        exact_revision=1,
++        file_state_payload=state_manager.build_payload("cached-analytics-test", 1),
++    )
++    assert base.revision == 1
++    committed = load_snapshot(
++        cache_dir,
++        expected_state_id="cached-analytics-test",
++        expected_repo_id="isolated-cached-analytics",
++        expected_root_path=str(repo),
++    )
++    assert committed is not None
++    isolated_state, metadata = committed
++    assert metadata.revision == 1
++    assert isolated_state.cached_analytics_state == "fresh"
++
++    isolated_state.cached_analytics_state = None
++    isolated_state.cached_analytics["module_layers"][module_name] = "obsolete_layer"
++    next_revision = metadata.revision + 1
++    saved = save_snapshot(
++        isolated_state,
++        cache_dir,
++        metadata.state_id,
++        repo_id=metadata.repo_id,
++        root_path=metadata.root_path,
++        exact_revision=next_revision,
++        file_state_payload=state_manager.build_payload(metadata.state_id, next_revision),
++    )
++    assert saved.revision == next_revision
++    loaded = load_snapshot(
++        cache_dir,
++        expected_state_id=metadata.state_id,
++        expected_repo_id=metadata.repo_id,
++        expected_root_path=metadata.root_path,
++    )
++    assert loaded is not None
++    loaded_state, loaded_metadata = loaded
++    assert loaded_metadata.revision == next_revision
++    assert loaded_state.cached_analytics_state is None
++    assert loaded_state.cached_analytics["module_layers"][module_name] == "obsolete_layer"
++
++    hydrated_file_state = FileStateManager(str(cache_dir))
++    assert hydrated_file_state.revision == loaded_metadata.revision
++    assert hydrated_file_state.state_id == loaded_metadata.state_id
++    hydrated = IncrementalAnalysisEngine(
++        loaded_state,
++        PersistentIdentityRegistry(str(repo)),
++        hydrated_file_state,
++        str(repo),
++    )
++    assert hydrated.state.cached_analytics_state == "deferred"
++    assert hydrated.state.cached_analytics["module_layers"][module_name] == "obsolete_layer"
++    fn = getattr(get_module_context, "fn", get_module_context)
++    with patch.dict(_live_engines, {str(repo.resolve()): hydrated}):
++        projected = json.loads(fn(str(repo), module_name, compact=True))
++    assert projected["metrics"].get("layer") != "obsolete_layer"
 +
 +
- def test_diagnostics_summary_does_not_fabricate_unavailable_counts():
-     summary = diagnostics_summary_for_state(SimpleNamespace(
-         collisions_state="deferred", cycles_state="unavailable", collisions=None, cycles=None
++def test_cached_marker_positive_lifecycle_preserves_other_families():
++    module_name = "contextor.core.analysis.mod"
++    module = Module(module_name, "contextor/core/analysis/mod.py", "/tmp/mod.py", [])
++    graph = ProjectGraph({module_name: set()}, {module_name: set()})
++    sentinel = {"module_layers": {module_name: "runtime"}}
++    for marker in ("fresh", "stale"):
++        state = RepositoryAnalysisState(
++            modules={module_name: module},
++            dependency_graph=graph,
++            cached_analytics_state=marker,
++            cached_analytics=sentinel.copy(),
++            topology_metrics_state="stale",
++            cycles_state="stale",
++        )
++        ensure_cached_analytics(state)
++        assert state.cached_analytics_state == marker
++        assert state.cached_analytics == sentinel
++        assert state.topology_metrics_state == "stale"
++        assert state.cycles_state == "stale"
++
++    deferred = RepositoryAnalysisState(
++        modules={module_name: module},
++        dependency_graph=graph,
++        cached_analytics_state="deferred",
++        cached_analytics={},
++        topology_metrics_state="stale",
++        cycles_state="stale",
++    )
++    ensure_cached_analytics(deferred)
++    assert deferred.cached_analytics_state == "fresh"
++    assert deferred.cached_analytics["module_layers"][module_name] == "runtime"
++    assert deferred.topology_metrics_state == "stale"
++    assert deferred.cycles_state == "stale"
++
++
+ def test_atomicity_and_isolation_on_failure(tmp_path):
+     """6. Failure during cached analytics computation does not corrupt published state."""
+     models_py, service_py, _, _ = _setup_multi_layer_repo(tmp_path)
 ```
