@@ -46,6 +46,7 @@ def _split_lineage_test_state(*source_keys):
     from contextor.core.analysis.state_manager import (
         RepositoryAnalysisState,
     )
+    from contextor.core.domain.module import Module
     from contextor.core.domain.lineage_facts import (
         LINEAGE_FACTS_SEMANTIC_VERSION,
         LineageFamilyStatus,
@@ -79,6 +80,24 @@ def _split_lineage_test_state(*source_keys):
         )
 
     return RepositoryAnalysisState(
+        modules={
+            source_key: Module(
+                module_id=source_key,
+                path=source_key,
+                absolute_path=str(Path(source_key).resolve()),
+                imports=[],
+            )
+            for source_key in source_keys
+        },
+        reexport_facts_by_module={
+            source_key: {
+                "exporter": source_key,
+                "explicit_all": None,
+                "bindings": {},
+                "star_sources": [],
+            }
+            for source_key in source_keys
+        },
         lineage_facts_by_source=sources,
         lineage_facts_state=(
             LineageFamilyStatus.FRESH.value
@@ -435,30 +454,10 @@ def test_current_schema_14_splits_lineage_and_roundtrips(tmp_path):
     )
 
 
-def test_reproducer_split_manifest_omitted_active_source_is_accepted(tmp_path):
+def test_split_manifest_omitted_active_source_is_rejected(tmp_path):
     import json
 
-    from contextor.core.domain.module import Module
-
     state = _split_lineage_test_state("a.py", "b.py")
-    state.modules = {
-        source: Module(
-            module_id=source,
-            path=source,
-            absolute_path=str(tmp_path / source),
-            imports=[],
-        )
-        for source in ("a.py", "b.py")
-    }
-    state.reexport_facts_by_module = {
-        source: {
-            "exporter": source,
-            "explicit_all": None,
-            "bindings": {},
-            "star_sources": [],
-        }
-        for source in state.modules
-    }
     metadata = save_snapshot(
         state,
         tmp_path,
@@ -485,31 +484,12 @@ def test_reproducer_split_manifest_omitted_active_source_is_accepted(tmp_path):
     manifest["sources"].pop("b.py")
     manifest_path.write_text(json.dumps(manifest, sort_keys=True), encoding="utf-8")
 
-    loaded = load_snapshot(tmp_path, "sid")
-    assert loaded is not None
-    loaded_state, loaded_metadata = loaded
-    actual = {
-        "accepted": True,
-        "loaded_sources": sorted(loaded_state.lineage_facts_by_source),
-        "lineage_facts_state": loaded_state.lineage_facts_state,
-        "lineage_query_index_state": loaded_state.lineage_query_index_state,
-        "expected_module_sources": sorted(module.path for module in loaded_state.modules.values()),
-        "metadata_revision": loaded_metadata.revision,
-    }
-    print(f"L33_REPRO={json.dumps(actual, sort_keys=True)}")
-    assert actual == {
-        "accepted": True,
-        "loaded_sources": ["a.py"],
-        "lineage_facts_state": "fresh",
-        "lineage_query_index_state": "fresh",
-        "expected_module_sources": ["a.py", "b.py"],
-        "metadata_revision": 1,
-    }
+    assert load_snapshot(tmp_path, "sid") is None
+    assert read_metadata(tmp_path) == metadata
 
 
 @pytest.mark.parametrize("case", ["embedded_repo_id_mismatch", "embedded_state_id_missing"])
 def test_reproducer_split_embedded_metadata_gap(tmp_path, case):
-    import json
     import pickle
 
     state = _split_lineage_test_state("a.py")
@@ -545,31 +525,147 @@ def test_reproducer_split_embedded_metadata_gap(tmp_path, case):
         payload["metadata"].pop("state_id")
     state_path.write_bytes(pickle.dumps(payload))
 
-    loaded = load_snapshot(
+    assert load_snapshot(
         tmp_path,
         "sid",
         expected_repo_id="repo-original",
         expected_root_path=str(tmp_path),
+    ) is None
+    assert read_metadata(tmp_path) == metadata
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "schema_version",
+        "state_id",
+        "revision",
+        "writer",
+        "repo_id",
+        "root_path",
+        "state_file",
+        "file_state_file",
+        "lineage_manifest_file",
+    ],
+)
+@pytest.mark.parametrize("tamper", ["missing", "mismatched"])
+def test_schema_14_rejects_missing_or_mismatched_embedded_field(tmp_path, field, tamper):
+    import pickle
+
+    state = _split_lineage_test_state("a.py")
+    metadata = save_snapshot(
+        state,
+        tmp_path,
+        "sid",
+        writer="desktop",
+        repo_id="repo-original",
+        root_path=str(tmp_path),
+        exact_revision=1,
+        file_state_payload={
+            "_meta": {"state_id": "sid", "revision": 1},
+            "files": {},
+        },
     )
+    assert metadata.schema_version == "1.4"
+    expected_load = {
+        "expected_repo_id": "repo-original",
+        "expected_root_path": str(tmp_path),
+    }
+    assert load_snapshot(tmp_path, "sid", **expected_load) is not None
+
+    state_path = tmp_path / metadata.state_file
+    payload = pickle.loads(state_path.read_bytes())
+    assert payload["metadata"][field] == getattr(metadata, field)
+    if tamper == "missing":
+        payload["metadata"].pop(field)
+    else:
+        mismatched = {
+            "schema_version": "1.3",
+            "state_id": "other-sid",
+            "revision": 2,
+            "writer": "other-writer",
+            "repo_id": "other-repo",
+            "root_path": str(tmp_path / "other-root"),
+            "state_file": "other-state.pkl",
+            "file_state_file": "other-file-state.json",
+            "lineage_manifest_file": "other-manifest.json",
+        }
+        payload["metadata"][field] = mismatched[field]
+    state_path.write_bytes(pickle.dumps(payload))
+
+    assert load_snapshot(tmp_path, "sid", **expected_load) is None
+    assert read_metadata(tmp_path) == metadata
+
+
+def test_split_deferred_lineage_allows_missing_active_source(tmp_path):
+    state = _split_lineage_test_state("a.py", "b.py")
+    state.lineage_facts_by_source.pop("b.py")
+    state.lineage_facts_state = "deferred"
+    metadata = save_snapshot(
+        state,
+        tmp_path,
+        "sid",
+        exact_revision=1,
+        file_state_payload={
+            "_meta": {"state_id": "sid", "revision": 1},
+            "files": {},
+        },
+    )
+
+    loaded = load_snapshot(tmp_path, "sid")
     assert loaded is not None
     loaded_state, loaded_metadata = loaded
-    actual = {
-        "case": case,
-        "accepted": True,
-        "outer_repo_id": loaded_metadata.repo_id,
-        "outer_state_id": loaded_metadata.state_id,
-        "loaded_state_id": loaded_state.state_id,
-        "revision": loaded_metadata.revision,
-    }
-    print(f"L34_REPRO={json.dumps(actual, sort_keys=True)}")
-    assert actual == {
-        "case": case,
-        "accepted": True,
-        "outer_repo_id": "repo-original",
-        "outer_state_id": "sid",
-        "loaded_state_id": "sid" if case == "embedded_repo_id_mismatch" else "",
-        "revision": 1,
-    }
+    assert loaded_metadata == metadata
+    assert {module.path for module in loaded_state.modules.values()} == {"a.py", "b.py"}
+    assert set(loaded_state.lineage_facts_by_source) == {"a.py"}
+    assert loaded_state.lineage_facts_state == "deferred"
+
+
+def test_split_lineage_rejects_foreign_source_key(tmp_path):
+    state = _split_lineage_test_state("a.py", "b.py")
+    state.modules.pop("b.py")
+    state.reexport_facts_by_module.pop("b.py")
+    metadata = save_snapshot(
+        state,
+        tmp_path,
+        "sid",
+        exact_revision=1,
+        file_state_payload={
+            "_meta": {"state_id": "sid", "revision": 1},
+            "files": {},
+        },
+    )
+    assert metadata.lineage_manifest_file
+    assert set(state.lineage_facts_by_source) == {"a.py", "b.py"}
+    assert {module.path for module in state.modules.values()} == {"a.py"}
+
+    assert load_snapshot(tmp_path, "sid") is None
+
+
+def test_split_lineage_accepts_valid_zero_fact_slice(tmp_path):
+    state = _split_lineage_test_state("a.py")
+    source_slice = state.lineage_facts_by_source["a.py"]
+    assert source_slice.manifest.anchor_count == 0
+    assert source_slice.manifest.flow_count == 0
+    assert source_slice.manifest.surface_count == 0
+    metadata = save_snapshot(
+        state,
+        tmp_path,
+        "sid",
+        exact_revision=1,
+        file_state_payload={
+            "_meta": {"state_id": "sid", "revision": 1},
+            "files": {},
+        },
+    )
+
+    loaded = load_snapshot(tmp_path, "sid")
+    assert loaded is not None
+    loaded_state, loaded_metadata = loaded
+    assert loaded_metadata == metadata
+    assert loaded_state.lineage_facts_by_source == {"a.py": source_slice}
+    assert loaded_state.lineage_facts_state == "fresh"
+    assert loaded_state.lineage_query_index_state == "fresh"
 
 
 def test_current_schema_reexport_facts_roundtrip(tmp_path):

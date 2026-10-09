@@ -1969,6 +1969,20 @@ def load_snapshot(
 
         if isinstance(payload, dict) and set(payload) == {"metadata", "state"}:
             embedded = payload["metadata"]
+            if not isinstance(embedded, dict):
+                return None
+
+            if metadata.schema_version == LIVE_STATE_SCHEMA_VERSION:
+                expected_embedded = asdict(metadata)
+                if set(embedded) != set(expected_embedded):
+                    return None
+                if any(
+                    type(embedded[key]) is not type(expected_value)
+                    or embedded[key] != expected_value
+                    for key, expected_value in expected_embedded.items()
+                ):
+                    return None
+
             embedded_metadata = LiveStateMetadata(
                 schema_version=str(embedded.get("schema_version", "1.0")),
                 state_id=str(embedded.get("state_id", "")),
@@ -2031,6 +2045,30 @@ def load_snapshot(
                     cache_dir,
                     metadata,
                 )
+
+                raw_modules = getattr(raw_state, "modules", None)
+                if not isinstance(raw_modules, dict):
+                    return None
+
+                try:
+                    expected_source_keys = {
+                        Path(str(module.path)).as_posix()
+                        for module in raw_modules.values()
+                    }
+                except (AttributeError, TypeError, ValueError):
+                    return None
+
+                actual_source_keys = set(split_lineage)
+
+                if not actual_source_keys.issubset(expected_source_keys):
+                    return None
+
+                if (
+                    getattr(raw_state, "lineage_facts_state", None)
+                    == LineageFamilyStatus.FRESH.value
+                    and actual_source_keys != expected_source_keys
+                ):
+                    return None
 
                 _trace_snapshot_load_phase(
                     "split_lineage_load",
