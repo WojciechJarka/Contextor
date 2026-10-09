@@ -427,3 +427,152 @@ def test_ensure_topology_analytics_lifecycle_invariants():
     ensure_topology_analytics(state_cached)
     assert state_cached.topology_metrics_state == "fresh"
     assert state_cached.cached_analytics_state == "deferred"  # untouched!
+
+
+@pytest.mark.parametrize(
+    "marker,analytics",
+    [
+        ("deferred", {"previous": "keep"}),
+        ("fresh", {"pagerank": {"a": 1.0}}),
+    ],
+    ids=["deferred", "fresh-populated"],
+)
+def test_topology_loses_freshness_and_preserves_payload_when_resync_required(
+    marker, analytics
+):
+    from contextor.core.analysis.incremental.materialization import ensure_topology_analytics
+
+    graph = ProjectGraph(hard_edges={"a": {"b"}, "b": set()}, soft_edges={})
+    state = RepositoryAnalysisState(
+        dependency_graph=graph,
+        topology_metrics_state=marker,
+        topology_analytics=analytics,
+    )
+    state.resync_required = True
+    previous = state.topology_analytics
+
+    with patch(
+        "contextor.core.reporting_engine.graph_analytics.compute_topology_analytics",
+        return_value={"recomputed": True},
+    ) as compute:
+        ensure_topology_analytics(state)
+
+    assert state.topology_metrics_state == "stale"
+    assert state.topology_analytics is previous
+    compute.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "graph",
+    [
+        pytest.param(ProjectGraph(hard_edges=[], soft_edges={}), id="hard-edges-not-dict"),
+        pytest.param(ProjectGraph(hard_edges={}, soft_edges=[]), id="soft-edges-not-dict"),
+        pytest.param(
+            ProjectGraph(hard_edges={"a": ["b"]}, soft_edges={}),
+            id="hard-edge-targets-not-set",
+        ),
+    ],
+)
+def test_topology_malformed_graph_stales_without_recomputation(graph):
+    from contextor.core.analysis.incremental.materialization import ensure_topology_analytics
+
+    previous = {"previous": "keep"}
+    state = RepositoryAnalysisState(
+        dependency_graph=graph,
+        topology_metrics_state="deferred",
+        topology_analytics=previous,
+    )
+
+    with patch(
+        "contextor.core.reporting_engine.graph_analytics.compute_topology_analytics",
+        return_value={"recomputed": True},
+    ) as compute:
+        ensure_topology_analytics(state)
+
+    assert state.topology_metrics_state == "stale"
+    assert state.topology_analytics is previous
+    compute.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "marker,analytics,expected_marker",
+    [
+        ("deferred", {}, "deferred"),
+        ("fresh", {"pagerank": {"a": 1.0}}, "stale"),
+    ],
+    ids=["deferred-remains-deferred", "fresh-becomes-stale"],
+)
+def test_topology_missing_graph_does_not_compute_or_discard_payload(
+    marker, analytics, expected_marker
+):
+    from contextor.core.analysis.incremental.materialization import ensure_topology_analytics
+
+    state = RepositoryAnalysisState(
+        dependency_graph=None,
+        topology_metrics_state=marker,
+        topology_analytics=analytics,
+    )
+    previous = state.topology_analytics
+
+    with patch(
+        "contextor.core.reporting_engine.graph_analytics.compute_topology_analytics",
+        return_value={"recomputed": True},
+    ) as compute:
+        ensure_topology_analytics(state)
+
+    assert state.topology_metrics_state == expected_marker
+    assert state.topology_analytics is previous
+    compute.assert_not_called()
+
+
+def test_topology_valid_deferred_matches_independent_compute_oracle():
+    from contextor.core.analysis.incremental.materialization import ensure_topology_analytics
+
+    hard_edges = {"a": {"b"}, "b": set()}
+    soft_edges = {"a": set(), "b": set()}
+    graph = ProjectGraph(hard_edges=hard_edges, soft_edges=soft_edges)
+    metrics = {}
+    expected = compute_topology_analytics(hard_edges, soft_edges, metrics)
+    state = RepositoryAnalysisState(
+        dependency_graph=graph,
+        metrics=metrics,
+        topology_metrics_state="deferred",
+        topology_analytics={"previous": "keep"},
+    )
+
+    ensure_topology_analytics(state)
+
+    assert state.topology_metrics_state == "fresh"
+    assert state.topology_analytics == expected
+
+
+@pytest.mark.parametrize(
+    "marker,analytics",
+    [
+        ("stale", {"previous": "stale"}),
+        ("fresh", {"pagerank": {"a": 1.0}}),
+    ],
+    ids=["stale-preserved", "fresh-preserved"],
+)
+def test_topology_valid_graph_preserves_certified_markers_and_payload_identity(
+    marker, analytics
+):
+    from contextor.core.analysis.incremental.materialization import ensure_topology_analytics
+
+    graph = ProjectGraph(hard_edges={"a": {"b"}, "b": set()}, soft_edges={})
+    state = RepositoryAnalysisState(
+        dependency_graph=graph,
+        topology_metrics_state=marker,
+        topology_analytics=analytics,
+    )
+    previous = state.topology_analytics
+
+    with patch(
+        "contextor.core.reporting_engine.graph_analytics.compute_topology_analytics",
+        return_value={"recomputed": True},
+    ) as compute:
+        ensure_topology_analytics(state)
+
+    assert state.topology_metrics_state == marker
+    assert state.topology_analytics is previous
+    compute.assert_not_called()

@@ -118,6 +118,30 @@ def ensure_module_usages(state: RepositoryAnalysisState) -> None:
             )
 
 
+def _canonical_graph_structure_valid(state: RepositoryAnalysisState) -> bool:
+    graph = getattr(state, "dependency_graph", None)
+    if graph is None:
+        return False
+
+    for field_name in ("hard_edges", "soft_edges"):
+        edges = getattr(graph, field_name, None)
+        if not isinstance(edges, dict):
+            return False
+
+        for source, targets in edges.items():
+            if not isinstance(source, str) or not source:
+                return False
+            if not isinstance(targets, set):
+                return False
+            if any(
+                not isinstance(target, str) or not target
+                for target in targets
+            ):
+                return False
+
+    return True
+
+
 def ensure_topology_analytics(state: RepositoryAnalysisState) -> None:
     """
     Ensures state.topology_analytics is fresh and complete from canonical graph.
@@ -130,6 +154,19 @@ def ensure_topology_analytics(state: RepositoryAnalysisState) -> None:
 
     if not hasattr(state, "topology_analytics") or state.topology_analytics is None:
         state.topology_analytics = {}
+
+    if getattr(state, "resync_required", False):
+        state.topology_metrics_state = "stale"
+        return
+
+    if getattr(state, "dependency_graph", None) is None:
+        if state.topology_metrics_state == "fresh":
+            state.topology_metrics_state = "stale"
+        return
+
+    if not _canonical_graph_structure_valid(state):
+        state.topology_metrics_state = "stale"
+        return
 
     # A. Fresh + populated analytics: preserve, zero recomputation
     if state.topology_metrics_state == "fresh" and state.topology_analytics:
@@ -221,6 +258,19 @@ def ensure_cycles(state: RepositoryAnalysisState) -> None:
 
     if not hasattr(state, "cycles") or state.cycles is None:
         state.cycles = []
+
+    if getattr(state, "resync_required", False):
+        state.cycles_state = "stale"
+        return
+
+    if getattr(state, "dependency_graph", None) is None:
+        if state.cycles_state == "fresh":
+            state.cycles_state = "stale"
+        return
+
+    if not _canonical_graph_structure_valid(state):
+        state.cycles_state = "stale"
+        return
 
     # A. Fresh state: preserve, zero recomputation (even if cycles == [])
     if state.cycles_state == "fresh":

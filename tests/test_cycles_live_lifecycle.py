@@ -456,3 +456,131 @@ def test_soft_edges_ignored_for_cycles():
 
     assert state.cycles_state == "fresh"
     assert state.cycles == []
+
+
+@pytest.mark.parametrize(
+    "marker,cycles",
+    [
+        ("deferred", [["previous", "cycle"]]),
+        ("fresh", [["a", "b", "a"]]),
+    ],
+    ids=["deferred", "fresh-populated"],
+)
+def test_cycles_lose_freshness_and_preserve_payload_when_resync_required(
+    marker, cycles
+):
+    from contextor.core.diagnostics_projection import diagnostics_summary_for_state
+
+    graph = ProjectGraph(hard_edges={"a": {"b"}, "b": {"a"}}, soft_edges={})
+    state = RepositoryAnalysisState(
+        dependency_graph=graph,
+        cycles_state=marker,
+        cycles=cycles,
+    )
+    state.resync_required = True
+    previous = state.cycles
+
+    with patch("contextor.core.graph.cycles.detect_cycles", return_value=[]) as compute:
+        ensure_cycles(state)
+        diagnostics = diagnostics_summary_for_state(state)
+
+    assert state.cycles_state == "stale"
+    assert state.cycles is previous
+    compute.assert_not_called()
+    assert diagnostics["cycles"] == {"count": None, "availability": "stale"}
+
+
+@pytest.mark.parametrize(
+    "graph",
+    [
+        pytest.param(ProjectGraph(hard_edges=[], soft_edges={}), id="hard-edges-not-dict"),
+        pytest.param(ProjectGraph(hard_edges={}, soft_edges=[]), id="soft-edges-not-dict"),
+        pytest.param(
+            ProjectGraph(hard_edges={"a": ["b"]}, soft_edges={}),
+            id="hard-edge-targets-not-set",
+        ),
+    ],
+)
+def test_cycles_malformed_graph_stales_without_recomputation(graph):
+    previous = [["previous", "cycle"]]
+    state = RepositoryAnalysisState(
+        dependency_graph=graph,
+        cycles_state="deferred",
+        cycles=previous,
+    )
+
+    with patch("contextor.core.graph.cycles.detect_cycles", return_value=[]) as compute:
+        ensure_cycles(state)
+
+    assert state.cycles_state == "stale"
+    assert state.cycles is previous
+    compute.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "marker,cycles,expected_marker",
+    [
+        ("deferred", [], "deferred"),
+        ("fresh", [["a", "b", "a"]], "stale"),
+    ],
+    ids=["deferred-remains-deferred", "fresh-becomes-stale"],
+)
+def test_cycles_missing_graph_does_not_compute_or_discard_payload(
+    marker, cycles, expected_marker
+):
+    state = RepositoryAnalysisState(
+        dependency_graph=None,
+        cycles_state=marker,
+        cycles=cycles,
+    )
+    previous = state.cycles
+
+    with patch("contextor.core.graph.cycles.detect_cycles", return_value=[]) as compute:
+        ensure_cycles(state)
+
+    assert state.cycles_state == expected_marker
+    assert state.cycles is previous
+    compute.assert_not_called()
+
+
+def test_cycles_valid_deferred_matches_independent_compute_oracle():
+    hard_edges = {"a": {"b"}, "b": {"c"}, "c": {"a"}}
+    graph = ProjectGraph(hard_edges=hard_edges, soft_edges={})
+    expected = detect_cycles(hard_edges)
+    state = RepositoryAnalysisState(
+        dependency_graph=graph,
+        cycles_state="deferred",
+        cycles=[["previous", "cycle"]],
+    )
+
+    ensure_cycles(state)
+
+    assert state.cycles_state == "fresh"
+    assert state.cycles == expected
+
+
+@pytest.mark.parametrize(
+    "marker,cycles",
+    [
+        ("stale", [["previous", "stale"]]),
+        ("fresh", []),
+    ],
+    ids=["stale-preserved", "fresh-empty-preserved"],
+)
+def test_cycles_valid_graph_preserves_certified_markers_and_payload_identity(
+    marker, cycles
+):
+    graph = ProjectGraph(hard_edges={"a": {"b"}, "b": set()}, soft_edges={})
+    state = RepositoryAnalysisState(
+        dependency_graph=graph,
+        cycles_state=marker,
+        cycles=cycles,
+    )
+    previous = state.cycles
+
+    with patch("contextor.core.graph.cycles.detect_cycles", return_value=[["x"]]) as compute:
+        ensure_cycles(state)
+
+    assert state.cycles_state == marker
+    assert state.cycles is previous
+    compute.assert_not_called()
