@@ -435,6 +435,143 @@ def test_current_schema_14_splits_lineage_and_roundtrips(tmp_path):
     )
 
 
+def test_reproducer_split_manifest_omitted_active_source_is_accepted(tmp_path):
+    import json
+
+    from contextor.core.domain.module import Module
+
+    state = _split_lineage_test_state("a.py", "b.py")
+    state.modules = {
+        source: Module(
+            module_id=source,
+            path=source,
+            absolute_path=str(tmp_path / source),
+            imports=[],
+        )
+        for source in ("a.py", "b.py")
+    }
+    state.reexport_facts_by_module = {
+        source: {
+            "exporter": source,
+            "explicit_all": None,
+            "bindings": {},
+            "star_sources": [],
+        }
+        for source in state.modules
+    }
+    metadata = save_snapshot(
+        state,
+        tmp_path,
+        "sid",
+        exact_revision=1,
+        file_state_payload={
+            "_meta": {"state_id": "sid", "revision": 1},
+            "files": {},
+        },
+    )
+    assert metadata.schema_version == "1.4"
+    assert set(state.lineage_facts_by_source) == {"a.py", "b.py"}
+    assert all(
+        not (slice_.anchors or slice_.flows or slice_.surfaces)
+        for slice_ in state.lineage_facts_by_source.values()
+    )
+    baseline = load_snapshot(tmp_path, "sid")
+    assert baseline is not None
+    assert set(baseline[0].lineage_facts_by_source) == {"a.py", "b.py"}
+
+    manifest_path = tmp_path / metadata.lineage_manifest_file
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert set(manifest["sources"]) == {"a.py", "b.py"}
+    manifest["sources"].pop("b.py")
+    manifest_path.write_text(json.dumps(manifest, sort_keys=True), encoding="utf-8")
+
+    loaded = load_snapshot(tmp_path, "sid")
+    assert loaded is not None
+    loaded_state, loaded_metadata = loaded
+    actual = {
+        "accepted": True,
+        "loaded_sources": sorted(loaded_state.lineage_facts_by_source),
+        "lineage_facts_state": loaded_state.lineage_facts_state,
+        "lineage_query_index_state": loaded_state.lineage_query_index_state,
+        "expected_module_sources": sorted(module.path for module in loaded_state.modules.values()),
+        "metadata_revision": loaded_metadata.revision,
+    }
+    print(f"L33_REPRO={json.dumps(actual, sort_keys=True)}")
+    assert actual == {
+        "accepted": True,
+        "loaded_sources": ["a.py"],
+        "lineage_facts_state": "fresh",
+        "lineage_query_index_state": "fresh",
+        "expected_module_sources": ["a.py", "b.py"],
+        "metadata_revision": 1,
+    }
+
+
+@pytest.mark.parametrize("case", ["embedded_repo_id_mismatch", "embedded_state_id_missing"])
+def test_reproducer_split_embedded_metadata_gap(tmp_path, case):
+    import json
+    import pickle
+
+    state = _split_lineage_test_state("a.py")
+    metadata = save_snapshot(
+        state,
+        tmp_path,
+        "sid",
+        repo_id="repo-original",
+        root_path=str(tmp_path),
+        exact_revision=1,
+        file_state_payload={
+            "_meta": {"state_id": "sid", "revision": 1},
+            "files": {},
+        },
+    )
+    assert metadata.schema_version == "1.4"
+    baseline = load_snapshot(
+        tmp_path,
+        "sid",
+        expected_repo_id="repo-original",
+        expected_root_path=str(tmp_path),
+    )
+    assert baseline is not None
+    assert baseline[0].state_id == baseline[1].state_id == "sid"
+
+    state_path = tmp_path / metadata.state_file
+    payload = pickle.loads(state_path.read_bytes())
+    assert payload["metadata"]["repo_id"] == "repo-original"
+    assert payload["metadata"]["state_id"] == "sid"
+    if case == "embedded_repo_id_mismatch":
+        payload["metadata"]["repo_id"] = "repo-different"
+    else:
+        payload["metadata"].pop("state_id")
+    state_path.write_bytes(pickle.dumps(payload))
+
+    loaded = load_snapshot(
+        tmp_path,
+        "sid",
+        expected_repo_id="repo-original",
+        expected_root_path=str(tmp_path),
+    )
+    assert loaded is not None
+    loaded_state, loaded_metadata = loaded
+    actual = {
+        "case": case,
+        "accepted": True,
+        "outer_repo_id": loaded_metadata.repo_id,
+        "outer_state_id": loaded_metadata.state_id,
+        "loaded_state_id": loaded_state.state_id,
+        "revision": loaded_metadata.revision,
+    }
+    print(f"L34_REPRO={json.dumps(actual, sort_keys=True)}")
+    assert actual == {
+        "case": case,
+        "accepted": True,
+        "outer_repo_id": "repo-original",
+        "outer_state_id": "sid",
+        "loaded_state_id": "sid" if case == "embedded_repo_id_mismatch" else "",
+        "revision": 1,
+    }
+
+
 def test_current_schema_reexport_facts_roundtrip(tmp_path):
     facts = {
         "pkg.mod": {

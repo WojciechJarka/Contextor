@@ -1,76 +1,230 @@
-# L33/L34 snapshot manifest integrity discovery
-
-MODE: READ-ONLY ARCHITECTURAL AUDIT. No implementation, tests, FULL analysis, restart or update_file.
+# L33/L34 negative reproducer
 
 ## CURRENT_HEAD
 
-`1a1efaee06aa927385821617dc72b889f436cf80` (`git rev-parse HEAD`). Initial `git status --short` was empty. Contextor MCP discovery included deferred-tool inventory, tool documentation, symbol lookup, implementation/source ranges, and lineage. Canonical owner: `contextor.core.live_state.store`; inspected Contextor records: canonical revision 114, `workspace_sync=verified`. Git working-tree source/test files supplied literal anchors; `git diff --name-only -- contextor tests` was empty.
+24c5b014ce1373fb4be8cd896c42eafebdd4391b (`git rev-parse HEAD`). Initial `git status --short` was clean. Contextor MCP deferred-tool inventory, documentation, implementation previews, source range, and `get_symbol_lineage` preview were used first. Canonical `load_snapshot` and `save_snapshot` resolved in `contextor/core/live_state/store.py` at canonical revision 114, source `workspace_sync=verified`. Git-confirmed source and test anchors were inspected before editing. No production file changed.
 
-## CANONICAL_SOURCE_DOMAIN_CONTRACT
+## L33_EXECUTED_REPRODUCTION
 
-- CONTRACT_PROVED: `RepositoryAnalysisState.modules` and `lineage_facts_by_source` are canonical state fields (`contextor/core/analysis/state_manager.py:83-102`). The full producer derives eligible keys as `Path(str(module.path)).as_posix()` over `modules.values()`, and marks the family `deferred` when an eligible key is absent (`contextor/core/api/facade.py:291-300,430-439`). Incremental refresh derives the same domain from `candidate.modules` and marks missing keys `deferred` or preserves `stale` (`contextor/core/analysis/incremental/engine.py:234-238,381-414`). These checks do not run in `load_snapshot`.
-- DIRECT_EVIDENCE: `not_materialized` requires an empty lineage mapping and no semantic version; materialized family states require the current version (`contextor/core/live_state/store.py:347-395`). Thus an unmaterialized optional lineage family is distinct from an omitted source in a `fresh` materialized family.
-- DIRECT_EVIDENCE: A valid intentionally empty source has a manifest entry/chunk and zero anchor/flow/surface counts (`contextor/core/domain/lineage_facts.py:428-465,483-499`; `tests/test_live_state_store.py:45-89`). An omitted source has no key. Malformed manifest or chunk is a separate corruption case.
+DIRECT_EVIDENCE: `tests/test_live_state_store.py::test_reproducer_split_manifest_omitted_active_source_is_accepted` constructs two `Module` objects with paths `a.py` and `b.py`, valid canonical re-export entries, and current-version, `fresh` lineage slices for both. Both slices have zero anchors, flows and surfaces but remain explicitly materialized and listed in the baseline manifest. It saves a schema-1.4 exact revision 1 snapshot with valid file-state identity and verifies the untampered real loader returns both source keys. The only post-save tamper removes the `b.py` entry from the committed manifest's `sources` mapping. Outer metadata, core pickle, manifest identity/revision, remaining entry/chunk and the physically present `b.py` chunk are unchanged.
 
-## SAVE_LOAD_GENERATION_BOUNDARY
+Real `load_snapshot(tmp_path, "sid")` returned:
+```json
+{"accepted": true, "expected_module_sources": ["a.py", "b.py"], "lineage_facts_state": "fresh", "lineage_query_index_state": "fresh", "loaded_sources": ["a.py"], "metadata_revision": 1}
+```
+Thus omission of `b.py` is accepted while both freshness fields remain `fresh`. A valid empty source is represented by the baseline `b.py` manifest entry and chunk with zero facts; the failing case is removal of the entire source entry, not an empty slice. Test anchors: `tests/test_live_state_store.py:438-507`. Code-path anchors: `contextor/core/live_state/store.py:1040-1116,1175-1393,2042-2067,337-466`.
 
-- CODE_PATH_PROVED: `save_snapshot` creates revision/token engine, file-state and lineage-manifest names (`contextor/core/live_state/store.py:1620-1654`). `LiveStateMetadata` carries schema, state_id, revision, writer, repo_id, root_path, and all three file references (`:469-479,1667-1688`). Split mode requires a dict lineage map (`:482-495`). Only present mapping keys are serialized into source chunks and manifest `sources`; the core pickle copy gets an empty lineage map (`:813-839,873-892,981-1025`). The pickle embeds metadata (`:1721-1755`). Save validates file-state `_meta.state_id/revision` (`:1757-1797`); `engine_state.meta.json` is committed last by `os.replace` (`:1813-1842`), with failed exact-generation cleanup (`:1854-1872`).
-- CODE_PATH_PROVED: `load_snapshot` reads outer metadata, optionally checks caller-expected state/repository/root, then follows outer `state_file` (`:1926-1963`). Split load follows outer manifest reference, validates its schema/state_id/revision and each *listed* chunk (`:1040-1116,1175-1393,2004-2049`). The loaded map replaces the deliberately empty core map before normalization (`:2042-2067`), then the state/metadata pair is returned (`:2224-2229`).
-- CODE_PATH_PROVED: Disk hydration delegates to `load_snapshot` and requires nonempty modules and a dependency graph, but does not check lineage domain (`contextor/core/analysis/state_manager.py:485-504`; `contextor/core/live_state/hydration.py:59-82`). LIVE startup calls the loader with expected repo/root, then constructs the server (`contextor/core/live_state/runtime.py:1431-1441,1528-1540`). Committed LIVE publication checks loaded state_id/revision against outer metadata and candidate, then installs the state (`contextor/core/live_state/ipc.py:1353-1404,1439-1451`).
+## L34_EXECUTED_REPRODUCTION
 
-## MANIFEST_COMPLETENESS_EVIDENCE
+Each parameter case starts from its own valid schema-1.4 committed snapshot with outer `repo_id=repo-original`, `state_id=sid`, `root_path=tmp_path`, and exact revision 1. Its untampered real load is asserted successful. Only the core pickle's embedded metadata mapping is then changed; outer metadata, state object, manifest, chunks and file-state generation are untouched. Calls use the correct `expected_repo_id=repo-original` and `expected_root_path=tmp_path`.
 
-- DIRECT_EVIDENCE: The manifest holds schema_version, state_id, revision, sources, but no required-source count/domain (`contextor/core/live_state/store.py:993-1000`). Save iterates `sorted(sources)` without comparing to `state.modules` (`:823-839,873-892`).
-- CODE_PATH_PROVED: Load requires `sources` to be a dict and iterates only its keys (`:1104-1116,1206-1245`). It checks each listed entry/chunk file, fingerprint, semantic version and key (`:1248-1355`). The validation cache compares its keys to manifest keys, not module paths (`:1379-1385`). Normalization validates only present source slices and preserves family state (`:357-430`). Index normalization builds from present sources and sets `lineage_query_index_state="fresh"` for a materialized family when index building succeeds (`:441-466`).
-- INFERENCE from complete code path: Removing a valid entry from `manifest.sources` leaves a structurally valid manifest; the omitted chunk is never read. A validation-cache mismatch may revalidate/rewrite the remaining entries, but does not establish module-domain completeness. Persisted `lineage_facts_state="fresh"` and derived index `"fresh"` can remain after partial hydration.
+Case A changes only embedded `repo_id` to `repo-different`. Real loader returned:
+```json
+{"accepted": true, "case": "embedded_repo_id_mismatch", "loaded_state_id": "sid", "outer_repo_id": "repo-original", "outer_state_id": "sid", "revision": 1}
+```
+The test explicitly confirms the saved embedded repo_id before tamper and the differing value after tamper; the returned metadata remains the outer value.
 
-## METADATA_BINDING_MATRIX
+Case B removes only embedded `state_id`. Real loader returned:
+```json
+{"accepted": true, "case": "embedded_state_id_missing", "loaded_state_id": "", "outer_repo_id": "repo-original", "outer_state_id": "sid", "revision": 1}
+```
+The preassignment core state id matches outer `sid`; after validation the loader assigns the embedded default empty string. Committed LIVE publication has a later state/metadata id parity check, so this specific result is a loader acceptance and return-time inconsistency, not evidence that committed publication accepts Case B (`contextor/core/live_state/ipc.py:1380-1391`). Test anchors: `tests/test_live_state_store.py:510-575`. Loader anchors: `contextor/core/live_state/store.py:1949-1959,1970-1994,2104-2123,2224-2229`.
 
-| Field | Save | Load comparison before assignment | Finding |
-|---|---|---|---|
-| repo_id / canonical root_path | Outer and embedded (`store.py:1667-1688,1740-1751`) | Caller expectations checked against outer only (`:1949-1957`); embedded parsed with empty defaults (`:1972-1987`) | Missing/mismatched embedded values accepted. |
-| state_id | Outer, embedded, core, manifest, file-state _meta | Manifest vs outer (`:1084-1092`); *present* core vs outer (`:2109-2116`); embedded not compared and then assigned to core (`:2117-2123`) | Embedded omission defaults to empty string. Loader can return outer sid with state id empty; committed publish separately rejects (`ipc.py:1380-1391`). |
-| revision | Same generation layers | Embedded vs outer (`store.py:1988-1989`), manifest vs outer (`:1094-1102`), present core vs outer (`:2105-2116`) | Embedded mismatch rejected; missing embedded revision defaults to 0 and fails for positive revisions. Missing core revision can be filled after check. |
-| schema_version | Outer, embedded; manifest has own schema | Outer supported-set check (`:1416-1424`), split requires current outer schema (`:2004-2009`), manifest checks own schema (`:1074-1082`); no embedded comparison (`:1972-1994`) | Embedded omission/mismatch accepted. |
-| engine state_file | Outer and embedded generation name | Outer selects pickle (`:1958-1963`); no embedded comparison (`:1972-1994`) | Embedded omission/mismatch accepted. |
-| file_state_file / file-state generation | Outer and embedded; file JSON _meta | Save checks JSON id/revision (`:1757-1797`). `load_snapshot` does not read file JSON or compare embedded reference. Separate `FileStateManager._load` follows outer reference and checks JSON identity (`contextor/core/analysis/state_manager.py:293-375`) | Embedded reference mismatch accepted by snapshot loader. |
-| lineage_manifest_file | Outer and embedded; manifest id/revision/schema | Embedded ref must equal outer (`store.py:1990-1994`); referenced manifest fields checked (`:1074-1102`) | Wrong/missing embedded split reference rejected. |
-| writer | Outer and embedded | Parsed, not compared (`:1972-1994`) | Mismatch accepted; informational field. |
+## SCHEMA_14_REQUIRED_FIELDS
 
-CODE_PATH_PROVED: The hypothesized mechanism “embedded metadata overwritten with trusted outer values before validation” is **not** what the code does. Embedded fields receive defaults; only embedded revision and manifest reference are compared. Present core state_id/revision are checked against outer, then core values are assigned from embedded values (`store.py:1972-1994,2105-2123`). This can mask missing core revision and inject an unverified embedded state_id. Embedded repo/root/schema/file names are not checked later by `load_snapshot`.
+CONTRACT_PROVED from current loader: outer metadata `schema_version` must be a supported value, and a nonempty split `lineage_manifest_file` requires outer schema 1.4 (`contextor/core/live_state/store.py:1416-1440,2004-2009`). The split manifest itself must have current manifest schema, outer-matching state_id/revision, and a `sources` mapping (`:1040-1116`). Each *listed* source has required entry/chunk fields and identity checks (`:1222-1355`). Split raw state must be a non-dict object with `__dict__` (`:2011-2022`).
 
-## EXISTING_NEGATIVE_TEST_COVERAGE
+For the embedded metadata mapping of a normal positive-revision schema-1.4 split generation, the loader effectively requires `revision` equal to outer revision and `lineage_manifest_file` equal to the nonempty outer reference (`:1970-1994`). Missing embedded revision defaults to 0, which mismatches normal revision 1; missing manifest reference defaults to empty, which mismatches the split reference. Embedded `state_id`, `repo_id`, `root_path`, `schema_version`, `writer`, `state_file`, and `file_state_file` are parsed with defaults but have no embedded-versus-outer equality check. Case B executes the missing embedded state_id acceptance, and Case A executes mismatched embedded repo_id acceptance. This describes current acceptance behavior, not a proposed policy. The pickle wrapper must be a mapping with exactly `metadata` and `state` keys to enter the embedded path; a split manifest with an unwrapped payload is rejected (`:1970,2230-2231`).
 
-- DIRECT_EVIDENCE: Complete split roundtrip asserts both manifest source keys and equality of loaded and saved maps, but its fixture has no active modules domain (`tests/test_live_state_store.py:45-89,337-435`). Lifecycle roundtrip checks endpoint types and index freshness (`tests/test_lineage_state_lifecycle.py:172-207`). Neither tests omitted-but-valid source detection.
-- DIRECT_EVIDENCE: Split corruption parameterization covers missing *listed chunk*, manifest revision mismatch and corrupt listed chunk, all asserting `load_snapshot is None` (`tests/test_live_state_store.py:1725-1808`). It never removes a source entry. Invalid family/version pairs and mapping/manifest source-key mismatch are covered (`tests/test_lineage_state_lifecycle.py:319-355`). Empty valid slices occur in the split fixture/roundtrip, without a check against active module paths.
-- DIRECT_EVIDENCE: The embedded metadata roundtrip test asserts only successful revision equality (`tests/test_live_state_store.py:330-334`). Repository identity/root negatives pass expectations that disagree with **outer** metadata (`:2074-2094`). No inspected assertion tampers with embedded repo_id/root/schema/state_id/state_file/file_state_file or removes an embedded identity field. Manifest revision mismatch has a negative test (`:1784-1808`); embedded revision mismatch and wrong embedded manifest reference are rejected by code (`store.py:1988-1994`) but have no corresponding negative assertion in inspected snapshot tests.
-- DIRECT_EVIDENCE: Interrupted metadata commit test asserts old revision remains and new generation files are absent (`tests/test_live_state_store.py:1811-1913`). Missing/invalid file-state generation and absent _meta have separate tests (`:2003-2048`). Legacy not-materialized lineage is asserted empty after hydration (`tests/test_lineage_state_lifecycle.py:430-505`). Search of test definitions found no omitted-manifest-source or embedded/outer metadata tamper assertion. This is a coverage observation, not a claim about every possible indirect test.
+## LEGACY_COMPATIBILITY_BOUNDARY
 
-## MINIMAL_FAILURE_CASES
+DIRECT_EVIDENCE: `read_metadata` accepts outer schema 1.0–1.4 and defaults absent outer generation/identity fields (`contextor/core/live_state/store.py:1416-1440`). The supported schema-1.2 monolithic test constructs outer and embedded metadata **without** `lineage_manifest_file` and successfully loads (`tests/test_live_state_store.py:2051-2125`; focused test passed). The legacy unwrapped dict snapshot test also passed (`tests/test_live_state_store.py:319-327`): with no split manifest, the loader follows the unwrapped path (`store.py:2230-2239`). Legacy monolithic snapshots therefore can lack the newer manifest reference; enforcing an embedded split reference against those supported snapshots would conflict with observed compatibility. In the wrapped legacy path, embedded revision is still compared to outer revision; absent newer embedded fields receive defaults. Caller-supplied repository/root expectations are checked against outer metadata if supplied (`:1949-1957`). This audit did not execute a permutation matrix of every missing legacy field, so acceptance beyond these code paths is CODE_PATH_PROVED rather than independently reproduced.
 
-1. **L33, CODE_PATH_PROVED; unexecuted:** Take a valid schema-1.4 exact-revision snapshot with active module paths `a.py`, `b.py`, valid slices for both (each may have zero facts), and family state/version `fresh`/current. Remove only `"b.py"` from committed manifest `sources`; leave outer metadata, core pickle, remaining entry/chunk and manifest id/revision intact. Load iterates `a.py` only, assigns the reduced map, preserves family `fresh`, builds index state `fresh`, and returns a state with active `b.py` but no `b.py` lineage slice (`store.py:1104-1116,1222-1245,1375-1393,2042-2067,382-430,441-466,2224-2229`). A valid empty `b.py` slice would retain a manifest entry and differs from this case.
-2. **L34, CODE_PATH_PROVED; unexecuted:** Save a valid split generation with outer `repo_id=R`, `root_path=P`, `state_id=sid`, `revision=1`. Change only the pickle's embedded repo_id to `R2` (or remove it); retain embedded revision, state_id and manifest reference, outer metadata and core state. `load_snapshot(..., expected_repo_id=R, expected_root_path=P)` compares expectations to outer, checks only embedded revision/manifest reference, and returns the snapshot (`store.py:1949-1957,1970-1994,2224-2229`). Committed-publish id/revision checks do not inspect embedded repo_id (`ipc.py:1362-1404`). No claim that normal save produces this mismatch.
-3. **L34 distinction, CODE_PATH_PROVED; unexecuted:** Remove only embedded state_id. It defaults to empty string; the preassignment core `state_id=sid` passes outer comparison, then is replaced with empty string and returned alongside outer metadata `sid` (`store.py:1972-1994,2109-2123`). Committed publication rejects this particular returned state (`ipc.py:1380-1391`).
+## EXACT_COMMANDS_AND_RESULTS
 
-## L33_VERDICT
+1. `git rev-parse HEAD` → `24c5b014ce1373fb4be8cd896c42eafebdd4391b`.
+2. `git status --short` before change → empty.
+3. `& .\.venv\Scripts\python.exe -m pytest -q -s tests/test_live_state_store.py::test_reproducer_split_manifest_omitted_active_source_is_accepted tests/test_live_state_store.py::test_reproducer_split_embedded_metadata_gap tests/test_live_state_store.py::test_current_schema_14_splits_lineage_and_roundtrips tests/test_live_state_store.py::test_split_lineage_corruption_fails_closed tests/test_live_state_store.py::test_schema_12_monolithic_snapshot_remains_loadable` → three JSON reproducer lines above; `8 passed in 2.46s`, exit 0.
+4. `& .\.venv\Scripts\python.exe -m pytest -q tests/test_live_state_store.py::test_legacy_dict_snapshot_returns_tuple tests/test_live_state_store.py::test_exact_snapshot_revision_binds_embedded_state_and_metadata tests/test_live_state_store.py::test_snapshot_rejects_wrong_repository_identity_or_root` → `3 passed in 0.97s`, exit 0.
+5. `& .\.venv\Scripts\python.exe -m pytest -q -s tests/test_live_state_store.py::test_reproducer_split_embedded_metadata_gap` after adding explicit embedded baseline assertions → `2 passed in 9.64s`, exit 0.
+6. `git diff --check -- tests/test_live_state_store.py` → empty, exit 0. No full pytest, FULL analysis, restart, or `update_file`.
 
-**PROVED_GAP.** Loader validates listed sources but never checks coverage of the active-module source domain. It can accept an omitted valid source while retaining `fresh` lineage family and index classifications. Code-path proof; counterexample not executed.
+## FILES_CHANGED
 
-## L34_VERDICT
+- `tests/test_live_state_store.py` — three controlled acceptance reproducers; current observed behavior is asserted, no future rejection expectation.
+Report artifact: `walkthrough.md` (excluded from changed source/test files).
 
-**PROVED_GAP.** Embedded revision and manifest reference are bound to outer metadata; embedded repository identity, root, state_id, schema, engine and file-state references are not fully bound. Embedded repo_id/root mismatch is accepted under matching outer caller expectations. Missing embedded state_id also yields a return-time inconsistency. Code-path proof; counterexamples not executed.
+## FULL_DIFFS
 
-## REQUIRED_SOURCE_RANGES
+Complete raw `git diff -- tests/test_live_state_store.py` follows. No production diff.
 
-`contextor/core/live_state/store.py:337-466,469-495,813-1037,1040-1116,1175-1393,1411-1442,1620-1688,1721-1874,1926-2123,2210-2229`; `contextor/core/analysis/state_manager.py:83-105,293-375,485-504`; `contextor/core/api/facade.py:291-300,430-439`; `contextor/core/analysis/incremental/engine.py:234-238,381-414`; `contextor/core/domain/lineage_facts.py:75-80,428-465,483-499`; `contextor/core/live_state/hydration.py:59-112`; `contextor/core/live_state/runtime.py:1431-1441,1528-1540`; `contextor/core/live_state/ipc.py:1353-1451`; `tests/test_live_state_store.py:45-89,330-435,1725-1913,2003-2048,2068-2094`; `tests/test_lineage_state_lifecycle.py:172-207,319-355,430-505`.
+```diff
 
-## ACTIONS / RESULT / NEXT STEP
+diff --git a/tests/test_live_state_store.py b/tests/test_live_state_store.py
+index 681d7a5..19a7f70 100644
+--- a/tests/test_live_state_store.py
++++ b/tests/test_live_state_store.py
+@@ -435,6 +435,143 @@ def test_current_schema_14_splits_lineage_and_roundtrips(tmp_path):
+     )
+ 
+ 
++def test_reproducer_split_manifest_omitted_active_source_is_accepted(tmp_path):
++    import json
++
++    from contextor.core.domain.module import Module
++
++    state = _split_lineage_test_state("a.py", "b.py")
++    state.modules = {
++        source: Module(
++            module_id=source,
++            path=source,
++            absolute_path=str(tmp_path / source),
++            imports=[],
++        )
++        for source in ("a.py", "b.py")
++    }
++    state.reexport_facts_by_module = {
++        source: {
++            "exporter": source,
++            "explicit_all": None,
++            "bindings": {},
++            "star_sources": [],
++        }
++        for source in state.modules
++    }
++    metadata = save_snapshot(
++        state,
++        tmp_path,
++        "sid",
++        exact_revision=1,
++        file_state_payload={
++            "_meta": {"state_id": "sid", "revision": 1},
++            "files": {},
++        },
++    )
++    assert metadata.schema_version == "1.4"
++    assert set(state.lineage_facts_by_source) == {"a.py", "b.py"}
++    assert all(
++        not (slice_.anchors or slice_.flows or slice_.surfaces)
++        for slice_ in state.lineage_facts_by_source.values()
++    )
++    baseline = load_snapshot(tmp_path, "sid")
++    assert baseline is not None
++    assert set(baseline[0].lineage_facts_by_source) == {"a.py", "b.py"}
++
++    manifest_path = tmp_path / metadata.lineage_manifest_file
++    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
++    assert set(manifest["sources"]) == {"a.py", "b.py"}
++    manifest["sources"].pop("b.py")
++    manifest_path.write_text(json.dumps(manifest, sort_keys=True), encoding="utf-8")
++
++    loaded = load_snapshot(tmp_path, "sid")
++    assert loaded is not None
++    loaded_state, loaded_metadata = loaded
++    actual = {
++        "accepted": True,
++        "loaded_sources": sorted(loaded_state.lineage_facts_by_source),
++        "lineage_facts_state": loaded_state.lineage_facts_state,
++        "lineage_query_index_state": loaded_state.lineage_query_index_state,
++        "expected_module_sources": sorted(module.path for module in loaded_state.modules.values()),
++        "metadata_revision": loaded_metadata.revision,
++    }
++    print(f"L33_REPRO={json.dumps(actual, sort_keys=True)}")
++    assert actual == {
++        "accepted": True,
++        "loaded_sources": ["a.py"],
++        "lineage_facts_state": "fresh",
++        "lineage_query_index_state": "fresh",
++        "expected_module_sources": ["a.py", "b.py"],
++        "metadata_revision": 1,
++    }
++
++
++@pytest.mark.parametrize("case", ["embedded_repo_id_mismatch", "embedded_state_id_missing"])
++def test_reproducer_split_embedded_metadata_gap(tmp_path, case):
++    import json
++    import pickle
++
++    state = _split_lineage_test_state("a.py")
++    metadata = save_snapshot(
++        state,
++        tmp_path,
++        "sid",
++        repo_id="repo-original",
++        root_path=str(tmp_path),
++        exact_revision=1,
++        file_state_payload={
++            "_meta": {"state_id": "sid", "revision": 1},
++            "files": {},
++        },
++    )
++    assert metadata.schema_version == "1.4"
++    baseline = load_snapshot(
++        tmp_path,
++        "sid",
++        expected_repo_id="repo-original",
++        expected_root_path=str(tmp_path),
++    )
++    assert baseline is not None
++    assert baseline[0].state_id == baseline[1].state_id == "sid"
++
++    state_path = tmp_path / metadata.state_file
++    payload = pickle.loads(state_path.read_bytes())
++    assert payload["metadata"]["repo_id"] == "repo-original"
++    assert payload["metadata"]["state_id"] == "sid"
++    if case == "embedded_repo_id_mismatch":
++        payload["metadata"]["repo_id"] = "repo-different"
++    else:
++        payload["metadata"].pop("state_id")
++    state_path.write_bytes(pickle.dumps(payload))
++
++    loaded = load_snapshot(
++        tmp_path,
++        "sid",
++        expected_repo_id="repo-original",
++        expected_root_path=str(tmp_path),
++    )
++    assert loaded is not None
++    loaded_state, loaded_metadata = loaded
++    actual = {
++        "case": case,
++        "accepted": True,
++        "outer_repo_id": loaded_metadata.repo_id,
++        "outer_state_id": loaded_metadata.state_id,
++        "loaded_state_id": loaded_state.state_id,
++        "revision": loaded_metadata.revision,
++    }
++    print(f"L34_REPRO={json.dumps(actual, sort_keys=True)}")
++    assert actual == {
++        "case": case,
++        "accepted": True,
++        "outer_repo_id": "repo-original",
++        "outer_state_id": "sid",
++        "loaded_state_id": "sid" if case == "embedded_repo_id_mismatch" else "",
++        "revision": 1,
++    }
++
++
+ def test_current_schema_reexport_facts_roundtrip(tmp_path):
+     facts = {
+         "pkg.mod": {
 
-Actions: Contextor-first discovery/lineage, Git HEAD and source-anchor verification, relevant test assertions read. Result: read-only code-path audit complete; no tests run. Next step: await `proceduj`.
+```
 
-FILES_CHANGED=NONE
+## DESIGN_INPUT_CONTRACT
 
-ACTUAL_DIFF=NONE
+Evidence constraints for any later user-directed design stage:
 
-DIFFS=NONE
+- Schema-1.4 split generations have an active-module source domain derived from `Module.path`; a present zero-fact slice and a missing manifest entry are observably different.
+- The loader currently checks only listed source chunks and leaves both lineage family and rebuilt query index `fresh` after an omitted required source.
+- Current outer caller identity checks do not bind embedded repo_id; missing embedded state_id is accepted and assigned as empty to the returned core state.
+- Current schema-1.2 monolithic and unwrapped legacy snapshots are supported; `lineage_manifest_file` is absent in the executed monolithic legacy fixture. The later committed-publish state_id parity check must be distinguished from loader acceptance.
+- No implementation design, rejection policy, or future test expectation was introduced in this task.
 
+## FINAL_VERDICT
+
+L33=EXECUTED_PROVED_GAP: the real loader accepted an incomplete active-module lineage domain and reported both lineage freshness fields as `fresh`.
+
+L34=EXECUTED_PROVED_GAP: the real loader accepted an embedded repo_id mismatch against correct outer repository expectations, and accepted missing embedded state_id while returning state id empty beside outer id sid.
+
+Validation: 8 focused initial tests passed, 3 adjacent tests passed, and after strengthening the embedded fixture baseline assertions the 2 L34 parameter cases passed again. Production changes: none. Await `proceduj`.
