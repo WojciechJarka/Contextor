@@ -1,258 +1,239 @@
-# L31 exact artifact-consumption roundtrip regression
+# L32A_DIAGNOSTICS_MARKER_FAIL_CLOSED
 
 ## CURRENT_HEAD
-`4e15fd5c98485afea8b41f9fa784990a5f5b218f` before edits. Contextor MCP first confirmed canonical artifact_consumption owner, complete snapshot persistence/hydration path and focused test-file context at LIVE revision 124. Git confirmed exact test-file anchors and clean source state except the prior walkthrough report.
 
-## FILES_CHANGED
-- tests/test_live_state_store.py
+`079cdc16a214155b08b5f362bcaad8da03ff7039`. Contextor MCP deferred symbol retrieval resolved the three affected owners at LIVE revision 126 with `workspace_sync=verified` for symbol source. Contextor lineage and blast-radius retrieval identified `diagnostics_summary_for_state` consumers including LIVE runtime, MCP diagnostics and tests. Git confirmed exact current anchors before edits. No FULL analysis, update_file or service restart.
 
-walkthrough.md is this task report and excluded from FILES_CHANGED. No production, schema or legacy-migration code changed.
+## PRE_FIX_NEGATIVE_RESULTS
 
-## FULL_DIFFS
-Complete exact Git diff against CURRENT_HEAD for the only changed test file:
+New tests were added first, then run with `& .\.venv\Scripts\python.exe -m pytest -q tests/test_mcp_diagnostics.py -k 'malformed or missing_markers'`: **27 failed, 6 passed, 20 deselected, 1 external Authlib warning**. The failures were expected red results. Six passing cases were scalar syntax markers already treated as unavailable. The other cases proved false-fresh collision/cycle summaries, unhashable list/dict exceptions, and malformed public collision availability.
 
-```diff
-diff --git a/tests/test_live_state_store.py b/tests/test_live_state_store.py
-index 72853a5..b084f20 100644
---- a/tests/test_live_state_store.py
-+++ b/tests/test_live_state_store.py
-@@ -1,6 +1,7 @@
- """Unit and integration boundaries for the shared canonical LIVE snapshot store."""
- 
- from concurrent.futures import ThreadPoolExecutor
-+from copy import deepcopy
- import multiprocessing
- import os
- from pathlib import Path
-@@ -10,6 +11,8 @@ from types import SimpleNamespace
- import pytest
- 
- from contextor.mcp import analysis_jobs
-+from contextor.core.api.facade import ContextorFacade
-+from contextor.core.analysis.state_manager import canonical_artifact_consumption_targets
- from contextor.core.live_state import (
-     load_snapshot,
-     migrate_legacy_snapshot,
-@@ -17,16 +20,181 @@ from contextor.core.live_state import (
-     save_snapshot,
-     SnapshotRevisionConflict,
- )
-+from contextor.core.live_state.hydration import hydrate_repository_engine
- from contextor.core.paths import app_cache_dir, legacy_repo_cache_dir, repo_cache_dir
- from contextor.core.analysis.state_manager import FileStateManager, RepositoryAnalysisState
- from contextor.core.domain.usage_facts import MODULE_USAGE_FACTS_SEMANTIC_VERSION
- from contextor.core.reporting_engine.persistent_registry import (
-     PersistentIdentityRegistry,
- )
-+from contextor.core.repository_identity import read_repository_identity
- 
- pytestmark = pytest.mark.live
- 
- 
-+def test_artifact_consumption_exact_full_and_incremental_roundtrip(tmp_path, monkeypatch):
-+    monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(tmp_path / "cache"))
-+    monkeypatch.setenv("CONTEXTOR_DISABLE_PROCESS_POOL", "1")
-+    monkeypatch.setattr("contextor.core.live_state.runtime.connect", lambda _root: None)
-+    repo = tmp_path / "repo"
-+    repo.mkdir()
-+    a = repo / "a.py"
-+    b = repo / "b.py"
-+    c = repo / "c.py"
-+    a.write_text(
-+        "def used():\n    return 1\n\n"
-+        "def spare():\n    return 2\n\n"
-+        "def unused():\n    return 3\n",
-+        encoding="utf-8",
-+    )
-+    b.write_text("from a import used\n\ndef call_b():\n    return used()\n", encoding="utf-8")
-+    c.write_text(
-+        "from a import used, spare\n\ndef call_c():\n    return used()\n",
-+        encoding="utf-8",
-+    )
-+
-+    errors, _ = ContextorFacade().analyze_project(str(repo))
-+    assert not errors, errors
-+    cache = repo_cache_dir(repo)
-+    identity = read_repository_identity(repo)
-+    assert identity is not None
-+    metadata = read_metadata(cache)
-+    assert metadata is not None
-+    hydrated = hydrate_repository_engine(repo)
-+    assert hydrated is not None
-+    assert hydrated.source == "snapshot"
-+    engine = hydrated.engine
-+    state = engine.state
-+    assert state.artifact_consumption_state == "fresh"
-+    assert set(state.artifact_consumption) == canonical_artifact_consumption_targets(state.artifacts)
-+    used_entry = state.artifact_consumption["a::used"]
-+    assert set(used_entry["consumers"]) == {"b", "c"}
-+    assert set(used_entry["channels"]["b"]) == {"api_imports", "direct_calls"}
-+    assert set(used_entry["channels"]["c"]) == {"api_imports", "direct_calls"}
-+    assert state.artifact_consumption["a::spare"]["channels"]["c"] == ["api_imports"]
-+    assert state.artifact_consumption["a::unused"] == {"consumers": [], "channels": {}}
-+    full_map = deepcopy(state.artifact_consumption)
-+    full_marker = state.artifact_consumption_state
-+
-+    loaded = load_snapshot(
-+        cache,
-+        metadata.state_id,
-+        expected_repo_id=identity.repo_id,
-+        expected_root_path=identity.root_path,
-+    )
-+    assert loaded is not None
-+    loaded_state, loaded_metadata = loaded
-+    assert loaded_state.artifact_consumption == full_map
-+    assert loaded_state.artifact_consumption_state == full_marker
-+    missing_consumer = deepcopy(full_map)
-+    missing_consumer["a::used"]["consumers"].remove("b")
-+    assert loaded_state.artifact_consumption != missing_consumer
-+    missing_channel = deepcopy(full_map)
-+    missing_channel["a::used"]["channels"]["c"].remove("direct_calls")
-+    assert loaded_state.artifact_consumption != missing_channel
-+    assert loaded_state.state_id == loaded_metadata.state_id == metadata.state_id
-+    assert loaded_state.revision == loaded_metadata.revision == metadata.revision
-+
-+    rehydrated = hydrate_repository_engine(repo)
-+    assert rehydrated is not None
-+    assert rehydrated.source == "snapshot"
-+    assert rehydrated.engine.state.artifact_consumption == full_map
-+    assert rehydrated.engine.state.artifact_consumption_state == full_marker
-+    assert rehydrated.engine.state.artifact_consumption["a::unused"] == {
-+        "consumers": [], "channels": {}
-+    }
-+
-+    b.write_text("B_VALUE = 1\n", encoding="utf-8")
-+    result = engine.update_file(str(b))
-+    assert result.status == "UPDATED"
-+    state = engine.state
-+    assert state.artifact_consumption_state == "fresh"
-+    assert set(state.artifact_consumption) == canonical_artifact_consumption_targets(state.artifacts)
-+    updated_used = state.artifact_consumption["a::used"]
-+    assert "b" not in updated_used["consumers"]
-+    assert "b" not in updated_used["channels"]
-+    assert "c" in updated_used["consumers"]
-+    assert updated_used["channels"]["c"] == full_map["a::used"]["channels"]["c"]
-+    assert state.artifact_consumption["a::spare"] == full_map["a::spare"]
-+    assert state.artifact_consumption["a::unused"] == full_map["a::unused"]
-+    updated_map = deepcopy(state.artifact_consumption)
-+    updated_marker = state.artifact_consumption_state
-+
-+    next_revision = metadata.revision + 1
-+    saved = save_snapshot(
-+        state,
-+        cache,
-+        metadata.state_id,
-+        writer="test-incremental-roundtrip",
-+        repo_id=identity.repo_id,
-+        root_path=identity.root_path,
-+        exact_revision=next_revision,
-+        file_state_payload=engine.state_manager.build_payload(
-+            metadata.state_id, next_revision
-+        ),
-+    )
-+    assert saved.revision == next_revision
-+    assert read_metadata(cache) == saved
-+    updated_loaded = load_snapshot(
-+        cache,
-+        metadata.state_id,
-+        expected_repo_id=identity.repo_id,
-+        expected_root_path=identity.root_path,
-+    )
-+    assert updated_loaded is not None
-+    updated_state, updated_metadata = updated_loaded
-+    assert updated_state.artifact_consumption == updated_map
-+    assert updated_state.artifact_consumption_state == updated_marker
-+    assert updated_state.state_id == updated_metadata.state_id == metadata.state_id
-+    assert updated_state.revision == updated_metadata.revision == next_revision
-+
-+    updated_hydrated = hydrate_repository_engine(repo)
-+    assert updated_hydrated is not None
-+    assert updated_hydrated.source == "snapshot"
-+    assert updated_hydrated.engine.state.artifact_consumption == updated_map
-+    assert updated_hydrated.engine.state.artifact_consumption_state == updated_marker
-+    assert set(updated_hydrated.engine.state.artifact_consumption) == (
-+        canonical_artifact_consumption_targets(updated_hydrated.engine.state.artifacts)
-+    )
-+    assert "b" not in updated_hydrated.engine.state.artifact_consumption["a::used"]["consumers"]
-+    assert "b" not in updated_hydrated.engine.state.artifact_consumption["a::used"]["channels"]
-+
-+
-+def test_artifact_consumption_fresh_empty_roundtrip(tmp_path, monkeypatch):
-+    monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(tmp_path / "cache"))
-+    monkeypatch.setenv("CONTEXTOR_DISABLE_PROCESS_POOL", "1")
-+    monkeypatch.setattr("contextor.core.live_state.runtime.connect", lambda _root: None)
-+    repo = tmp_path / "repo"
-+    repo.mkdir()
-+    (repo / "empty.py").write_text("pass\n", encoding="utf-8")
-+
-+    errors, _ = ContextorFacade().analyze_project(str(repo))
-+    assert not errors, errors
-+    cache = repo_cache_dir(repo)
-+    identity = read_repository_identity(repo)
-+    assert identity is not None
-+    metadata = read_metadata(cache)
-+    assert metadata is not None
-+    loaded = load_snapshot(
-+        cache,
-+        metadata.state_id,
-+        expected_repo_id=identity.repo_id,
-+        expected_root_path=identity.root_path,
-+    )
-+    assert loaded is not None
-+    state, loaded_metadata = loaded
-+    assert canonical_artifact_consumption_targets(state.artifacts) == set()
-+    assert state.artifact_consumption == {}
-+    assert state.artifact_consumption_state == "fresh"
-+    assert loaded_metadata == metadata
-+
-+    hydrated = hydrate_repository_engine(repo)
-+    assert hydrated is not None
-+    assert hydrated.source == "snapshot"
-+    assert hydrated.engine.state.artifact_consumption == {}
-+    assert hydrated.engine.state.artifact_consumption_state == "fresh"
-+
-+
- def test_module_usage_manifest_roundtrips_with_repository_state(tmp_path):
-     manifest={"pkg.mod":{"module_id":"pkg.mod","path":"C:/x.py","sha256":"abc","semantic_version":MODULE_USAGE_FACTS_SEMANTIC_VERSION}}
-     state=RepositoryAnalysisState(module_usages_manifest=manifest)
-```
+## FALSE_FRESH_REPRODUCTION
 
-## FULL_BASELINE_CANONICAL_MAP
-EXECUTED_PROOF: isolated a.py/b.py/c.py repository analyzed by real ContextorFacade, then disk-hydrated through the real production path with `source="snapshot"`. Full map captured as a detached `deepcopy`. The test proves complete target-key coverage, `artifact_consumption_state="fresh"`, `a::used` consumers exactly `{b,c}` with each consumer carrying `api_imports` and `direct_calls`, `a::spare` retaining c's `api_imports`, and `a::unused == {"consumers": [], "channels": {}}`. The test compares complete map structures, including any additional canonical target entries produced by the real analyzer. It also checks that deleting b's membership or c's `direct_calls` from a comparison copy makes it unequal to the actual loaded map.
+With a nonempty collision or cycle payload, marker `None`, empty string, `UNKNOWN`, `Fresh`, `True`, `7`, `[]`, or `{}` caused the pre-fix `_availability` fallback to report `fresh` or throw. A missing marker with a present payload also reported `fresh`. This incorrectly exposed counts and attention classification without freshness certification.
 
-## FULL_SAVE_LOAD_EQUALITY
-EXECUTED_PROOF: real committed full-analysis generation loaded by `load_snapshot` with exact repo_id/root_path. Its complete `artifact_consumption` equals the detached baseline map and its marker equals the baseline `fresh` marker. Loaded state_id/revision equal committed metadata.
+## UNHASHABLE_MARKER_REPRODUCTION
 
-## FULL_HYDRATION_EQUALITY
-EXECUTED_PROOF: second real disk hydration returned `source="snapshot"`; its complete map and marker equal the same detached baseline. Empty target entry `a::unused` remains present and empty.
+Pre-fix `[]` and `{}` hit `TypeError: unhashable type` in `diagnostics_projection._availability`; syntax list/dict hit the membership check in `diagnostics_summary_for_state` or `syntax_diagnostics_for_path`. The new exact tests exercise these paths without modifying durable state.
 
-## INCREMENTAL_BEFORE_AFTER
-EXECUTED_PROOF: only b.py changed to `B_VALUE = 1`; real `engine.update_file` returned `UPDATED`. b disappeared from both a::used consumers and channels, while c and its channels remained. a::spare and a::unused retained their complete entries. Marker stayed `fresh`, and target-key coverage remained exact. Complete updated map and marker were captured by detached copy.
+## POST_FIX_MARKER_MATRIX
 
-## INCREMENTAL_DURABLE_EQUALITY
-EXECUTED_PROOF: updated state was saved through real `save_snapshot` in the isolated repository cache using original state_id/repo_id/root_path, next exact revision and matching real FileState payload. `read_metadata` matched the committed metadata. Real `load_snapshot` returned the entire updated mapping and marker exactly equal to the detached post-commit values, with matching state_id/revision.
+| Marker | Collisions/cycles summary | Syntax summary/path | Public collision tool |
+|---|---|---|---|
+| None, empty, UNKNOWN, Fresh, True, 7, [], {} | unavailable, count None | unavailable, not materialized | valid JSON, unavailable, no details |
+| Missing attribute, existing payload | unavailable, count None | unavailable, not materialized | valid JSON, unavailable, no details |
+| fresh | existing positive tests retain fresh counts/details | existing positive tests retain materialized syntax | existing positive tests retain details |
+| stale/deferred | existing nonfresh behavior retained | existing accepted status set retained | existing nonfresh branch retained |
 
-## INCREMENTAL_HYDRATION_EQUALITY
-EXECUTED_PROOF: post-save disk hydration returned `source="snapshot"`; complete updated mapping and marker were exactly equal to the post-commit values. Canonical target coverage remained complete, and obsolete b membership/channel did not reappear.
+No unknown marker is promoted to fresh from payload presence. The four production edits implement only the auditor-specified guards and fallback.
 
-## FRESH_EMPTY_ROUNDTRIP
-EXECUTED_PROOF: isolated empty.py containing `pass` was fully analyzed. Canonical target domain was empty; real durable `load_snapshot` returned `{}` with marker `fresh` and matching metadata. Disk hydration preserved `{}` and `fresh`, with `source="snapshot"`.
+## PUBLIC_MCP_AVAILABILITY_RESULT
 
-## LEGACY_COMPATIBILITY
-Existing `_report` migration assertions were left unchanged. The new tests compare modern canonical mappings only; they do not require legacy `_report` payloads to equal post-hydration canonical representations.
+The isolated in-memory `get_name_collisions` test now parses valid JSON and observes `availability=unavailable`, `total=None`, `details=[]`, and a fail-closed diagnostics summary for every malformed marker. This tests the local tool function, not the still-running MCP server; runtime certification requires a later manual restart.
 
 ## TARGETED_TEST_RESULTS
-Final code exact-node gate: 2 passed in 4.33s.
-`tests/test_live_state_store.py::test_artifact_consumption_exact_full_and_incremental_roundtrip`
-`tests/test_live_state_store.py::test_artifact_consumption_fresh_empty_roundtrip`
 
-Final code focused file gate: 124 passed in 48.23s.
-`tests/test_live_state_store.py tests/test_matrix_clusters_state_lifecycle.py`
+Post-fix new tests: **33 passed, 20 deselected, 1 external Authlib warning**. Targeted gate: `tests/test_mcp_diagnostics.py tests/test_syntax_diagnostics_full_analysis.py tests/test_collisions_live_lifecycle.py tests/test_cycles_live_lifecycle.py` — **103 passed, 1 external Authlib warning**. `git diff --check` found no whitespace errors. No full suite.
 
-An earlier pass before the explicit negative controls also passed: 2 passed in 14.00s; file gate 124 passed in 48.86s. No full repository suite was run. `git diff --check` found no whitespace errors.
+## REGRESSION_FAILURES
 
-## REMAINING_LIMITATIONS
-The test fixture proves exact modern mapping and marker equality for the selected full and incremental generations, including nonempty/empty targets and distinct channels. It does not exhaust every possible artifact graph or legacy schema. Disk hydration is deliberately forced by `runtime.connect` returning None for the isolated fixture; no global LIVE service was contacted or mutated.
+None in the required targeted gate. The expected 27 pre-fix red cases are documented above.
+
+## RESTART_REQUIRED
+
+**YES** — manual MCP backend restart is required before certifying runtime responses against the changed server code. No restart was performed.
+
+## FILES_CHANGED
+
+- `contextor/core/diagnostics_projection.py`
+- `contextor/mcp/diagnostics.py`
+- `contextor/mcp/tools/get_name_collisions.py`
+- `tests/test_mcp_diagnostics.py`
 
 ## FINAL_VERDICT
-PASS for the auditor-designed L31 evidence closure. Both new tests and the required focused regression files pass. No production code, snapshot schema, LIVE service, Desktop/MCP process, or actual Contextor repository analysis was changed or restarted.
+
+**FOCUSED_FIX_PASS** for source and targeted regression gate. Runtime MCP certification remains pending a manual backend restart.
+
+## FULL_DIFFS
+
+```diff
+diff --git a/contextor/core/diagnostics_projection.py b/contextor/core/diagnostics_projection.py
+index e581125..b390fc6 100644
+--- a/contextor/core/diagnostics_projection.py
++++ b/contextor/core/diagnostics_projection.py
+@@ -16,21 +16,17 @@ def _availability(
+         None,
+     )
+ 
+-    if values is None and status == "fresh":
+-        return "unavailable"
+-
+-    if status in {
++    if isinstance(status, str) and status in {
+         "fresh",
+         "stale",
+         "deferred",
+         "unavailable",
+     }:
++        if status == "fresh" and values is None:
++            return "unavailable"
+         return status
+ 
+-    if values is None:
+-        return "unavailable"
+-
+-    return "fresh"
++    return "unavailable"
+ 
+ 
+ def diagnostics_summary_for_state(
+@@ -85,7 +81,7 @@ def diagnostics_summary_for_state(
+         )
+         syntax_availability = "fresh"
+ 
+-    elif syntax_state in {
++    elif isinstance(syntax_state, str) and syntax_state in {
+         "not_materialized",
+         "deferred",
+         "stale",
+diff --git a/contextor/mcp/diagnostics.py b/contextor/mcp/diagnostics.py
+index 4760280..7118cdb 100644
+--- a/contextor/mcp/diagnostics.py
++++ b/contextor/mcp/diagnostics.py
+@@ -36,7 +36,7 @@ def syntax_diagnostics_for_path(
+     if family_state != "fresh" or not isinstance(facts, dict):
+         return {
+             "status": "unavailable",
+-            "availability": family_state if family_state in {"not_materialized", "deferred", "stale", "unavailable"} else "unavailable",
++            "availability": family_state if isinstance(family_state, str) and family_state in {"not_materialized", "deferred", "stale", "unavailable"} else "unavailable",
+             "materialized": False,
+             "source_path": canonical_path,
+             "errors": None,
+diff --git a/contextor/mcp/tools/get_name_collisions.py b/contextor/mcp/tools/get_name_collisions.py
+index c6f5f30..114dda8 100644
+--- a/contextor/mcp/tools/get_name_collisions.py
++++ b/contextor/mcp/tools/get_name_collisions.py
+@@ -98,6 +98,16 @@ def get_name_collisions(
+     engine = mcp_runtime.get_or_init_engine(root)
+     state = getattr(engine, "state", None) if engine is not None else None
+     availability = getattr(state, "collisions_state", "unavailable") if state is not None else "unavailable"
++    if not (
++        isinstance(availability, str)
++        and availability in {
++            "fresh",
++            "stale",
++            "deferred",
++            "unavailable",
++        }
++    ):
++        availability = "unavailable"
+     if availability != "fresh":
+         payload = {
+             "total": None,
+diff --git a/tests/test_mcp_diagnostics.py b/tests/test_mcp_diagnostics.py
+index 05c14de..5ba4560 100644
+--- a/tests/test_mcp_diagnostics.py
++++ b/tests/test_mcp_diagnostics.py
+@@ -1,12 +1,15 @@
+ import json
+ from types import SimpleNamespace
+ 
++import pytest
++
+ from contextor import mcp_server
+ from contextor.mcp.diagnostics import (
+     diagnostics_summary,
+     diagnostics_summary_for_completed_job,
+     diagnostics_summary_for_state,
+     inject_diagnostics_summary,
++    syntax_diagnostics_for_path,
+ )
+ from contextor.mcp.output_guard import LARGE_OUTPUT_WARNING_BYTES
+ from contextor.mcp import runtime as mcp_runtime
+@@ -27,6 +30,85 @@ def _collision(kind="NAME_COLLISION", identical=False, module="pkg.a"):
+     )
+ 
+ 
++INVALID_MARKERS = [None, "", "UNKNOWN", "Fresh", True, 7, [], {}]
++
++
++@pytest.mark.parametrize("marker", INVALID_MARKERS, ids=repr)
++@pytest.mark.parametrize(
++    ("family", "payload"),
++    [("collisions", [_collision()]), ("cycles", [["a", "b", "a"]])],
++)
++def test_malformed_collision_or_cycle_marker_never_certifies_payload(marker, family, payload):
++    state = SimpleNamespace(
++        collisions_state="fresh",
++        collisions=[_collision()],
++        cycles_state="fresh",
++        cycles=[["a", "b", "a"]],
++    )
++    setattr(state, f"{family}_state", marker)
++    setattr(state, family, payload)
++
++    summary = diagnostics_summary_for_state(state)
++    key = "name_collisions" if family == "collisions" else "cycles"
++    assert summary[key]["availability"] == "unavailable"
++    assert summary[key]["count"] is None
++    assert summary["availability"][key] == "unavailable"
++
++
++@pytest.mark.parametrize("marker", INVALID_MARKERS, ids=repr)
++def test_malformed_syntax_marker_never_materializes_facts(marker):
++    state = SimpleNamespace(
++        syntax_diagnostics_state=marker,
++        syntax_diagnostics_by_path={
++            "broken.py": {"status": "checked_with_errors", "errors": [{"message": "bad"}]}
++        },
++    )
++    summary = diagnostics_summary_for_state(state)
++    projection = syntax_diagnostics_for_path(state, "broken.py")
++    assert summary["syntax_errors"] == {"count": None, "availability": "unavailable"}
++    assert projection["status"] == "unavailable"
++    assert projection["availability"] == "unavailable"
++    assert projection["materialized"] is False
++    assert projection["errors"] is None
++
++
++@pytest.mark.parametrize("marker", INVALID_MARKERS, ids=repr)
++def test_name_collision_tool_normalizes_malformed_marker(tmp_path, monkeypatch, marker):
++    repo = tmp_path / "repo"
++    repo.mkdir()
++    state = SimpleNamespace(collisions_state=marker, collisions=[_collision()])
++    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: SimpleNamespace(state=state))
++    result = json.loads(get_name_collisions(str(repo)))
++    assert result["availability"] == "unavailable"
++    assert result["total"] is None
++    assert result["details"] == []
++    assert result["diagnostics_summary"]["name_collisions"] == {
++        "count": None, "critical": None, "warning": None, "info": None,
++        "availability": "unavailable",
++    }
++
++
++def test_missing_markers_with_payload_do_not_certify_diagnostics(tmp_path, monkeypatch):
++    repo = tmp_path / "repo"
++    repo.mkdir()
++    state = SimpleNamespace(
++        collisions=[_collision()],
++        cycles=[["a", "b", "a"]],
++        syntax_diagnostics_by_path={
++            "broken.py": {"status": "checked_with_errors", "errors": [{"message": "bad"}]}
++        },
++    )
++    summary = diagnostics_summary_for_state(state)
++    for key in ("name_collisions", "cycles", "syntax_errors"):
++        assert summary[key]["availability"] == "unavailable"
++        assert summary[key]["count"] is None
++    assert syntax_diagnostics_for_path(state, "broken.py")["materialized"] is False
++    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: SimpleNamespace(state=state))
++    result = json.loads(get_name_collisions(str(repo)))
++    assert result["availability"] == "unavailable"
++    assert result["details"] == []
++
++
+ def test_diagnostics_summary_does_not_fabricate_unavailable_counts():
+     summary = diagnostics_summary_for_state(SimpleNamespace(
+         collisions_state="deferred", cycles_state="unavailable", collisions=None, cycles=None
+```

@@ -16,21 +16,17 @@ def _availability(
         None,
     )
 
-    if values is None and status == "fresh":
-        return "unavailable"
-
-    if status in {
+    if isinstance(status, str) and status in {
         "fresh",
         "stale",
         "deferred",
         "unavailable",
     }:
+        if status == "fresh" and values is None:
+            return "unavailable"
         return status
 
-    if values is None:
-        return "unavailable"
-
-    return "fresh"
+    return "unavailable"
 
 
 def diagnostics_summary_for_state(
@@ -85,7 +81,7 @@ def diagnostics_summary_for_state(
         )
         syntax_availability = "fresh"
 
-    elif syntax_state in {
+    elif isinstance(syntax_state, str) and syntax_state in {
         "not_materialized",
         "deferred",
         "stale",

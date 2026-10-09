@@ -1,12 +1,15 @@
 import json
 from types import SimpleNamespace
 
+import pytest
+
 from contextor import mcp_server
 from contextor.mcp.diagnostics import (
     diagnostics_summary,
     diagnostics_summary_for_completed_job,
     diagnostics_summary_for_state,
     inject_diagnostics_summary,
+    syntax_diagnostics_for_path,
 )
 from contextor.mcp.output_guard import LARGE_OUTPUT_WARNING_BYTES
 from contextor.mcp import runtime as mcp_runtime
@@ -25,6 +28,85 @@ def _collision(kind="NAME_COLLISION", identical=False, module="pkg.a"):
         symbol_details=[],
         code_snippets={module: "def foo():\n    return 1", "pkg.b": "def foo():\n    return 2"},
     )
+
+
+INVALID_MARKERS = [None, "", "UNKNOWN", "Fresh", True, 7, [], {}]
+
+
+@pytest.mark.parametrize("marker", INVALID_MARKERS, ids=repr)
+@pytest.mark.parametrize(
+    ("family", "payload"),
+    [("collisions", [_collision()]), ("cycles", [["a", "b", "a"]])],
+)
+def test_malformed_collision_or_cycle_marker_never_certifies_payload(marker, family, payload):
+    state = SimpleNamespace(
+        collisions_state="fresh",
+        collisions=[_collision()],
+        cycles_state="fresh",
+        cycles=[["a", "b", "a"]],
+    )
+    setattr(state, f"{family}_state", marker)
+    setattr(state, family, payload)
+
+    summary = diagnostics_summary_for_state(state)
+    key = "name_collisions" if family == "collisions" else "cycles"
+    assert summary[key]["availability"] == "unavailable"
+    assert summary[key]["count"] is None
+    assert summary["availability"][key] == "unavailable"
+
+
+@pytest.mark.parametrize("marker", INVALID_MARKERS, ids=repr)
+def test_malformed_syntax_marker_never_materializes_facts(marker):
+    state = SimpleNamespace(
+        syntax_diagnostics_state=marker,
+        syntax_diagnostics_by_path={
+            "broken.py": {"status": "checked_with_errors", "errors": [{"message": "bad"}]}
+        },
+    )
+    summary = diagnostics_summary_for_state(state)
+    projection = syntax_diagnostics_for_path(state, "broken.py")
+    assert summary["syntax_errors"] == {"count": None, "availability": "unavailable"}
+    assert projection["status"] == "unavailable"
+    assert projection["availability"] == "unavailable"
+    assert projection["materialized"] is False
+    assert projection["errors"] is None
+
+
+@pytest.mark.parametrize("marker", INVALID_MARKERS, ids=repr)
+def test_name_collision_tool_normalizes_malformed_marker(tmp_path, monkeypatch, marker):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    state = SimpleNamespace(collisions_state=marker, collisions=[_collision()])
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: SimpleNamespace(state=state))
+    result = json.loads(get_name_collisions(str(repo)))
+    assert result["availability"] == "unavailable"
+    assert result["total"] is None
+    assert result["details"] == []
+    assert result["diagnostics_summary"]["name_collisions"] == {
+        "count": None, "critical": None, "warning": None, "info": None,
+        "availability": "unavailable",
+    }
+
+
+def test_missing_markers_with_payload_do_not_certify_diagnostics(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    state = SimpleNamespace(
+        collisions=[_collision()],
+        cycles=[["a", "b", "a"]],
+        syntax_diagnostics_by_path={
+            "broken.py": {"status": "checked_with_errors", "errors": [{"message": "bad"}]}
+        },
+    )
+    summary = diagnostics_summary_for_state(state)
+    for key in ("name_collisions", "cycles", "syntax_errors"):
+        assert summary[key]["availability"] == "unavailable"
+        assert summary[key]["count"] is None
+    assert syntax_diagnostics_for_path(state, "broken.py")["materialized"] is False
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: SimpleNamespace(state=state))
+    result = json.loads(get_name_collisions(str(repo)))
+    assert result["availability"] == "unavailable"
+    assert result["details"] == []
 
 
 def test_diagnostics_summary_does_not_fabricate_unavailable_counts():

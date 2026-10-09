@@ -98,6 +98,16 @@ def get_name_collisions(
     engine = mcp_runtime.get_or_init_engine(root)
     state = getattr(engine, "state", None) if engine is not None else None
     availability = getattr(state, "collisions_state", "unavailable") if state is not None else "unavailable"
+    if not (
+        isinstance(availability, str)
+        and availability in {
+            "fresh",
+            "stale",
+            "deferred",
+            "unavailable",
+        }
+    ):
+        availability = "unavailable"
     if availability != "fresh":
         payload = {
             "total": None,

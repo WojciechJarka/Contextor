@@ -36,7 +36,7 @@ def syntax_diagnostics_for_path(
     if family_state != "fresh" or not isinstance(facts, dict):
         return {
             "status": "unavailable",
-            "availability": family_state if family_state in {"not_materialized", "deferred", "stale", "unavailable"} else "unavailable",
+            "availability": family_state if isinstance(family_state, str) and family_state in {"not_materialized", "deferred", "stale", "unavailable"} else "unavailable",
             "materialized": False,
             "source_path": canonical_path,
             "errors": None,
