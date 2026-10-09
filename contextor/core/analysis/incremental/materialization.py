@@ -172,6 +172,21 @@ def ensure_cached_analytics(state: RepositoryAnalysisState) -> None:
     if not hasattr(state, "cached_analytics") or state.cached_analytics is None:
         state.cached_analytics = {}
 
+    from contextor.core.analysis.state_manager import (
+        dependency_matrix_inputs_are_fresh,
+    )
+
+    if not dependency_matrix_inputs_are_fresh(state):
+        if (
+            not getattr(state, "resync_required", False)
+            and getattr(state, "artifact_consumption_state", None) == "deferred"
+        ):
+            if state.cached_analytics_state != "stale":
+                state.cached_analytics_state = "deferred"
+        else:
+            state.cached_analytics_state = "stale"
+        return
+
     if (
         state.cached_analytics_state != "stale"
         and not state.cached_analytics

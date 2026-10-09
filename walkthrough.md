@@ -1,128 +1,343 @@
-# L32B_CACHED_ANALYTICS_FALSE_FRESH_FIX
+# L32C_CACHED_ANALYTICS_PREREQUISITE_TRUST_GATE
 
 ## CURRENT_HEAD
 
-`fe097fff93cb4b4b2149913dcd2560606f8144d3`. Contextor MCP first: complete `ensure_cached_analytics` implementation at `contextor/core/analysis/incremental/materialization.py:164-195`, `workspace_sync=verified`, LIVE revision 130; symbol lineage and blast radius found direct runtime consumers in incremental engine. Git confirmed the exact literal anchor. No active LIVE state, cache or snapshot was modified.
-
-## PRE_FIX_RED_RESULTS
-
-After adding the focused tests and before editing production, the exact new subset ran with `& .\.venv\Scripts\python.exe -m pytest -q tests/test_cached_facts_live_analytics.py -k 'none_cached_marker or missing_cached_marker or explicit_none_cached_marker or cached_marker_positive_lifecycle' --tb=short`: **3 failed, 1 passed, 11 deselected, 1 external Authlib warning**. The three failures each showed `fresh` where `deferred` was required. The isolated snapshot case passed real save/load preconditions and failed at post-hydration false-fresh promotion. An earlier test-authoring run had one unrelated test-fixture constructor error; it was corrected before the recorded red gate.
+`8927890c31676c34d3187931cc46785a8ecb748e` (user-specified verified starting HEAD). Contextor MCP first: retrieved complete `ensure_cached_analytics`, `dependency_matrix_inputs_are_fresh`, and `materialize_incremental_state`; all source lookups reported `workspace_sync=verified`, canonical LIVE revision 133. Blast-radius lookup confirms runtime consumers in the incremental engine and hydration chain. Git confirmed the exact anchor before edits. No full analysis, actual-repository update_file, or service restart.
 
 ## FILES_CHANGED
 
 - `contextor/core/analysis/incremental/materialization.py`
 - `tests/test_cached_facts_live_analytics.py`
 
-## CACHED_ANALYTICS_MARKER_MATRIX
+## PRE_FIX_RED_RESULTS
 
-| Marker/payload | Result after fix |
-|---|---|
-| None + nonempty obsolete payload | deferred; payload retained, untrusted |
-| genuinely missing legacy marker + nonempty payload | deferred; payload retained, untrusted |
-| None/missing + empty payload + valid modules | normal RAM computation may produce fresh |
-| fresh + populated payload | fresh preserved, no forced recomputation |
-| stale + populated payload | stale preserved, no auto-promotion |
-| deferred + empty payload + valid modules | computed fresh from canonical RAM inputs |
+Added negative and isolated durable repro tests before production change. Exact new regression command:
 
-The production change is exactly the specified replacement: None/missing state becomes `deferred`; the existing compute branch and all other families remain unchanged.
+```text
+python -m pytest -q tests/test_cached_facts_live_analytics.py -k 'requires_trusted_artifact or untrusted_artifact_consumption_invalidates or isolated_snapshot_hydration_does_not_publish'
+8 failed, 15 deselected, 1 external Authlib warning
+```
 
-## SNAPSHOT_LOAD_RESULT
+All eight failures were expected: UNKNOWN, stale, None, list and dict artifact-consumption markers, pre-populated fresh cache invalidation, and both persisted/hydrated cases (UNKNOWN and stale) incorrectly ended with `cached_analytics_state='fresh'`.
 
-The new isolated test builds canonical state by updating a Python file only inside `tmp_path`, then saves a valid first generation with repository ID/root and FileState payload at revision 1. It loads that generation and confirms the cache is fresh. It sets only the loaded test state's cached marker to None and injects `module_layers[contextor.core.analysis.mod]=obsolete_layer`, saves revision 2 with matching repository identity and FileState revision, and reloads it. Real `load_snapshot` retains explicit None and the obsolete sentinel; metadata and FileState revisions match 2.
+## ARTIFACT_PREREQUISITE_MATRIX
+
+| Prerequisite state | Cache before materialization | Result |
+|---|---|---|
+| Valid fresh artifact consumption + valid graph | Empty/deferred | Successful RAM compute may yield fresh |
+| Valid fresh artifact consumption + valid graph | Fresh/populated | Preserved; no unnecessary recompute |
+| artifact state UNKNOWN, stale, None, list or dict | Empty/deferred | stale; no computation |
+| artifact state UNKNOWN/stale/invalid | Fresh/populated | stale; payload retained but untrusted |
+| artifact state deferred | Fresh/populated | deferred; payload retained |
+| artifact state deferred | Previously stale/populated | stale preserved |
+| resync_required=True | Any cache | stale |
+| Missing/invalid graph | Empty/deferred | stale; no computation |
+
+Production guard calls existing `dependency_matrix_inputs_are_fresh`, which requires no resync, genuinely fresh/validated artifact-consumption coverage, and a graph with dict `hard_edges` (`state_manager.py:686-707`). The existing analytics algorithm is unchanged.
+
+## OLD_FRESH_CACHE_INVALIDATION
+
+New direct regression sets cache state fresh with a populated visibility payload and stale artifact consumption. Result: marker becomes stale and payload remains byte-for-byte/value-equal. Direct negative matrix also checks UNKNOWN, stale, None, list and dict with structurally valid canonical map and nonempty module domain; all become stale and leave empty cache empty.
+
+## ISOLATED_SNAPSHOT_REPRODUCTION
+
+Temporary repository contains real `contextor/core/analysis/mod.py` defining `foo` and `contextor/ui/consumer.py` defining `VALUE`. Real incremental updates establish modules/artifacts/graph and initially classify the definer visibility as private. A separate deep-copied state retains exact canonical target-key coverage, replaces only `mod::foo` consumer facts with the structurally valid obsolete `contextor.ui.consumer` / `api_imports` entry, and uses UNKNOWN or stale artifact marker, deferred cached marker, empty cache, resync false.
+
+Real `save_snapshot` writes revision 1 with repository identity and matching FileState generation. Real `load_snapshot` preserves selected marker, entry and revision. Real `IncrementalAnalysisEngine` initialization now results in stale cached analytics, retains no computed cache, and isolated in-process `get_module_context` does not expose public visibility. Before patch both parameter cases failed because hydration produced fresh cache and the public path could consume the obsolete consumer-derived visibility. Only tmp_path state was mutated; actual LIVE state was untouched.
 
 ## POST_HYDRATION_RESULT
 
-Real `IncrementalAnalysisEngine` initialization with the loaded state and revision-matched `FileStateManager` now yields `cached_analytics_state=deferred`. The sentinel payload remains present but untrusted. Before the fix, this exact assertion failed because hydration set `fresh`.
+Both isolated roundtrips pass for artifact marker UNKNOWN and stale. The prerequisite guard invalidates freshness before recompute and preserves the empty cache. FileState state_id/revision are asserted equal to the committed snapshot metadata.
 
-## PUBLIC_PROJECTION_RESULT
+## PUBLIC_VISIBILITY_RESULT
 
-An isolated in-process `get_module_context` projection bound to the hydrated test engine does not return `obsolete_layer` in `metrics.layer`. The pre-fix red test reached and failed the marker assertion before this projection; the after-fix test proves the public sentinel guard. The active MCP backend was not restarted or mutated, so its current runtime is not certified for this change.
+For both persisted failure cases, the isolated module-context response contains no `visibility='public'` certification from the obsolete consumer entry. The sentinel is not computed into cached analytics. This is test-based local MCP projection evidence, not a live malformed-state request.
 
-## LEGACY_COMPATIBILITY_RESULT
+## LEGACY_MIGRATION_RESULT
 
-Existing `test_snapshot_lifecycle_and_consumer_projection` remains passing: a genuinely missing legacy cache is reconstructed from canonical RAM inputs and becomes fresh. New separate missing-marker + populated-cache test proves such payload alone no longer certifies freshness. Positive tests confirm existing fresh/stale behavior, successful deferred recomputation, and unchanged topology/cycle markers.
+Changed only `_CachedAnalyticsLegacySnapshotState.artifact_consumption` from empty dict to recognized `{"_report": {}}`. The existing `test_snapshot_lifecycle_and_consumer_projection` now asserts migrated `artifact_consumption_state='fresh'` before accepting cached analytics fresh; its source-free reconstruction and public projection assertions still pass. No legacy exemption was added to the production trust gate.
+
+## VALID_INPUT_PARITY
+
+Positive control asserts deferred empty-cache computation with fresh artifact map and graph equals the `compute_cached_analytics` RAM oracle. Existing fresh populated data remains preserved; stale data remains stale. New controls verify resync and missing graph fail closed, deferred prerequisites downgrade fresh to deferred and preserve stale, and unrelated topology/cycle markers remain unchanged.
 
 ## TARGETED_TEST_RESULTS
 
-Post-fix exact new subset: **4 passed, 11 deselected, 1 external Authlib warning**. Required focused gate `tests/test_cached_facts_live_analytics.py tests/test_graph_only_live_analytics.py tests/test_freshness_preservation.py tests/test_mcp_incremental_hydration.py`: **31 passed, 1 external Authlib warning**. `git diff --check` found no whitespace errors. No full suite.
+After production patch and fixture correction, exact relevant subset: **13 passed, 10 deselected, 1 external Authlib warning**. Entire `tests/test_cached_facts_live_analytics.py`: **27 passed, 1 external Authlib warning**. Required five-file gate:
 
-## REGRESSION_FAILURES
+```text
+tests/test_cached_facts_live_analytics.py
+tests/test_matrix_clusters_state_lifecycle.py
+tests/test_graph_only_live_analytics.py
+tests/test_mcp_incremental_hydration.py
+tests/test_freshness_preservation.py
+97 passed, 1 external Authlib warning, 48.17 seconds
+```
 
-None in the required focused gate.
+`git diff --check` passed. No full repository suite.
 
-## RUNTIME_RESTART_REQUIREMENT
+## REMAINING_GAPS
 
-**Manual MCP backend restart required** before runtime certification of changed core module. No automatic restart occurred.
+No remaining gap in the requested trust-gate contract was identified in the focused paths. The gate intentionally relies on the existing dependency-matrix prerequisite predicate; unsupported malformed structures outside that predicate's documented graph/artifact coverage are not certified by this test scope.
+
+## MCP_RESTART_REQUIRED
+
+**YES.** The changed core runtime module requires a manual MCP backend restart before runtime certification. No restart was performed.
 
 ## FINAL_VERDICT
 
-**FOCUSED_FIX_PASS**: exact production patch, red/green proof, valid isolated snapshot and FileState contract, public projection guard, legacy and positive lifecycle, and focused regression gate completed. Active MCP runtime certification remains pending manual restart.
+**FOCUSED_IMPLEMENTATION_PASS.** Exact auditor-designed prerequisite gate, isolated durable repro, legacy migration contract, positive oracle and required targeted regressions pass.
 
 ## FULL_DIFFS
 
 ```diff
 diff --git a/contextor/core/analysis/incremental/materialization.py b/contextor/core/analysis/incremental/materialization.py
-index 5a72dff..07eeaaa 100644
+index 07eeaaa..a3c8a01 100644
 --- a/contextor/core/analysis/incremental/materialization.py
 +++ b/contextor/core/analysis/incremental/materialization.py
-@@ -167,9 +167,7 @@ def ensure_cached_analytics(state: RepositoryAnalysisState) -> None:
-     RAM ONLY — ZERO source I/O.
-     """
-     if not hasattr(state, "cached_analytics_state") or state.cached_analytics_state is None:
--        state.cached_analytics_state = (
--            "fresh" if bool(getattr(state, "cached_analytics", None)) else "deferred"
--        )
-+        state.cached_analytics_state = "deferred"
- 
+@@ -172,6 +172,21 @@ def ensure_cached_analytics(state: RepositoryAnalysisState) -> None:
      if not hasattr(state, "cached_analytics") or state.cached_analytics is None:
          state.cached_analytics = {}
+ 
++    from contextor.core.analysis.state_manager import (
++        dependency_matrix_inputs_are_fresh,
++    )
++
++    if not dependency_matrix_inputs_are_fresh(state):
++        if (
++            not getattr(state, "resync_required", False)
++            and getattr(state, "artifact_consumption_state", None) == "deferred"
++        ):
++            if state.cached_analytics_state != "stale":
++                state.cached_analytics_state = "deferred"
++        else:
++            state.cached_analytics_state = "stale"
++        return
++
+     if (
+         state.cached_analytics_state != "stale"
+         and not state.cached_analytics
 diff --git a/tests/test_cached_facts_live_analytics.py b/tests/test_cached_facts_live_analytics.py
-index b4d1226..e54ee94 100644
+index e54ee94..938b93b 100644
 --- a/tests/test_cached_facts_live_analytics.py
 +++ b/tests/test_cached_facts_live_analytics.py
-@@ -18,6 +18,7 @@ from contextor.core.analysis.incremental_engine import (
-     IncrementalAnalysisEngine,
-     IncrementalUpdateResult,
- )
-+from contextor.core.analysis.incremental.materialization import ensure_cached_analytics
+@@ -9,6 +9,7 @@ and zero-call execution minimality for pure implementation-body changes.
+ """
+ 
+ from pathlib import Path
++from copy import deepcopy
+ from unittest.mock import patch, MagicMock
+ import json
+ import time
+@@ -22,6 +23,9 @@ from contextor.core.analysis.incremental.materialization import ensure_cached_an
  from contextor.core.analysis.state_manager import (
      RepositoryAnalysisState,
      FileStateManager,
-@@ -361,6 +362,148 @@ def test_snapshot_lifecycle_and_consumer_projection(tmp_path):
-     assert engine_stale.state.cached_analytics_state == "stale"
++    canonical_artifact_consumption_targets,
++    validate_canonical_artifact_consumption,
++    validate_canonical_artifact_consumption_coverage,
+ )
+ from contextor.core.domain.graph import ProjectGraph
+ from contextor.core.domain.module import Module
+@@ -38,6 +42,7 @@ from contextor.core.reporting_engine.graph_analytics import (
+ )
+ from contextor.core.validator.layers import validate_layer_rules
+ from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
++from contextor.core.repository_identity import ensure_repository_identity
+ from contextor.mcp_server import get_module_context
+ from contextor.mcp.runtime import _live_engines
+ 
+@@ -298,7 +303,7 @@ class _CachedAnalyticsLegacySnapshotState:
+         self.dependency_graph = graph
+         self.metrics = metrics
+         self.artifacts = {"contextor.core.analysis.mod": {"own_symbols": ["foo"]}}
+-        self.artifact_consumption = {}
++        self.artifact_consumption = {"_report": {}}
  
  
-+def test_none_cached_marker_preserves_obsolete_payload_without_certifying_it():
-+    obsolete = {"module_layers": {"contextor.core.analysis.mod": "obsolete_layer"}}
+ def test_snapshot_lifecycle_and_consumer_projection(tmp_path):
+@@ -331,6 +336,7 @@ def test_snapshot_lifecycle_and_consumer_projection(tmp_path):
+         )
+ 
+     # Reconstructed to fresh with zero disk reads
++    assert engine.state.artifact_consumption_state == "fresh"
+     assert engine.state.cached_analytics_state == "fresh"
+     assert "contextor.core.analysis.mod" in engine.state.cached_analytics["module_layers"]
+     assert engine.state.cached_analytics["export_degree"]["contextor.core.analysis.mod"] == 1
+@@ -378,8 +384,17 @@ def test_none_cached_marker_preserves_obsolete_payload_without_certifying_it():
+ 
+ 
+ def test_missing_cached_marker_with_populated_legacy_cache_is_not_fresh():
+-    state = _CachedAnalyticsLegacySnapshotState({}, ProjectGraph({}, {}), {})
++    module_name = "contextor.core.analysis.mod"
++    state = _CachedAnalyticsLegacySnapshotState(
++        {module_name: Module(module_name, "mod.py", "/tmp/mod.py", [])},
++        ProjectGraph({module_name: set()}, {module_name: set()}),
++        {},
++    )
+     state.cached_analytics = {"module_layers": {"legacy.mod": "obsolete_layer"}}
++    state.artifact_consumption = {
++        f"{module_name}::foo": {"consumers": [], "channels": {}}
++    }
++    state.artifact_consumption_state = "fresh"
+     assert not hasattr(state, "cached_analytics_state")
+ 
+     ensure_cached_analytics(state)
+@@ -477,6 +492,11 @@ def test_cached_marker_positive_lifecycle_preserves_other_families():
+     for marker in ("fresh", "stale"):
+         state = RepositoryAnalysisState(
+             modules={module_name: module},
++            artifacts={module_name: {"own_symbols": ["foo"]}},
++            artifact_consumption={
++                f"{module_name}::foo": {"consumers": [], "channels": {}}
++            },
++            artifact_consumption_state="fresh",
+             dependency_graph=graph,
+             cached_analytics_state=marker,
+             cached_analytics=sentinel.copy(),
+@@ -491,6 +511,11 @@ def test_cached_marker_positive_lifecycle_preserves_other_families():
+ 
+     deferred = RepositoryAnalysisState(
+         modules={module_name: module},
++        artifacts={module_name: {"own_symbols": ["foo"]}},
++        artifact_consumption={
++            f"{module_name}::foo": {"consumers": [], "channels": {}}
++        },
++        artifact_consumption_state="fresh",
+         dependency_graph=graph,
+         cached_analytics_state="deferred",
+         cached_analytics={},
+@@ -498,12 +523,205 @@ def test_cached_marker_positive_lifecycle_preserves_other_families():
+         cycles_state="stale",
+     )
+     ensure_cached_analytics(deferred)
++    oracle = compute_cached_analytics(
++        modules=deferred.modules,
++        artifacts=deferred.artifacts,
++        artifact_consumption=deferred.artifact_consumption,
++        hard_edges=deferred.dependency_graph.hard_edges,
++    )
+     assert deferred.cached_analytics_state == "fresh"
+-    assert deferred.cached_analytics["module_layers"][module_name] == "runtime"
++    assert deferred.cached_analytics == oracle
+     assert deferred.topology_metrics_state == "stale"
+     assert deferred.cycles_state == "stale"
+ 
+ 
++@pytest.mark.parametrize("missing_graph", [False, True], ids=["resync", "missing_graph"])
++def test_cached_analytics_requires_valid_graph_and_no_resync(missing_graph):
++    module_name = "contextor.core.analysis.mod"
++    graph = None if missing_graph else ProjectGraph({module_name: set()}, {module_name: set()})
 +    state = RepositoryAnalysisState(
-+        modules={},
-+        cached_analytics_state=None,
-+        cached_analytics=obsolete,
++        modules={module_name: Module(module_name, "mod.py", "/tmp/mod.py", [])},
++        artifacts={module_name: {"own_symbols": ["foo"]}},
++        artifact_consumption={
++            f"{module_name}::foo": {"consumers": [], "channels": {}}
++        },
++        artifact_consumption_state="fresh",
++        dependency_graph=graph,
++        cached_analytics_state="deferred",
++        cached_analytics={},
++    )
++    state.resync_required = not missing_graph
++
++    ensure_cached_analytics(state)
++
++    assert state.cached_analytics_state == "stale"
++    assert state.cached_analytics == {}
++
++
++@pytest.mark.parametrize(
++    ("cached_state", "expected_state"),
++    [("fresh", "deferred"), ("stale", "stale")],
++)
++def test_deferred_artifact_prerequisite_degrades_only_fresh_cache(cached_state, expected_state):
++    module_name = "contextor.core.analysis.mod"
++    payload = {"visibility": {module_name: "public"}}
++    state = RepositoryAnalysisState(
++        modules={module_name: Module(module_name, "mod.py", "/tmp/mod.py", [])},
++        artifacts={module_name: {"own_symbols": ["foo"]}},
++        artifact_consumption={
++            f"{module_name}::foo": {"consumers": [], "channels": {}}
++        },
++        artifact_consumption_state="deferred",
++        dependency_graph=ProjectGraph({module_name: set()}, {module_name: set()}),
++        cached_analytics_state=cached_state,
++        cached_analytics=deepcopy(payload),
 +    )
 +
 +    ensure_cached_analytics(state)
 +
-+    assert state.cached_analytics_state == "deferred"
-+    assert state.cached_analytics is obsolete
-+    assert state.cached_analytics["module_layers"]["contextor.core.analysis.mod"] == "obsolete_layer"
++    assert state.cached_analytics_state == expected_state
++    assert state.cached_analytics == payload
 +
 +
-+def test_missing_cached_marker_with_populated_legacy_cache_is_not_fresh():
-+    state = _CachedAnalyticsLegacySnapshotState({}, ProjectGraph({}, {}), {})
-+    state.cached_analytics = {"module_layers": {"legacy.mod": "obsolete_layer"}}
-+    assert not hasattr(state, "cached_analytics_state")
++@pytest.mark.parametrize("artifact_state", ["UNKNOWN", "stale", None, [], {}], ids=repr)
++def test_cached_analytics_requires_trusted_artifact_consumption(artifact_state):
++    module_name = "contextor.core.analysis.mod"
++    target = f"{module_name}::foo"
++    state = RepositoryAnalysisState(
++        modules={
++            module_name: Module(
++                module_name,
++                "contextor/core/analysis/mod.py",
++                "/tmp/mod.py",
++                [],
++            )
++        },
++        artifacts={module_name: {"own_symbols": ["foo"]}},
++        artifact_consumption={target: {"consumers": [], "channels": {}}},
++        artifact_consumption_state=artifact_state,
++        dependency_graph=ProjectGraph({module_name: set()}, {module_name: set()}),
++        cached_analytics_state="deferred",
++        cached_analytics={},
++    )
++    assert validate_canonical_artifact_consumption(state.artifact_consumption)
++    assert validate_canonical_artifact_consumption_coverage(
++        state.artifact_consumption,
++        state.artifacts,
++    )
++    assert set(state.artifact_consumption) == canonical_artifact_consumption_targets(
++        state.artifacts
++    )
 +
 +    ensure_cached_analytics(state)
 +
-+    assert state.cached_analytics_state == "deferred"
-+    assert state.cached_analytics["module_layers"]["legacy.mod"] == "obsolete_layer"
++    assert state.cached_analytics_state == "stale"
++    assert state.cached_analytics == {}
 +
 +
-+def test_explicit_none_cached_marker_snapshot_hydration_and_public_projection(tmp_path):
++def test_untrusted_artifact_consumption_invalidates_existing_fresh_cached_payload():
++    module_name = "contextor.core.analysis.mod"
++    cached = {"visibility": {module_name: "public"}, "sentinel": "retain"}
++    state = RepositoryAnalysisState(
++        modules={module_name: Module(module_name, "mod.py", "/tmp/mod.py", [])},
++        artifact_consumption_state="stale",
++        dependency_graph=ProjectGraph({module_name: set()}, {module_name: set()}),
++        cached_analytics_state="fresh",
++        cached_analytics=deepcopy(cached),
++    )
++
++    ensure_cached_analytics(state)
++
++    assert state.cached_analytics_state == "stale"
++    assert state.cached_analytics == cached
++
++
++@pytest.mark.parametrize("artifact_state", ["UNKNOWN", "stale"])
++def test_isolated_snapshot_hydration_does_not_publish_visibility_from_untrusted_consumers(
++    tmp_path,
++    artifact_state,
++):
 +    repo = tmp_path / "repo"
-+    module_file = repo / "contextor" / "core" / "analysis" / "mod.py"
-+    module_file.parent.mkdir(parents=True)
-+    module_file.write_text("def foo():\n    return 1\n", encoding="utf-8")
++    mod_file = repo / "contextor" / "core" / "analysis" / "mod.py"
++    consumer_file = repo / "contextor" / "ui" / "consumer.py"
++    mod_file.parent.mkdir(parents=True)
++    consumer_file.parent.mkdir(parents=True)
++    mod_file.write_text("def foo():\n    return 1\n", encoding="utf-8")
++    consumer_file.write_text("VALUE = 2\n", encoding="utf-8")
++
++    identity = ensure_repository_identity(repo)[0]
 +    cache_dir = tmp_path / "cache"
 +    state_manager = FileStateManager(str(cache_dir))
 +    engine = IncrementalAnalysisEngine(
@@ -131,107 +346,69 @@ index b4d1226..e54ee94 100644
 +        state_manager,
 +        str(repo),
 +    )
-+    assert engine.update_file(str(module_file)).status == "UPDATED"
-+    module_name = "contextor.core.analysis.mod"
-+    assert engine.state.cached_analytics_state == "fresh"
-+    assert module_name in engine.state.cached_analytics["module_layers"]
++    assert engine.update_file(str(mod_file)).status == "UPDATED"
++    assert engine.update_file(str(consumer_file)).status == "UPDATED"
++    definer = "contextor.core.analysis.mod"
++    consumer = "contextor.ui.consumer"
++    target = f"{definer}::foo"
++    assert engine.state.cached_analytics["visibility"][definer] == "private"
 +
-+    base = save_snapshot(
-+        engine.state,
++    candidate = deepcopy(engine.state)
++    assert set(candidate.artifact_consumption) == canonical_artifact_consumption_targets(
++        candidate.artifacts
++    )
++    candidate.artifact_consumption[target] = {
++        "consumers": [consumer],
++        "channels": {consumer: ["api_imports"]},
++    }
++    candidate.artifact_consumption_state = artifact_state
++    candidate.cached_analytics_state = "deferred"
++    candidate.cached_analytics = {}
++    candidate.resync_required = False
++    assert validate_canonical_artifact_consumption(candidate.artifact_consumption)
++    assert validate_canonical_artifact_consumption_coverage(
++        candidate.artifact_consumption,
++        candidate.artifacts,
++    )
++    assert target in candidate.artifact_consumption
++    assert candidate.artifact_consumption[target]["channels"][consumer] == ["api_imports"]
++
++    state_id = "l32c-prerequisite-trust"
++    metadata = save_snapshot(
++        candidate,
 +        cache_dir,
-+        "cached-analytics-test",
-+        repo_id="isolated-cached-analytics",
-+        root_path=str(repo),
++        state_id,
++        repo_id=identity.repo_id,
++        root_path=identity.root_path,
 +        exact_revision=1,
-+        file_state_payload=state_manager.build_payload("cached-analytics-test", 1),
++        file_state_payload=state_manager.build_payload(state_id, 1),
 +    )
-+    assert base.revision == 1
-+    committed = load_snapshot(
-+        cache_dir,
-+        expected_state_id="cached-analytics-test",
-+        expected_repo_id="isolated-cached-analytics",
-+        expected_root_path=str(repo),
-+    )
-+    assert committed is not None
-+    isolated_state, metadata = committed
-+    assert metadata.revision == 1
-+    assert isolated_state.cached_analytics_state == "fresh"
-+
-+    isolated_state.cached_analytics_state = None
-+    isolated_state.cached_analytics["module_layers"][module_name] = "obsolete_layer"
-+    next_revision = metadata.revision + 1
-+    saved = save_snapshot(
-+        isolated_state,
-+        cache_dir,
-+        metadata.state_id,
-+        repo_id=metadata.repo_id,
-+        root_path=metadata.root_path,
-+        exact_revision=next_revision,
-+        file_state_payload=state_manager.build_payload(metadata.state_id, next_revision),
-+    )
-+    assert saved.revision == next_revision
 +    loaded = load_snapshot(
 +        cache_dir,
-+        expected_state_id=metadata.state_id,
-+        expected_repo_id=metadata.repo_id,
-+        expected_root_path=metadata.root_path,
++        expected_state_id=state_id,
++        expected_repo_id=identity.repo_id,
++        expected_root_path=identity.root_path,
 +    )
 +    assert loaded is not None
 +    loaded_state, loaded_metadata = loaded
-+    assert loaded_metadata.revision == next_revision
-+    assert loaded_state.cached_analytics_state is None
-+    assert loaded_state.cached_analytics["module_layers"][module_name] == "obsolete_layer"
-+
-+    hydrated_file_state = FileStateManager(str(cache_dir))
-+    assert hydrated_file_state.revision == loaded_metadata.revision
-+    assert hydrated_file_state.state_id == loaded_metadata.state_id
++    assert loaded_metadata.revision == metadata.revision == 1
++    assert loaded_state.artifact_consumption_state == artifact_state
++    hydrated_files = FileStateManager(str(cache_dir))
++    assert hydrated_files.revision == loaded_metadata.revision
++    assert hydrated_files.state_id == loaded_metadata.state_id
 +    hydrated = IncrementalAnalysisEngine(
 +        loaded_state,
 +        PersistentIdentityRegistry(str(repo)),
-+        hydrated_file_state,
++        hydrated_files,
 +        str(repo),
 +    )
-+    assert hydrated.state.cached_analytics_state == "deferred"
-+    assert hydrated.state.cached_analytics["module_layers"][module_name] == "obsolete_layer"
++
++    assert hydrated.state.cached_analytics_state == "stale"
++    assert hydrated.state.cached_analytics == {}
 +    fn = getattr(get_module_context, "fn", get_module_context)
 +    with patch.dict(_live_engines, {str(repo.resolve()): hydrated}):
-+        projected = json.loads(fn(str(repo), module_name, compact=True))
-+    assert projected["metrics"].get("layer") != "obsolete_layer"
-+
-+
-+def test_cached_marker_positive_lifecycle_preserves_other_families():
-+    module_name = "contextor.core.analysis.mod"
-+    module = Module(module_name, "contextor/core/analysis/mod.py", "/tmp/mod.py", [])
-+    graph = ProjectGraph({module_name: set()}, {module_name: set()})
-+    sentinel = {"module_layers": {module_name: "runtime"}}
-+    for marker in ("fresh", "stale"):
-+        state = RepositoryAnalysisState(
-+            modules={module_name: module},
-+            dependency_graph=graph,
-+            cached_analytics_state=marker,
-+            cached_analytics=sentinel.copy(),
-+            topology_metrics_state="stale",
-+            cycles_state="stale",
-+        )
-+        ensure_cached_analytics(state)
-+        assert state.cached_analytics_state == marker
-+        assert state.cached_analytics == sentinel
-+        assert state.topology_metrics_state == "stale"
-+        assert state.cycles_state == "stale"
-+
-+    deferred = RepositoryAnalysisState(
-+        modules={module_name: module},
-+        dependency_graph=graph,
-+        cached_analytics_state="deferred",
-+        cached_analytics={},
-+        topology_metrics_state="stale",
-+        cycles_state="stale",
-+    )
-+    ensure_cached_analytics(deferred)
-+    assert deferred.cached_analytics_state == "fresh"
-+    assert deferred.cached_analytics["module_layers"][module_name] == "runtime"
-+    assert deferred.topology_metrics_state == "stale"
-+    assert deferred.cycles_state == "stale"
++        projected = json.loads(fn(str(repo), definer, compact=True))
++    assert projected["metrics"].get("visibility") != "public"
 +
 +
  def test_atomicity_and_isolation_on_failure(tmp_path):
