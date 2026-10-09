@@ -141,6 +141,7 @@ class ContextorGUI:
         self.live_event_feeds = {}
         self._live_start_retry_attempt = 0
         self._live_start_retry_after_id = None
+        self._live_recovery_after_id = None
         self.live_status_var = tk.StringVar(value="LIVE: waiting for analysis")
         self.repo_id_var = tk.StringVar(value="Repo ID: unregistered")
         self._live_status_queue: Queue[str] = Queue()
@@ -159,7 +160,9 @@ class ContextorGUI:
         self._build_ui()
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
         self.root.after(50, self._start_post_paint_tasks)
-        self.root.after(100, self._drain_live_recovery_queue)
+        self._live_recovery_after_id = self.root.after(
+            100, self._drain_live_recovery_queue
+        )
 
     def _claim_current_backend_for_desktop(self):
         claim = claim_backend_owner(
@@ -1184,6 +1187,7 @@ class ContextorGUI:
 
     def _drain_live_recovery_queue(self) -> None:
         """Process recovery dialogs exclusively on the Tk event loop."""
+        self._live_recovery_after_id = None
         if getattr(self, "_closing", False):
             return
 
@@ -1254,7 +1258,7 @@ class ContextorGUI:
 
         finally:
             if not getattr(self, "_closing", False):
-                self.root.after(
+                self._live_recovery_after_id = self.root.after(
                     100, self._drain_live_recovery_queue
                 )
 
@@ -2133,6 +2137,17 @@ class ContextorGUI:
         import time
 
         self._closing = True
+        recovery_after_id = getattr(
+            self, "_live_recovery_after_id", None
+        )
+        self._live_recovery_after_id = None
+
+        if recovery_after_id is not None:
+            try:
+                self.root.after_cancel(recovery_after_id)
+            except (tk.TclError, RuntimeError):
+                pass
+
         close_cmd_log()
 
         # Route Desktop shutdown through the same cancellation path as Stop

@@ -1,51 +1,203 @@
-# L37/L38 A3C final T9/W8 certification
+# L37/L38 A3C T9 Tk recovery timer lifecycle fix
 
-## CURRENT_HEAD
+## FILES_CHANGED
 
-- Git HEAD: `55a7e98c26fde3fa9a1a9e2dcc15f4a31640cf11`; the worktree was clean before writing this report. No production, test, or documentation source was changed. No active Desktop/LIVE/MCP process was restarted.
-- Contextor MCP was used first: deferred tool inventory and current documentation, then `get_symbol_implementation` for `ContextorGUI.on_closing`, `_drain_live_recovery_queue`, `_request_full_analysis_recovery`, `DesktopLiveWatcher._poll_inflight_updates`, `poll_once`, `start`, and `stop`. Contextor reported `workspace_sync=verified` at canonical revision 106. Git source inspection confirmed exact control flow and line anchors. (DIRECT_EVIDENCE / CODE_PATH_PROVED.)
+- `C:\Temp\Contextor_Repo\contextor\ui\gui.py`
+- `C:\Temp\Contextor_Repo\tests\test_gui_live_startup.py`
+- HEAD before edits: `21db1dd4ef53e890317e386cdd20f25ab48cacd6`. No other source/test/documentation file changed. This `walkthrough.md` is the task report.
 
-## T9_REAL_TK_EVIDENCE
+## T9_ROOT_CAUSE
 
-- **T9=FAIL for clean scheduled-callback teardown; other tested shutdown properties passed.** An actual Windows Tk 8.6 root and `mainloop()` were used in an in-process controller. The real `ContextorGUI.on_closing` method ran; external log, process-pool and state-save side effects were stubbed so no active Desktop resources were touched. The modal answer was controlled as `False`; there was no automatic FULL.
-- Before close: one recovery drain callback ran on Tk thread ID 10080 and one controlled dialog call ran on that same thread; incident generation 1 remained. `root.tk.call('after','info')` returned pending timer `after#2`, scheduled by the recovery queue's `finally` block. `on_closing` then set `_closing=True`, destroyed the root, and `mainloop()` exited. After close, the Python drain callback count and dialog count both remained 1; incident generation 1 remained intact. Thus no Python callback accessed a destroyed widget and no dialog opened after shutdown began in the observed run. (DIRECT_EVIDENCE / REAL_TK_EVENT_LOOP.)
-- After waiting beyond the timer deadline, explicitly processing the surviving Tcl event queue with `root.tk.eval('update')` emitted `invalid command name "1402612246464callback"` from an `after` script. The Python callback itself did not run. This is a reproducible pending Tcl callback command left after root destruction, so the stricter requirement that shutdown leave no invalid scheduled Tk callback is not certified and is classified FAIL. The ordinary `mainloop()` exit completed without a Python exception; the Tcl diagnostic appeared only when the post-destroy event queue was explicitly processed. Do not interpret this as a destroyed-widget access by Python. (DIRECT_EVIDENCE.)
-- Source: `C:\Temp\Contextor_Repo\contextor\ui\gui.py:1185-1259` returns early when `_closing` is true and schedules a new `root.after(100, self._drain_live_recovery_queue)` in `finally` while open. `:2131-2244` sets `_closing=True`, cancels `_live_start_retry_after_id`, stops owned workers, saves state and destroys root; it does not record/cancel the recovery drain timer. (CODE_PATH_PROVED.) No source change was made.
-- The first T9 harness attempt itself called `winfo_exists()` after root destruction and raised TclError. That was a harness mistake, not product behavior; the corrected second run above avoided widget access and produced the pending-Tcl-command evidence.
+- Contextor MCP was used first, including deferred discovery and current tool documentation. `get_symbol_implementation` returned complete `ContextorGUI.__init__` (`gui.py:99-162`), `_drain_live_recovery_queue` (`:1185-1259`) and `on_closing` (`:2131-2244`) with `workspace_sync=verified` at canonical revision 106. Git verified the exact anchors and focused test consumers before edits. (DIRECT_EVIDENCE / CODE_PATH_PROVED.)
+- The initial recovery `root.after(100, ...)` and recurring recovery `root.after(100, ...)` were untracked. `on_closing` canceled the separate LIVE retry timer but had no recovery timer ID to cancel. The prior real-Tk audit found a pending Tcl `after` command at root destruction; processing the post-destroy Tcl queue emitted `invalid command name`. (CODE_PATH_PROVED plus prior DIRECT_EVIDENCE.)
 
-## W8_NATIVE_INFLIGHT_EVIDENCE
+## TIMER_LIFECYCLE_CHANGE
 
-- **W8=PASS for the isolated native-observer/real-IPC interleaving.** Final dedicated temporary repo: `C:\Users\DafoO\AppData\Local\Temp\contextor_w8_native_snnjni8a\repo`, permanent repo ID `ctx_3e0074dc`; separate process-local state, cache, output and registry domains. Real LIVE PID 7860, instance `0a5eda5ff09b4a76a0d73f76853f4372`, lease generation 1. Actual observer was `watchdog.observers.read_directory_changes.WindowsApiObserver`, alive with polling fallback false. No `_enqueue_path` call was made by the harness. (DIRECT_EVIDENCE / NATIVE_WATCHDOG + REAL_LIVE_IPC.)
-- A native filesystem write `VALUE = 1` → `VALUE = 2` produced real accepted job `mu-1f6ac23914e346339fe5d2e51e570f60` at accepted revision 1. The watcher tracked that job in `_inflight_updates`. The proxy delayed only its first `mutation_status` request with a `threading.Event`; it did not fabricate or modify the eventual IPC response. While that request was held, a controlled GUI recovery incident was registered for the isolated root at generation 1; its admission closure returned `RECOVERY_DEFERRED`. (DIRECT_EVIDENCE / IN_PROCESS synchronization + REAL_LIVE_IPC.)
-- The real first job committed revision 2 while its status delivery remained held. A subsequent native write `VALUE = 3` produced another WindowsApiObserver event. During the barrier, the first job remained inflight and submission count stayed 1. After releasing the barrier, the forwarded real `mutation_status` returned `state=completed`; the watcher cleared inflight, kept `module.py` pending, had no second submission, and retained incident generation 1. `_pending_intents` was empty because the accepted job's intent had already moved into the inflight record; the path remained recoverable in `_pending_paths`. (DIRECT_EVIDENCE.)
-- Real `verify_recovery(1)` returned a certificate for revision 2, state_id `20261009_110653`, repo ID `ctx_3e0074dc`; real `complete_recovery_verification` returned `status=ok,released=True`, matching certificate ID and incident generation. The controlled harness then cleared only that matching in-process incident and called `watcher.complete_recovery_certificate()`. The watcher performed its trusted rebaseline, made one deferred real IPC submission, reconciled it, and ended with no pending path, no inflight job and `_recovery_rebaseline_pending=False`. LIVE advanced 2 → 3. This directly certifies watcher/LIVE recovery behavior; it does not claim the complete GUI `analyze` certification path was executed. (DIRECT_EVIDENCE / REAL_LIVE_IPC + IN_PROCESS controller.)
-- Source: `C:\Temp\Contextor_Repo\contextor\core\live_state\watcher.py:592-665` polls real inflight jobs, defers trusting a completed path while admission is blocked and requeues it; `:667-972` validates fresh LIVE/file-state evidence before rebaseline and later submission; `:210-240,277-343` starts/stops the native observer and worker. (CODE_PATH_PROVED.)
-- An earlier isolated attempt wrote `VALUE = 3` before proving the first job's durable revision 2 commit; it did not deliver a second semantic update after certification. That attempt was insufficient to prove W8's deferred-update requirement. The final run explicitly awaited real revision 2 before the second write and then observed revision 3. The earlier ordering does not establish a production defect or root cause. All isolated services shut down; no code was changed.
+- `ContextorGUI.__init__` initializes `_live_recovery_after_id=None` and stores the first recovery timer ID.
+- `_drain_live_recovery_queue` clears the executing callback's ID at entry and stores the next scheduled ID only when `_closing` is false. Incident, prompt, generation and certificate logic is unchanged.
+- `on_closing` sets `_closing=True`, copies and clears the recovery timer ID, then cancels that timer before the existing long-running shutdown operations. Cancellation catches only `tk.TclError` and `RuntimeError`; a second shutdown has no recovery timer to cancel. The existing LIVE retry timer logic was not modified.
+- IPC, watcher, durable storage, backend ownership and publication semantics were not edited. No Desktop/LIVE/MCP restart or manual `update_file` occurred.
 
-## RECOVERY_INTEGRITY
+## REAL_TK_TEST_EVIDENCE
 
-- Under the incident, admission deferred new submissions; accepted inflight work still reconciled from an actual completed mutation-status response. Incident generation 1 stayed present throughout this reconciliation, and the second native modification remained pending. No pending modification was lost in the final controlled run. The certificate was real IPC and matched isolated identity/revision; release preceded trusted rebaseline and deferred delivery.
-- T9's pending Tcl `after` command is separate from the watcher/LIVE authority flow. No recovery incident was deleted merely by closing the controlled Tk controller.
-- Focused regressions only: `tests/test_gui_live_startup.py::test_recovery_prompt_suppressed_after_desktop_closes`, `tests/test_watcher_recovery_admission.py::test_inflight_status_reconciles_during_recovery_without_trusting_baseline`, and `::test_recovery_release_rescans_and_revalidates_against_current_live` — **3 passed**, one external Authlib deprecation warning, 2.78 s. These tests do not override the real-Tk Tcl diagnostic.
+- New focused test creates a real Tk root and `ContextorGUI(root)` with UI construction, backend startup and unrelated external shutdown side effects stubbed. It observes the initial stored recovery timer ID in Tcl `after info`, runs the actual Tk event loop, processes one controlled recovery dialog, then enters actual `on_closing` while the recurring recovery callback is pending. It confirms the recurring ID was present before shutdown, cleared by shutdown, and no timer remains in `after info` afterward. A post-destroy `root.tk.eval('update')` produced no `invalid command name` diagnostic under `capfd`; no callback/dialog ran after close; the recovery incident generation remained. (DIRECT_EVIDENCE / REAL_TK_EVENT_LOOP; the modal answer itself is controlled.)
+- The first test run found an unrelated LIVE-status `after` callback left by `_set_live_status`, not the recovery callback. The test now stubs only that separate status timer chain and explicitly documents why, so the `after info` assertion attributes the absence of callbacks to the recovery timer under test. The corrected real-Tk test passed; the initial harness assertion failure is not presented as a production failure.
+- A separate idempotence test invokes `on_closing` twice with a controlled root and verifies the recovery ID is canceled exactly once and remains `None`.
 
-## DURABLE_LIVE_PARITY
+## T7_REGRESSION
 
-- Final W8 isolated authority: LIVE revision 3/state_id `20261009_110653`; durable metadata revision 3/same state_id; loaded embedded durable state revision 3/same state_id. Repo ID `ctx_3e0074dc` matched the isolated service authority. PASS / REAL_LIVE_IPC plus durable store read.
-- The first accepted job was revision 1 → 2; the deferred second job was revision 2 → 3. Both real jobs were reconciled by the watcher by the end of the final run.
+- The existing real-Tk A → B → A decline/reselection regression passed. Decline still preserves the incident, clears prompt-pending state, and queues exactly one later prompt on reselection. Focused accept, worker-to-Tk handoff, stale queue, failure and switched-repository tests passed as listed below. The timer change did not modify watcher admission or generation matching.
 
-## PRODUCTION_RUNTIME_INTEGRITY
+## TARGETED_TEST_RESULTS
 
-- Active production Desktop PID 9676, MCP PID 2140, LIVE PID 11484 retained their earlier startup identities; the MCP listener on port 8765 remained owned by PID 2140. No isolated service PID (248, 2692 or 7860) remained at final process census. The isolated service used its own repository/cache/state/registry and was shut down through real IPC; temporary harness and repository directories were removed. (DIRECT_EVIDENCE.)
-- Production permanent repo ID `ctx_8efc50d8`, root `C:\Temp\Contextor_Repo`; durable metadata and embedded snapshot revision 106/state_id `20261009_100948`; LIVE authority and embedded snapshot revision 106/same state_id, service instance `49c8405bd2ec4897b29c987af6b916d6`, lease generation 6. Contextor `get_live_events(after_revision=105)` returned `continuity=continuous`, `resync_required=false`, one desktop_watcher update for `tests/test_gui_live_startup.py` at revision 106. This was an existing production watcher event, not a manual update submitted for this task. PASS for observed parity/continuity. Private production queue quiescence was not inspected. (DIRECT_EVIDENCE.)
-
-## UNRESOLVED_RISKS
-
-- T9 leaves a Tcl `after` callback command pending at root destruction. The observed post-destroy `update` emits an invalid-command diagnostic; no Python callback or dialog ran after shutdown. Whether an ordinary desktop process exit ever processes this residual Tcl event is UNKNOWN.
-- W8's incident clearance after real certificate completion was performed by a controlled in-process controller rather than a full Desktop `analyze` invocation. Full Desktop ownership and native modal behavior remain outside this isolated gate.
-- The final W8 interleaving is one deterministic process run; it certifies the observed path, not all scheduler timings. The early-write attempt is reported as inconclusive, without inferred root cause.
+- First focused run: the new real-Tk test failed because an unrelated LIVE-status timer remained after root destruction; the recovery timer itself was canceled. The harness was narrowed to stub the unrelated `_set_live_status` timer.
+- Corrected focused run: **7 passed** in 5.36 s (new real-Tk shutdown, cancellation idempotence, real-Tk T7, decline, accept, worker queue, closed Desktop).
+- Adjacent focused run: **5 passed** in 2.88 s (stale queued dialog, failed analysis, dialog exception, repository switch, existing LIVE retry cancellation). Each run emitted one external Authlib deprecation warning. No full pytest suite was run.
+- `git diff --check` passed. Contextor `get_live_events(after_revision=106)` returned `continuity=continuous`, `resync_required=false`, desktop_watcher updates for `gui.py` at revision 107 and `test_gui_live_startup.py` at revisions 108–109. This proves source-file LIVE observation; the already-running Desktop process has not been restarted and therefore its loaded Tk code is not certified by this event.
 
 ## FINAL_VERDICT
 
-- **W8 PASS** for the specified isolated native watchdog + real LIVE IPC inflight/recovery sequence, including durable/LIVE parity after deferred delivery.
-- **T9 FAIL** for clean scheduled Tk callback teardown: a pending Tcl timer survives GUI root destruction and emits `invalid command name` when the event queue is processed afterward. Other observed T9 subconditions passed as specified above. No source correction was authorized or made.
-- `FILES_CHANGED=NONE` for production/tests/docs; `ACTUAL_DIFF=NONE`. This overwritten `walkthrough.md` is the only task artifact. No full pytest suite, active-runtime restart, automatic FULL, or manual update_file was performed.
+- **PASS for the focused T9 timer lifecycle contract in an isolated real-Tk event loop.** Pending recovery `after` IDs are tracked and canceled before root destruction; the tested post-destroy Tcl queue has no orphan recovery command. T7 and adjacent focused recovery behavior passed. Active Desktop loaded-code certification requires a separately authorized restart and is not claimed here.
+
+## FULL_DIFFS
+
+Complete actual Git diff for every changed source/test file follows:
+
+diff --git a/contextor/ui/gui.py b/contextor/ui/gui.py
+index a42c539..2b1ebbd 100644
+--- a/contextor/ui/gui.py
++++ b/contextor/ui/gui.py
+@@ -141,6 +141,7 @@ class ContextorGUI:
+         self.live_event_feeds = {}
+         self._live_start_retry_attempt = 0
+         self._live_start_retry_after_id = None
++        self._live_recovery_after_id = None
+         self.live_status_var = tk.StringVar(value="LIVE: waiting for analysis")
+         self.repo_id_var = tk.StringVar(value="Repo ID: unregistered")
+         self._live_status_queue: Queue[str] = Queue()
+@@ -159,7 +160,9 @@ class ContextorGUI:
+         self._build_ui()
+         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+         self.root.after(50, self._start_post_paint_tasks)
+-        self.root.after(100, self._drain_live_recovery_queue)
++        self._live_recovery_after_id = self.root.after(
++            100, self._drain_live_recovery_queue
++        )
+ 
+     def _claim_current_backend_for_desktop(self):
+         claim = claim_backend_owner(
+@@ -1184,6 +1187,7 @@ class ContextorGUI:
+ 
+     def _drain_live_recovery_queue(self) -> None:
+         """Process recovery dialogs exclusively on the Tk event loop."""
++        self._live_recovery_after_id = None
+         if getattr(self, "_closing", False):
+             return
+ 
+@@ -1254,7 +1258,7 @@ class ContextorGUI:
+ 
+         finally:
+             if not getattr(self, "_closing", False):
+-                self.root.after(
++                self._live_recovery_after_id = self.root.after(
+                     100, self._drain_live_recovery_queue
+                 )
+ 
+@@ -2133,6 +2137,17 @@ class ContextorGUI:
+         import time
+ 
+         self._closing = True
++        recovery_after_id = getattr(
++            self, "_live_recovery_after_id", None
++        )
++        self._live_recovery_after_id = None
++
++        if recovery_after_id is not None:
++            try:
++                self.root.after_cancel(recovery_after_id)
++            except (tk.TclError, RuntimeError):
++                pass
++
+         close_cmd_log()
+ 
+         # Route Desktop shutdown through the same cancellation path as Stop
+diff --git a/tests/test_gui_live_startup.py b/tests/test_gui_live_startup.py
+index c64d7e5..5d3975a 100644
+--- a/tests/test_gui_live_startup.py
++++ b/tests/test_gui_live_startup.py
+@@ -959,6 +959,94 @@ def test_recovery_decline_reprompts_once_after_reselection_with_real_tk(
+         root.destroy()
+ 
+ 
++def test_recovery_timer_is_cancelled_before_real_tk_shutdown(
++    tmp_path, monkeypatch, capfd
++):
++    repo = tmp_path / "repo"
++    repo.mkdir()
++    try:
++        root = tk.Tk()
++    except tk.TclError as exc:
++        pytest.skip(f"Tk display unavailable: {exc}")
++    root.withdraw()
++    monkeypatch.setattr(gui, "load_state", lambda: {"repository": str(repo)})
++    monkeypatch.setattr(gui, "apply_theme", lambda *_args: None)
++    monkeypatch.setattr(ContextorGUI, "_build_ui", lambda _self: None)
++    monkeypatch.setattr(ContextorGUI, "_start_post_paint_tasks", lambda _self: None)
++    # LIVE status has its own after chain; isolate the recovery timer here.
++    monkeypatch.setattr(ContextorGUI, "_set_live_status", lambda *_args: None)
++    monkeypatch.setattr(gui, "close_cmd_log", lambda: None)
++    monkeypatch.setattr(gui, "terminate_active_process_pools", lambda **_kwargs: None)
++    monkeypatch.setattr(gui, "save_state", lambda **_kwargs: None)
++    dialogs = []
++    monkeypatch.setattr(
++        gui.messagebox,
++        "askyesno",
++        lambda *_args, **_kwargs: dialogs.append(threading.get_ident()) or False,
++    )
++
++    controller = ContextorGUI(root)
++    initial_id = controller._live_recovery_after_id
++    assert initial_id in root.tk.call("after", "info")
++    generation = controller._request_full_analysis_recovery(
++        str(repo), "Recovery required."
++    )
++    close_evidence = {}
++
++    def close_on_tk_thread():
++        pending_id = controller._live_recovery_after_id
++        close_evidence["pending_id"] = pending_id
++        close_evidence["pending_scripts"] = root.tk.call("after", "info")
++        close_evidence["dialogs_before"] = len(dialogs)
++        close_evidence["incident_before"] = controller._live_recovery_incident(
++            str(repo)
++        )
++        controller.on_closing()
++        close_evidence["id_after"] = controller._live_recovery_after_id
++
++    try:
++        root.after(130, close_on_tk_thread)
++        root.mainloop()
++        assert initial_id != close_evidence["pending_id"]
++        assert close_evidence["pending_id"] in close_evidence["pending_scripts"]
++        assert close_evidence["dialogs_before"] == 1
++        assert close_evidence["incident_before"]["generation"] == generation
++        assert close_evidence["id_after"] is None
++        assert root.tk.call("after", "info") == ""
++
++        root.tk.eval("update")
++        assert root.tk.call("after", "info") == ""
++        assert len(dialogs) == 1
++        assert controller._live_recovery_incident(str(repo))["generation"] == generation
++        output = capfd.readouterr()
++        assert "invalid command name" not in output.err
++        assert "invalid command name" not in output.out
++    finally:
++        controller._closing = True
++        try:
++            root.destroy()
++        except tk.TclError:
++            pass
++
++
++def test_recovery_timer_cancellation_is_idempotent(tmp_path, monkeypatch):
++    repo = tmp_path / "repo"
++    repo.mkdir()
++    root = MockTkRoot()
++    controller = _make_controller(repo, root)
++    monkeypatch.setattr(gui, "close_cmd_log", lambda: None)
++    monkeypatch.setattr(gui, "terminate_active_process_pools", lambda **_kwargs: None)
++    monkeypatch.setattr(gui, "save_state", lambda **_kwargs: None)
++    recovery_id = root.after(100, lambda: None)
++    controller._live_recovery_after_id = recovery_id
++
++    ContextorGUI.on_closing(controller)
++    ContextorGUI.on_closing(controller)
++
++    assert root.cancelled.count(recovery_id) == 1
++    assert controller._live_recovery_after_id is None
++
++
+ def test_stale_recovery_queue_item_does_not_open_dialog(tmp_path, monkeypatch):
+     repo = tmp_path / "repo"
+     repo.mkdir()
+ACTUAL_DIFF=the complete diff above.

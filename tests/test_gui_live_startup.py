@@ -959,6 +959,94 @@ def test_recovery_decline_reprompts_once_after_reselection_with_real_tk(
         root.destroy()
 
 
+def test_recovery_timer_is_cancelled_before_real_tk_shutdown(
+    tmp_path, monkeypatch, capfd
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    try:
+        root = tk.Tk()
+    except tk.TclError as exc:
+        pytest.skip(f"Tk display unavailable: {exc}")
+    root.withdraw()
+    monkeypatch.setattr(gui, "load_state", lambda: {"repository": str(repo)})
+    monkeypatch.setattr(gui, "apply_theme", lambda *_args: None)
+    monkeypatch.setattr(ContextorGUI, "_build_ui", lambda _self: None)
+    monkeypatch.setattr(ContextorGUI, "_start_post_paint_tasks", lambda _self: None)
+    # LIVE status has its own after chain; isolate the recovery timer here.
+    monkeypatch.setattr(ContextorGUI, "_set_live_status", lambda *_args: None)
+    monkeypatch.setattr(gui, "close_cmd_log", lambda: None)
+    monkeypatch.setattr(gui, "terminate_active_process_pools", lambda **_kwargs: None)
+    monkeypatch.setattr(gui, "save_state", lambda **_kwargs: None)
+    dialogs = []
+    monkeypatch.setattr(
+        gui.messagebox,
+        "askyesno",
+        lambda *_args, **_kwargs: dialogs.append(threading.get_ident()) or False,
+    )
+
+    controller = ContextorGUI(root)
+    initial_id = controller._live_recovery_after_id
+    assert initial_id in root.tk.call("after", "info")
+    generation = controller._request_full_analysis_recovery(
+        str(repo), "Recovery required."
+    )
+    close_evidence = {}
+
+    def close_on_tk_thread():
+        pending_id = controller._live_recovery_after_id
+        close_evidence["pending_id"] = pending_id
+        close_evidence["pending_scripts"] = root.tk.call("after", "info")
+        close_evidence["dialogs_before"] = len(dialogs)
+        close_evidence["incident_before"] = controller._live_recovery_incident(
+            str(repo)
+        )
+        controller.on_closing()
+        close_evidence["id_after"] = controller._live_recovery_after_id
+
+    try:
+        root.after(130, close_on_tk_thread)
+        root.mainloop()
+        assert initial_id != close_evidence["pending_id"]
+        assert close_evidence["pending_id"] in close_evidence["pending_scripts"]
+        assert close_evidence["dialogs_before"] == 1
+        assert close_evidence["incident_before"]["generation"] == generation
+        assert close_evidence["id_after"] is None
+        assert root.tk.call("after", "info") == ""
+
+        root.tk.eval("update")
+        assert root.tk.call("after", "info") == ""
+        assert len(dialogs) == 1
+        assert controller._live_recovery_incident(str(repo))["generation"] == generation
+        output = capfd.readouterr()
+        assert "invalid command name" not in output.err
+        assert "invalid command name" not in output.out
+    finally:
+        controller._closing = True
+        try:
+            root.destroy()
+        except tk.TclError:
+            pass
+
+
+def test_recovery_timer_cancellation_is_idempotent(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    root = MockTkRoot()
+    controller = _make_controller(repo, root)
+    monkeypatch.setattr(gui, "close_cmd_log", lambda: None)
+    monkeypatch.setattr(gui, "terminate_active_process_pools", lambda **_kwargs: None)
+    monkeypatch.setattr(gui, "save_state", lambda **_kwargs: None)
+    recovery_id = root.after(100, lambda: None)
+    controller._live_recovery_after_id = recovery_id
+
+    ContextorGUI.on_closing(controller)
+    ContextorGUI.on_closing(controller)
+
+    assert root.cancelled.count(recovery_id) == 1
+    assert controller._live_recovery_after_id is None
+
+
 def test_stale_recovery_queue_item_does_not_open_dialog(tmp_path, monkeypatch):
     repo = tmp_path / "repo"
     repo.mkdir()
