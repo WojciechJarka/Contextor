@@ -423,9 +423,15 @@ def acquire_full_analysis(
     Blocks if another process or thread holds the lease until released,
     timed out, or cancelled.
     """
-    if writer_kind not in {"full_analysis", "live_mutation", "startup_publish"}:
+    if writer_kind not in {
+        "full_analysis",
+        "live_mutation",
+        "startup_publish",
+        "local_incremental",
+    }:
         raise ValueError(
-            "writer_kind must be 'full_analysis', 'live_mutation', or 'startup_publish'"
+            "writer_kind must be 'full_analysis', 'live_mutation', "
+            "'startup_publish', or 'local_incremental'"
         )
 
     lock_file, key, repo_id = _resolve_lock_path(repo_path)

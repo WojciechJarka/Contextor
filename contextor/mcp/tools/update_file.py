@@ -251,6 +251,31 @@ def _assert_local_committed_baseline(root: Path, engine, root_key: str) -> None:
 def _execute_local_candidate_update(
     root: Path, target_file: Path, engine
 ):
+    """Coordinate local updates with repository canonical writers."""
+    from contextor.core.analysis.full_analysis_coordinator import (
+        acquire_full_analysis,
+        release_full_analysis,
+    )
+
+    lease = acquire_full_analysis(
+        root,
+        owner="mcp_local_incremental",
+        writer_kind="local_incremental",
+        timeout=10.0,
+    )
+    try:
+        return _execute_local_candidate_update_with_domain_fence(
+            root,
+            target_file,
+            engine,
+        )
+    finally:
+        release_full_analysis(lease)
+
+
+def _execute_local_candidate_update_with_domain_fence(
+    root: Path, target_file: Path, engine
+):
     """Fence LIVE authority before executing a local candidate transaction."""
     from contextor.core.live_state.runtime import _production_domain
     from contextor.core.live_state.runtime_lease import RuntimeLeaseManager

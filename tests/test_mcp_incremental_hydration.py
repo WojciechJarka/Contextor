@@ -8,11 +8,13 @@ from pathlib import Path
 import pytest
 import threading
 import multiprocessing
+from contextlib import contextmanager
 from dataclasses import replace
 from types import SimpleNamespace
 
 from contextor import mcp_server
 from contextor.core.analysis.incremental import engine as incremental_engine_module
+from contextor.core.analysis import full_analysis_coordinator as coordinator
 from contextor.mcp import report_helpers
 from contextor.mcp import runtime as mcp_runtime
 from contextor.core.analysis.incremental_engine import IncrementalAnalysisEngine
@@ -151,6 +153,345 @@ def _cross_process_local_candidate_worker(
                 "error": repr(exc),
             },
         })
+
+
+def _cross_process_full_writer_worker(repo_text, ready, entered, release, results):
+    def body(_root, **_kwargs):
+        entered.set()
+        if not release.wait(10):
+            raise TimeoutError("full-analysis body hold expired")
+
+    ready.set()
+    try:
+        coordinator.run_full_analysis_exclusive(
+            repo_text, owner="test_full_writer", analysis_fn=body, timeout=10.0
+        )
+        results.put("completed")
+    except BaseException as exc:
+        results.put(repr(exc))
+
+
+def test_local_incremental_lease_precedes_cache_domain_and_spans_commit(
+    tmp_path, monkeypatch
+):
+    repo, provider, engine = _build_local_fallback_engine(
+        tmp_path, monkeypatch, "def run():\n    return 1\n"
+    )
+    assert update_file_module._persist_live_engine(repo, engine) is True
+    provider.write_text("def run():\n    return 2\n", encoding="utf-8")
+    events = []
+    real_acquire = coordinator.acquire_full_analysis
+    real_release = coordinator.release_full_analysis
+    real_cache = mcp_runtime._engine_cache_transaction
+    real_domain = RuntimeLeaseManager._lock
+    real_checkpoint = engine.registry.create_checkpoint
+    real_update = IncrementalAnalysisEngine.update_file
+    real_persist = update_file_module._persist_live_engine
+
+    def acquire(*args, **kwargs):
+        assert kwargs == {
+            "owner": "mcp_local_incremental",
+            "writer_kind": "local_incremental",
+            "timeout": 10.0,
+        }
+        lease = real_acquire(*args, **kwargs)
+        events.append("lease_acquired")
+        return lease
+
+    def release(lease):
+        assert mcp_runtime._live_engines[str(repo.resolve())] is not engine
+        events.append("lease_released")
+        return real_release(lease)
+
+    @contextmanager
+    def cache(root):
+        events.append("cache_enter")
+        with real_cache(root) as key:
+            yield key
+        events.append("cache_exit")
+
+    @contextmanager
+    def domain(self):
+        events.append("domain_enter")
+        with real_domain(self):
+            yield
+        events.append("domain_exit")
+
+    def checkpoint():
+        events.append("checkpoint")
+        return real_checkpoint()
+
+    def update(self, path):
+        events.append("update")
+        return real_update(self, path)
+
+    def persist(root, candidate):
+        events.append("persist")
+        return real_persist(root, candidate)
+
+    monkeypatch.setattr(coordinator, "acquire_full_analysis", acquire)
+    monkeypatch.setattr(coordinator, "release_full_analysis", release)
+    monkeypatch.setattr(mcp_runtime, "_engine_cache_transaction", cache)
+    monkeypatch.setattr(RuntimeLeaseManager, "_lock", domain)
+    monkeypatch.setattr(engine.registry, "create_checkpoint", checkpoint)
+    monkeypatch.setattr(IncrementalAnalysisEngine, "update_file", update)
+    monkeypatch.setattr(update_file_module, "_persist_live_engine", persist)
+
+    result, candidate, _, persisted = update_file_module._execute_local_candidate_update(
+        repo, provider, engine
+    )
+
+    assert result.status == "UPDATED" and persisted is True
+    assert candidate is mcp_runtime._live_engines[str(repo.resolve())]
+    assert events[0:3] == ["lease_acquired", "cache_enter", "domain_enter"]
+    assert events.index("checkpoint") < events.index("update") < events.index("persist")
+    assert events[-3:] == ["domain_exit", "cache_exit", "lease_released"]
+
+
+def test_local_incremental_timeout_does_not_start_candidate(
+    tmp_path, monkeypatch
+):
+    repo, provider, engine = _build_local_fallback_engine(
+        tmp_path, monkeypatch, "def run():\n    return 1\n"
+    )
+    assert update_file_module._persist_live_engine(repo, engine) is True
+    before_meta = (repo_cache_dir(repo) / "engine_state.meta.json").read_bytes()
+    before_registry = engine.registry.create_checkpoint()
+    provider.write_text("def run():\n    return 2\n", encoding="utf-8")
+    observed = []
+
+    def reject(*args, **kwargs):
+        observed.append(kwargs)
+        raise coordinator.FullAnalysisBusyError("full-analysis lease busy")
+
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("candidate, registry, or snapshot started after lease rejection")
+
+    monkeypatch.setattr(coordinator, "acquire_full_analysis", reject)
+    monkeypatch.setattr(IncrementalAnalysisEngine, "update_file", forbidden)
+    monkeypatch.setattr(engine.registry, "create_checkpoint", forbidden)
+    monkeypatch.setattr(update_file_module, "_persist_live_engine", forbidden)
+    response = _local_update(repo, provider)
+
+    assert observed == [{
+        "owner": "mcp_local_incremental",
+        "writer_kind": "local_incremental",
+        "timeout": 10.0,
+    }]
+    assert response["status"] == "ERROR"
+    assert "busy" in response["error"]
+    assert mcp_runtime._live_engines[str(repo.resolve())] is engine
+    assert engine.registry._state == before_registry
+    assert (repo_cache_dir(repo) / "engine_state.meta.json").read_bytes() == before_meta
+
+
+@pytest.mark.parametrize("failure", ["persistence", "update", "rollback"])
+def test_local_incremental_lease_released_after_candidate_failure(
+    tmp_path, monkeypatch, failure
+):
+    repo, provider, engine = _build_local_fallback_engine(
+        tmp_path, monkeypatch, "def run():\n    return 1\n"
+    )
+    assert update_file_module._persist_live_engine(repo, engine) is True
+    before_meta = (repo_cache_dir(repo) / "engine_state.meta.json").read_bytes()
+    before_registry = engine.registry.create_checkpoint()
+    provider.write_text("def run():\n    return 2\n", encoding="utf-8")
+    events = []
+    real_acquire = coordinator.acquire_full_analysis
+    real_release = coordinator.release_full_analysis
+    real_restore = engine.registry.restore_checkpoint
+
+    def acquire(*args, **kwargs):
+        lease = real_acquire(*args, **kwargs)
+        events.append("acquire")
+        return lease
+
+    def release(lease):
+        events.append("release")
+        return real_release(lease)
+
+    def restore(checkpoint):
+        events.append("rollback")
+        if failure == "rollback":
+            raise RuntimeError("forced rollback failure")
+        return real_restore(checkpoint)
+
+    monkeypatch.setattr(coordinator, "acquire_full_analysis", acquire)
+    monkeypatch.setattr(coordinator, "release_full_analysis", release)
+    monkeypatch.setattr(engine.registry, "restore_checkpoint", restore)
+    if failure in {"persistence", "rollback"}:
+        monkeypatch.setattr(update_file_module, "_persist_live_engine", lambda *_: False)
+    else:
+        def fail_update(*_args):
+            raise RuntimeError("forced update failure")
+        monkeypatch.setattr(IncrementalAnalysisEngine, "update_file", fail_update)
+
+    response = _local_update(repo, provider)
+
+    assert response["status"] == "ERROR"
+    assert events == ["acquire", "rollback", "release"]
+    assert (repo_cache_dir(repo) / "engine_state.meta.json").read_bytes() == before_meta
+    if failure == "rollback":
+        assert str(repo.resolve()) not in mcp_runtime._live_engines
+    else:
+        assert mcp_runtime._live_engines[str(repo.resolve())] is engine
+        assert engine.registry._state == before_registry
+    subsequent = real_acquire(repo, owner="after_failure", timeout=1.0)
+    real_release(subsequent)
+
+
+def test_local_incremental_blocks_wrapped_full_analysis_through_persistence(
+    tmp_path, monkeypatch
+):
+    repo, provider, engine = _build_local_fallback_engine(
+        tmp_path, monkeypatch, "def run():\n    return 1\n"
+    )
+    assert update_file_module._persist_live_engine(repo, engine) is True
+    provider.write_text("def run():\n    return 2\n", encoding="utf-8")
+    real_persist = update_file_module._persist_live_engine
+    entered = threading.Event()
+    release = threading.Event()
+    full_body = threading.Event()
+    results = {}
+
+    def persist(root, candidate):
+        entered.set()
+        assert release.wait(10)
+        return real_persist(root, candidate)
+
+    def full_analysis():
+        try:
+            coordinator.run_full_analysis_exclusive(
+                repo,
+                analysis_fn=lambda *_args, **_kwargs: full_body.set(),
+                timeout=5.0,
+            )
+            results["full"] = "completed"
+        except BaseException as exc:
+            results["full"] = repr(exc)
+
+    monkeypatch.setattr(update_file_module, "_persist_live_engine", persist)
+    local = threading.Thread(target=lambda: results.setdefault("local", _local_update(repo, provider)))
+    full = threading.Thread(target=full_analysis)
+    try:
+        local.start()
+        assert entered.wait(10)
+        full.start()
+        assert not full_body.wait(0.25)
+    finally:
+        release.set()
+        local.join(10)
+        full.join(10)
+
+    assert not local.is_alive() and not full.is_alive()
+    assert results["local"]["status"] == "UPDATED"
+    assert results["full"] == "completed" and full_body.is_set()
+
+
+def test_local_wait_for_full_analysis_holds_neither_cache_nor_domain(
+    tmp_path, monkeypatch
+):
+    repo, provider, engine = _build_local_fallback_engine(
+        tmp_path, monkeypatch, "def run():\n    return 1\n"
+    )
+    assert update_file_module._persist_live_engine(repo, engine) is True
+    provider.write_text("def run():\n    return 2\n", encoding="utf-8")
+    held = coordinator.acquire_full_analysis(repo, owner="holder", timeout=1.0)
+    cache_entered = threading.Event()
+    domain_entered = threading.Event()
+    update_entered = threading.Event()
+    real_cache = mcp_runtime._engine_cache_transaction
+    real_domain = RuntimeLeaseManager._lock
+    real_update = IncrementalAnalysisEngine.update_file
+    results = {}
+
+    @contextmanager
+    def cache(root):
+        cache_entered.set()
+        with real_cache(root) as key:
+            yield key
+
+    @contextmanager
+    def domain(self):
+        domain_entered.set()
+        with real_domain(self):
+            yield
+
+    def update(self, path):
+        update_entered.set()
+        return real_update(self, path)
+
+    monkeypatch.setattr(mcp_runtime, "_engine_cache_transaction", cache)
+    monkeypatch.setattr(RuntimeLeaseManager, "_lock", domain)
+    monkeypatch.setattr(IncrementalAnalysisEngine, "update_file", update)
+    local = threading.Thread(
+        target=lambda: results.setdefault(
+            "local", update_file_module._execute_local_candidate_update(repo, provider, engine)
+        )
+    )
+    try:
+        local.start()
+        assert not cache_entered.wait(0.3)
+        assert not domain_entered.is_set()
+        assert not update_entered.is_set()
+    finally:
+        coordinator.release_full_analysis(held)
+        local.join(10)
+
+    assert not local.is_alive()
+    assert results["local"][0].status == "UPDATED"
+    assert cache_entered.is_set() and domain_entered.is_set() and update_entered.is_set()
+
+
+def test_full_analysis_os_lock_excludes_other_process_during_local_persistence(
+    tmp_path, monkeypatch
+):
+    repo, provider, engine = _build_local_fallback_engine(
+        tmp_path, monkeypatch, "def run():\n    return 1\n"
+    )
+    assert update_file_module._persist_live_engine(repo, engine) is True
+    provider.write_text("def run():\n    return 2\n", encoding="utf-8")
+    entered = threading.Event()
+    release_local = threading.Event()
+    real_persist = update_file_module._persist_live_engine
+    results = {}
+
+    def persist(root, candidate):
+        entered.set()
+        assert release_local.wait(10)
+        return real_persist(root, candidate)
+
+    monkeypatch.setattr(update_file_module, "_persist_live_engine", persist)
+    ctx = multiprocessing.get_context("spawn")
+    ready = ctx.Event()
+    full_body = ctx.Event()
+    release_full = ctx.Event()
+    full_results = ctx.Queue()
+    full = ctx.Process(
+        target=_cross_process_full_writer_worker,
+        args=(str(repo), ready, full_body, release_full, full_results),
+    )
+    local = threading.Thread(target=lambda: results.setdefault("local", _local_update(repo, provider)))
+    try:
+        local.start()
+        assert entered.wait(10)
+        full.start()
+        assert ready.wait(15)
+        assert not full_body.wait(0.3)
+    finally:
+        release_local.set()
+        local.join(10)
+        release_full.set()
+        if full.pid is not None:
+            full.join(15)
+        if full.is_alive():
+            full.terminate()
+            full.join(5)
+
+    assert not local.is_alive() and full.exitcode == 0
+    assert results["local"]["status"] == "UPDATED"
+    assert full_body.is_set()
+    assert full_results.get(timeout=5) == "completed"
 
 
 @pytest.mark.parametrize("prior_generation", ["never_acquired", "released"])

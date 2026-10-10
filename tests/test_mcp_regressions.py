@@ -2904,6 +2904,10 @@ def test_mcp_update_file_live_branch_delegates_without_local_persistence(
         lambda *_args: pytest.fail("LIVE path called the local persister"),
     )
     monkeypatch.setattr(
+        "contextor.core.analysis.full_analysis_coordinator.acquire_full_analysis",
+        lambda *_args, **_kwargs: pytest.fail("LIVE path acquired local writer lease"),
+    )
+    monkeypatch.setattr(
         update_file_module, "_mcp_runtime_restart_required", lambda _path: False
     )
 

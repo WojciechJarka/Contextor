@@ -67,6 +67,21 @@ def test_startup_publish_writer_kind_is_accepted(tmp_path: Path):
         acquire_full_analysis(repo, writer_kind="invalid")
 
 
+def test_local_incremental_writer_kind_is_accepted(tmp_path: Path):
+    repo = tmp_path / "local_incremental"
+    repo.mkdir()
+    lease = acquire_full_analysis(
+        repo,
+        owner="mcp_local_incremental",
+        writer_kind="local_incremental",
+        timeout=1.0,
+    )
+    try:
+        assert lease.owner == "mcp_local_incremental"
+    finally:
+        release_full_analysis(lease)
+
+
 def test_live_mutation_admission_trace_fields_are_correlated_and_whitelisted(
     tmp_path: Path,
 ):
