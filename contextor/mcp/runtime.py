@@ -390,13 +390,22 @@ def _get_or_init_engine_locked(
         identity = read_repository_identity(root)
         if identity is None:
             return None
-        from contextor.core.paths import repo_cache_dir
+        from contextor.core.paths import (
+            legacy_repo_cache_dir,
+            repo_cache_dir,
+        )
 
         cache_dir = str(repo_cache_dir(root))
         if read_metadata(cache_dir) is None:
-            if not allow_migration:
-                return _MIGRATION_NEEDED
-            migrate_legacy_snapshot(root, _lease_held=True)
+            legacy_dir = legacy_repo_cache_dir(root)
+            migration_candidate = (
+                legacy_dir != Path(cache_dir)
+                and read_metadata(legacy_dir) is not None
+            )
+            if migration_candidate:
+                if not allow_migration:
+                    return _MIGRATION_NEEDED
+                migrate_legacy_snapshot(root, _lease_held=True)
         metadata = read_metadata(cache_dir)
         state = load_engine_state(
             cache_dir,

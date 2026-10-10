@@ -1380,10 +1380,16 @@ def test_legacy_migration_writer_admission_precedes_mcp_cache_lock(
 ):
     from contextlib import contextmanager
     from contextor.core.analysis import full_analysis_lease
+    from contextor.core.paths import legacy_repo_cache_dir
 
     repo = tmp_path / "repo_migration_lock_order"
     repo.mkdir()
+    monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(tmp_path / "cache"))
     PersistentIdentityRegistry(str(repo))
+    snapshot_store.save_snapshot(
+        {"legacy": True}, legacy_repo_cache_dir(repo), "legacy", writer="test"
+    )
+    assert read_metadata(repo_cache_dir(repo)) is None
     monkeypatch.setattr("contextor.core.live_state.connect", lambda _root: None)
     monkeypatch.setattr(mcp_runtime, "_live_engines", {})
     monkeypatch.setattr(mcp_runtime, "_live_engine_revisions", {})
@@ -1612,10 +1618,16 @@ def test_healthy_live_hydration_does_not_attempt_legacy_migration_or_writer_admi
 def test_cold_fallback_rechecks_cache_after_writer_admission(tmp_path, monkeypatch):
     from contextor.core import live_state
     from contextor.core.analysis import full_analysis_lease
+    from contextor.core.paths import legacy_repo_cache_dir
 
     root = tmp_path / "repo"
     root.mkdir()
+    monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(tmp_path / "cache"))
     PersistentIdentityRegistry(str(root))
+    snapshot_store.save_snapshot(
+        {"legacy": True}, legacy_repo_cache_dir(root), "legacy", writer="test"
+    )
+    assert read_metadata(repo_cache_dir(root)) is None
     root_key = str(root.resolve())
     cached = SimpleNamespace(state=SimpleNamespace(revision=9))
     admission_entered = threading.Event()
@@ -1788,6 +1800,77 @@ def test_missing_identity_and_missing_legacy_do_not_publish_migration(
     PersistentIdentityRegistry(str(root))
     assert mcp_runtime.get_or_init_engine(root) is None
     assert read_metadata(repo_cache_dir(root)) is None
+
+
+@pytest.mark.parametrize("legacy_dir_state", ["absent", "invalid_metadata"])
+def test_cold_getter_without_legacy_metadata_never_requests_writer_admission(
+    tmp_path, monkeypatch, legacy_dir_state
+):
+    from contextor.core import live_state
+    from contextor.core.analysis import full_analysis_lease, state_manager
+    from contextor.core.paths import legacy_repo_cache_dir
+    from contextor.core.repository_identity import read_repository_identity
+    from contextor.core.reporting_engine import persistent_registry
+
+    root = tmp_path / "repo"
+    root.mkdir()
+    cache_root = tmp_path / "cache"
+    monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(cache_root))
+    PersistentIdentityRegistry(str(root))
+    identity = read_repository_identity(root)
+    assert identity is not None
+    legacy_dir = legacy_repo_cache_dir(root)
+    if legacy_dir_state == "invalid_metadata":
+        legacy_dir.mkdir(parents=True)
+        (legacy_dir / "engine_state.meta.json").write_text(
+            "{invalid-json", encoding="utf-8"
+        )
+    assert read_metadata(repo_cache_dir(root)) is None
+    assert read_metadata(legacy_dir) is None
+
+    def files_before_or_after():
+        return {
+            (str(path.relative_to(tmp_path)), path.read_bytes(), path.stat().st_mtime_ns)
+            for path in tmp_path.rglob("*")
+            if path.is_file()
+        }
+
+    before = files_before_or_after()
+    monkeypatch.setattr(live_state, "connect", lambda _root: None)
+    monkeypatch.setattr(mcp_runtime, "_live_engines", {})
+    monkeypatch.setattr(mcp_runtime, "_live_engine_revisions", {})
+    monkeypatch.setattr(
+        full_analysis_lease,
+        "acquire_full_analysis",
+        lambda *_a, **_k: pytest.fail("no legacy metadata requires no writer lease"),
+    )
+    monkeypatch.setattr(
+        live_state,
+        "migrate_legacy_snapshot",
+        lambda *_a, **_k: pytest.fail("no legacy metadata requires no migration"),
+    )
+    monkeypatch.setattr(state_manager, "load_engine_state", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        state_manager,
+        "FileStateManager",
+        lambda *_a, **_k: pytest.fail("no state should construct FileStateManager"),
+    )
+    monkeypatch.setattr(
+        persistent_registry,
+        "PersistentIdentityRegistry",
+        lambda *_a, **_k: pytest.fail("no state should construct registry"),
+    )
+
+    for _ in range(2):
+        result = mcp_runtime.get_or_init_engine(root)
+        assert result is None
+        assert result is not mcp_runtime._MIGRATION_NEEDED
+
+    assert files_before_or_after() == before
+    assert read_repository_identity(root) == identity
+    assert read_metadata(repo_cache_dir(root)) is None
+    assert mcp_runtime._live_engines == {}
+    assert mcp_runtime._live_engine_revisions == {}
 
 
 def test_concurrent_cold_hydration_commits_one_migration_and_one_engine(
