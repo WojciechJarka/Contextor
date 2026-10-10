@@ -1937,6 +1937,40 @@ def test_desktop_watcher_reports_create_edit_and_delete_without_manual_update(tm
         thread.join(timeout=2)
 
 
+def test_desktop_watcher_requeues_failed_mutation_status(tmp_path, monkeypatch):
+    target = tmp_path / "sample.py"
+    target.write_text("value = 1\n", encoding="utf-8")
+    statuses = []
+    client = SimpleNamespace(
+        snapshot=lambda: {"status": "error"},
+        mutation_status=lambda job_id: {
+            "status": "ok",
+            "job_id": job_id,
+            "state": "failed",
+            "error": "canonical_mutation_execution_failed",
+        }
+    )
+    watcher = DesktopLiveWatcher(
+        tmp_path,
+        client,
+        on_status=statuses.append,
+    )
+    job = SimpleNamespace(
+        path=str(target),
+        trace_op="failed-watcher-update",
+        started_at=time.monotonic(),
+    )
+    watcher._inflight_updates["job-1"] = job
+    monkeypatch.setattr("contextor.core.runtime_trace.trace_event", lambda *_a, **_k: None)
+
+    completed = watcher._poll_inflight_updates()
+
+    assert completed == []
+    assert "job-1" not in watcher._inflight_updates
+    assert str(target) in watcher._pending_paths
+    assert statuses == ["LIVE update failed; deferring watcher update: sample.py"]
+
+
 def test_first_run_watcher_waits_for_initial_canonical_state(tmp_path):
     identity = PersistentIdentityRegistry(str(tmp_path))
     manager = FileStateManager(str(repo_cache_dir(tmp_path)))

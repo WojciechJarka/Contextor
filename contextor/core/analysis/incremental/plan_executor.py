@@ -680,6 +680,16 @@ def _rebuild_consumer_slice(
 
 def _prepare_candidate_state(state: RepositoryAnalysisState) -> CandidateState:
     """Initializes Copy-on-Write candidate state from current canonical state."""
+    raw_parse_freshness = getattr(
+        state,
+        "module_parse_freshness",
+        {},
+    )
+    if not isinstance(raw_parse_freshness, dict):
+        raise ValueError(
+            "Canonical module_parse_freshness is invalid; "
+            "fresh full analysis is required."
+        )
     return CandidateState(
         modules=dict(state.modules),
         reexport_facts_by_module=dict(
@@ -691,7 +701,7 @@ def _prepare_candidate_state(state: RepositoryAnalysisState) -> CandidateState:
             or {}
         ),
         artifacts=dict(state.artifacts),
-        module_parse_freshness=dict(getattr(state, "module_parse_freshness", {}) or {}),
+        module_parse_freshness=dict(raw_parse_freshness),
         syntax_diagnostics_by_path=dict(getattr(state, "syntax_diagnostics_by_path", {}) or {}),
         syntax_diagnostics_state=getattr(state, "syntax_diagnostics_state", "not_materialized"),
         module_usages=dict(getattr(state, "module_usages", {}) or {}),

@@ -278,6 +278,12 @@ def mark_module_parse_failure(
     column_number: int | None,
 ) -> None:
     """Mark retained module facts as last-known-good after a parse failure."""
+    truth = module_current_truth(state, module_name)
+    if truth["state"] == "unavailable":
+        raise ValueError(
+            "Canonical module parse freshness is untrusted; "
+            "fresh full analysis is required."
+        )
     freshness = getattr(state, "module_parse_freshness", None)
     if not isinstance(freshness, dict):
         freshness = {}

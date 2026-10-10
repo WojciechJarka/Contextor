@@ -11,6 +11,7 @@ from unittest.mock import patch
 import pytest
 
 from contextor.core.analysis.incremental_engine import IncrementalAnalysisEngine
+from contextor.core.analysis.incremental.plan_executor import _prepare_candidate_state
 from contextor.core.analysis.state_manager import FileStateManager, RepositoryAnalysisState
 from contextor.core.api.facade import ContextorFacade
 from contextor.core.domain.module import Module
@@ -284,3 +285,66 @@ def test_case_g_noop_unchanged(tmp_path):
     # Re-saving same content
     res = engine.update_file(str(f_target))
     assert res.status == "UNCHANGED"
+
+
+@pytest.mark.parametrize(
+    "raw_map",
+    [
+        None,
+        False,
+        0,
+        "",
+        [],
+        (),
+        set(),
+        ["bad"],
+        17,
+        [("provider", {"state": "stale"})],
+    ],
+    ids=repr,
+)
+def test_prepare_candidate_state_rejects_malformed_parse_freshness_maps(raw_map):
+    state = RepositoryAnalysisState()
+    state.module_parse_freshness = raw_map
+
+    with pytest.raises(
+        ValueError,
+        match="Canonical module_parse_freshness is invalid",
+    ):
+        _prepare_candidate_state(state)
+
+    assert state.module_parse_freshness is raw_map
+
+
+def test_prepare_candidate_state_preserves_legacy_and_valid_parse_freshness_cow():
+    legacy_state = RepositoryAnalysisState()
+    del legacy_state.module_parse_freshness
+
+    legacy_candidate = _prepare_candidate_state(legacy_state)
+
+    assert legacy_candidate.module_parse_freshness == {}
+
+    empty_state = RepositoryAnalysisState(module_parse_freshness={})
+    empty_candidate = _prepare_candidate_state(empty_state)
+
+    assert empty_candidate.module_parse_freshness == {}
+    assert empty_candidate.module_parse_freshness is not empty_state.module_parse_freshness
+
+    fresh_entry = {"state": "fresh"}
+    stale_entry = {"state": "stale", "error": "invalid syntax"}
+    malformed_entry = {"state": "unknown"}
+    raw_map = {
+        "fresh": fresh_entry,
+        "stale": stale_entry,
+        "malformed": malformed_entry,
+    }
+    state = RepositoryAnalysisState(module_parse_freshness=raw_map)
+
+    candidate = _prepare_candidate_state(state)
+
+    assert candidate.module_parse_freshness == raw_map
+    assert candidate.module_parse_freshness is not raw_map
+    assert candidate.module_parse_freshness["fresh"] is fresh_entry
+    assert candidate.module_parse_freshness["stale"] is stale_entry
+    assert candidate.module_parse_freshness["malformed"] is malformed_entry
+    assert state.module_parse_freshness is raw_map

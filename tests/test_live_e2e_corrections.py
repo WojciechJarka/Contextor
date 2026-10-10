@@ -16,6 +16,7 @@ from contextor.core.analysis.state_manager import (
     FileStateManager,
     RepositoryAnalysisState,
     load_engine_state,
+    mark_module_parse_failure,
     module_current_truth,
     save_engine_state,
 )
@@ -499,9 +500,213 @@ def test_reading_malformed_parse_freshness_does_not_claim_recovery(tmp_path):
 
     assert module_current_truth(engine.state, "provider")["state"] == "unavailable"
     assert engine.state.module_parse_freshness["provider"] is entry
-    source.write_text("def helper(value: int) -> int:\n    return value + 1\n")
+    source.write_text(
+        "def helper(value: int) -> int:\n    return value + 1\n# verified parse\n"
+    )
     result = engine.update_file(str(source))
     assert result.status != "RECOVERED"
+    assert module_current_truth(engine.state, "provider")["state"] == "fresh"
+
+
+def test_mark_module_parse_failure_rejects_untrusted_target_entry():
+    entry = {"state": "unknown"}
+    raw_map = {"provider": entry}
+    state = SimpleNamespace(module_parse_freshness=raw_map)
+
+    with pytest.raises(
+        ValueError,
+        match="Canonical module parse freshness is untrusted",
+    ):
+        mark_module_parse_failure(
+            state,
+            "provider",
+            error="invalid syntax",
+            line_number=1,
+            column_number=1,
+        )
+
+    assert state.module_parse_freshness is raw_map
+    assert state.module_parse_freshness["provider"] is entry
+    assert module_current_truth(state, "provider")["provenance"] == "untrusted"
+
+
+@pytest.mark.parametrize(
+    "raw_map",
+    [None, [("provider", {"state": "stale"})]],
+    ids=["falsey_none", "truthy_coercible_pairs"],
+)
+def test_syntax_failure_rejects_malformed_whole_parse_freshness_map(
+    tmp_path,
+    raw_map,
+):
+    source, engine = _engine_for_file(tmp_path)
+    engine.state.module_parse_freshness = raw_map
+    original_modules = engine.state.modules
+    original_artifacts = engine.state.artifacts
+    source.write_text("def broken(\n")
+
+    with pytest.raises(
+        ValueError,
+        match="Canonical module_parse_freshness is invalid",
+    ):
+        engine.update_file(str(source))
+
+    assert engine.state.module_parse_freshness is raw_map
+    assert engine.state.modules is original_modules
+    assert engine.state.artifacts is original_artifacts
+    assert module_current_truth(engine.state, "provider")["state"] == "unavailable"
+    assert module_current_truth(engine.state, "unrelated")["state"] == "unavailable"
+
+
+def test_syntax_failure_does_not_promote_untrusted_target_entry_to_lkg(tmp_path):
+    source, engine = _engine_for_file(tmp_path)
+    entry = {"state": "unknown"}
+    raw_map = {"provider": entry}
+    engine.state.module_parse_freshness = raw_map
+    source.write_text("def broken(\n")
+
+    with pytest.raises(
+        ValueError,
+        match="Canonical module parse freshness is untrusted",
+    ):
+        engine.update_file(str(source))
+
+    assert engine.state.module_parse_freshness is raw_map
+    assert engine.state.module_parse_freshness["provider"] is entry
+    assert module_current_truth(engine.state, "provider")["provenance"] == "untrusted"
+
+
+def test_semantic_noop_rejects_malformed_parse_freshness_map(tmp_path):
+    source, engine = _engine_for_file(tmp_path)
+    raw_map = None
+    engine.state.module_parse_freshness = raw_map
+    original_modules = engine.state.modules
+    source.write_text(
+        "def helper(value: int) -> int:\n    return value + 1\n# semantically unchanged\n"
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="Canonical module_parse_freshness is invalid",
+    ):
+        engine.update_file(str(source))
+
+    assert engine.state.module_parse_freshness is raw_map
+    assert engine.state.modules is original_modules
+    assert module_current_truth(engine.state, "provider")["state"] == "unavailable"
+    assert module_current_truth(engine.state, "unrelated")["state"] == "unavailable"
+
+
+@pytest.mark.parametrize(
+    ("operation", "raw_map"),
+    [
+        ("updated", False),
+        ("deleted", [("provider", {"state": "stale"})]),
+    ],
+    ids=["ordinary_update", "module_delete"],
+)
+def test_updated_and_deleted_candidates_reject_malformed_parse_freshness(
+    tmp_path,
+    operation,
+    raw_map,
+):
+    source, engine = _engine_for_file(tmp_path)
+    engine.state.module_parse_freshness = raw_map
+    original_modules = engine.state.modules
+    original_artifacts = engine.state.artifacts
+    if operation == "updated":
+        source.write_text(
+            "def helper(value: int) -> int:\n    return value + 2\n"
+        )
+    else:
+        source.unlink()
+
+    with pytest.raises(
+        ValueError,
+        match="Canonical module_parse_freshness is invalid",
+    ):
+        engine.update_file(str(source))
+
+    assert engine.state.module_parse_freshness is raw_map
+    assert engine.state.modules is original_modules
+    assert engine.state.artifacts is original_artifacts
+    assert module_current_truth(engine.state, "provider")["state"] == "unavailable"
+
+
+def test_successful_update_preserves_unrelated_malformed_parse_entry(tmp_path):
+    source, engine = _engine_for_file(tmp_path)
+    unrelated_entry = {"state": "unknown"}
+    raw_map = {"unrelated": unrelated_entry}
+    engine.state.module_parse_freshness = raw_map
+    source.write_text(
+        "def helper(value: int) -> int:\n    return value + 2\n"
+    )
+
+    result = engine.update_file(str(source))
+
+    assert result.status == "UPDATED"
+    assert engine.state.module_parse_freshness == raw_map
+    assert engine.state.module_parse_freshness is not raw_map
+    assert engine.state.module_parse_freshness["unrelated"] is unrelated_entry
+    assert module_current_truth(engine.state, "provider")["state"] == "fresh"
+    assert module_current_truth(engine.state, "unrelated")["provenance"] == "untrusted"
+
+
+def test_early_unchanged_keeps_untrusted_target_marker_without_parsing(
+    tmp_path,
+    monkeypatch,
+):
+    source, engine = _engine_for_file(tmp_path)
+    entry = {"state": "unknown"}
+    raw_map = {"provider": entry}
+    engine.state.module_parse_freshness = raw_map
+
+    def unexpected_parse(**_kwargs):
+        pytest.fail("early UNCHANGED must not parse the source")
+
+    monkeypatch.setattr(
+        "contextor.core.analysis.incremental.engine.prepare_source_update",
+        unexpected_parse,
+    )
+
+    result = engine.update_file(str(source))
+
+    assert result.status == "UNCHANGED"
+    assert engine.state.module_parse_freshness is raw_map
+    assert engine.state.module_parse_freshness["provider"] is entry
+    assert module_current_truth(engine.state, "provider")["provenance"] == "untrusted"
+
+
+def test_malformed_snapshot_map_rejects_hydrated_syntax_update(tmp_path):
+    source, engine = _engine_for_file(tmp_path)
+    raw_map = [("provider", {"state": "stale"})]
+    engine.state.module_parse_freshness = raw_map
+    cache = tmp_path / "cache"
+    assert save_engine_state(engine.state, str(cache), "state-malformed-update")
+    loaded = load_engine_state(str(cache), "state-malformed-update")
+    assert loaded is not None
+    original_map = loaded.module_parse_freshness
+    original_modules = loaded.modules
+    source.write_text("def broken(\n")
+    hydrated_engine = IncrementalAnalysisEngine(
+        loaded,
+        engine.registry,
+        engine.state_manager,
+        str(tmp_path),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="Canonical module_parse_freshness is invalid",
+    ):
+        hydrated_engine.update_file(str(source))
+
+    assert loaded.module_parse_freshness is original_map
+    assert loaded.modules is original_modules
+    assert module_current_truth(loaded, "provider")["state"] == "unavailable"
+    previous_generation = load_engine_state(str(cache), "state-malformed-update")
+    assert previous_generation is not None
+    assert previous_generation.module_parse_freshness == raw_map
 
 
 def test_global_search_and_static_context_do_not_leak_parse_stale_truth(

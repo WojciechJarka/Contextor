@@ -1,8 +1,10 @@
+import time
 from types import SimpleNamespace
 
 from contextor.core.analysis.state_manager import (
     RepositoryAnalysisState,
     build_syntax_diagnostics_from_index,
+    module_current_truth,
 )
 from contextor.core.api.facade import ContextorFacade
 from contextor.core.analysis.incremental_engine import IncrementalAnalysisEngine
@@ -319,5 +321,62 @@ def test_live_persistence_failure_does_not_publish_half_updated_syntax_fact(tmp_
             "status": "checked_and_none", "errors": []
         }
         assert server._state.module_parse_freshness == {}
+    finally:
+        server.close()
+
+
+def test_live_mutation_job_failure_preserves_malformed_parse_freshness_atomically(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("CONTEXTOR_DISABLE_PROCESS_POOL", "1")
+    source, server, state = _live_syntax_fixture(tmp_path)
+    state.module_parse_freshness = None
+    persisted = []
+    server._persister = lambda candidate, revision: persisted.append(
+        (candidate, revision)
+    )
+    source.write_text("def value(\n", encoding="utf-8")
+
+    try:
+        accepted = server._dispatch(
+            {
+                "operation": "submit_update_file",
+                "file_path": str(source),
+                "idempotency_key": "malformed-parse-freshness",
+            }
+        )
+        assert accepted["status"] == "accepted"
+        job_id = accepted["job_id"]
+
+        deadline = time.monotonic() + 3.0
+        job_status = {}
+        while time.monotonic() < deadline:
+            job_status = server._dispatch(
+                {"operation": "mutation_status", "job_id": job_id}
+            )
+            if job_status.get("state") in {"failed", "completed"}:
+                break
+            time.sleep(0.01)
+
+        assert job_status.get("state") == "failed"
+        assert job_status["response"] == {
+            "status": "error",
+            "error": "canonical_mutation_execution_failed",
+            "detail": (
+                "Canonical module_parse_freshness is invalid; "
+                "fresh full analysis is required."
+            ),
+        }
+        assert server._state is state
+        assert server._revision == 0
+        assert state.module_parse_freshness is None
+        assert module_current_truth(state, "provider")["state"] == "unavailable"
+        assert persisted == []
+
+        events = server._dispatch(
+            {"operation": "get_events", "after_revision": 0, "limit": None}
+        )
+        assert not any(event["operation"] == "update_file" for event in events["events"])
     finally:
         server.close()
