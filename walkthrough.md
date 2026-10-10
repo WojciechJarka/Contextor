@@ -1,87 +1,406 @@
-# L32H2E — FINAL CANONICAL WRITER COVERAGE AUDIT
+# L32H2F1_DIRECT_LIVE_IPC_WRITER_ADMISSION
 
-## FILES_CHANGED
-NONE (source/test/docs). Only C:\Temp\Contextor_Repo\walkthrough.md was overwritten.
+## FILES_CHANGED_THIS_TASK
 
-## ACTUAL_DIFF
-ACTUAL_DIFF=DIFFS=NONE for source/test/docs; walkthrough.md is the report, excluded by contract.
+- C:\Temp\Contextor_Repo\contextor\core\live_state\ipc.py
+- C:\Temp\Contextor_Repo\contextor\core\live_state\runtime.py
+- C:\Temp\Contextor_Repo\tests\test_live_mutation_coordinator.py
 
-## CANONICAL_WRITER_INVENTORY
-DIRECT_EVIDENCE: current complete Contextor symbol retrieval, canonical revision 248, workspace_sync=verified, plus workspace literal anchors. CODE_PATH_PROVED means exact reachable source path. No race was reproduced.
+No production or test files outside the authorized allowlist changed. walkthrough.md is the requested report and is excluded from this source/test list.
 
-| Path and complete symbol owner | Caller/resource | Locks/condition | Risk |
-|---|---|---|---|
-| C:\Temp\Contextor_Repo\contextor\core\analysis\full_analysis_coordinator.py::run_full_analysis_exclusive -> C:\Temp\Contextor_Repo\contextor\core\api\facade.py::ContextorFacade.analyze_project | Confirmed CLI/MCP/GUI full run; registry/snapshot/LIVE | full_analysis.lock through facade completion | PROVED_SAFE |
-| C:\Temp\Contextor_Repo\contextor\core\api\facade.py::analyze_layer, analyze_single_file | Confirmed CLI/MCP/GUI scoped run; registry/snapshot/LIVE | scoped_analysis full lease before private body | PROVED_SAFE |
-| C:\Temp\Contextor_Repo\contextor\mcp\tools\update_file.py::_execute_local_candidate_update | MCP local candidate; registry/snapshot/FileState/cache | full lease -> cache RLock -> LIVE domain lock -> registry -> snapshot, conditional authority absence | PROVED_SAFE within admitted transaction |
-| C:\Temp\Contextor_Repo\contextor\core\live_state\ipc.py::_execute_queued_update_file with C:\Temp\Contextor_Repo\contextor\core\live_state\runtime.py::_repository_mutation_guard | Desktop queued update; registry/snapshot/FileState/LIVE | full lease -> LIVE mutation lock -> registry -> snapshot | PROVED_SAFE for production configured guard |
-| C:\Temp\Contextor_Repo\contextor\core\live_state\ipc.py::_dispatch, _execute_update_file | MCP LiveStateClient.update_file; registry/snapshot/FileState/LIVE | LIVE mutation lock -> registry -> snapshot, no full lease; LIVE active | PROVED_UNSAFE |
-| C:\Temp\Contextor_Repo\contextor\core\reporting_engine\persistent_registry.py::PersistentIdentityRegistry.__init__, _recover_transaction | MCP hydration/read and LIVE updater; registry files/transaction marker | identity creation lock only; recovery has no registry .lock or full lease; only if marker exists | PROVED_UNSAFE |
-| C:\Temp\Contextor_Repo\contextor\core\reporting_engine\persistent_registry.py::read_transaction | registry readers; registry recovery writes | registry .lock -> recovery; no full lease; only if marker exists | CONDITIONAL cross-resource bypass |
-| C:\Temp\Contextor_Repo\contextor\core\live_state\store.py::migrate_legacy_snapshot | MCP hydration, LIVE/GUI startup; snapshot metadata/state/FileState | save_snapshot store lock; FileState copy after lock; no full lease at independent callers; only valid legacy and absent target | PROVED_UNSAFE coordination bypass |
-| C:\Temp\Contextor_Repo\contextor\core\live_state\runtime.py startup migration/backfill | LIVE startup; snapshot/FileState | LIVE authority lease -> snapshot store lock, no full lease observed; only migration/backfill condition | CONDITIONAL overlap with full/scoped |
-| C:\Temp\Contextor_Repo\contextor\core\live_state\ipc.py::_dispatch, _execute_publish, _execute_committed_publish | direct client.publish; LIVE RAM/event | LIVE mutation/server lock -> committed snapshot read lock; no full lease; matching committed generation needed | CONDITIONAL |
-| C:\Temp\Contextor_Repo\contextor\core\reporting_engine\artifact_pipeline.py::build_artifact_pipeline | project pipeline registry transaction | registry .lock; confirmed full-analysis caller under full lease | PROVED_SAFE for confirmed caller |
+## SOURCE_PREFLIGHT_REUSED
 
-## PRE_ADMISSION_MUTATION_PATHS
-A: YES, CODE_PATH_PROVED. C:\Temp\Contextor_Repo\contextor\mcp\tools\update_file.py::update_file calls mcp_runtime.get_or_init_engine at line 503 before local lease acquisition at line 529. C:\Temp\Contextor_Repo\contextor\mcp\runtime.py::get_or_init_engine (311-419) holds MCP cache RLock and can construct PersistentIdentityRegistry during LIVE refresh or snapshot hydration; in no-LIVE fallback it calls migrate_legacy_snapshot first. Constructor can create identity or recover registry. All are conditional durable changes before writer admission. The helper also serves read-oriented MCP consumers. C:\Temp\Contextor_Repo\contextor\core\live_state\hydration.py::resolve_authoritative_repository_state likewise calls migration before LIVE connection; hydrate_repository_engine constructs registry. Public facade scoped bodies are protected by their outer lease, independent callers are not.
+The task's completed preflight was reused. It had verified the insertion anchors and relevant consumers before this patch. Immediately before editing, source assertions were still true: direct _dispatch update_file lacked the mutation guard; queued execution already had its own guard; the production server supplied _repository_mutation_guard(root); acquire_full_analysis accepted timeout=0.0. No F2 or F3 work was authorized or performed.
 
-## REGISTRY_RECOVERY_RACES
-B/H: CODE_PATH_PROVED, not observed runtime overlap. C:\Temp\Contextor_Repo\contextor\core\reporting_engine\persistent_registry.py::PersistentIdentityRegistry.__init__ calls ensure_repository_identity then _recover_transaction and _load_all without registry .lock or full_analysis.lock. _recover_transaction reads transaction.tmp; for status committing it os.replace-s existing .json.tmp members into registry files, then removes the marker. The same file's transaction() holds registry .lock while writing temporary members, writing the committing marker, replacing members, and removing marker. Possible schedule: constructor sees the marker after transaction writes it, consumes one temporary member before the transaction's own replace, and the transaction subsequently fails or observes partial file movement. This schedule is source-supported, not reproduced. read_transaction takes registry .lock before recovery, so it is serialized against registry.transaction, but recovery is still a durable write-on-read without cross-resource full lease. C:\Temp\Contextor_Repo\contextor\mcp\query_helpers.py::read_registries and C:\Temp\Contextor_Repo\contextor\core\report_query.py::catalog_from_registry both construct registry before read_transaction. Existing C:\Temp\Contextor_Repo\tests\test_persistent_registry.py::test_read_registries_recovers_interrupted_commit tests recovery without an overlapping writer; C:\Temp\Contextor_Repo\tests\mcp\tools\test_minimal_registry_read_path.py::test_read_transaction_has_no_commit_side_effects covers clean read, not pending recovery.
+The source/test working tree was clean before this task's edits; walkthrough.md already contained the prior task report. No HEAD or commit comparison was used.
 
-## SNAPSHOT_MIGRATION_RACES
-C: CODE_PATH_PROVED. C:\Temp\Contextor_Repo\contextor\core\live_state\store.py::migrate_legacy_snapshot returns without writing when target metadata exists. Otherwise, with valid legacy snapshot, it calls save_snapshot with revision_floor and then conditionally shutil.copy2-s legacy file_state.json if target FileState is absent. save_snapshot takes a snapshot store lock and checks metadata under that lock; this serializes individual snapshot commits. The migration's initial absent-metadata check, cross-resource registry coherence, and later FileState copy are outside full_analysis.lock; copy occurs after the store lock. Independent callers: C:\Temp\Contextor_Repo\contextor\mcp\runtime.py::get_or_init_engine; C:\Temp\Contextor_Repo\contextor\core\live_state\hydration.py::resolve_authoritative_repository_state; C:\Temp\Contextor_Repo\contextor\core\live_state\runtime.py startup; C:\Temp\Contextor_Repo\contextor\ui\gui.py::_start_live_watcher_blocking, where migration precedes its startup_publish lease. Runtime startup backfill also calls save_snapshot after LIVE lease acquisition but no full lease is visible. LIVE domain ownership excludes local candidates, not full/scoped writers. Possible overlap with a full writer is code-supported; exact revision-conflict/overwrite outcome remains UNKNOWN, not claimed observed. Existing C:\Temp\Contextor_Repo\tests\test_live_state_ipc.py startup backfill parity and failure tests cover single-writer behavior.
+Contextor post-edit retrieval returned complete implementations for CanonicalLiveServer._dispatch and _repository_mutation_guard, both workspace_sync=verified at canonical revision 254. The symbol response showed the new guards. Call context connected _serve_requests to _dispatch. The blast-radius tool reported zero direct consumers for dispatch; this is a static direct-consumer limitation because dispatch is entered through request serving/dynamic dispatch. The retrieved call context and current source establish that route.
 
-## FACADE_ENTRYPOINT_COVERAGE
-D: Contextor direct consumer/blast-radius evidence for ContextorFacade.analyze_project found the only confirmed production caller in C:\Temp\Contextor_Repo\contextor\core\analysis\full_analysis_coordinator.py::run_full_analysis_exclusive. It acquires full_analysis.lock before calling facade and releases finally. CLI/MCP/GUI full routes inspected resolve there. Dynamic/external direct calls remain UNKNOWN; analyze_project itself does not acquire an internal lease.
-E: Both public analyze_layer and analyze_single_file are staticmethods. Each resolves/validates target, then acquires writer_kind=scoped_analysis before its private uncoordinated body and releases finally. Existing C:\Temp\Contextor_Repo\tests\test_full_analysis_coordination.py::test_scoped_facade_holds_writer_lease_before_identity_write and ::test_scoped_facade_excludes_cross_process_canonical_writer cover the key order.
+## F1_RED_RESULT
 
-## LIVE_IPC_WRITER_COVERAGE
-F: C:\Temp\Contextor_Repo\contextor\core\live_state\ipc.py::_dispatch routes submit_update_file to the mutation coordinator, whose production queued executor uses _repository_mutation_guard and writer_kind=live_mutation. The same dispatch routes update_file directly to _execute_update_file. That function enters _mutation_execution_lock, calls updater and persister, then installs canonical RAM without taking full_analysis.lock. C:\Temp\Contextor_Repo\contextor\mcp\tools\update_file.py::update_file reaches it through LiveStateClient.update_file when LIVE is connected. The updater at C:\Temp\Contextor_Repo\contextor\core\live_state\runtime.py::_repository_updater can write registry; _repository_persister writes snapshot and FileState and handles rollback. The LIVE ownership fence blocks local candidates while LIVE is active, but does not exclude a full/scoped writer. Possible schedule: full writer holds full_analysis.lock and starts its cross-resource transaction; direct MCP LIVE update enters LIVE mutation lock and starts registry/snapshot work without waiting for that lease. Snapshot revision checks may reject an individual collision but do not establish global exclusion. No such overlap was run here.
+Before either production edit, the three focused regressions were run against the old code. Result: 4 failed, 0 passed (the callback-exception regression is parametrized into two cases).
 
-G: Direct publish reaches _execute_publish without a full lease inside IPC. Production _execute_committed_publish checks committed snapshot state_id/revision match, monotonic revision, and installs only the committed snapshot under server and store locks. Thus arbitrary uncommitted/stale candidates are PROVED_SAFE from installation. A caller with matching already-committed generation can modify LIVE canonical RAM while another full writer holds the full lease: CONDITIONAL code path, no observed concurrent publish. Confirmed full/scoped facade publishers already hold outer lease. Desktop startup client.publish at C:\Temp\Contextor_Repo\contextor\ui\gui.py:1796 is under startup_publish full lease; its earlier migration is not.
+- test_direct_live_update_enters_guard_before_updater_and_persister: expected guard entry before callbacks; observed only updater then persister.
+- test_direct_live_update_fails_fast_behind_cross_process_writer: the direct request returned status=ok while another process held the actual full-analysis OS lease.
+- test_direct_live_update_releases_guard_after_callback_failure[updater] and [persister]: no guard enter/exit was observed.
 
-## GLOBAL_LOCK_ORDER
-Intended local order: canonical admission gate -> full_analysis process/OS lease -> MCP cache RLock -> LIVE domain OS byte lock -> registry .lock -> snapshot store lock -> cache publication. Queued LIVE: full lease -> mutation execution lock -> registry -> snapshot -> LIVE RAM. Scoped/full: full lease -> registry/snapshot -> LIVE publish (mutation/server/store read locks). Direct LIVE: mutation execution lock -> registry -> snapshot, missing full lease. MCP pre-admission hydration: cache RLock -> migration/store lock or unguarded registry constructor; cache is released before later local full lease. Runtime startup: LIVE domain lease acquisition -> migration/backfill snapshot without full lease. No inspected production path was proved to HOLD LIVE domain OS byte lock and then attempt full_analysis.lock; the long-lived authority lease is not the held domain byte-lock. Dynamic paths UNKNOWN.
+These failures prove the direct synchronous route bypassed writer admission before the patch.
 
-J: C:\Temp\Contextor_Repo\contextor\core\analysis\full_analysis_lease.py owns acquire/release; coordinator re-exports those symbols. Allowed writer_kind values are full_analysis, live_mutation, startup_publish, local_incremental, scoped_analysis. C:\Temp\Contextor_Repo\tests\test_full_analysis_coordination.py::test_acyclic_lease_import_contract and ::test_extracted_lease_api_and_process_locks_have_one_owner assert import/lock identity. User-supplied baseline cycles.count=0; current Contextor diagnostics also reports cycles count 0. This does not attest current imported code in existing processes.
+## F1_GREEN_RESULT
 
-## RISK_MATRIX
-| ID | Reachable caller; resource; overlap | Existing test / gap | Classification |
-|---|---|---|---|
-| R1 | Public MCP update_file -> direct LIVE IPC; registry/snapshot/FileState/LIVE may overlap full/scoped writer | C:\Temp\Contextor_Repo\tests\test_live_state_ipc.py::test_update_runs_inside_the_live_owner_and_is_visible_to_other_clients; no direct-versus-full exclusion test identified | PROVED_UNSAFE |
-| R2 | MCP hydration/read -> registry constructor; pending marker can be consumed while registry.transaction owns .lock | C:\Temp\Contextor_Repo\tests\test_persistent_registry.py recovery test; no in-flight concurrent constructor test | PROVED_UNSAFE |
-| R3 | MCP/GUI/LIVE migration; snapshot metadata and conditional FileState copy can overlap full writer | C:\Temp\Contextor_Repo\tests\test_mcp_incremental_hydration.py::test_local_exact_generation_migrates_legacy_filestate_and_state_id; no migration-versus-full test | PROVED_UNSAFE coordination bypass, exact collision outcome CONDITIONAL |
-| R4 | read_transaction recovery under registry .lock, outside full lease; registry/snapshot coherence | C:\Temp\Contextor_Repo\tests\mcp\tools\test_minimal_registry_read_path.py clean-read test | CONDITIONAL |
-| R5 | LIVE startup backfill save_snapshot under domain authority lease, no full lease | C:\Temp\Contextor_Repo\tests\test_live_state_ipc.py startup parity/failure tests; no full-writer overlap | CONDITIONAL |
-| R6 | direct publish of matching committed generation during another writer's lease | C:\Temp\Contextor_Repo\tests\test_live_state_ipc.py publish trace/rejection tests; no overlap test | CONDITIONAL |
-| R7 | confirmed full/scoped facade, local candidate and queued LIVE update | C:\Temp\Contextor_Repo\tests\test_full_analysis_coordination.py and C:\Temp\Contextor_Repo\tests\test_mcp_incremental_hydration.py lease/domain/rollback tests | PROVED_SAFE |
+All new F1 regressions passed after the exact production changes. The focused existing compatibility, queueing, lease-exclusion, IPC, cancellation, persistence, and trace-field regressions passed. One additional compatibility test for a generic CanonicalLiveServer with no mutation_guard was run after reviewing the requested invariant; it passed.
 
-## PROVED_SAFE_PATHS
-CONTRACT_PROVED within inspected scopes: full coordinator holds lease through facade return; public scoped facade holds lease before body; local candidate holds full lease through persistence/rollback; queued LIVE uses production mutation guard; registry.transaction and read_transaction take registry .lock for their own bodies; save_snapshot uses store lock and metadata validation; committed publish installs validated durable generation only. These guarantees do not extend to R1-R6.
+Total targeted green executions reported below: 22 passed, 0 failed. No full repository suite was run.
 
-## PROVED_UNSAFE_PATHS
-R1 direct LIVE IPC update is a reachable durable writer outside full-analysis admission. R2 constructor recovery is a durable registry writer without registry .lock. R3 independent migration can publish snapshot/FileState outside full-analysis admission. PROVED_UNSAFE denotes code-level coordination bypass with a possible overlapping schedule, not an observed corruption event.
+## DIRECT_IPC_ADMISSION
 
-## CONDITIONAL_AND_UNKNOWN
-Recovery needs transaction.tmp; migration needs absent target metadata plus valid legacy state; FileState copy needs an existing legacy and absent target file. Direct publish needs exact committed identity and newer revision. Direct external use of analyze_project/private bodies has no confirmed in-repository production caller. Startup backfill/full writer overlap depends on timing. Current serving MCP/Desktop/LIVE imported-code freshness, process count, and physical registry/snapshot identity were not tested. No byte-lock domain->full reverse acquisition was found in inspected paths; arbitrary dynamic callers remain UNKNOWN.
+CanonicalLiveServer._dispatch now uses the configured mutation guard around the direct update_file execution. When a server has no mutation guard, the previous direct execution path remains in place. _execute_update_file, _execute_queued_update_file, and CanonicalMutationCoordinator were not changed.
 
-## EXACT_MINIMUM_PATCH_OWNERS
-Owner/symbol list only, no design:
-1. C:\Temp\Contextor_Repo\contextor\core\live_state\ipc.py::CanonicalLiveServer._dispatch, _execute_update_file; C:\Temp\Contextor_Repo\contextor\mcp\tools\update_file.py::update_file; production guard C:\Temp\Contextor_Repo\contextor\core\live_state\runtime.py::_repository_mutation_guard.
-2. C:\Temp\Contextor_Repo\contextor\core\reporting_engine\persistent_registry.py::PersistentIdentityRegistry.__init__, _recover_transaction, read_transaction.
-3. C:\Temp\Contextor_Repo\contextor\core\live_state\store.py::migrate_legacy_snapshot; callers C:\Temp\Contextor_Repo\contextor\mcp\runtime.py::get_or_init_engine, C:\Temp\Contextor_Repo\contextor\core\live_state\hydration.py::resolve_authoritative_repository_state, C:\Temp\Contextor_Repo\contextor\core\live_state\runtime.py startup, C:\Temp\Contextor_Repo\contextor\ui\gui.py::_start_live_watcher_blocking.
-4. Conditional publication/backfill owners: C:\Temp\Contextor_Repo\contextor\core\live_state\ipc.py::_execute_publish, _execute_committed_publish; C:\Temp\Contextor_Repo\contextor\core\live_state\runtime.py startup backfill.
+The runtime guard passes timeout=0.0 only for request.operation == "update_file". All other guarded operations pass timeout=None, retaining their prior waiting/cancellation behavior. The writer kind, cancellation callback, trace fields, and lease release implementation are unchanged.
 
-## TARGETED_RUNTIME_CERTIFICATION_GATE
-L: Do not run yet. After correction and controlled restart, establish actual MCP loaded-code process identity; Desktop/LIVE import freshness; canonical authority/revision consistency; watcher event continuity and resync_required=false; cycles.count=0; registry/snapshot/FileState identity parity; cross-process full/local/scoped versus direct/queued LIVE exclusion; constructor recovery versus active registry transaction; migration/backfill versus full writer; direct publish during full writer; and process count stability under continuous workload. Targeted test owners: C:\Temp\Contextor_Repo\tests\test_full_analysis_coordination.py, C:\Temp\Contextor_Repo\tests\test_live_state_ipc.py, C:\Temp\Contextor_Repo\tests\test_mcp_incremental_hydration.py, C:\Temp\Contextor_Repo\tests\test_persistent_registry.py, C:\Temp\Contextor_Repo\tests\mcp\tools\test_minimal_registry_read_path.py, C:\Temp\Contextor_Repo\tests\test_repository_scope_guards.py. Fresh-process pytest cannot certify already-serving imports.
+## DIRECT_FAIL_FAST
+
+The cross-process regression starts a second process that acquires the real full-analysis lease. While that OS lease is held, the real LiveStateClient.update_file request returns status=error in under one second. The updater and persister are not called; snapshot state and LIVE revision remain at their pre-request values. The request does not wait for the client timeout.
+
+## DIRECT_IPC_RESPONSE_COMPATIBILITY
+
+The post-release direct update succeeds over LiveStateClient.update_file. The test checks status=ok, revision, result, and seq fields and observes the updater and persister exactly once. The legacy activity_epoch field is also checked by the separate generic-server contract test. The contention test asserts the error status; it does not assert every error payload field, so only the tested status and the server's existing exception-to-error response handling are claimed here.
+
+## QUEUED_MUTATION_COMPATIBILITY
+
+The queued route remains independently guarded at its existing execution boundary. The existing queued admission tests verify guard entry before canonical execution and preservation of job identity/trace operation. The _repository_mutation_guard trace-fields test now explicitly checks timeout=None, so queued admission keeps its existing wait behavior. The changed direct _dispatch branch does not add a second queued guard.
+
+## NO_DOUBLE_ACQUISITION
+
+The successful direct update after contention uses the real production _repository_mutation_guard, which acquires the existing repository full-analysis lease. It completes the updater and persister and returns successfully. This exercises the direct path without a nested full-analysis acquisition or self-deadlock. The queued route remains covered by its existing single-boundary guard tests.
+
+## CROSS_PROCESS_EXCLUSION
+
+The exclusion regression uses multiprocessing spawn and an independently held OS lease, not an in-process mock. The competing lease causes immediate direct admission rejection. Once the holder releases the lease, a new direct request succeeds. No competing-process lease state was manipulated outside the isolated temporary repository.
+
+## NO_DELAYED_MUTATION
+
+After the rejected request, the test sends ping as a server-thread barrier, confirms the updater/persister call list is empty, releases the competing process, sends another ping barrier, and confirms the call list is still empty. A separate new request is then accepted. Thus the rejected synchronous request does not turn into delayed work after contention ends.
+
+## FAILURE_AND_ROLLBACK_COMPATIBILITY
+
+Updater and persister exception cases both return status=error, leave the observed LIVE revision at 0, and record guard enter followed by guard exit. Each case then reacquires and releases the repository lease, proving the lock was released. Existing selected persistence-failure and snapshot-conflict tests also passed. This report does not infer broader rollback guarantees beyond those assertions and the existing selected tests.
+
+## TARGETED_TEST_RESULTS
+
+All commands used the repository .venv Python. No full pytest run occurred.
+
+RED command, before production edits:
+tests/test_live_mutation_coordinator.py::test_direct_live_update_enters_guard_before_updater_and_persister
+tests/test_live_mutation_coordinator.py::test_direct_live_update_fails_fast_behind_cross_process_writer
+tests/test_live_mutation_coordinator.py::test_direct_live_update_releases_guard_after_callback_failure
+Result: 4 failed as described under F1_RED_RESULT.
+
+GREEN main focused command group: 18 passed:
+- tests/test_live_mutation_coordinator.py::test_direct_live_update_enters_guard_before_updater_and_persister
+- tests/test_live_mutation_coordinator.py::test_direct_live_update_fails_fast_behind_cross_process_writer
+- tests/test_live_mutation_coordinator.py::test_direct_live_update_releases_guard_after_callback_failure (2 parametrized cases)
+- tests/test_live_mutation_coordinator.py::test_queued_mutation_guard_receives_job_identity_and_trace_operation
+- tests/test_live_mutation_coordinator.py::test_repository_mutation_guard_forwards_exact_admission_trace_fields
+- tests/test_live_mutation_coordinator.py::test_generic_snapshot_failure_restores_committed_registry_and_old_canonical_state
+- tests/test_live_mutation_coordinator.py::test_queued_executor_enters_mutation_guard_before_canonical_execution
+- tests/test_live_mutation_coordinator.py::test_real_full_analysis_lease_blocks_worker_until_released
+- tests/test_live_mutation_coordinator.py::test_coordinator_close_cancels_queued_not_active_job
+- tests/test_live_mutation_coordinator.py::test_coordinator_close_reports_undrained_active_worker_then_drains
+- tests/test_live_mutation_coordinator.py::test_publish_and_queued_update_are_single_writer_serialized
+- tests/test_live_state_ipc.py::test_client_request_timeout_closes_connection
+- tests/test_live_state_ipc.py::test_persistence_conflict_fails_closed_without_live_event
+- tests/test_live_state_ipc.py::test_updater_failure_does_not_kill_the_service
+- tests/test_live_state_ipc.py::test_update_runs_inside_the_live_owner_and_is_visible_to_other_clients
+- tests/test_full_analysis_coordination.py::test_live_mutation_admission_trace_fields_are_correlated_and_whitelisted
+- tests/test_full_analysis_coordination.py::test_admission_cancellation_does_not_leak_locks
+
+Additional focused command group: 3 passed:
+- tests/test_live_mutation_coordinator.py::test_persistence_failure_leaves_canonical_state_revision_journal_and_diagnostics_unchanged
+- tests/test_live_state_ipc.py::test_real_repository_persister_disk_ahead_fails_closed
+- tests/test_full_analysis_coordination.py::test_cross_process_waiting_full_analysis_precedes_later_live_mutation
+
+Additional generic-server compatibility test: 1 passed:
+- tests/test_live_mutation_coordinator.py::test_legacy_update_file_contract_remains_synchronous_and_unchanged
+
+Total: 22 passed, 0 failed across the targeted green commands.
+
+py_compile passed for contextor/core/live_state/ipc.py, contextor/core/live_state/runtime.py, and tests/test_live_mutation_coordinator.py. git diff --check for those files passed. Git emitted only LF-to-CRLF advisory warnings for these working files; diff check found no whitespace errors.
+
+No test was weakened. The new tests assert guard ordering, actual cross-process fail-fast, unchanged LIVE state on rejection, no delayed execution, callback exception release, and post-release success.
+
+## ARCHITECTURAL_CYCLE_CHECK
+
+Contextor's post-edit architecture summary reported cycles.count=0. The updated symbol retrieval was complete and workspace_sync=verified. No full repository analysis was run.
 
 ## SOURCE_SYNC
-Contextor MCP FIRST, including deferred get_symbol_implementation, get_source_range, get_artifact_blast_radius, get_symbol_lineage, contextor_fact_lineage, and get_live_events. Documentation read before relevant calls; erroneous source-range absolute path and lineage representation requests were corrected against documentation. Complete implementation_is_complete=true/no_partial_symbol_source=true returned for named registry, snapshot, hydration, facade, coordinator, local and LIVE symbols. Large analyze_project was fetched in complete bounded source ranges. Current retrieval: canonical_state=fresh, provenance=live, workspace_sync=verified, canonical revision 248. Literal workspace rg confirmed anchors after Contextor discovery. Narrow lineage reports workspace_sync=unverified by its documented design and was not used for source identity. No preview/truncation was accepted as full implementation. No full repository analysis.
 
-## LIVE_REVISION
-Read-only get_live_events(after_revision=248): latest_revision=248; activity_epoch=9e9a2a2edcb046bba00df0850244ad36; continuity=continuous; resync_required=false; earliest_retained_revision=194; events empty. This is event-cursor continuity, not runtime reload certification.
+Contextor source retrieval marked both edited production owners workspace_sync=verified at revision 254. The watcher event query from revision 248 returned continuous events through revision 254 with resync_required=false and the same activity epoch 9e9a2a2edcb046bba00df0850244ad36:
+- 249-251: test_live_mutation_coordinator.py watcher updates during test editing.
+- 252: contextor/core/live_state/ipc.py UPDATED.
+- 253: contextor/core/live_state/runtime.py UPDATED.
+- 254: tests/test_live_mutation_coordinator.py UPDATED.
+
+No manual Contextor update_file, restart, or full analysis was performed. Watcher/source synchronization does not establish that already-running MCP or LIVE processes imported the changed code.
+
+## LIVE_REVISION_BEFORE_AFTER
+
+Before patch: 248.
+After the observed source/test watcher updates: 254.
+Event history was continuous; resync_required=false. Activity epoch remained 9e9a2a2edcb046bba00df0850244ad36.
+
+## REMAINING_F2_F3_RISKS
+
+F2 registry-constructor synchronization and F3 migration coordination remain outside this authorization and were not changed or certified. This F1 result covers direct synchronous LIVE IPC update_file admission only.
+
+## RESTART_REQUIRED
+
+No process was restarted. For serving-process runtime certification of these MCP/LIVE code changes, a controlled manual restart/reload boundary remains required; source indexing and watcher events alone do not prove imported-code reload.
 
 ## FINAL_VERDICT
-BLOCKED_BY_PROVED_WRITER_RACE
 
+F1 exact patch and targeted regressions: PASS. Direct synchronous LIVE IPC update_file now enters the configured repository mutation guard and fails fast on full-analysis lease contention. Queued behavior and generic unguarded-server compatibility passed their targeted tests. No runtime reload certification is claimed. F2/F3 remain unresolved by scope.
+
+## FULL_DIFFS
+
+### C:\Temp\Contextor_Repo\contextor\core\live_state\ipc.py
+
+diff --git a/contextor/core/live_state/ipc.py b/contextor/core/live_state/ipc.py
+index 5f08eaf..ca89f1f 100644
+--- a/contextor/core/live_state/ipc.py
++++ b/contextor/core/live_state/ipc.py
+@@ -2163,7 +2163,10 @@ class CanonicalLiveServer:
+         if operation == "cancel_recovery_verification":
+             return self._finish_recovery_verification(request, cancelled=True)
+         if operation == "update_file":
+-            return self._execute_update_file(request)
++            if self._mutation_guard is None:
++                return self._execute_update_file(request)
++            with self._mutation_guard(request, self._stop):
++                return self._execute_update_file(request)
+         if operation == "publish":
+             return self._execute_publish(request)
+
+### C:\Temp\Contextor_Repo\contextor\core\live_state\runtime.py
+
+diff --git a/contextor/core/live_state/runtime.py b/contextor/core/live_state/runtime.py
+index 992d25d..9cb2c40 100644
+--- a/contextor/core/live_state/runtime.py
++++ b/contextor/core/live_state/runtime.py
+@@ -1287,6 +1287,11 @@ def _repository_mutation_guard(root: Path):
+             root,
+             owner="live_mutation_worker",
+             writer_kind="live_mutation",
++            timeout=(
++                0.0
++                if request.get("operation") == "update_file"
++                else None
++            ),
+             is_cancelled=stop_event.is_set,
+             admission_trace_fields=admission_trace_fields,
+         )
+
+### C:\Temp\Contextor_Repo\tests\test_live_mutation_coordinator.py
+
+diff --git a/tests/test_live_mutation_coordinator.py b/tests/test_live_mutation_coordinator.py
+index 9f28934..4ec2e40 100644
+--- a/tests/test_live_mutation_coordinator.py
++++ b/tests/test_live_mutation_coordinator.py
+@@ -1,5 +1,6 @@
+ import threading
+ import time
++import multiprocessing
+ from contextlib import contextmanager
+ from types import SimpleNamespace
+ 
+@@ -26,6 +27,32 @@ def _diagnostic_state():
+     )
+ 
+ 
++def _hold_full_analysis_lease_process(repo_path, acquired, release, outcome):
++    from contextor.core.analysis.full_analysis_coordinator import (
++        acquire_full_analysis,
++        release_full_analysis,
++    )
++
++    lease = None
++    try:
++        lease = acquire_full_analysis(
++            repo_path,
++            owner="f1_cross_process_holder",
++            timeout=5.0,
++            poll_interval=0.01,
++        )
++        outcome.put("acquired")
++        acquired.set()
++        if not release.wait(timeout=10.0):
++            outcome.put("release_timeout")
++    except Exception as exc:
++        outcome.put(f"error:{type(exc).__name__}:{exc}")
++        acquired.set()
++    finally:
++        if lease is not None:
++            release_full_analysis(lease)
++
++
+ @contextmanager
+ def _running_server(server):
+     thread = threading.Thread(target=server.serve_forever, daemon=True)
+@@ -372,6 +399,7 @@ def test_repository_mutation_guard_forwards_exact_admission_trace_fields(
+     assert repo_path == tmp_path
+     assert kwargs["owner"] == "live_mutation_worker"
+     assert kwargs["writer_kind"] == "live_mutation"
++    assert kwargs["timeout"] is None
+     assert callable(kwargs["is_cancelled"])
+     assert kwargs["is_cancelled"]() is False
+     assert kwargs["admission_trace_fields"] == {
+@@ -970,3 +998,168 @@ def test_coordinator_close_reports_undrained_active_worker_then_drains():
+     release.set()
+     assert coordinator.close(join_timeout=3.0) is True
+     assert coordinator.status(accepted["job_id"])["state"] == "completed"
++
++
++def test_direct_live_update_enters_guard_before_updater_and_persister():
++    order = []
++
++    @contextmanager
++    def guard(request, _stop_event):
++        order.append(("guard_enter", request.get("operation")))
++        try:
++            yield
++        finally:
++            order.append(("guard_exit", request.get("operation")))
++
++    def updater(state, path):
++        order.append("updater")
++        state.files.append(path)
++        return {"status": "UPDATED", "file_path": path}
++
++    def persister(_state, _revision):
++        order.append("persister")
++
++    server = CanonicalLiveServer(
++        SimpleNamespace(files=[], revision=0),
++        updater=updater,
++        persister=persister,
++        mutation_guard=guard,
++    )
++    with _running_server(server) as client:
++        response = client.update_file("guarded-direct.py", origin="test")
++
++    assert response["status"] == "ok"
++    assert order == [
++        ("guard_enter", "update_file"),
++        "updater",
++        "persister",
++        ("guard_exit", "update_file"),
++    ]
++
++
++def test_direct_live_update_fails_fast_behind_cross_process_writer(tmp_path):
++    import multiprocessing
++
++    from contextor.core.analysis.full_analysis_coordinator import (
++        acquire_full_analysis,
++        release_full_analysis,
++    )
++    from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
++
++    repo = tmp_path / "direct-live-repo"
++    repo.mkdir()
++    PersistentIdentityRegistry(str(repo))
++
++    context = multiprocessing.get_context("spawn")
++    acquired = context.Event()
++    release = context.Event()
++    outcome = context.Queue()
++    holder = context.Process(
++        target=_hold_full_analysis_lease_process,
++        args=(str(repo), acquired, release, outcome),
++    )
++    holder.start()
++    calls = []
++
++    def updater(state, path):
++        calls.append("updater")
++        state.files.append(path)
++        return {"status": "UPDATED", "file_path": path}
++
++    def persister(_state, _revision):
++        calls.append("persister")
++
++    server = CanonicalLiveServer(
++        SimpleNamespace(files=[], revision=0),
++        updater=updater,
++        persister=persister,
++        mutation_guard=_repository_mutation_guard(repo),
++    )
++    try:
++        assert acquired.wait(timeout=8.0)
++        assert outcome.get(timeout=1.0) == "acquired"
++        with _running_server(server) as client:
++            started = time.monotonic()
++            rejected = client.update_file("blocked-direct.py", origin="mcp")
++            elapsed = time.monotonic() - started
++
++            assert rejected["status"] == "error"
++            assert elapsed < 1.0
++            assert calls == []
++            assert client.request("ping")["status"] == "ok"
++            before_release = client.snapshot()
++            assert before_release["revision"] == 0
++            assert before_release["state"].files == []
++
++            release.set()
++            holder.join(timeout=5.0)
++            assert not holder.is_alive()
++            assert holder.exitcode == 0
++
++            # A rejected synchronous call has no queued work to run after the
++            # competing process releases its OS lease; the subsequent ping is
++            # a server-thread barrier before this assertion.
++            assert client.request("ping")["status"] == "ok"
++            assert calls == []
++            after_release = client.update_file("allowed-direct.py", origin="mcp")
++            assert after_release["status"] == "ok"
++            assert after_release["revision"] == 1
++            assert set(after_release) >= {"status", "revision", "result", "seq"}
++            assert calls == ["updater", "persister"]
++    finally:
++        release.set()
++        holder.join(timeout=5.0)
++        if holder.is_alive():
++            holder.terminate()
++            holder.join(timeout=2.0)
++        server.close()
++
++
++@pytest.mark.parametrize("failure_stage", ["updater", "persister"])
++def test_direct_live_update_releases_guard_after_callback_failure(tmp_path, failure_stage):
++    from contextor.core.analysis.full_analysis_coordinator import (
++        acquire_full_analysis,
++        release_full_analysis,
++    )
++
++    repo = tmp_path / f"direct-failure-{failure_stage}"
++    repo.mkdir()
++    from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
++
++    PersistentIdentityRegistry(str(repo))
++    guard_calls = []
++    production_guard = _repository_mutation_guard(repo)
++
++    @contextmanager
++    def tracked_guard(request, stop_event):
++        guard_calls.append(("enter", request.get("operation")))
++        try:
++            with production_guard(request, stop_event):
++                yield
++        finally:
++            guard_calls.append(("exit", request.get("operation")))
++
++    def updater(state, path):
++        if failure_stage == "updater":
++            raise RuntimeError("updater failure")
++        state.files.append(path)
++        return {"status": "UPDATED", "file_path": path}
++
++    def persister(_state, _revision):
++        if failure_stage == "persister":
++            raise RuntimeError("persister failure")
++
++    server = CanonicalLiveServer(
++        SimpleNamespace(files=[], revision=0),
++        updater=updater,
++        persister=persister,
++        mutation_guard=tracked_guard,
++    )
++    with _running_server(server) as client:
++        response = client.update_file("callback-failure.py", origin="test")
++        assert response["status"] == "error"
++        assert client.snapshot()["revision"] == 0
++
++    assert guard_calls == [("enter", "update_file"), ("exit", "update_file")]
++    lease = acquire_full_analysis(repo, owner="after-direct-failure", timeout=0.5)
++    release_full_analysis(lease)
++

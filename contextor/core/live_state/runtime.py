@@ -1287,6 +1287,11 @@ def _repository_mutation_guard(root: Path):
             root,
             owner="live_mutation_worker",
             writer_kind="live_mutation",
+            timeout=(
+                0.0
+                if request.get("operation") == "update_file"
+                else None
+            ),
             is_cancelled=stop_event.is_set,
             admission_trace_fields=admission_trace_fields,
         )

@@ -2163,7 +2163,10 @@ class CanonicalLiveServer:
         if operation == "cancel_recovery_verification":
             return self._finish_recovery_verification(request, cancelled=True)
         if operation == "update_file":
-            return self._execute_update_file(request)
+            if self._mutation_guard is None:
+                return self._execute_update_file(request)
+            with self._mutation_guard(request, self._stop):
+                return self._execute_update_file(request)
         if operation == "publish":
             return self._execute_publish(request)
 

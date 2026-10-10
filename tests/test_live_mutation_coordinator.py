@@ -1,5 +1,6 @@
 import threading
 import time
+import multiprocessing
 from contextlib import contextmanager
 from types import SimpleNamespace
 
@@ -24,6 +25,32 @@ def _diagnostic_state():
         cycles_state="fresh",
         cycles=[],
     )
+
+
+def _hold_full_analysis_lease_process(repo_path, acquired, release, outcome):
+    from contextor.core.analysis.full_analysis_coordinator import (
+        acquire_full_analysis,
+        release_full_analysis,
+    )
+
+    lease = None
+    try:
+        lease = acquire_full_analysis(
+            repo_path,
+            owner="f1_cross_process_holder",
+            timeout=5.0,
+            poll_interval=0.01,
+        )
+        outcome.put("acquired")
+        acquired.set()
+        if not release.wait(timeout=10.0):
+            outcome.put("release_timeout")
+    except Exception as exc:
+        outcome.put(f"error:{type(exc).__name__}:{exc}")
+        acquired.set()
+    finally:
+        if lease is not None:
+            release_full_analysis(lease)
 
 
 @contextmanager
@@ -372,6 +399,7 @@ def test_repository_mutation_guard_forwards_exact_admission_trace_fields(
     assert repo_path == tmp_path
     assert kwargs["owner"] == "live_mutation_worker"
     assert kwargs["writer_kind"] == "live_mutation"
+    assert kwargs["timeout"] is None
     assert callable(kwargs["is_cancelled"])
     assert kwargs["is_cancelled"]() is False
     assert kwargs["admission_trace_fields"] == {
@@ -970,3 +998,168 @@ def test_coordinator_close_reports_undrained_active_worker_then_drains():
     release.set()
     assert coordinator.close(join_timeout=3.0) is True
     assert coordinator.status(accepted["job_id"])["state"] == "completed"
+
+
+def test_direct_live_update_enters_guard_before_updater_and_persister():
+    order = []
+
+    @contextmanager
+    def guard(request, _stop_event):
+        order.append(("guard_enter", request.get("operation")))
+        try:
+            yield
+        finally:
+            order.append(("guard_exit", request.get("operation")))
+
+    def updater(state, path):
+        order.append("updater")
+        state.files.append(path)
+        return {"status": "UPDATED", "file_path": path}
+
+    def persister(_state, _revision):
+        order.append("persister")
+
+    server = CanonicalLiveServer(
+        SimpleNamespace(files=[], revision=0),
+        updater=updater,
+        persister=persister,
+        mutation_guard=guard,
+    )
+    with _running_server(server) as client:
+        response = client.update_file("guarded-direct.py", origin="test")
+
+    assert response["status"] == "ok"
+    assert order == [
+        ("guard_enter", "update_file"),
+        "updater",
+        "persister",
+        ("guard_exit", "update_file"),
+    ]
+
+
+def test_direct_live_update_fails_fast_behind_cross_process_writer(tmp_path):
+    import multiprocessing
+
+    from contextor.core.analysis.full_analysis_coordinator import (
+        acquire_full_analysis,
+        release_full_analysis,
+    )
+    from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
+
+    repo = tmp_path / "direct-live-repo"
+    repo.mkdir()
+    PersistentIdentityRegistry(str(repo))
+
+    context = multiprocessing.get_context("spawn")
+    acquired = context.Event()
+    release = context.Event()
+    outcome = context.Queue()
+    holder = context.Process(
+        target=_hold_full_analysis_lease_process,
+        args=(str(repo), acquired, release, outcome),
+    )
+    holder.start()
+    calls = []
+
+    def updater(state, path):
+        calls.append("updater")
+        state.files.append(path)
+        return {"status": "UPDATED", "file_path": path}
+
+    def persister(_state, _revision):
+        calls.append("persister")
+
+    server = CanonicalLiveServer(
+        SimpleNamespace(files=[], revision=0),
+        updater=updater,
+        persister=persister,
+        mutation_guard=_repository_mutation_guard(repo),
+    )
+    try:
+        assert acquired.wait(timeout=8.0)
+        assert outcome.get(timeout=1.0) == "acquired"
+        with _running_server(server) as client:
+            started = time.monotonic()
+            rejected = client.update_file("blocked-direct.py", origin="mcp")
+            elapsed = time.monotonic() - started
+
+            assert rejected["status"] == "error"
+            assert elapsed < 1.0
+            assert calls == []
+            assert client.request("ping")["status"] == "ok"
+            before_release = client.snapshot()
+            assert before_release["revision"] == 0
+            assert before_release["state"].files == []
+
+            release.set()
+            holder.join(timeout=5.0)
+            assert not holder.is_alive()
+            assert holder.exitcode == 0
+
+            # A rejected synchronous call has no queued work to run after the
+            # competing process releases its OS lease; the subsequent ping is
+            # a server-thread barrier before this assertion.
+            assert client.request("ping")["status"] == "ok"
+            assert calls == []
+            after_release = client.update_file("allowed-direct.py", origin="mcp")
+            assert after_release["status"] == "ok"
+            assert after_release["revision"] == 1
+            assert set(after_release) >= {"status", "revision", "result", "seq"}
+            assert calls == ["updater", "persister"]
+    finally:
+        release.set()
+        holder.join(timeout=5.0)
+        if holder.is_alive():
+            holder.terminate()
+            holder.join(timeout=2.0)
+        server.close()
+
+
+@pytest.mark.parametrize("failure_stage", ["updater", "persister"])
+def test_direct_live_update_releases_guard_after_callback_failure(tmp_path, failure_stage):
+    from contextor.core.analysis.full_analysis_coordinator import (
+        acquire_full_analysis,
+        release_full_analysis,
+    )
+
+    repo = tmp_path / f"direct-failure-{failure_stage}"
+    repo.mkdir()
+    from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
+
+    PersistentIdentityRegistry(str(repo))
+    guard_calls = []
+    production_guard = _repository_mutation_guard(repo)
+
+    @contextmanager
+    def tracked_guard(request, stop_event):
+        guard_calls.append(("enter", request.get("operation")))
+        try:
+            with production_guard(request, stop_event):
+                yield
+        finally:
+            guard_calls.append(("exit", request.get("operation")))
+
+    def updater(state, path):
+        if failure_stage == "updater":
+            raise RuntimeError("updater failure")
+        state.files.append(path)
+        return {"status": "UPDATED", "file_path": path}
+
+    def persister(_state, _revision):
+        if failure_stage == "persister":
+            raise RuntimeError("persister failure")
+
+    server = CanonicalLiveServer(
+        SimpleNamespace(files=[], revision=0),
+        updater=updater,
+        persister=persister,
+        mutation_guard=tracked_guard,
+    )
+    with _running_server(server) as client:
+        response = client.update_file("callback-failure.py", origin="test")
+        assert response["status"] == "error"
+        assert client.snapshot()["revision"] == 0
+
+    assert guard_calls == [("enter", "update_file"), ("exit", "update_file")]
+    lease = acquire_full_analysis(repo, owner="after-direct-failure", timeout=0.5)
+    release_full_analysis(lease)
