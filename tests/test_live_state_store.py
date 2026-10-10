@@ -2536,6 +2536,34 @@ def test_legacy_snapshot_migrates_to_repo_id_cache_without_deleting_source(
     assert (legacy / "engine_state.pkl").is_file()
 
 
+def test_already_coordinated_migration_does_not_acquire_second_lease(
+    tmp_path, monkeypatch
+):
+    from contextor.core.analysis import full_analysis_lease
+
+    monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(tmp_path / "cache"))
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    PersistentIdentityRegistry(str(repo))
+    legacy = legacy_repo_cache_dir(repo)
+    save_snapshot({"value": 7}, legacy, "legacy", writer="test")
+    real_acquire = full_analysis_lease.acquire_full_analysis
+    real_release = full_analysis_lease.release_full_analysis
+    lease = real_acquire(
+        repo, owner="scoped_test", writer_kind="scoped_analysis", timeout=5.0
+    )
+    try:
+        monkeypatch.setattr(
+            full_analysis_lease,
+            "acquire_full_analysis",
+            lambda *_a, **_k: pytest.fail("recursive full-analysis lease"),
+        )
+        assert migrate_legacy_snapshot(repo, _lease_held=True) == repo_cache_dir(repo)
+        assert read_metadata(repo_cache_dir(repo)) is not None
+    finally:
+        real_release(lease)
+
+
 def _migration_race_full_analysis_holder(
     repo_text, cache_text, lease_held, release_lease, results
 ):

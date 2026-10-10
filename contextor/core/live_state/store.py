@@ -2416,7 +2416,11 @@ def load_snapshot(
 
 
 
-def migrate_legacy_snapshot(repo_root: str | Path) -> Path:
+def migrate_legacy_snapshot(
+    repo_root: str | Path,
+    *,
+    _lease_held: bool = False,
+) -> Path:
     """Copy a verified path-keyed snapshot into its repo-ID cache directory."""
 
     from contextor.core.paths import legacy_repo_cache_dir, repo_cache_dir
@@ -2434,6 +2438,26 @@ def migrate_legacy_snapshot(repo_root: str | Path) -> Path:
     loaded = load_snapshot(legacy)
     if loaded is None:
         return target
+
+    if not _lease_held:
+        from contextor.core.analysis.full_analysis_lease import (
+            acquire_full_analysis,
+            release_full_analysis,
+        )
+
+        lease = acquire_full_analysis(
+            root,
+            owner="legacy_snapshot_migration",
+            writer_kind="full_analysis",
+            timeout=10.0,
+        )
+        try:
+            return migrate_legacy_snapshot(
+                root,
+                _lease_held=True,
+            )
+        finally:
+            release_full_analysis(lease)
 
     state, metadata = loaded
     save_snapshot(

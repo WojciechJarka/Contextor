@@ -649,7 +649,9 @@ class ContextorFacade:
         )
 
         component_started = time.monotonic()
-        previous_canonical_state = resolve_authoritative_repository_state(path)
+        previous_canonical_state = resolve_authoritative_repository_state(
+            path, _lease_held=True
+        )
         emit_stage_component_end(
             "identity_and_setup",
             "authoritative_state_resolution",
@@ -1363,7 +1365,9 @@ class ContextorFacade:
         from contextor.core.graph.resolver import build_trie, detect_package_root
 
         collision_facts = None
-        authoritative_state = resolve_authoritative_repository_state(root_resolved)
+        authoritative_state = resolve_authoritative_repository_state(
+            root_resolved, _lease_held=True
+        )
         if authoritative_state is not None:
             progress.begin("Loading canonical LIVE context")
             state = authoritative_state.state
@@ -1605,7 +1609,9 @@ class ContextorFacade:
         analysis_state = None
         state_only = False
 
-        resolved = resolve_authoritative_repository_state(repo_root)
+        resolved = resolve_authoritative_repository_state(
+            repo_root, _lease_held=True
+        )
 
         if resolved is not None:
             state = resolved.state
@@ -1657,7 +1663,7 @@ class ContextorFacade:
                         )
 
         if not state_only:
-            hydrated = hydrate_repository_engine(repo_root)
+            hydrated = hydrate_repository_engine(repo_root, _lease_held=True)
 
         if state_only:
             pass

@@ -518,9 +518,28 @@ def update_file(
             if remote.get("status") != "ok":
                 raise RuntimeError(remote.get("error", "Shared LIVE update failed."))
             res = remote["result"]
+            cold_migration = False
             with mcp_runtime._engine_cache_transaction(root) as root_key:
                 mcp_runtime._live_engine_revisions[root_key] = int(remote["revision"]) - 1
-                engine = mcp_runtime.get_or_init_engine(root)
+                engine = mcp_runtime.get_or_init_engine(
+                    root, _defer_migration=True
+                )
+                cold_migration = engine is mcp_runtime._MIGRATION_NEEDED
+                if cold_migration:
+                    mcp_runtime._live_engine_revisions.pop(root_key, None)
+            if cold_migration:
+                mcp_runtime.get_or_init_engine(root)
+                with mcp_runtime._engine_cache_transaction(root) as root_key:
+                    engine = mcp_runtime._live_engines.get(root_key)
+                    refreshed_revision = mcp_runtime._live_engine_revisions.get(root_key)
+                    if (
+                        engine is None
+                        or refreshed_revision != int(remote["revision"])
+                        or getattr(engine.state, "revision", None) != refreshed_revision
+                    ):
+                        raise RuntimeError(
+                            "Canonical LIVE state could not be hydrated at the committed revision."
+                        )
             live_state_persisted = True
         else:
             res, engine, old_artifacts, live_state_persisted = (

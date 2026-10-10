@@ -26,7 +26,7 @@ def _state(tmp_path):
 def _patch_resolution_dependencies(monkeypatch, root, *, live=None, snapshot=None):
     identity = RepositoryIdentity("ctx_test", str(root.resolve()), root.name)
     monkeypatch.setattr("contextor.core.repository_identity.read_repository_identity", lambda _: identity)
-    monkeypatch.setattr("contextor.core.live_state.store.migrate_legacy_snapshot", lambda _: root / "cache")
+    monkeypatch.setattr("contextor.core.live_state.store.migrate_legacy_snapshot", lambda _, **_kwargs: root / "cache")
     monkeypatch.setattr("contextor.core.live_state.store.read_metadata", lambda _: SimpleNamespace(state_id="state"))
     monkeypatch.setattr("contextor.core.analysis.state_manager.load_engine_state", lambda *args, **kwargs: snapshot)
     monkeypatch.setattr("contextor.core.live_state.runtime.connect", lambda _: live)
@@ -68,7 +68,7 @@ def test_full_hydrator_still_constructs_an_incremental_engine(tmp_path, monkeypa
         state=state, client=None, revision=3, source="snapshot", cache_dir=tmp_path / "cache"
     )
     calls = []
-    monkeypatch.setattr(hydration, "resolve_authoritative_repository_state", lambda _: resolved)
+    monkeypatch.setattr(hydration, "resolve_authoritative_repository_state", lambda _, **_kwargs: resolved)
 
     class Engine:
         def __init__(self, *args):
@@ -91,7 +91,7 @@ def test_layer_uses_state_directly_without_full_engine_hydration(tmp_path, monke
     resolved = hydration.AuthoritativeRepositoryState(
         state=state, client=None, revision=3, source="snapshot", cache_dir=tmp_path / "cache"
     )
-    monkeypatch.setattr(facade, "resolve_authoritative_repository_state", lambda _: resolved)
+    monkeypatch.setattr(facade, "resolve_authoritative_repository_state", lambda _, **_kwargs: resolved)
     monkeypatch.setattr(facade, "hydrate_repository_engine", lambda _: (_ for _ in ()).throw(AssertionError("full hydration used")))
     monkeypatch.setattr(facade, "_initialize_repository_identity", lambda _: SimpleNamespace(transaction=lambda: nullcontext()))
     monkeypatch.setattr(facade, "reset_caches", lambda: None)

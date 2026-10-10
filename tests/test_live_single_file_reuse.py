@@ -101,8 +101,8 @@ def test_single_file_reports_accepted_recovery_without_changing_string_return(
     original_hydrate = facade_module.hydrate_repository_engine
     published = []
 
-    def hydrate_with_client(root):
-        hydrated = original_hydrate(root)
+    def hydrate_with_client(root, **kwargs):
+        hydrated = original_hydrate(root, **kwargs)
         client = SimpleNamespace(publish=lambda *_a, **_k: published.append(True) or {
             "status": "ok", "revision": 17,
             "resync_required": True, "warning": "release unverified",
@@ -149,8 +149,8 @@ def test_scoped_single_file_publishes_to_real_live_server_under_writer_lease(
     original_publish = client.publish
     observed = []
 
-    def hydrate_with_server(root):
-        hydrated = original_hydrate(root)
+    def hydrate_with_server(root, **kwargs):
+        hydrated = original_hydrate(root, **kwargs)
         return replace(hydrated, client=client)
 
     def publish_while_held(*args, **kwargs):
@@ -204,12 +204,12 @@ def test_single_file_resync_state_rejects_state_only_path(
     hydrate_calls = 0
     first_resolution = True
 
-    def controlled_resolver(repo_path):
+    def controlled_resolver(repo_path, **kwargs):
         nonlocal first_resolution
         if first_resolution:
             first_resolution = False
             return resolved
-        return real_resolver(repo_path)
+        return real_resolver(repo_path, **kwargs)
 
     def counted_hydrate(*args, **kwargs):
         nonlocal hydrate_calls

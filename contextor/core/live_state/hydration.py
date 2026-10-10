@@ -28,6 +28,8 @@ class AuthoritativeRepositoryState:
 
 def resolve_authoritative_repository_state(
     repo_path: str | Path,
+    *,
+    _lease_held: bool = False,
 ) -> AuthoritativeRepositoryState | None:
     """Resolve the same LIVE-first, validated canonical state used by hydration."""
 
@@ -41,7 +43,7 @@ def resolve_authoritative_repository_state(
     if identity is None:
         return None
 
-    cache_dir = migrate_legacy_snapshot(root)
+    cache_dir = migrate_legacy_snapshot(root, _lease_held=_lease_held)
     client = connect(root)
     state = None
     revision = 0
@@ -84,6 +86,8 @@ def resolve_authoritative_repository_state(
 
 def hydrate_repository_engine(
     repo_path: str | Path,
+    *,
+    _lease_held: bool = False,
 ) -> HydratedRepositoryEngine | None:
     """Load a complete engine without triggering a repository analysis."""
 
@@ -94,7 +98,7 @@ def hydrate_repository_engine(
     )
 
     root = Path(repo_path).resolve()
-    resolved = resolve_authoritative_repository_state(root)
+    resolved = resolve_authoritative_repository_state(root, _lease_held=_lease_held)
     if resolved is None:
         return None
 

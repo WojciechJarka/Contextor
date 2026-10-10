@@ -1159,7 +1159,7 @@ def test_mcp_single_publication_root_cause_regression(tmp_path: Path, monkeypatc
     monkeypatch.setattr(
         mcp_runtime,
         "get_or_init_engine",
-        lambda _root: SimpleNamespace(state=SimpleNamespace(revision=11)),
+        lambda _root, **_kwargs: SimpleNamespace(state=SimpleNamespace(revision=11)),
     )
     monkeypatch.setattr(
         "contextor.core.live_state.connect_or_start",

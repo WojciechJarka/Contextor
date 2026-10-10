@@ -1439,7 +1439,7 @@ def test_legacy_migration_writer_admission_precedes_mcp_cache_lock(
             with event_lock:
                 active_leases.pop(thread_id, None)
 
-    def pause_migration(_root):
+    def pause_migration(_root, **_kwargs):
         thread_id = threading.get_ident()
         with event_lock:
             events.append(("migration_callback", threading.current_thread().name))
@@ -1512,8 +1512,11 @@ def test_legacy_migration_writer_admission_precedes_mcp_cache_lock(
     assert cache_probe_was_blocked, (
         f"second thread acquired the same MCP cache RLock while migration was paused: {events}"
     )
-    assert lease_positions and cache_positions and lease_positions[0] < cache_positions[0], (
-        "full_analysis.lock must be acquired before the MCP cache RLock; "
+    assert lease_positions and len(cache_positions) >= 2 and (
+        cache_positions[0] < lease_positions[0] < cache_positions[1] < migration_positions[0]
+    ), (
+        "read-only cache probe must finish before writer admission, and "
+        "migration must run under the post-admission cache transaction; "
         f"callback_had_full_analysis_lease={observations.get('full_analysis_held_at_migration')}; "
         f"events={events}"
     )
@@ -1521,6 +1524,331 @@ def test_legacy_migration_writer_admission_precedes_mcp_cache_lock(
         "migration callback ran without a full_analysis lease owned by the "
         f"get_or_init_engine thread; events={events}"
     )
+
+
+def test_warm_cache_does_not_attempt_legacy_migration_or_writer_admission(
+    tmp_path, monkeypatch
+):
+    from contextor.core import live_state
+    from contextor.core.analysis import full_analysis_lease
+    from contextor.core.paths import legacy_repo_cache_dir
+
+    root = tmp_path / "repo"
+    root.mkdir()
+    monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(tmp_path / "cache"))
+    PersistentIdentityRegistry(str(root))
+    snapshot_store.save_snapshot(
+        {"legacy": True}, legacy_repo_cache_dir(root), "legacy", writer="test"
+    )
+    assert read_metadata(repo_cache_dir(root)) is None
+    cached = SimpleNamespace(state=SimpleNamespace(revision=7))
+    root_key = str(root.resolve())
+    monkeypatch.setattr(mcp_runtime, "_live_engines", {root_key: cached})
+    monkeypatch.setattr(live_state, "connect", lambda _root: None)
+    monkeypatch.setattr(
+        live_state,
+        "migrate_legacy_snapshot",
+        lambda *_a, **_k: pytest.fail("warm cache attempted migration"),
+    )
+    monkeypatch.setattr(
+        full_analysis_lease,
+        "acquire_full_analysis",
+        lambda *_a, **_k: pytest.fail("warm cache attempted writer admission"),
+    )
+
+    assert mcp_runtime.get_or_init_engine(root) is cached
+
+
+def test_healthy_live_hydration_does_not_attempt_legacy_migration_or_writer_admission(
+    tmp_path, monkeypatch
+):
+    from contextor.core import live_state
+    from contextor.core.analysis import full_analysis_lease
+    from contextor.core.analysis import incremental_engine as incremental_module
+    from contextor.core.paths import legacy_repo_cache_dir
+
+    root = tmp_path / "repo"
+    root.mkdir()
+    monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(tmp_path / "cache"))
+    PersistentIdentityRegistry(str(root))
+    snapshot_store.save_snapshot(
+        {"legacy": True}, legacy_repo_cache_dir(root), "legacy", writer="test"
+    )
+    assert read_metadata(repo_cache_dir(root)) is None
+    state = SimpleNamespace(revision=8, state_id="live-8")
+
+    class Client:
+        endpoint = SimpleNamespace(host="127.0.0.1", port=1, authkey_hex="test")
+
+        def ping(self):
+            return {"revision": 8}
+
+        def snapshot(self):
+            return {"state": state}
+
+    class Engine:
+        def __init__(self, loaded_state, *_args):
+            self.state = loaded_state
+
+    monkeypatch.setattr(mcp_runtime, "_live_engines", {})
+    monkeypatch.setattr(mcp_runtime, "_live_sessions", {})
+    monkeypatch.setattr(mcp_runtime, "_live_journal_revisions", {})
+    monkeypatch.setattr(live_state, "connect", lambda _root: Client())
+    monkeypatch.setattr(incremental_module, "IncrementalAnalysisEngine", Engine)
+    monkeypatch.setattr(
+        live_state,
+        "migrate_legacy_snapshot",
+        lambda *_a, **_k: pytest.fail("LIVE hydration attempted migration"),
+    )
+    monkeypatch.setattr(
+        full_analysis_lease,
+        "acquire_full_analysis",
+        lambda *_a, **_k: pytest.fail("LIVE hydration attempted writer admission"),
+    )
+
+    assert mcp_runtime.get_or_init_engine(root).state is state
+
+
+def test_cold_fallback_rechecks_cache_after_writer_admission(tmp_path, monkeypatch):
+    from contextor.core import live_state
+    from contextor.core.analysis import full_analysis_lease
+
+    root = tmp_path / "repo"
+    root.mkdir()
+    PersistentIdentityRegistry(str(root))
+    root_key = str(root.resolve())
+    cached = SimpleNamespace(state=SimpleNamespace(revision=9))
+    admission_entered = threading.Event()
+    resume_admission = threading.Event()
+    outcomes = []
+    monkeypatch.setattr(mcp_runtime, "_live_engines", {})
+    monkeypatch.setattr(live_state, "connect", lambda _root: None)
+    monkeypatch.setattr(
+        live_state,
+        "migrate_legacy_snapshot",
+        lambda *_a, **_k: pytest.fail("stale fallback migrated after cache recheck"),
+    )
+
+    def acquire(*_args, **_kwargs):
+        admission_entered.set()
+        assert resume_admission.wait(5)
+        return object()
+
+    monkeypatch.setattr(full_analysis_lease, "acquire_full_analysis", acquire)
+    monkeypatch.setattr(full_analysis_lease, "release_full_analysis", lambda _lease: None)
+
+    def hydrate():
+        try:
+            outcomes.append(mcp_runtime.get_or_init_engine(root))
+        except BaseException as exc:
+            outcomes.append(exc)
+
+    thread = threading.Thread(target=hydrate)
+    thread.start()
+    try:
+        assert admission_entered.wait(5)
+        with mcp_runtime._engine_cache_transaction(root):
+            mcp_runtime._live_engines[root_key] = cached
+    finally:
+        resume_admission.set()
+        thread.join(timeout=5)
+    assert not thread.is_alive()
+    assert outcomes == [cached]
+
+
+def test_cold_snapshot_returns_current_engine_revision_pair(tmp_path, monkeypatch):
+    root = tmp_path / "repo"
+    root.mkdir()
+    root_key = str(root.resolve())
+    older = SimpleNamespace(state=SimpleNamespace(revision=4))
+    newer = SimpleNamespace(state=SimpleNamespace(revision=5))
+    monkeypatch.setattr(mcp_runtime, "_live_engines", {})
+    monkeypatch.setattr(mcp_runtime, "_live_engine_revisions", {})
+
+    def fake_get(_root, *, _defer_migration=False):
+        if _defer_migration:
+            return mcp_runtime._MIGRATION_NEEDED
+        with mcp_runtime._engine_cache_transaction(root):
+            mcp_runtime._live_engines[root_key] = older
+            mcp_runtime._live_engine_revisions[root_key] = 4
+        replaced = threading.Event()
+
+        def publish_newer():
+            with mcp_runtime._engine_cache_transaction(root):
+                mcp_runtime._live_engines[root_key] = newer
+                mcp_runtime._live_engine_revisions[root_key] = 5
+            replaced.set()
+
+        worker = threading.Thread(target=publish_newer)
+        worker.start()
+        assert replaced.wait(5)
+        worker.join(timeout=5)
+        return older
+
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", fake_get)
+    assert mcp_runtime._get_or_init_engine_snapshot(root) == (newer, 5)
+
+
+def test_cold_wait_for_full_analysis_releases_mcp_cache_lock(tmp_path, monkeypatch):
+    from contextor.core import live_state
+    from contextor.core.analysis import full_analysis_lease
+    from contextor.core.analysis import state_manager
+    from contextor.core.paths import legacy_repo_cache_dir
+
+    cache_root = tmp_path / "cache"
+    monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(cache_root))
+    root = tmp_path / "repo"
+    root.mkdir()
+    PersistentIdentityRegistry(str(root))
+    snapshot_store.save_snapshot(
+        {"legacy": True}, legacy_repo_cache_dir(root), "legacy", writer="test"
+    )
+    monkeypatch.setattr(live_state, "connect", lambda _root: None)
+    monkeypatch.setattr(mcp_runtime, "_live_engines", {})
+    monkeypatch.setattr(state_manager, "load_engine_state", lambda *_a, **_k: None)
+    attempted = threading.Event()
+    outcome = []
+    real_acquire = full_analysis_lease.acquire_full_analysis
+
+    def observe_acquire(*args, **kwargs):
+        attempted.set()
+        return real_acquire(*args, **kwargs)
+
+    monkeypatch.setattr(full_analysis_lease, "acquire_full_analysis", observe_acquire)
+    context = multiprocessing.get_context("spawn")
+    ready, entered, release = (context.Event() for _ in range(3))
+    results = context.Queue()
+    holder = context.Process(
+        target=_cross_process_full_writer_worker,
+        args=(str(root), ready, entered, release, results),
+    )
+
+    def cold_get():
+        try:
+            outcome.append(mcp_runtime.get_or_init_engine(root))
+        except BaseException as exc:
+            outcome.append(exc)
+
+    thread = threading.Thread(target=cold_get)
+    try:
+        holder.start()
+        assert entered.wait(5), "other process did not hold full_analysis.lock"
+        thread.start()
+        assert attempted.wait(5), "cold getter did not reach writer admission"
+
+        reader_acquired = threading.Event()
+
+        def read_cache():
+            with mcp_runtime._engine_cache_transaction(root):
+                reader_acquired.set()
+
+        reader = threading.Thread(target=read_cache)
+        reader.start()
+        assert reader_acquired.wait(1), "waiting writer held the MCP cache RLock"
+        reader.join(timeout=2)
+        assert not reader.is_alive()
+    finally:
+        release.set()
+        if thread.ident is not None:
+            thread.join(timeout=10)
+        if holder.pid is not None:
+            holder.join(timeout=10)
+            if holder.is_alive():
+                holder.terminate()
+                holder.join(timeout=5)
+        results.close()
+        results.join_thread()
+    assert not thread.is_alive()
+    assert not holder.is_alive()
+    assert holder.exitcode == 0
+    assert not outcome or outcome[0] is None
+
+
+def test_missing_identity_and_missing_legacy_do_not_publish_migration(
+    tmp_path, monkeypatch
+):
+    from contextor.core import live_state
+    from contextor.core.analysis import state_manager
+
+    root = tmp_path / "repo"
+    root.mkdir()
+    monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(live_state, "connect", lambda _root: None)
+    monkeypatch.setattr(mcp_runtime, "_live_engines", {})
+    monkeypatch.setattr(
+        snapshot_store,
+        "save_snapshot",
+        lambda *_a, **_k: pytest.fail("missing source published migration"),
+    )
+    monkeypatch.setattr(state_manager, "load_engine_state", lambda *_a, **_k: None)
+
+    assert mcp_runtime.get_or_init_engine(root) is None
+    assert not (root / ".contextor").exists()
+
+    PersistentIdentityRegistry(str(root))
+    assert mcp_runtime.get_or_init_engine(root) is None
+    assert read_metadata(repo_cache_dir(root)) is None
+
+
+def test_concurrent_cold_hydration_commits_one_migration_and_one_engine(
+    tmp_path, monkeypatch
+):
+    from contextor.core import live_state
+    from contextor.core.analysis import incremental_engine as incremental_module
+    from contextor.core.analysis import state_manager
+    from contextor.core.paths import legacy_repo_cache_dir
+
+    root = tmp_path / "repo"
+    root.mkdir()
+    monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(tmp_path / "cache"))
+    PersistentIdentityRegistry(str(root))
+    snapshot_store.save_snapshot(
+        {"legacy": True}, legacy_repo_cache_dir(root), "legacy", writer="test"
+    )
+    monkeypatch.setattr(live_state, "connect", lambda _root: None)
+    for name in (
+        "_live_engines",
+        "_live_engine_revisions",
+        "_live_engine_provenance",
+        "_live_sessions",
+        "_live_journal_revisions",
+    ):
+        monkeypatch.setattr(mcp_runtime, name, {})
+    state = SimpleNamespace()
+    monkeypatch.setattr(state_manager, "load_engine_state", lambda *_a, **_k: state)
+    monkeypatch.setattr(state_manager, "FileStateManager", lambda *_a: object())
+
+    class Engine:
+        def __init__(self, loaded_state, *_args):
+            self.state = loaded_state
+
+    monkeypatch.setattr(incremental_module, "IncrementalAnalysisEngine", Engine)
+    real_save = snapshot_store.save_snapshot
+    commits = []
+
+    def count_commit(*args, **kwargs):
+        commits.append(True)
+        return real_save(*args, **kwargs)
+
+    monkeypatch.setattr(snapshot_store, "save_snapshot", count_commit)
+    barrier = threading.Barrier(3)
+    results = []
+
+    def get_pair():
+        barrier.wait(timeout=5)
+        results.append(mcp_runtime._get_or_init_engine_snapshot(root))
+
+    workers = [threading.Thread(target=get_pair) for _ in range(3)]
+    for worker in workers:
+        worker.start()
+    for worker in workers:
+        worker.join(timeout=10)
+    assert all(not worker.is_alive() for worker in workers)
+    assert len(results) == 3
+    assert len(commits) == 1
+    assert all(engine is results[0][0] for engine, _revision in results)
+    assert all(revision == results[0][1] for _engine, revision in results)
+    assert results[0][1] == read_metadata(repo_cache_dir(root)).revision
 
 
 def test_mcp_refreshes_its_engine_from_a_newer_shared_live_revision(tmp_path, monkeypatch):

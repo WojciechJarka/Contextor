@@ -289,7 +289,7 @@ def test_analysis_refresh_transaction_excludes_same_root_reader(tmp_path, monkey
             "live_publish_revision": 11,
         }
 
-    def refresh_engine(_candidate_root):
+    def refresh_engine(_candidate_root, **_kwargs):
         refresh_entered.set()
         release_refresh.wait()
         mcp_runtime._live_engines[root_key] = new_engine
@@ -359,7 +359,7 @@ def test_analysis_refresh_transaction_is_reentrant(tmp_path, monkeypatch):
             "live_publish_revision": 13,
         }
 
-    def reentrant_get(candidate_root):
+    def reentrant_get(candidate_root, **_kwargs):
         with mcp_runtime._engine_cache_transaction(candidate_root):
             mcp_runtime._live_engines[root_key] = engine
             return engine
@@ -430,7 +430,7 @@ def test_update_file_refresh_uses_same_root_transaction(tmp_path, monkeypatch):
         def update_file(self, *_args, **_kwargs):
             return {"status": "ok", "revision": 22, "result": result}
 
-    def fake_get_or_init_engine(_root):
+    def fake_get_or_init_engine(_root, **_kwargs):
         calls.append(True)
         if len(calls) == 1:
             return old_engine
@@ -516,7 +516,7 @@ def test_file_edit_context_binds_engine_and_revision_atomically(tmp_path, monkey
     result_box = []
     errors = []
 
-    def fake_get_or_init_engine(_root):
+    def fake_get_or_init_engine(_root, **_kwargs):
         mcp_runtime._live_engines[root_key] = engine_one
         mcp_runtime._live_engine_revisions[root_key] = 41
         snapshot_entered.set()
@@ -1154,7 +1154,7 @@ def test_project_analysis_job_fails_closed_when_canonical_engine_is_missing(
         }
 
     monkeypatch.setattr(analysis_jobs, "_run_analysis_worker", fake_worker)
-    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: None)
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root, **_kwargs: None)
     mcp_runtime._live_engines[str(repo)] = SimpleNamespace(
         state=SimpleNamespace(revision=10)
     )
@@ -1189,7 +1189,7 @@ def test_project_analysis_job_fails_closed_on_canonical_revision_mismatch(
     monkeypatch.setattr(analysis_jobs, "_run_analysis_worker", fake_worker)
     mismatched_engine = SimpleNamespace(state=SimpleNamespace(revision=10))
 
-    def fake_get_or_init_engine(_root):
+    def fake_get_or_init_engine(_root, **_kwargs):
         mcp_runtime._live_engines[str(repo)] = mismatched_engine
         return mismatched_engine
 
@@ -1225,7 +1225,7 @@ def test_project_analysis_job_certifies_matching_canonical_revision(
     monkeypatch.setattr(analysis_jobs, "_run_analysis_worker", fake_worker)
     matching_engine = SimpleNamespace(state=SimpleNamespace(revision=11))
 
-    def fake_get_or_init_engine(_root):
+    def fake_get_or_init_engine(_root, **_kwargs):
         mcp_runtime._live_engines[str(repo)] = matching_engine
         return matching_engine
 
@@ -2913,7 +2913,7 @@ def test_mcp_update_file_live_branch_delegates_without_local_persistence(
     monkeypatch.setattr(
         "contextor.core.live_state.connect", lambda _root: FakeLiveClient()
     )
-    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: engine)
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root, **_kwargs: engine)
     monkeypatch.setattr(
         mcp_runtime,
         "_engine_cache_transaction",
@@ -2940,6 +2940,128 @@ def test_mcp_update_file_live_branch_delegates_without_local_persistence(
     assert remote_calls == [(str(target), "mcp")]
     assert response["status"] == "UPDATED"
     assert response["live_state_persisted"] is True
+
+
+def test_project_analysis_cold_migration_exits_outer_cache_transaction(
+    tmp_path, monkeypatch
+):
+    from contextlib import contextmanager
+
+    root = tmp_path / "repo"
+    root.mkdir()
+    root_key = str(root.resolve())
+    engine = SimpleNamespace(state=SimpleNamespace(revision=18))
+    monkeypatch.setattr(mcp_runtime, "_live_engines", {})
+    monkeypatch.setattr(mcp_runtime, "_live_engine_revisions", {})
+    real_transaction = mcp_runtime._engine_cache_transaction
+    depth = 0
+    calls = []
+
+    @contextmanager
+    def observed_transaction(candidate_root):
+        nonlocal depth
+        with real_transaction(candidate_root) as key:
+            depth += 1
+            try:
+                yield key
+            finally:
+                depth -= 1
+
+    def fake_get(_root, *, _defer_migration=False):
+        calls.append((_defer_migration, depth))
+        if _defer_migration:
+            return mcp_runtime._MIGRATION_NEEDED
+        assert depth == 0
+        with mcp_runtime._engine_cache_transaction(root):
+            mcp_runtime._live_engines[root_key] = engine
+            mcp_runtime._live_engine_revisions[root_key] = 18
+        return engine
+
+    async def worker(*_args, **_kwargs):
+        return {"live_publish_status": "success", "live_publish_revision": 18}
+
+    writes = []
+    monkeypatch.setattr(mcp_runtime, "_engine_cache_transaction", observed_transaction)
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", fake_get)
+    monkeypatch.setattr(analysis_jobs, "_run_analysis_worker", worker)
+    monkeypatch.setattr(analysis_jobs, "_write_analysis_job", lambda _r, job: writes.append(job))
+    asyncio.run(
+        analysis_jobs._execute_analysis_job(
+            root, _project_analysis_job(root, "cold-analysis-refresh"), None, []
+        )
+    )
+    assert calls == [(True, 1), (False, 0)]
+    assert writes[-1]["status"] == "completed"
+    assert mcp_runtime._live_engine_revisions[root_key] == 18
+
+
+@pytest.mark.parametrize("hydrated", [True, False])
+def test_direct_live_update_cold_refresh_exits_outer_cache_and_checks_revision(
+    tmp_path, monkeypatch, hydrated
+):
+    from contextlib import contextmanager
+
+    root = tmp_path / "repo"
+    root.mkdir()
+    root_key = str(root.resolve())
+    target = root / "provider.py"
+    target.write_text("VALUE = 1\n", encoding="utf-8")
+    old = SimpleNamespace(state=SimpleNamespace(artifacts={"provider": {}}))
+    current = SimpleNamespace(
+        state=SimpleNamespace(artifacts={"provider": {}}, revision=42)
+    )
+    result = SimpleNamespace(
+        status="UPDATED", file_path=str(target), graph_state="fresh",
+        dependencies_state="fresh", blast_radius_state="fresh",
+        local_metrics_state="deferred", global_metrics_state="deferred",
+        artifact_consumption_state="fresh", affected_modules=[], delta=None,
+    )
+    remote_calls = []
+
+    class Client:
+        def update_file(self, *_args, **_kwargs):
+            remote_calls.append(True)
+            return {"status": "ok", "revision": 42, "result": result}
+
+    real_transaction = mcp_runtime._engine_cache_transaction
+    depth = 0
+    calls = []
+
+    @contextmanager
+    def observed_transaction(candidate_root):
+        nonlocal depth
+        with real_transaction(candidate_root) as key:
+            depth += 1
+            try:
+                yield key
+            finally:
+                depth -= 1
+
+    def fake_get(_root, *, _defer_migration=False):
+        calls.append((_defer_migration, depth))
+        if len(calls) == 1:
+            return old
+        if _defer_migration:
+            return mcp_runtime._MIGRATION_NEEDED
+        assert depth == 0
+        assert root_key not in mcp_runtime._live_engine_revisions
+        if hydrated:
+            with mcp_runtime._engine_cache_transaction(root):
+                mcp_runtime._live_engines[root_key] = current
+                mcp_runtime._live_engine_revisions[root_key] = 42
+            return current
+        return None
+
+    monkeypatch.setattr("contextor.core.live_state.connect", lambda _root: Client())
+    monkeypatch.setattr(mcp_runtime, "_engine_cache_transaction", observed_transaction)
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", fake_get)
+    monkeypatch.setattr(mcp_runtime, "_live_engines", {})
+    monkeypatch.setattr(mcp_runtime, "_live_engine_revisions", {})
+    monkeypatch.setattr(update_file_module, "_mcp_runtime_restart_required", lambda _p: False)
+    response = json.loads(update_file_module.update_file(str(root), str(target)))
+    assert remote_calls == [True]
+    assert calls == [(False, 0), (True, 1), (False, 0)]
+    assert response["status"] == ("UPDATED" if hydrated else "ERROR")
 
 
 def test_mcp_update_file_local_persistence_exception_keeps_error_response(
