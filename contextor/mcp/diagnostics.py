@@ -31,6 +31,15 @@ def syntax_diagnostics_for_path(
             "errors": None,
         }
 
+    if getattr(state, "resync_required", False):
+        return {
+            "status": "unavailable",
+            "availability": "stale",
+            "materialized": False,
+            "source_path": canonical_path,
+            "errors": None,
+        }
+
     family_state = getattr(state, "syntax_diagnostics_state", None)
     facts = getattr(state, "syntax_diagnostics_by_path", None)
     if family_state != "fresh" or not isinstance(facts, dict):
@@ -136,6 +145,18 @@ def diagnostics_summary_for_completed_job(summary: dict[str, Any], job: dict[str
     skipped = job.get("skipped_python_files")
     if not isinstance(skipped, list):
         return summary
+
+    syntax = summary.get("syntax_errors")
+    availability = summary.get("availability")
+    if (
+        (isinstance(syntax, dict) and syntax.get("availability") == "stale")
+        or (
+            isinstance(availability, dict)
+            and availability.get("syntax_errors") == "stale"
+        )
+    ):
+        return summary
+
     syntax_count = sum("not valid Python" in str(item.get("reason", "")) for item in skipped)
     result = dict(summary)
     result["syntax_errors"] = {"count": syntax_count, "availability": "fresh"}

@@ -378,6 +378,10 @@ def ensure_collisions(state: RepositoryAnalysisState) -> None:
     if not hasattr(state, "collision_facts") or state.collision_facts is None:
         state.collision_facts = {}
 
+    if getattr(state, "resync_required", False):
+        state.collisions_state = "stale"
+        return
+
     # A. Stale state: untrusted/desynced source facts -> do NOT auto-heal
     if state.collisions_state == "stale":
         return

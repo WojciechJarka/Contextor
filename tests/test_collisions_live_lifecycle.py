@@ -15,7 +15,7 @@ Verifies:
 import ast
 import tempfile
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -260,6 +260,37 @@ def test_completeness_helper_and_materialization():
     state.collisions_state = "stale"
     ensure_collisions(state)
     assert state.collisions_state == "stale"
+
+
+@pytest.mark.parametrize("marker", ["fresh", "deferred"])
+def test_resync_collision_materialization_stales_without_recomputing_or_erasing(marker):
+    collision_facts = {"a": []}
+    collisions = [object()]
+    state = RepositoryAnalysisState(
+        modules={
+            "a": Module(module_id="a", path="a.py", absolute_path="/tmp/a.py", imports=[])
+        },
+        collision_facts=collision_facts,
+        collisions=collisions,
+        collisions_state=marker,
+    )
+    state.resync_required = True
+    assert collision_facts_complete(state) is True
+
+    with patch(
+        "contextor.core.validator.collisions.resolve_collision_candidate_codes",
+        return_value=collision_facts,
+    ) as resolve, patch(
+        "contextor.core.validator.collisions.compute_collisions_from_facts",
+        return_value=[],
+    ) as compute:
+        ensure_collisions(state)
+
+    assert state.collisions_state == "stale"
+    assert state.collisions is collisions
+    assert state.collision_facts is collision_facts
+    resolve.assert_not_called()
+    compute.assert_not_called()
 
 
 def test_incremental_engine_end_to_end_collision_lifecycle():

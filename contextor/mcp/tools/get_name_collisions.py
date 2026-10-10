@@ -108,6 +108,8 @@ def get_name_collisions(
         }
     ):
         availability = "unavailable"
+    if state is not None and getattr(state, "resync_required", False):
+        availability = "stale"
     if availability != "fresh":
         payload = {
             "total": None,

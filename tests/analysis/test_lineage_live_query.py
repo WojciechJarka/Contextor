@@ -1340,6 +1340,29 @@ def test_live_lineage_state_freshness_marks_last_known_good_target_module_stale(
     )
 
 
+def test_live_symbol_lineage_lkg_without_resync_keeps_selected_facts():
+    state, _backend, _selected = _owner_name_projection_fixture()
+    state.module_parse_freshness = {
+        "pkg.mod": {"state": "stale", "error": "syntax failure"},
+    }
+    state.resync_required = False
+
+    result = query_live_symbol_lineage(
+        state,
+        "A17/2",
+        ("calls_interfaces", "state"),
+    )
+
+    assert result.resolution.status == "resolved"
+    assert result.selected is not None
+    assert result.owner_names == {
+        "17/2": "pkg.mod",
+        "A18/1": "pkg.mod::other",
+    }
+    assert result.state_freshness["canonical_state"] == "stale"
+    assert result.state_freshness["families"]["module"] == "stale"
+
+
 def test_live_lineage_state_freshness_marks_resync_required():
     state, backend = _fixture()
     state.resync_required = True
@@ -1378,6 +1401,41 @@ def test_live_symbol_lineage_result_carries_selected_owner_names_and_same_revisi
         result.selected.facts.metadata.revision
         == result.state_freshness["canonical_revision"]
     )
+
+
+def test_live_symbol_lineage_resync_returns_unavailable_without_selected_facts():
+    state, _backend, selected = _owner_name_projection_fixture()
+    state.resync_required = True
+    original_sources = state.lineage_facts_by_source
+
+    blocked = query_live_symbol_lineage(
+        state,
+        "A17/2",
+        ("calls_interfaces", "state"),
+    )
+
+    assert blocked.resolution.status == "unavailable"
+    assert blocked.resolution.query == "A17/2"
+    assert blocked.selected is None
+    assert blocked.owner_names == {}
+    assert blocked.unavailable_reason == "Canonical state requires resynchronization."
+    assert blocked.state_freshness["canonical_state"] == "stale"
+    assert blocked.state_freshness["advisory_warning"] == blocked.unavailable_reason
+    assert state.lineage_facts_by_source is original_sources
+    assert selected is not None
+
+    state.resync_required = False
+    recovered = query_live_symbol_lineage(
+        state,
+        "A17/2",
+        ("calls_interfaces", "state"),
+    )
+    assert recovered.resolution.status == "resolved"
+    assert recovered.selected is not None
+    assert recovered.owner_names == {
+        "17/2": "pkg.mod",
+        "A18/1": "pkg.mod::other",
+    }
 
 
 def test_unresolved_and_unavailable_live_symbol_results_have_no_owner_names_but_keep_freshness():

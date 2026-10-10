@@ -58,6 +58,29 @@ def diagnostics_summary_for_state(
             },
         }
 
+    if getattr(state, "resync_required", False):
+        unavailable = {
+            "count": None,
+            "availability": "stale",
+        }
+        return {
+            "syntax_errors": dict(unavailable),
+            "name_collisions": {
+                "count": None,
+                "critical": None,
+                "warning": None,
+                "info": None,
+                "availability": "stale",
+            },
+            "cycles": dict(unavailable),
+            "attention_required": False,
+            "availability": {
+                "syntax_errors": "stale",
+                "name_collisions": "stale",
+                "cycles": "stale",
+            },
+        }
+
     syntax_state = getattr(
         state,
         "syntax_diagnostics_state",

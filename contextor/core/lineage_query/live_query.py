@@ -484,6 +484,21 @@ def query_live_symbol_lineage(
         state
     )
 
+    if getattr(state, "resync_required", False):
+        return LiveSymbolLineageQueryResult(
+            resolution=LineageTargetResolution(
+                status="unavailable",
+                query=raw_query,
+            ),
+            unavailable_reason=(
+                "Canonical state requires resynchronization."
+            ),
+            state_freshness=build_live_lineage_state_freshness(
+                state,
+                backend,
+            ),
+        )
+
     try:
         canonical_query = backend.canonicalize_qualified_identity(
             raw_query

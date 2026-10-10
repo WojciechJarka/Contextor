@@ -109,6 +109,124 @@ def test_missing_markers_with_payload_do_not_certify_diagnostics(tmp_path, monke
     assert result["details"] == []
 
 
+def test_resync_diagnostics_summary_hides_fresh_payloads_without_mutation():
+    syntax_facts = {
+        "broken.py": {"status": "checked_with_errors", "errors": [{"message": "bad"}]}
+    }
+    collisions = [_collision()]
+    cycles = [["a", "b", "a"]]
+    state = SimpleNamespace(
+        resync_required=True,
+        syntax_diagnostics_state="fresh",
+        syntax_diagnostics_by_path=syntax_facts,
+        collisions_state="fresh",
+        collisions=collisions,
+        cycles_state="fresh",
+        cycles=cycles,
+    )
+
+    summary = diagnostics_summary_for_state(state)
+
+    assert summary["availability"] == {
+        "syntax_errors": "stale",
+        "name_collisions": "stale",
+        "cycles": "stale",
+    }
+    assert summary["syntax_errors"] == {"count": None, "availability": "stale"}
+    assert summary["name_collisions"] == {
+        "count": None,
+        "critical": None,
+        "warning": None,
+        "info": None,
+        "availability": "stale",
+    }
+    assert summary["cycles"] == {"count": None, "availability": "stale"}
+    assert summary["attention_required"] is False
+    assert state.syntax_diagnostics_by_path is syntax_facts
+    assert state.collisions is collisions
+    assert state.cycles is cycles
+
+    state.resync_required = False
+    recovered = diagnostics_summary_for_state(state)
+    assert recovered["availability"] == {
+        "syntax_errors": "fresh",
+        "name_collisions": "fresh",
+        "cycles": "fresh",
+    }
+    assert recovered["syntax_errors"]["count"] == 1
+    assert recovered["name_collisions"]["count"] == 1
+    assert recovered["cycles"]["count"] == 1
+    assert recovered["attention_required"] is True
+
+
+def test_resync_syntax_path_does_not_materialize_fresh_error_fact():
+    facts = {
+        "broken.py": {"status": "checked_with_errors", "errors": [{"message": "bad"}]}
+    }
+    state = SimpleNamespace(
+        resync_required=True,
+        syntax_diagnostics_state="fresh",
+        syntax_diagnostics_by_path=facts,
+    )
+
+    result = syntax_diagnostics_for_path(state, "broken.py")
+
+    assert result == {
+        "status": "unavailable",
+        "availability": "stale",
+        "materialized": False,
+        "source_path": "broken.py",
+        "errors": None,
+    }
+    assert state.syntax_diagnostics_by_path is facts
+
+    state.resync_required = False
+    recovered = syntax_diagnostics_for_path(state, "broken.py")
+    assert recovered["status"] == "checked_with_errors"
+    assert recovered["availability"] == "fresh"
+    assert recovered["materialized"] is True
+    assert recovered["errors"] == [{"message": "bad"}]
+
+
+def test_get_name_collisions_hides_fresh_details_during_resync(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    collisions = [_collision()]
+    state = SimpleNamespace(
+        resync_required=True,
+        collisions_state="fresh",
+        collisions=collisions,
+        syntax_diagnostics_state="fresh",
+        syntax_diagnostics_by_path={
+            "broken.py": {"status": "checked_with_errors", "errors": [{"message": "bad"}]}
+        },
+        cycles_state="fresh",
+        cycles=[["a", "b", "a"]],
+    )
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: SimpleNamespace(state=state))
+
+    result = json.loads(get_name_collisions(str(repo), representation="named"))
+
+    assert result["availability"] == "stale"
+    assert result["total"] is None
+    assert result["matched"] is None
+    assert result["details"] == []
+    assert result["returned"] == 0
+    assert result["diagnostics_summary"]["availability"] == {
+        "syntax_errors": "stale",
+        "name_collisions": "stale",
+        "cycles": "stale",
+    }
+    assert result["diagnostics_summary"]["name_collisions"]["count"] is None
+    assert state.collisions is collisions
+
+    state.resync_required = False
+    recovered = json.loads(get_name_collisions(str(repo), representation="named"))
+    assert recovered["availability"] == "fresh"
+    assert recovered["total"] == 1
+    assert len(recovered["details"]) == 1
+
+
 def test_diagnostics_summary_does_not_fabricate_unavailable_counts():
     summary = diagnostics_summary_for_state(SimpleNamespace(
         collisions_state="deferred", cycles_state="unavailable", collisions=None, cycles=None
@@ -214,6 +332,96 @@ def test_analysis_status_uses_only_the_exact_completed_project_job_for_syntax(tm
     monkeypatch.setitem(mcp_runtime._live_engines, str(repo.resolve()), SimpleNamespace(state=state))
     result = json.loads(get_analysis_status(str(repo), job_id))
     assert result["diagnostics_summary"]["syntax_errors"] == {"count": 1, "availability": "fresh"}
+
+
+def test_completed_job_keeps_resync_stale_summary_identity():
+    state = SimpleNamespace(
+        resync_required=True,
+        syntax_diagnostics_state="fresh",
+        syntax_diagnostics_by_path={"broken.py": {"status": "checked_with_errors"}},
+        collisions_state="fresh",
+        collisions=[_collision()],
+        cycles_state="fresh",
+        cycles=[["a", "b", "a"]],
+    )
+    summary = diagnostics_summary_for_state(state)
+    result = diagnostics_summary_for_completed_job(
+        summary,
+        {"status": "completed", "operation": "project", "skipped_python_files": [{"reason": "not valid Python"}]},
+    )
+
+    assert result is summary
+    assert result["syntax_errors"] == {"count": None, "availability": "stale"}
+    assert result["availability"]["syntax_errors"] == "stale"
+    assert result["name_collisions"]["availability"] == "stale"
+    assert result["cycles"]["availability"] == "stale"
+    assert result["attention_required"] is False
+
+
+@pytest.mark.parametrize("stale_field", ["syntax_errors", "availability"])
+def test_completed_job_fail_closes_either_stale_syntax_marker(stale_field):
+    summary = diagnostics_summary_for_state(SimpleNamespace(
+        syntax_diagnostics_state="fresh", syntax_diagnostics_by_path={},
+        collisions_state="fresh", collisions=[], cycles_state="fresh", cycles=[],
+    ))
+    if stale_field == "syntax_errors":
+        summary["syntax_errors"] = {"count": None, "availability": "stale"}
+    else:
+        summary["availability"]["syntax_errors"] = "stale"
+
+    result = diagnostics_summary_for_completed_job(
+        summary,
+        {"status": "completed", "operation": "project", "skipped_python_files": [{"reason": "not valid Python"}]},
+    )
+    assert result is summary
+
+
+def test_completed_job_without_skipped_list_keeps_summary_identity():
+    summary = diagnostics_summary_for_state(SimpleNamespace())
+    assert diagnostics_summary_for_completed_job(
+        summary, {"status": "completed", "operation": "project"}
+    ) is summary
+
+
+@pytest.mark.parametrize("skipped, expected", [([], 0), ([{"reason": "not valid Python"}], 1)])
+def test_completed_job_nonstale_enrichment_preserves_other_families(skipped, expected):
+    summary = diagnostics_summary_for_state(SimpleNamespace(
+        syntax_diagnostics_state="fresh", syntax_diagnostics_by_path={},
+        collisions_state="fresh", collisions=[], cycles_state="fresh", cycles=[],
+    ))
+    result = diagnostics_summary_for_completed_job(
+        summary, {"status": "completed", "operation": "project", "skipped_python_files": skipped},
+    )
+    assert result["syntax_errors"] == {"count": expected, "availability": "fresh"}
+    assert result["availability"]["syntax_errors"] == "fresh"
+    assert result["attention_required"] is bool(expected)
+    assert result["name_collisions"] is summary["name_collisions"]
+    assert result["cycles"] is summary["cycles"]
+    assert result["availability"]["name_collisions"] == summary["availability"]["name_collisions"]
+    assert result["availability"]["cycles"] == summary["availability"]["cycles"]
+
+
+def test_analysis_status_keeps_resync_stale_syntax_publicly(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    (repo / ".contextor" / "analysis_jobs").mkdir(parents=True)
+    job_id = "b" * 32
+    (repo / ".contextor" / "analysis_jobs" / f"{job_id}.json").write_text(json.dumps({
+        "job_id": job_id, "operation": "project", "repo_path": str(repo), "status": "completed",
+        "skipped_python_files": [{"reason": "not valid Python"}], "live_publish_status": "success",
+    }), encoding="utf-8")
+    state = SimpleNamespace(
+        resync_required=True,
+        syntax_diagnostics_state="fresh", syntax_diagnostics_by_path={"broken.py": {"status": "checked_with_errors"}},
+        collisions_state="fresh", collisions=[_collision()], cycles_state="fresh", cycles=[["a", "b", "a"]],
+    )
+    monkeypatch.setitem(mcp_runtime._live_engines, str(repo.resolve()), SimpleNamespace(state=state))
+
+    result = json.loads(get_analysis_status(str(repo), job_id))
+    summary = result["diagnostics_summary"]
+    assert summary["syntax_errors"] == {"count": None, "availability": "stale"}
+    assert summary["availability"]["syntax_errors"] == "stale"
+    assert summary["attention_required"] is False
+    assert result["diagnostics_attention_required"] is False
 
 
 def test_wrapper_injects_health_for_analytical_not_found(tmp_path, monkeypatch):
