@@ -138,9 +138,19 @@ def _cross_process_local_candidate_worker(
         if not first:
             assert mcp_runtime.get_or_init_engine(Path(repo_text)) is not None
             ready.set()
-        results.put(_local_update(Path(repo_text), Path(target_text)))
+        response = _local_update(Path(repo_text), Path(target_text))
+        results.put({
+            "role": "first" if first else "second",
+            "response": response,
+        })
     except BaseException as exc:
-        results.put({"status": "WORKER_ERROR", "error": repr(exc)})
+        results.put({
+            "role": "first" if first else "second",
+            "response": {
+                "status": "WORKER_ERROR",
+                "error": repr(exc),
+            },
+        })
 
 
 @pytest.mark.parametrize("prior_generation", ["never_acquired", "released"])
@@ -449,10 +459,22 @@ def test_two_mcp_processes_cannot_enter_local_candidate_concurrently(
 
     assert first.exitcode == 0
     assert second.exitcode == 0
-    first_result = results.get(timeout=5)
-    second_result = results.get(timeout=5)
+    received = [
+        results.get(timeout=5),
+        results.get(timeout=5),
+    ]
+    by_role = {
+        item["role"]: item["response"]
+        for item in received
+    }
+    assert set(by_role) == {"first", "second"}
+
+    first_result = by_role["first"]
+    second_result = by_role["second"]
+
     assert first_result["status"] == "UPDATED"
-    assert second_result["status"] in {"ERROR", "UPDATED"}
+    assert second_result["status"] == "ERROR"
+    assert "stale" in second_result.get("error", "").lower()
     assert not update_started.is_set()
     assert read_metadata(repo_cache_dir(repo)).revision == 2
 
