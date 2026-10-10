@@ -5,6 +5,7 @@ import pytest
 
 from contextor.core.report_query import IndexCatalog
 from contextor.mcp import query_helpers
+from contextor.mcp.query_helpers import module_truth_unavailable as canonical_module_truth_unavailable
 from contextor.mcp import runtime as mcp_runtime
 from contextor.mcp.tools.get_file_edit_context import get_file_edit_context
 
@@ -104,6 +105,38 @@ def test_syntax_error_survives_structural_fail_closed_response(monkeypatch, harn
         "message": "invalid syntax", "line_number": 3, "column_number": 7
     }]
     assert result["syntax_diagnostics"]["availability"] == "fresh"
+
+
+def test_untrusted_module_truth_is_gated_before_canonical_syntax_projection(
+    monkeypatch, harness
+):
+    state = _state(
+        family_state="fresh",
+        fact={
+            "status": "checked_with_errors",
+            "errors": [{"message": "invalid syntax", "line_number": 3, "column_number": 7}],
+        },
+    )
+    state.module_parse_freshness = {"pkg.module": {"state": "unknown"}}
+    _install_state(monkeypatch, harness, state)
+    monkeypatch.setattr(
+        query_helpers,
+        "module_truth_unavailable",
+        canonical_module_truth_unavailable,
+    )
+
+    result = json.loads(
+        get_file_edit_context(str(harness.root), file_path="pkg/module.py")
+    )
+
+    assert result["status"] == "unavailable"
+    assert result["provenance"] == "untrusted"
+    assert result["syntax_diagnostics"]["availability"] == "fresh"
+    assert result["syntax_diagnostics"]["errors"] == [
+        {"message": "invalid syntax", "line_number": 3, "column_number": 7}
+    ]
+    assert "consumers" not in result
+    assert "risk_score" not in result
 
 
 @pytest.mark.parametrize("family_state", ["not_materialized", "deferred"])

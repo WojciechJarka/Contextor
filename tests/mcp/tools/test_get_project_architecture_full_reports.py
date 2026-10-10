@@ -190,6 +190,11 @@ def test_project_architecture_overlay_distinguishes_untrusted_from_lkg(tmp_path,
     engine = architecture_tool.mcp_runtime.get_or_init_engine(tmp_path)
     entry = {"state": "unknown"}
     engine.state.module_parse_freshness = {"pkg.mod": entry}
+    monkeypatch.setattr(
+        architecture_tool.query_helpers,
+        "build_state_freshness",
+        build_state_freshness,
+    )
 
     result = json.loads(mcp_server.get_project_architecture.fn(repo_path=str(tmp_path)))
 
@@ -197,6 +202,7 @@ def test_project_architecture_overlay_distinguishes_untrusted_from_lkg(tmp_path,
     assert live["parse_stale_modules"]["pkg.mod"]["state"] == "unavailable"
     assert live["parse_stale_modules"]["pkg.mod"]["provenance"] == "untrusted"
     assert live["state_freshness"]["canonical_state"] == "unavailable"
+    assert live["state_freshness"]["families"]["module"] == "unavailable"
     assert "untrusted" in live["state_freshness"]["advisory_warning"]
     assert "last-known-good" not in live["state_freshness"]["advisory_warning"]
     assert engine.state.module_parse_freshness["pkg.mod"] is entry

@@ -337,8 +337,10 @@ def test_untrusted_module_truth_prevents_symbol_calls_complete_coverage(tmp_path
 
     result = _load(contextor_fact_lineage(str(tmp_path), "symbol_calls"))
 
-    assert result["status"] == "partial"
+    assert result["status"] == "unavailable"
     assert result["coverage"]["stale_module_count"] == 1
+    assert result["freshness"]["canonical_state"] == "unavailable"
+    assert result["freshness"]["families"]["module"] == "unavailable"
     assert any(
         gap["expected_edge"] == "COMPLETE_SYMBOL_CALLS_COVERAGE"
         for gap in result["unresolved"]

@@ -159,3 +159,123 @@ def test_global_resync_still_wins_over_untrusted_module_canonical_state(tmp_path
 
     assert freshness["canonical_state"] == "stale"
     assert freshness["families"]["module"] == "unavailable"
+
+
+@pytest.mark.parametrize(
+    "raw_map, expected",
+    [
+        ({"pkg.mod": {"state": "unknown"}}, "unavailable"),
+        ({"pkg.mod": {"state": "stale"}}, "stale"),
+        (
+            {
+                "pkg.fresh": {"state": "fresh"},
+                "pkg.stale": {"state": "stale"},
+                "pkg.unknown": {"state": "unknown"},
+            },
+            "unavailable",
+        ),
+        (
+            {"pkg.fresh": {"state": "fresh"}, "pkg.stale": {"state": "stale"}},
+            "stale",
+        ),
+        (
+            {"pkg.one": {"state": "fresh"}, "pkg.two": {"state": "fresh"}},
+            "fresh",
+        ),
+        ({}, "fresh"),
+        ({1: {"state": "fresh"}}, "unavailable"),
+    ],
+    ids=[
+        "untrusted",
+        "stale",
+        "mixed-untrusted-wins",
+        "stale-wins-over-fresh",
+        "fresh-only",
+        "empty",
+        "invalid-key",
+    ],
+)
+def test_unscoped_module_freshness_aggregates_parse_truth_without_mutation(
+    tmp_path, raw_map, expected
+):
+    state = _state("fresh")
+    state.module_parse_freshness = raw_map
+    entries = dict(raw_map)
+
+    freshness = build_state_freshness(tmp_path, state)
+
+    assert freshness["canonical_state"] == expected
+    assert freshness["families"]["module"] == expected
+    assert state.module_parse_freshness is raw_map
+    for module_name, entry in entries.items():
+        assert state.module_parse_freshness[module_name] is entry
+
+
+@pytest.mark.parametrize(
+    "raw_map",
+    [None, False, [], [("pkg.mod", {"state": "fresh"})]],
+    ids=["none", "false", "empty-list", "pair-iterable"],
+)
+def test_unscoped_module_freshness_rejects_malformed_whole_map(tmp_path, raw_map):
+    state = _state("fresh")
+    state.module_parse_freshness = raw_map
+
+    freshness = build_state_freshness(tmp_path, state)
+
+    assert freshness["canonical_state"] == "unavailable"
+    assert freshness["families"]["module"] == "unavailable"
+    assert state.module_parse_freshness is raw_map
+
+
+def test_unscoped_module_freshness_missing_legacy_map_attribute_remains_fresh(tmp_path):
+    state = _state("fresh")
+
+    freshness = build_state_freshness(tmp_path, state)
+
+    assert freshness["canonical_state"] == "fresh"
+    assert freshness["families"]["module"] == "fresh"
+    assert not hasattr(state, "module_parse_freshness")
+
+
+def test_target_module_freshness_ignores_unrelated_untrusted_module(tmp_path):
+    state = _state("fresh")
+    state.module_parse_freshness = {
+        "pkg.target": {"state": "fresh"},
+        "pkg.other": {"state": "unknown"},
+    }
+    raw_map = state.module_parse_freshness
+    target_entry = raw_map["pkg.target"]
+    other_entry = raw_map["pkg.other"]
+
+    freshness = build_state_freshness(tmp_path, state, target_module="pkg.target")
+
+    assert freshness["canonical_state"] == "fresh"
+    assert freshness["families"]["module"] == "fresh"
+    assert state.module_parse_freshness is raw_map
+    assert raw_map["pkg.target"] is target_entry
+    assert raw_map["pkg.other"] is other_entry
+
+
+@pytest.mark.parametrize(
+    "raw_map, expected_family",
+    [
+        (None, "unavailable"),
+        ({"pkg.mod": {"state": "unknown"}}, "unavailable"),
+        ({"pkg.mod": {"state": "stale"}}, "stale"),
+        ({"pkg.mod": {"state": "fresh"}}, "fresh"),
+    ],
+    ids=["malformed-map", "untrusted", "stale", "fresh"],
+)
+def test_global_resync_keeps_aggregate_parse_truth_but_stales_canonical_state(
+    tmp_path, raw_map, expected_family
+):
+    state = _state("fresh")
+    state.resync_required = True
+    state.module_parse_freshness = raw_map
+
+    freshness = build_state_freshness(tmp_path, state)
+
+    assert freshness["canonical_state"] == "stale"
+    assert freshness["families"]["module"] == expected_family
+    assert state.resync_required is True
+    assert state.module_parse_freshness is raw_map

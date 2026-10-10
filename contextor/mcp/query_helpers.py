@@ -362,14 +362,39 @@ def build_state_freshness(
         provenance = "snapshot"
 
     # 2. Canonical State Internal Health
-    resync_required = getattr(state, "resync_required", False)
-    if resync_required:
-        canonical_state = "stale"
-    elif target_module:
-        truth = module_current_truth(state, target_module)
-        canonical_state = truth.get("state", "fresh")
+    if target_module:
+        module_parse_state = module_current_truth(
+            state,
+            target_module,
+        )["state"]
     else:
-        canonical_state = "fresh"
+        raw_module_freshness = getattr(
+            state,
+            "module_parse_freshness",
+            {},
+        )
+        if not isinstance(raw_module_freshness, dict):
+            module_parse_state = "unavailable"
+        else:
+            module_parse_state = "fresh"
+            for module_name in raw_module_freshness:
+                if type(module_name) is not str:
+                    module_parse_state = "unavailable"
+                    break
+                entry_state = module_current_truth(
+                    state,
+                    module_name,
+                )["state"]
+                if entry_state == "unavailable":
+                    module_parse_state = "unavailable"
+                    break
+                if entry_state == "stale":
+                    module_parse_state = "stale"
+
+    resync_required = getattr(state, "resync_required", False)
+    canonical_state = (
+        "stale" if resync_required else module_parse_state
+    )
 
     # 3. Positive Generation Coherence Proof (Blocker 1 - Fail Closed)
     state_mgr = getattr(engine, "state_manager", None)
@@ -462,11 +487,7 @@ def build_state_freshness(
 
     # 5. Families
     families = {
-        "module": (
-            module_current_truth(state, target_module)["state"]
-            if target_module
-            else "fresh"
-        ),
+        "module": module_parse_state,
         "graph": (
             "fresh"
             if getattr(state, "dependency_graph", None) is not None
