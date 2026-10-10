@@ -208,6 +208,24 @@ def test_artifact_consumption_fresh_contains_both_branches_and_projections(tmp_p
     _assert_all_references_resolve(result)
 
 
+def test_fact_lineage_normalizes_unselected_family_without_changing_selected_gate(
+    tmp_path, monkeypatch
+):
+    state = _state()
+    _install(monkeypatch, tmp_path, state)
+    before = _load(contextor_fact_lineage(str(tmp_path), "syntax_diagnostics"))
+
+    state.cycles_state = "pretend_fresh"
+    after = _load(contextor_fact_lineage(str(tmp_path), "syntax_diagnostics"))
+
+    assert after["freshness"]["families"]["cycles"] == "unavailable"
+    assert after["freshness"]["families"]["syntax_diagnostics"] == "fresh"
+    assert after["status"] == before["status"]
+    assert after["edges"] == before["edges"]
+    assert after["public_projections"] == before["public_projections"]
+    assert state.cycles_state == "pretend_fresh"
+
+
 def test_artifact_consumption_stale_stops_downstream_and_reports_gap(tmp_path, monkeypatch):
     state = _state(artifact_state="stale")
     _install(monkeypatch, tmp_path, state)

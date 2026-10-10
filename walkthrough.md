@@ -1,538 +1,323 @@
-# L32F_PUBLIC_RESYNC_FAIL_CLOSED_FINAL_PATCH
+# L32G-A Public family marker normalization
 
 ## CURRENT_HEAD
 
-58755b725b1809227f6f9c68bda883585562a7a6
+`37e75674f426581d1a379ebaa76b8f034e2e5c09`
 
 ## WORKTREE_BASELINE
 
-Przed edycją zachowano dokładny diff ośmiu zastanych plików source/test. Worktree miał także zmodyfikowany walkthrough.md. Poniższe linie baseline diff są zapisane jako JSON string per line, aby zachować również końcowe spacje bez naruszenia git diff --check.
+DIRECT_EVIDENCE: Before edits, `git status --short` showed only `M walkthrough.md` from the previous task. The four source/test files below were clean. Current HEAD matched the discovery anchor. The previous report was overwritten for this task as requested.
 
-## PREEXISTING_DIFFS_IDENTIFIED
+## FILES_CHANGED
 
-""
-"diff --git a/contextor/core/analysis/incremental/materialization.py b/contextor/core/analysis/incremental/materialization.py"
-"index ff26d73..8e06914 100644"
-"--- a/contextor/core/analysis/incremental/materialization.py"
-"+++ b/contextor/core/analysis/incremental/materialization.py"
-"@@ -378,6 +378,10 @@ def ensure_collisions(state: RepositoryAnalysisState) -> None:"
-"     if not hasattr(state, \"collision_facts\") or state.collision_facts is None:"
-"         state.collision_facts = {}"
-" "
-"+    if getattr(state, \"resync_required\", False):"
-"+        state.collisions_state = \"stale\""
-"+        return"
-"+"
-"     # A. Stale state: untrusted/desynced source facts -> do NOT auto-heal"
-"     if state.collisions_state == \"stale\":"
-"         return"
-"diff --git a/contextor/core/diagnostics_projection.py b/contextor/core/diagnostics_projection.py"
-"index b390fc6..23ee56c 100644"
-"--- a/contextor/core/diagnostics_projection.py"
-"+++ b/contextor/core/diagnostics_projection.py"
-"@@ -58,6 +58,29 @@ def diagnostics_summary_for_state("
-"             },"
-"         }"
-" "
-"+    if getattr(state, \"resync_required\", False):"
-"+        unavailable = {"
-"+            \"count\": None,"
-"+            \"availability\": \"stale\","
-"+        }"
-"+        return {"
-"+            \"syntax_errors\": dict(unavailable),"
-"+            \"name_collisions\": {"
-"+                \"count\": None,"
-"+                \"critical\": None,"
-"+                \"warning\": None,"
-"+                \"info\": None,"
-"+                \"availability\": \"stale\","
-"+            },"
-"+            \"cycles\": dict(unavailable),"
-"+            \"attention_required\": False,"
-"+            \"availability\": {"
-"+                \"syntax_errors\": \"stale\","
-"+                \"name_collisions\": \"stale\","
-"+                \"cycles\": \"stale\","
-"+            },"
-"+        }"
-"+"
-"     syntax_state = getattr("
-"         state,"
-"         \"syntax_diagnostics_state\","
-"diff --git a/contextor/core/lineage_query/live_query.py b/contextor/core/lineage_query/live_query.py"
-"index 793f54b..5648d9b 100644"
-"--- a/contextor/core/lineage_query/live_query.py"
-"+++ b/contextor/core/lineage_query/live_query.py"
-"@@ -484,6 +484,21 @@ def query_live_symbol_lineage("
-"         state"
-"     )"
-" "
-"+    if getattr(state, \"resync_required\", False):"
-"+        return LiveSymbolLineageQueryResult("
-"+            resolution=LineageTargetResolution("
-"+                status=\"unavailable\","
-"+                query=raw_query,"
-"+            ),"
-"+            unavailable_reason=("
-"+                \"Canonical state requires resynchronization.\""
-"+            ),"
-"+            state_freshness=build_live_lineage_state_freshness("
-"+                state,"
-"+                backend,"
-"+            ),"
-"+        )"
-"+"
-"     try:"
-"         canonical_query = backend.canonicalize_qualified_identity("
-"             raw_query"
-"diff --git a/contextor/mcp/diagnostics.py b/contextor/mcp/diagnostics.py"
-"index 7118cdb..ade5527 100644"
-"--- a/contextor/mcp/diagnostics.py"
-"+++ b/contextor/mcp/diagnostics.py"
-"@@ -31,6 +31,15 @@ def syntax_diagnostics_for_path("
-"             \"errors\": None,"
-"         }"
-" "
-"+    if getattr(state, \"resync_required\", False):"
-"+        return {"
-"+            \"status\": \"unavailable\","
-"+            \"availability\": \"stale\","
-"+            \"materialized\": False,"
-"+            \"source_path\": canonical_path,"
-"+            \"errors\": None,"
-"+        }"
-"+"
-"     family_state = getattr(state, \"syntax_diagnostics_state\", None)"
-"     facts = getattr(state, \"syntax_diagnostics_by_path\", None)"
-"     if family_state != \"fresh\" or not isinstance(facts, dict):"
-"diff --git a/contextor/mcp/tools/get_name_collisions.py b/contextor/mcp/tools/get_name_collisions.py"
-"index 114dda8..85da32f 100644"
-"--- a/contextor/mcp/tools/get_name_collisions.py"
-"+++ b/contextor/mcp/tools/get_name_collisions.py"
-"@@ -108,6 +108,8 @@ def get_name_collisions("
-"         }"
-"     ):"
-"         availability = \"unavailable\""
-"+    if state is not None and getattr(state, \"resync_required\", False):"
-"+        availability = \"stale\""
-"     if availability != \"fresh\":"
-"         payload = {"
-"             \"total\": None,"
-"diff --git a/tests/analysis/test_lineage_live_query.py b/tests/analysis/test_lineage_live_query.py"
-"index b1060af..e6b87b9 100644"
-"--- a/tests/analysis/test_lineage_live_query.py"
-"+++ b/tests/analysis/test_lineage_live_query.py"
-"@@ -1340,6 +1340,29 @@ def test_live_lineage_state_freshness_marks_last_known_good_target_module_stale("
-"     )"
-" "
-" "
-"+def test_live_symbol_lineage_lkg_without_resync_keeps_selected_facts():"
-"+    state, _backend, _selected = _owner_name_projection_fixture()"
-"+    state.module_parse_freshness = {"
-"+        \"pkg.mod\": {\"state\": \"stale\", \"error\": \"syntax failure\"},"
-"+    }"
-"+    state.resync_required = False"
-"+"
-"+    result = query_live_symbol_lineage("
-"+        state,"
-"+        \"A17/2\","
-"+        (\"calls_interfaces\", \"state\"),"
-"+    )"
-"+"
-"+    assert result.resolution.status == \"resolved\""
-"+    assert result.selected is not None"
-"+    assert result.owner_names == {"
-"+        \"17/2\": \"pkg.mod\","
-"+        \"A18/1\": \"pkg.mod::other\","
-"+    }"
-"+    assert result.state_freshness[\"canonical_state\"] == \"stale\""
-"+    assert result.state_freshness[\"families\"][\"module\"] == \"stale\""
-"+"
-"+"
-" def test_live_lineage_state_freshness_marks_resync_required():"
-"     state, backend = _fixture()"
-"     state.resync_required = True"
-"@@ -1380,6 +1403,41 @@ def test_live_symbol_lineage_result_carries_selected_owner_names_and_same_revisi"
-"     )"
-" "
-" "
-"+def test_live_symbol_lineage_resync_returns_unavailable_without_selected_facts():"
-"+    state, _backend, selected = _owner_name_projection_fixture()"
-"+    state.resync_required = True"
-"+    original_sources = state.lineage_facts_by_source"
-"+"
-"+    blocked = query_live_symbol_lineage("
-"+        state,"
-"+        \"A17/2\","
-"+        (\"calls_interfaces\", \"state\"),"
-"+    )"
-"+"
-"+    assert blocked.resolution.status == \"unavailable\""
-"+    assert blocked.resolution.query == \"A17/2\""
-"+    assert blocked.selected is None"
-"+    assert blocked.owner_names == {}"
-"+    assert blocked.unavailable_reason == \"Canonical state requires resynchronization.\""
-"+    assert blocked.state_freshness[\"canonical_state\"] == \"stale\""
-"+    assert blocked.state_freshness[\"advisory_warning\"] == blocked.unavailable_reason"
-"+    assert state.lineage_facts_by_source is original_sources"
-"+    assert selected is not None"
-"+"
-"+    state.resync_required = False"
-"+    recovered = query_live_symbol_lineage("
-"+        state,"
-"+        \"A17/2\","
-"+        (\"calls_interfaces\", \"state\"),"
-"+    )"
-"+    assert recovered.resolution.status == \"resolved\""
-"+    assert recovered.selected is not None"
-"+    assert recovered.owner_names == {"
-"+        \"17/2\": \"pkg.mod\","
-"+        \"A18/1\": \"pkg.mod::other\","
-"+    }"
-"+"
-"+"
-" def test_unresolved_and_unavailable_live_symbol_results_have_no_owner_names_but_keep_freshness():"
-"     state, _backend = _fixture()"
-" "
-"diff --git a/tests/test_collisions_live_lifecycle.py b/tests/test_collisions_live_lifecycle.py"
-"index 990d048..b2d5ad6 100644"
-"--- a/tests/test_collisions_live_lifecycle.py"
-"+++ b/tests/test_collisions_live_lifecycle.py"
-"@@ -15,7 +15,7 @@ Verifies:"
-" import ast"
-" import tempfile"
-" from pathlib import Path"
-"-from unittest.mock import MagicMock"
-"+from unittest.mock import MagicMock, patch"
-" "
-" import pytest"
-" "
-"@@ -262,6 +262,37 @@ def test_completeness_helper_and_materialization():"
-"     assert state.collisions_state == \"stale\""
-" "
-" "
-"+@pytest.mark.parametrize(\"marker\", [\"fresh\", \"deferred\"])"
-"+def test_resync_collision_materialization_stales_without_recomputing_or_erasing(marker):"
-"+    collision_facts = {\"a\": []}"
-"+    collisions = [object()]"
-"+    state = RepositoryAnalysisState("
-"+        modules={"
-"+            \"a\": Module(module_id=\"a\", path=\"a.py\", absolute_path=\"/tmp/a.py\", imports=[])"
-"+        },"
-"+        collision_facts=collision_facts,"
-"+        collisions=collisions,"
-"+        collisions_state=marker,"
-"+    )"
-"+    state.resync_required = True"
-"+    assert collision_facts_complete(state) is True"
-"+"
-"+    with patch("
-"+        \"contextor.core.validator.collisions.resolve_collision_candidate_codes\","
-"+        return_value=collision_facts,"
-"+    ) as resolve, patch("
-"+        \"contextor.core.validator.collisions.compute_collisions_from_facts\","
-"+        return_value=[],"
-"+    ) as compute:"
-"+        ensure_collisions(state)"
-"+"
-"+    assert state.collisions_state == \"stale\""
-"+    assert state.collisions is collisions"
-"+    assert state.collision_facts is collision_facts"
-"+    resolve.assert_not_called()"
-"+    compute.assert_not_called()"
-"+"
-"+"
-" def test_incremental_engine_end_to_end_collision_lifecycle():"
-"     \"\"\"End-to-end test of IncrementalAnalysisEngine updating files and managing collisions lifecycle.\"\"\""
-"     with tempfile.TemporaryDirectory() as tmpdir:"
-"diff --git a/tests/test_mcp_diagnostics.py b/tests/test_mcp_diagnostics.py"
-"index 5ba4560..13f8838 100644"
-"--- a/tests/test_mcp_diagnostics.py"
-"+++ b/tests/test_mcp_diagnostics.py"
-"@@ -109,6 +109,124 @@ def test_missing_markers_with_payload_do_not_certify_diagnostics(tmp_path, monke"
-"     assert result[\"details\"] == []"
-" "
-" "
-"+def test_resync_diagnostics_summary_hides_fresh_payloads_without_mutation():"
-"+    syntax_facts = {"
-"+        \"broken.py\": {\"status\": \"checked_with_errors\", \"errors\": [{\"message\": \"bad\"}]}"
-"+    }"
-"+    collisions = [_collision()]"
-"+    cycles = [[\"a\", \"b\", \"a\"]]"
-"+    state = SimpleNamespace("
-"+        resync_required=True,"
-"+        syntax_diagnostics_state=\"fresh\","
-"+        syntax_diagnostics_by_path=syntax_facts,"
-"+        collisions_state=\"fresh\","
-"+        collisions=collisions,"
-"+        cycles_state=\"fresh\","
-"+        cycles=cycles,"
-"+    )"
-"+"
-"+    summary = diagnostics_summary_for_state(state)"
-"+"
-"+    assert summary[\"availability\"] == {"
-"+        \"syntax_errors\": \"stale\","
-"+        \"name_collisions\": \"stale\","
-"+        \"cycles\": \"stale\","
-"+    }"
-"+    assert summary[\"syntax_errors\"] == {\"count\": None, \"availability\": \"stale\"}"
-"+    assert summary[\"name_collisions\"] == {"
-"+        \"count\": None,"
-"+        \"critical\": None,"
-"+        \"warning\": None,"
-"+        \"info\": None,"
-"+        \"availability\": \"stale\","
-"+    }"
-"+    assert summary[\"cycles\"] == {\"count\": None, \"availability\": \"stale\"}"
-"+    assert summary[\"attention_required\"] is False"
-"+    assert state.syntax_diagnostics_by_path is syntax_facts"
-"+    assert state.collisions is collisions"
-"+    assert state.cycles is cycles"
-"+"
-"+    state.resync_required = False"
-"+    recovered = diagnostics_summary_for_state(state)"
-"+    assert recovered[\"availability\"] == {"
-"+        \"syntax_errors\": \"fresh\","
-"+        \"name_collisions\": \"fresh\","
-"+        \"cycles\": \"fresh\","
-"+    }"
-"+    assert recovered[\"syntax_errors\"][\"count\"] == 1"
-"+    assert recovered[\"name_collisions\"][\"count\"] == 1"
-"+    assert recovered[\"cycles\"][\"count\"] == 1"
-"+    assert recovered[\"attention_required\"] is True"
-"+"
-"+"
-"+def test_resync_syntax_path_does_not_materialize_fresh_error_fact():"
-"+    facts = {"
-"+        \"broken.py\": {\"status\": \"checked_with_errors\", \"errors\": [{\"message\": \"bad\"}]}"
-"+    }"
-"+    state = SimpleNamespace("
-"+        resync_required=True,"
-"+        syntax_diagnostics_state=\"fresh\","
-"+        syntax_diagnostics_by_path=facts,"
-"+    )"
-"+"
-"+    result = syntax_diagnostics_for_path(state, \"broken.py\")"
-"+"
-"+    assert result == {"
-"+        \"status\": \"unavailable\","
-"+        \"availability\": \"stale\","
-"+        \"materialized\": False,"
-"+        \"source_path\": \"broken.py\","
-"+        \"errors\": None,"
-"+    }"
-"+    assert state.syntax_diagnostics_by_path is facts"
-"+"
-"+    state.resync_required = False"
-"+    recovered = syntax_diagnostics_for_path(state, \"broken.py\")"
-"+    assert recovered[\"status\"] == \"checked_with_errors\""
-"+    assert recovered[\"availability\"] == \"fresh\""
-"+    assert recovered[\"materialized\"] is True"
-"+    assert recovered[\"errors\"] == [{\"message\": \"bad\"}]"
-"+"
-"+"
-"+def test_get_name_collisions_hides_fresh_details_during_resync(tmp_path, monkeypatch):"
-"+    repo = tmp_path / \"repo\""
-"+    repo.mkdir()"
-"+    collisions = [_collision()]"
-"+    state = SimpleNamespace("
-"+        resync_required=True,"
-"+        collisions_state=\"fresh\","
-"+        collisions=collisions,"
-"+        syntax_diagnostics_state=\"fresh\","
-"+        syntax_diagnostics_by_path={"
-"+            \"broken.py\": {\"status\": \"checked_with_errors\", \"errors\": [{\"message\": \"bad\"}]}"
-"+        },"
-"+        cycles_state=\"fresh\","
-"+        cycles=[[\"a\", \"b\", \"a\"]],"
-"+    )"
-"+    monkeypatch.setattr(mcp_runtime, \"get_or_init_engine\", lambda _root: SimpleNamespace(state=state))"
-"+"
-"+    result = json.loads(get_name_collisions(str(repo), representation=\"named\"))"
-"+"
-"+    assert result[\"availability\"] == \"stale\""
-"+    assert result[\"total\"] is None"
-"+    assert result[\"matched\"] is None"
-"+    assert result[\"details\"] == []"
-"+    assert result[\"returned\"] == 0"
-"+    assert result[\"diagnostics_summary\"][\"availability\"] == {"
-"+        \"syntax_errors\": \"stale\","
-"+        \"name_collisions\": \"stale\","
-"+        \"cycles\": \"stale\","
-"+    }"
-"+    assert result[\"diagnostics_summary\"][\"name_collisions\"][\"count\"] is None"
-"+    assert state.collisions is collisions"
-"+"
-"+    state.resync_required = False"
-"+    recovered = json.loads(get_name_collisions(str(repo), representation=\"named\"))"
-"+    assert recovered[\"availability\"] == \"fresh\""
-"+    assert recovered[\"total\"] == 1"
-"+    assert len(recovered[\"details\"]) == 1"
-"+"
-"+"
-" def test_diagnostics_summary_does_not_fabricate_unavailable_counts():"
-"     summary = diagnostics_summary_for_state(SimpleNamespace("
-"         collisions_state=\"deferred\", cycles_state=\"unavailable\", collisions=None, cycles=None"
+- C:\Temp\Contextor_Repo\contextor\mcp\query_helpers.py
+- C:\Temp\Contextor_Repo\tests\mcp\tools\test_lineage_freshness.py
+- C:\Temp\Contextor_Repo\tests\mcp\tools\test_contextor_fact_lineage.py
+- C:\Temp\Contextor_Repo\tests\mcp\tools\test_get_project_architecture_full_reports.py
+- C:\Temp\Contextor_Repo\walkthrough.md (report only; excluded from source/test FULL_DIFFS)
 
-## NEW_FILES_CHANGED
+## PRE_FIX_RED
 
-C:\Temp\Contextor_Repo\contextor\mcp\diagnostics.py
-C:\Temp\Contextor_Repo\tests\test_mcp_diagnostics.py
-C:\Temp\Contextor_Repo\walkthrough.md (raport)
+DIRECT_EVIDENCE: Added focused tests before the production patch. Ran `& .\.venv\Scripts\python.exe -m pytest -q tests/mcp/tools/test_lineage_freshness.py::test_malformed_family_marker_is_unavailable_without_mutating_state` against the old implementation. Exit 1: 30 failed in 4.14s. All five raw family fields and six invalid marker values were covered. The old public envelope passed raw invalid markers through.
 
-## RED_RESULT
+## POST_FIX_GREEN
 
-Przed patchem produkcyjnym: tests/test_mcp_diagnostics.py::test_completed_job_keeps_resync_stale_summary_identity FAILED (assert result is summary). Publiczna składnia była błędnie promowana stale/count=None do fresh/count=1 i attention_required=True. Exit 1.
+DIRECT_EVIDENCE: After the exact production patch, the six targeted test files completed with exit 0: 168 passed, 1 AuthlibDeprecationWarning, in 111.76s. No full repository test suite was run.
 
-## GREEN_RESULT
+## TARGETED_REGRESSIONS
 
-Po literalnym patchu ten sam test PASSED. Exit 0.
+The run included:
+- C:\Temp\Contextor_Repo\tests\mcp\tools\test_lineage_freshness.py
+- C:\Temp\Contextor_Repo\tests\mcp\tools\test_contextor_fact_lineage.py
+- C:\Temp\Contextor_Repo\tests\mcp\tools\test_get_project_architecture_full_reports.py
+- C:\Temp\Contextor_Repo\tests\test_h3a_workspace_canonical_freshness.py
+- C:\Temp\Contextor_Repo\tests\analysis\test_lineage_live_query.py
+- C:\Temp\Contextor_Repo\tests\analysis\test_lineage_query_backend.py
 
-## TARGETED_REGRESSION_RESULT
+The new unit cases cover None, unknown string, bool, int, list and dict for each of five raw fields; unchanged source field identity; absent attributes and documented defaults; all legal derived states; all LineageFamilyStatus values; explicit resource_limit; and resync metadata separation.
 
-Uruchomiono wskazane sześć plików: tests/test_mcp_diagnostics.py, tests/test_collisions_live_lifecycle.py, tests/analysis/test_lineage_live_query.py, tests/mcp/test_live_diagnostics_narrow.py, tests/live_state/test_runtime_canonical_query.py, tests/mcp/test_runtime_lineage_query.py, oraz istniejący tests/mcp/tools/test_analysis_status_concurrency.py::test_analysis_status_concurrency__explicit_job_id_bypasses_ambiguity. Wynik 149 passed, 1 external AuthlibDeprecationWarning, exit 0. Nie uruchomiono pełnego suite.
+## PUBLIC_INTEGRATION
 
-## PUBLIC_INTEGRATION_RESULT
+CODE_PATH_PROVED by targeted tests: `get_project_architecture` exposes malformed cycles as `state_freshness.families.cycles="unavailable"` while the source marker remains unchanged. `contextor_fact_lineage` exposes malformed unselected cycles as unavailable; selected syntax_diagnostics remains fresh and status, edges and public_projections equal the baseline result.
 
-Contextor get_symbol_implementation pobrał kompletny get_analysis_status.py::get_analysis_status (linie 14-147), workspace_sync=verified, revision=150. Wywołanie helpera: linia 106 diagnostics_summary_for_completed_job(diagnostics_summary(root), job), potem linie 107-108 public_job diagnostics_summary/diagnostics_attention_required. Nie zmieniono get_analysis_status.py. Nowy test test_analysis_status_keeps_resync_stale_syntax_publicly przeszedł w targeted suite: count=null, syntax availability=stale, availability.syntax_errors=stale, attention_required=false.
+## LINEAGE_RESOURCE_LIMIT_COMPATIBILITY
 
-Contextor before edit: get_file_edit_context owner mcp.diagnostics, 8 direct module consumers; get_artifact_blast_radius helpera: direct get_analysis_status i tests.test_mcp_diagnostics, 34 downstream modules (modułowa reachability, nie dowód dynamicznej kompletności). get_symbol_lineage helpera resolved, revision=150. Source anchor w workspace odpowiadał literalnemu SEARCH. Po edit desktop_watcher update_file tests/test_mcp_diagnostics.py revision=151 i contextor/mcp/diagnostics.py revision=152; get_live_events(after_revision=150): continuity=continuous, resync_required=false. get_symbol_implementation helpera: revision=152, workspace_sync=verified, complete AST implementation, linie 141-165. get_file_edit_context obu plików: syntax checked_and_none/fresh, revision=152.
+CONTRACT_PROVED by the enum-parameterized unit test and a separate explicit resource_limit test: every legal LineageFamilyStatus value, including `resource_limit`, passes through unchanged.
+
+## LKG_COMPATIBILITY
+
+CODE_PATH_PROVED by the passing targeted suite: existing module current-truth and LKG coverage in the six files remained green. The patch leaves `module_current_truth` and its projection logic intact.
+
+## LIVE_REVISION_BEFORE_AFTER
+
+Before edit: LIVE revision 152, `resync_required=false`. After edit: revision 156, `resync_required=false`. `get_live_events(after_revision=152, limit=10)` returned `continuity=continuous` with four desktop_watcher `update_file` events: revision 153 test_lineage_freshness.py, 154 test_get_project_architecture_full_reports.py, 155 test_contextor_fact_lineage.py, 156 query_helpers.py. Each event reported UPDATED. No manual update_file, restart, or full analysis was run.
+
+## SOURCE_SYNC_VERIFICATION
+
+DIRECT_EVIDENCE: Before edit, Contextor `get_symbol_implementation` resolved the complete `build_state_freshness` implementation at revision 152 with `workspace_sync=verified`; exact source anchors and HEAD were checked locally. After edit, the same tool resolved the complete implementation at revision 156 with `workspace_sync=verified`, lines 322-526. Contextor blast radius returned 12 direct static consumers and 44 downstream module reachability without truncation; symbol lineage resolved selected interfaces, connections and surfaces. `get_file_edit_context` reported fresh syntax checking for the edited lineage freshness test. Watcher continuity confirms source indexing, not serving MCP process reload.
 
 ## FULL_DIFFS
 
-Poniżej pełny diff zmian wprowadzonych wyłącznie w tym zadaniu, względem zachowanego baseline worktree. Zastany diff względem HEAD jest powyżej; zmiany te nie są przypisane temu zadaniu.
+The following blocks are the complete current Git diffs for every source/test file changed by this task.
+### contextor/mcp/query_helpers.py
+~~~diff
+diff --git a/contextor/mcp/query_helpers.py b/contextor/mcp/query_helpers.py
+index eeea214..299dfcb 100644
+--- a/contextor/mcp/query_helpers.py
++++ b/contextor/mcp/query_helpers.py
+@@ -7,10 +7,30 @@ from contextor.core.analysis.state_manager import (
+     canonical_artifact_consumption_targets,
+     module_current_truth,
+ )
++from contextor.core.domain.lineage_facts import LineageFamilyStatus
 
---- a/contextor/mcp/diagnostics.py
-+++ b/contextor/mcp/diagnostics.py
-@@ -145,6 +145,18 @@
-     skipped = job.get("skipped_python_files")
-     if not isinstance(skipped, list):
-         return summary
+ FUZZY_MIN_SCORE: float = 0.75
+ FUZZY_MAX_CANDIDATES: int = 5
+
++_PUBLIC_DERIVED_FAMILY_STATES = frozenset({
++    "fresh",
++    "stale",
++    "deferred",
++    "unavailable",
++})
 +
-+    syntax = summary.get("syntax_errors")
-+    availability = summary.get("availability")
-+    if (
-+        (isinstance(syntax, dict) and syntax.get("availability") == "stale")
-+        or (
-+            isinstance(availability, dict)
-+            and availability.get("syntax_errors") == "stale"
-+        )
-+    ):
-+        return summary
++_PUBLIC_LINEAGE_FAMILY_STATES = frozenset(
++    status.value for status in LineageFamilyStatus
++)
 +
-     syntax_count = sum("not valid Python" in str(item.get("reason", "")) for item in skipped)
-     result = dict(summary)
-     result["syntax_errors"] = {"count": syntax_count, "availability": "fresh"}
---- a/tests/test_mcp_diagnostics.py
-+++ b/tests/test_mcp_diagnostics.py
-@@ -332,6 +332,96 @@
-     monkeypatch.setitem(mcp_runtime._live_engines, str(repo.resolve()), SimpleNamespace(state=state))
-     result = json.loads(get_analysis_status(str(repo), job_id))
-     assert result["diagnostics_summary"]["syntax_errors"] == {"count": 1, "availability": "fresh"}
++def _normalize_public_family_marker(
++    value: Any,
++    allowed: frozenset[str],
++) -> str:
++    if isinstance(value, str) and value in allowed:
++        return value
++    return "unavailable"
 +
-+
-+def test_completed_job_keeps_resync_stale_summary_identity():
-+    state = SimpleNamespace(
-+        resync_required=True,
-+        syntax_diagnostics_state="fresh",
-+        syntax_diagnostics_by_path={"broken.py": {"status": "checked_with_errors"}},
-+        collisions_state="fresh",
-+        collisions=[_collision()],
-+        cycles_state="fresh",
-+        cycles=[["a", "b", "a"]],
-+    )
-+    summary = diagnostics_summary_for_state(state)
-+    result = diagnostics_summary_for_completed_job(
-+        summary,
-+        {"status": "completed", "operation": "project", "skipped_python_files": [{"reason": "not valid Python"}]},
-+    )
-+
-+    assert result is summary
-+    assert result["syntax_errors"] == {"count": None, "availability": "stale"}
-+    assert result["availability"]["syntax_errors"] == "stale"
-+    assert result["name_collisions"]["availability"] == "stale"
-+    assert result["cycles"]["availability"] == "stale"
-+    assert result["attention_required"] is False
-+
-+
-+@pytest.mark.parametrize("stale_field", ["syntax_errors", "availability"])
-+def test_completed_job_fail_closes_either_stale_syntax_marker(stale_field):
-+    summary = diagnostics_summary_for_state(SimpleNamespace(
-+        syntax_diagnostics_state="fresh", syntax_diagnostics_by_path={},
-+        collisions_state="fresh", collisions=[], cycles_state="fresh", cycles=[],
-+    ))
-+    if stale_field == "syntax_errors":
-+        summary["syntax_errors"] = {"count": None, "availability": "stale"}
-+    else:
-+        summary["availability"]["syntax_errors"] = "stale"
-+
-+    result = diagnostics_summary_for_completed_job(
-+        summary,
-+        {"status": "completed", "operation": "project", "skipped_python_files": [{"reason": "not valid Python"}]},
-+    )
-+    assert result is summary
-+
-+
-+def test_completed_job_without_skipped_list_keeps_summary_identity():
-+    summary = diagnostics_summary_for_state(SimpleNamespace())
-+    assert diagnostics_summary_for_completed_job(
-+        summary, {"status": "completed", "operation": "project"}
-+    ) is summary
-+
-+
-+@pytest.mark.parametrize("skipped, expected", [([], 0), ([{"reason": "not valid Python"}], 1)])
-+def test_completed_job_nonstale_enrichment_preserves_other_families(skipped, expected):
-+    summary = diagnostics_summary_for_state(SimpleNamespace(
-+        syntax_diagnostics_state="fresh", syntax_diagnostics_by_path={},
-+        collisions_state="fresh", collisions=[], cycles_state="fresh", cycles=[],
-+    ))
-+    result = diagnostics_summary_for_completed_job(
-+        summary, {"status": "completed", "operation": "project", "skipped_python_files": skipped},
-+    )
-+    assert result["syntax_errors"] == {"count": expected, "availability": "fresh"}
-+    assert result["availability"]["syntax_errors"] == "fresh"
-+    assert result["attention_required"] is bool(expected)
-+    assert result["name_collisions"] is summary["name_collisions"]
-+    assert result["cycles"] is summary["cycles"]
-+    assert result["availability"]["name_collisions"] == summary["availability"]["name_collisions"]
-+    assert result["availability"]["cycles"] == summary["availability"]["cycles"]
-+
-+
-+def test_analysis_status_keeps_resync_stale_syntax_publicly(tmp_path, monkeypatch):
-+    repo = tmp_path / "repo"
-+    (repo / ".contextor" / "analysis_jobs").mkdir(parents=True)
-+    job_id = "b" * 32
-+    (repo / ".contextor" / "analysis_jobs" / f"{job_id}.json").write_text(json.dumps({
-+        "job_id": job_id, "operation": "project", "repo_path": str(repo), "status": "completed",
-+        "skipped_python_files": [{"reason": "not valid Python"}], "live_publish_status": "success",
-+    }), encoding="utf-8")
-+    state = SimpleNamespace(
-+        resync_required=True,
-+        syntax_diagnostics_state="fresh", syntax_diagnostics_by_path={"broken.py": {"status": "checked_with_errors"}},
-+        collisions_state="fresh", collisions=[_collision()], cycles_state="fresh", cycles=[["a", "b", "a"]],
-+    )
-+    monkeypatch.setitem(mcp_runtime._live_engines, str(repo.resolve()), SimpleNamespace(state=state))
-+
-+    result = json.loads(get_analysis_status(str(repo), job_id))
-+    summary = result["diagnostics_summary"]
-+    assert summary["syntax_errors"] == {"count": None, "availability": "stale"}
-+    assert summary["availability"]["syntax_errors"] == "stale"
-+    assert summary["attention_required"] is False
-+    assert result["diagnostics_attention_required"] is False
+
+ def fuzzy_choice_candidates(
+     query: str,
+@@ -442,13 +462,36 @@ def build_state_freshness(
+
+     # 5. Families
+     families = {
+-        "module": module_current_truth(state, target_module)["state"] if target_module else "fresh",
+-        "graph": "fresh" if getattr(state, "dependency_graph", None) is not None else "unavailable",
+-        "topology": getattr(state, "topology_metrics_state", "deferred"),
+-        "artifact_consumption": getattr(state, "artifact_consumption_state", "deferred"),
+-        "cycles": getattr(state, "cycles_state", "deferred"),
+-        "collisions": getattr(state, "collisions_state", "deferred"),
+-        "lineage": getattr(state, "lineage_facts_state", "not_materialized"),
++        "module": (
++            module_current_truth(state, target_module)["state"]
++            if target_module
++            else "fresh"
++        ),
++        "graph": (
++            "fresh"
++            if getattr(state, "dependency_graph", None) is not None
++            else "unavailable"
++        ),
++        "topology": _normalize_public_family_marker(
++            getattr(state, "topology_metrics_state", "deferred"),
++            _PUBLIC_DERIVED_FAMILY_STATES,
++        ),
++        "artifact_consumption": _normalize_public_family_marker(
++            getattr(state, "artifact_consumption_state", "deferred"),
++            _PUBLIC_DERIVED_FAMILY_STATES,
++        ),
++        "cycles": _normalize_public_family_marker(
++            getattr(state, "cycles_state", "deferred"),
++            _PUBLIC_DERIVED_FAMILY_STATES,
++        ),
++        "collisions": _normalize_public_family_marker(
++            getattr(state, "collisions_state", "deferred"),
++            _PUBLIC_DERIVED_FAMILY_STATES,
++        ),
++        "lineage": _normalize_public_family_marker(
++            getattr(state, "lineage_facts_state", "not_materialized"),
++            _PUBLIC_LINEAGE_FAMILY_STATES,
++        ),
+     }
+
+     # 6. Advisory Warning
+~~~
+### tests/mcp/tools/test_lineage_freshness.py
+~~~diff
+diff --git a/tests/mcp/tools/test_lineage_freshness.py b/tests/mcp/tools/test_lineage_freshness.py
+index 29f838a..a3f908b 100644
+--- a/tests/mcp/tools/test_lineage_freshness.py
++++ b/tests/mcp/tools/test_lineage_freshness.py
+@@ -2,6 +2,7 @@ from types import SimpleNamespace
+
+ import pytest
+
++from contextor.core.domain.lineage_facts import LineageFamilyStatus
+ from contextor.mcp.query_helpers import build_state_freshness
 
 
- def test_wrapper_injects_health_for_analytical_not_found(tmp_path, monkeypatch):
+@@ -46,3 +47,83 @@ def test_missing_lineage_state_fails_closed_as_not_materialized(tmp_path):
+     freshness = build_state_freshness(tmp_path, state)
+
+     assert freshness["families"]["lineage"] == "not_materialized"
++
++
++_RAW_FAMILIES = {
++    "topology_metrics_state": "topology",
++    "artifact_consumption_state": "artifact_consumption",
++    "cycles_state": "cycles",
++    "collisions_state": "collisions",
++    "lineage_facts_state": "lineage",
++}
++
++
++@pytest.mark.parametrize("field, family", _RAW_FAMILIES.items())
++@pytest.mark.parametrize("marker", [None, "pretend_fresh", True, 17, [], {}], ids=repr)
++def test_malformed_family_marker_is_unavailable_without_mutating_state(
++    tmp_path, field, family, marker
++):
++    state = _state("fresh")
++    setattr(state, field, marker)
++
++    freshness = build_state_freshness(tmp_path, state)
++
++    assert freshness["families"][family] == "unavailable"
++    assert getattr(state, field) is marker
++
++
++@pytest.mark.parametrize("field, family", _RAW_FAMILIES.items())
++def test_missing_family_marker_keeps_documented_default(tmp_path, field, family):
++    state = _state("fresh")
++    delattr(state, field)
++
++    freshness = build_state_freshness(tmp_path, state)
++
++    assert freshness["families"][family] == (
++        "not_materialized" if family == "lineage" else "deferred"
++    )
++    assert not hasattr(state, field)
++
++
++@pytest.mark.parametrize("field, family", list(_RAW_FAMILIES.items())[:4])
++@pytest.mark.parametrize("marker", ["fresh", "stale", "deferred", "unavailable"])
++def test_legal_derived_family_marker_is_preserved(tmp_path, field, family, marker):
++    state = _state("fresh")
++    setattr(state, field, marker)
++
++    freshness = build_state_freshness(tmp_path, state)
++
++    assert freshness["families"][family] == marker
++    assert getattr(state, field) == marker
++
++
++@pytest.mark.parametrize("status", list(LineageFamilyStatus))
++def test_every_legal_lineage_family_marker_is_preserved(tmp_path, status):
++    state = _state(status.value)
++
++    freshness = build_state_freshness(tmp_path, state)
++
++    assert freshness["families"]["lineage"] == status.value
++    assert state.lineage_facts_state == status.value
++
++
++def test_resource_limit_lineage_marker_remains_public(tmp_path):
++    state = _state("resource_limit")
++    assert build_state_freshness(tmp_path, state)["families"]["lineage"] == "resource_limit"
++
++
++def test_resync_keeps_canonical_stale_and_normalizes_only_malformed_family(tmp_path):
++    state = _state("fresh")
++    state.resync_required = True
++    state.cycles_state = "pretend_fresh"
++
++    freshness = build_state_freshness(tmp_path, state)
++
++    assert freshness["canonical_state"] == "stale"
++    assert freshness["families"]["cycles"] == "unavailable"
++    assert freshness["families"]["lineage"] == "fresh"
++    assert freshness["canonical_revision"] == 7
++    assert freshness["provenance"] == "snapshot"
++    assert freshness["workspace_sync"] == "unverified"
++    assert state.resync_required is True
++    assert state.cycles_state == "pretend_fresh"
+~~~
+### tests/mcp/tools/test_contextor_fact_lineage.py
+~~~diff
+diff --git a/tests/mcp/tools/test_contextor_fact_lineage.py b/tests/mcp/tools/test_contextor_fact_lineage.py
+index fdfeddb..a7dadd1 100644
+--- a/tests/mcp/tools/test_contextor_fact_lineage.py
++++ b/tests/mcp/tools/test_contextor_fact_lineage.py
+@@ -208,6 +208,24 @@ def test_artifact_consumption_fresh_contains_both_branches_and_projections(tmp_p
+     _assert_all_references_resolve(result)
+
+
++def test_fact_lineage_normalizes_unselected_family_without_changing_selected_gate(
++    tmp_path, monkeypatch
++):
++    state = _state()
++    _install(monkeypatch, tmp_path, state)
++    before = _load(contextor_fact_lineage(str(tmp_path), "syntax_diagnostics"))
++
++    state.cycles_state = "pretend_fresh"
++    after = _load(contextor_fact_lineage(str(tmp_path), "syntax_diagnostics"))
++
++    assert after["freshness"]["families"]["cycles"] == "unavailable"
++    assert after["freshness"]["families"]["syntax_diagnostics"] == "fresh"
++    assert after["status"] == before["status"]
++    assert after["edges"] == before["edges"]
++    assert after["public_projections"] == before["public_projections"]
++    assert state.cycles_state == "pretend_fresh"
++
++
+ def test_artifact_consumption_stale_stops_downstream_and_reports_gap(tmp_path, monkeypatch):
+     state = _state(artifact_state="stale")
+     _install(monkeypatch, tmp_path, state)
+~~~
+### tests/mcp/tools/test_get_project_architecture_full_reports.py
+~~~diff
+diff --git a/tests/mcp/tools/test_get_project_architecture_full_reports.py b/tests/mcp/tools/test_get_project_architecture_full_reports.py
+index f2457ff..d35614c 100644
+--- a/tests/mcp/tools/test_get_project_architecture_full_reports.py
++++ b/tests/mcp/tools/test_get_project_architecture_full_reports.py
+@@ -4,6 +4,7 @@ from types import SimpleNamespace
+
+ from contextor import mcp_server
+ from contextor.core.analysis.state_manager import RepositoryAnalysisState
++from contextor.mcp.query_helpers import build_state_freshness
+
+
+ architecture_tool = importlib.import_module(
+@@ -169,6 +170,21 @@ def test_get_project_architecture_returns_lossless_global_report_bundle_under_50
+         )
+
+
++def test_get_project_architecture_normalizes_malformed_public_family(tmp_path, monkeypatch):
++    _install_runtime(tmp_path, monkeypatch, _small_bundle())
++    engine = architecture_tool.mcp_runtime.get_or_init_engine(tmp_path)
++    engine.state.cycles_state = "pretend_fresh"
++    monkeypatch.setattr(architecture_tool.query_helpers, "build_state_freshness", build_state_freshness)
++
++    result = json.loads(mcp_server.get_project_architecture.fn(repo_path=str(tmp_path)))
++
++    assert result["status"] == "ok"
++    freshness = result["live_state"]["state_freshness"]
++    assert freshness["families"]["cycles"] == "unavailable"
++    assert freshness["families"]["lineage"] == "fresh"
++    assert engine.state.cycles_state == "pretend_fresh"
++
++
+ def test_get_project_architecture_preflights_over_50k_and_reports_section_sizes(
+     tmp_path,
+     monkeypatch,
+~~~
 
 ## REMAINING_RISKS
 
-Nie wykonano globalnej certyfikacji ani realnego runtime scenariusza resync=True; regresja publiczna używa istniejącego durable job file i cache fixture. Osiągalność szczególnego stanu na żywym serwerze nie jest dowiedziona. Funkcja non-project/running/incomplete zachowuje istniejące wczesne return; nowy test bez listy potwierdza tożsamość summary. Zastane zmiany L32F pozostają niezatwierdzone. Publiczne MCP w aktualnym procesie może nadal wykonywać załadowany wcześniej kod; lokalny focused test używa bieżącego workspace.
+UNKNOWN: The running MCP server process may still hold pre-edit Python code. Source indexing and local pytest do not certify that process's public response behavior. No excluded production file was changed.
 
-## RESTART_REQUIREMENTS
+## RESTART_REQUIRED
 
-Zmieniono kod serwera MCP: do realnej certyfikacji nowego publicznego zachowania wymagany reload/restart odpowiedniego procesu MCP. Nie restartowano Desktop, LIVE ani MCP. Po manualnym reloadzie pierwszym krokiem jest sprawdzenie runtime freshness/schema/version i dopiero potem certyfikacja.
+A reload of the serving MCP process is required before runtime public-response certification of this MCP code change. The task forbids a restart; none was performed.
 
 ## FINAL_VERDICT
 
-TARGETED_REGRESSION_PASS / PUBLIC_INTEGRATION_TEST_PASS; runtime MCP certification pending manual reload. Patch helpera literalny; osiem zastanych source/test modyfikacji zachowanych. Czekam na proceduj.
+TARGETED_IMPLEMENTATION_PASS; RUNTIME_PUBLIC_CERTIFICATION_PENDING_RELOAD. The exact marker-normalization patch and focused regressions are complete. No redesign, extra production change, full suite, or full analysis was performed.

@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 from contextor import mcp_server
 from contextor.core.analysis.state_manager import RepositoryAnalysisState
+from contextor.mcp.query_helpers import build_state_freshness
 
 
 architecture_tool = importlib.import_module(
@@ -167,6 +168,21 @@ def test_get_project_architecture_returns_lossless_global_report_bundle_under_50
                 ensure_ascii=False,
             ).encode("utf-8")
         )
+
+
+def test_get_project_architecture_normalizes_malformed_public_family(tmp_path, monkeypatch):
+    _install_runtime(tmp_path, monkeypatch, _small_bundle())
+    engine = architecture_tool.mcp_runtime.get_or_init_engine(tmp_path)
+    engine.state.cycles_state = "pretend_fresh"
+    monkeypatch.setattr(architecture_tool.query_helpers, "build_state_freshness", build_state_freshness)
+
+    result = json.loads(mcp_server.get_project_architecture.fn(repo_path=str(tmp_path)))
+
+    assert result["status"] == "ok"
+    freshness = result["live_state"]["state_freshness"]
+    assert freshness["families"]["cycles"] == "unavailable"
+    assert freshness["families"]["lineage"] == "fresh"
+    assert engine.state.cycles_state == "pretend_fresh"
 
 
 def test_get_project_architecture_preflights_over_50k_and_reports_section_sizes(

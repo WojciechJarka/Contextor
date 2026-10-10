@@ -7,9 +7,29 @@ from contextor.core.analysis.state_manager import (
     canonical_artifact_consumption_targets,
     module_current_truth,
 )
+from contextor.core.domain.lineage_facts import LineageFamilyStatus
 
 FUZZY_MIN_SCORE: float = 0.75
 FUZZY_MAX_CANDIDATES: int = 5
+
+_PUBLIC_DERIVED_FAMILY_STATES = frozenset({
+    "fresh",
+    "stale",
+    "deferred",
+    "unavailable",
+})
+
+_PUBLIC_LINEAGE_FAMILY_STATES = frozenset(
+    status.value for status in LineageFamilyStatus
+)
+
+def _normalize_public_family_marker(
+    value: Any,
+    allowed: frozenset[str],
+) -> str:
+    if isinstance(value, str) and value in allowed:
+        return value
+    return "unavailable"
 
 
 def fuzzy_choice_candidates(
@@ -442,13 +462,36 @@ def build_state_freshness(
 
     # 5. Families
     families = {
-        "module": module_current_truth(state, target_module)["state"] if target_module else "fresh",
-        "graph": "fresh" if getattr(state, "dependency_graph", None) is not None else "unavailable",
-        "topology": getattr(state, "topology_metrics_state", "deferred"),
-        "artifact_consumption": getattr(state, "artifact_consumption_state", "deferred"),
-        "cycles": getattr(state, "cycles_state", "deferred"),
-        "collisions": getattr(state, "collisions_state", "deferred"),
-        "lineage": getattr(state, "lineage_facts_state", "not_materialized"),
+        "module": (
+            module_current_truth(state, target_module)["state"]
+            if target_module
+            else "fresh"
+        ),
+        "graph": (
+            "fresh"
+            if getattr(state, "dependency_graph", None) is not None
+            else "unavailable"
+        ),
+        "topology": _normalize_public_family_marker(
+            getattr(state, "topology_metrics_state", "deferred"),
+            _PUBLIC_DERIVED_FAMILY_STATES,
+        ),
+        "artifact_consumption": _normalize_public_family_marker(
+            getattr(state, "artifact_consumption_state", "deferred"),
+            _PUBLIC_DERIVED_FAMILY_STATES,
+        ),
+        "cycles": _normalize_public_family_marker(
+            getattr(state, "cycles_state", "deferred"),
+            _PUBLIC_DERIVED_FAMILY_STATES,
+        ),
+        "collisions": _normalize_public_family_marker(
+            getattr(state, "collisions_state", "deferred"),
+            _PUBLIC_DERIVED_FAMILY_STATES,
+        ),
+        "lineage": _normalize_public_family_marker(
+            getattr(state, "lineage_facts_state", "not_materialized"),
+            _PUBLIC_LINEAGE_FAMILY_STATES,
+        ),
     }
 
     # 6. Advisory Warning
