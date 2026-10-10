@@ -1533,6 +1533,12 @@ class ContextorFacade:
         additional_excludes: list[str] | None = None,
         publication_result: dict[str, Any] | None = None,
     ) -> str:
+        if publication_result is not None:
+            publication_result.update(
+                status="not_attempted",
+                revision=None,
+                warning=None,
+            )
         from contextor.core.analysis.full_analysis_coordinator import (
             acquire_full_analysis,
             release_full_analysis,

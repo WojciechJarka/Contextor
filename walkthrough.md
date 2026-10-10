@@ -1,568 +1,176 @@
-# L32H2D2B_SCOPED_FACADE_WRITER_COORDINATION
+# L32H2D2B_POST_AUDIT_CONTRACT_HARDENING
 
 ## FILES_CHANGED_THIS_TASK
 
 - C:\Temp\Contextor_Repo\contextor\core\api\facade.py
-- C:\Temp\Contextor_Repo\contextor\core\analysis\full_analysis_coordinator.py
 - C:\Temp\Contextor_Repo\tests\test_full_analysis_coordination.py
-- C:\Temp\Contextor_Repo\tests\test_live_single_file_reuse.py
 - Raport: C:\Temp\Contextor_Repo\walkthrough.md
 
-## SOURCE_CONTRACT_VERIFICATION
+## PUBLICATION_RESULT_CONTRACT
 
-DIRECT_EVIDENCE: Contextor MCP `get_symbol_implementation(mode=fetch)` pobrał kompletne aktualne implementacje obu publicznych metod facade, `_resolve_repository_target`, `acquire_full_analysis`, `release_full_analysis`, resolvera stanu, hydratora, migracji oraz ścieżki publikacji. Przed patchem wszystkie źródła deklarowały `implementation_is_complete=true` i `workspace_sync=verified`, revision 231. Obie metody publiczne były i pozostały `@staticmethod`. Potwierdzeni konsumenci produkcyjni: `contextor.cli`, `contextor.mcp_worker`, `contextor.mcp.analysis_jobs`, `contextor.ui.gui`; ich wywołania idą przez publiczne metody. CLI wywołuje metody scoped po powrocie z `run_full_analysis_exclusive`; pozostałe scoped calle nie są objęte istniejącym outer lease. Dynamiczna kompletność callerów pozostaje poza zakresem statycznego narzędzia.
-
-## LIVE_PUBLICATION_LOCK_PREFLIGHT
-
-CODE_PATH_PROVED: `LiveStateClient.publish -> CanonicalLiveServer._dispatch -> _execute_publish -> _execute_committed_publish -> locked_committed_snapshot` (gdy zainstalowano reader). Synchroniczna ścieżka nie wywołuje `acquire_full_analysis`; reader bierze tylko blokadę snapshot store. `_repository_mutation_guard` bierze full-analysis lease dla operacji update, lecz dispatch publish omija guard. `resolve_authoritative_repository_state` wywołuje `migrate_legacy_snapshot`, `connect`, odczyt snapshot; `hydrate_repository_engine` wywołuje resolver. Migracja może zapisać snapshot pod już posiadanym scoped lease i nie bierze kolejnego full-analysis lease. Nie stwierdzono nested acquisition ani odwrotnej krawędzi w tych ścieżkach.
+DIRECT_EVIDENCE: przed edycją publiczne `ContextorFacade.analyze_single_file` walidowało target i nabywało lease przed wejściem do prywatnego body. Prywatne `_analyze_single_file_uncoordinated` zaczynało od `publication_result.update(status="not_attempted", revision=None, warning=None)`. Wczesny `ValueError` oraz `FullAnalysisBusyError` pozostawiały stare pola w przekazanym słowniku. Literalna poprawka kopiuje tę inicjalizację na sam początek publicznego wrappera i zachowuje ją w private body. Publiczna sygnatura, walidacja, lease i publikacja LIVE nie zostały zmienione.
 
 ## RED_RESULT
 
-5 oczekiwanych niepowodzeń przed produkcyjnym patchem: dwa testy braku lease przed identity write, dwa testy braku wrappera blokowanego przez wcześniejszego writera, jeden test odrzucanego `writer_kind=scoped_analysis`. Komenda: `.venv\Scripts\python.exe -m pytest -q tests/test_full_analysis_coordination.py::test_scoped_facade_holds_writer_lease_before_identity_write tests/test_full_analysis_coordination.py::test_scoped_facade_blocks_behind_existing_writer_before_body tests/test_full_analysis_coordination.py::test_scoped_writer_kind_is_accepted`.
+Dwa nowe testy przed patchem: 2 failed. W obu stan początkowy `{"status":"stale","revision":99,"warning":"old"}` pozostał niezmieniony po wczesnym wyjątku. Test A: out-of-repository `ValueError`, brak lease. Test B: wstrzyknięty `FullAnalysisBusyError`, private body niewykonane; fixture porównuje drzewo tymczasowe przed/po, bez nowych plików registry/snapshot.
 
-## GREEN_RESULT / SCOPED_ANALYSIS_WRITER_KIND / PUBLIC_FACADE_WRAPPER_CONTRACT
+## GREEN_RESULT
 
-Literalny writer kind `scoped_analysis` dodany wyłącznie w walidatorze. Publiczne statyczne wrappery walidują scope przed lease, biorą lease z ownerem `scoped_layer_analysis` albo `scoped_single_file_analysis`, `timeout=10.0`, wywołują niezmienione ciała pod prywatnymi nazwami i zwalniają lease w `finally`. Contextor po zmianie pobrał pięć kompletnych implementacji, `workspace_sync=verified`, revision 240. `get_symbol_call_context` pokazuje wywołania prywatnych implementacji z publicznych wrapperów; publiczny blast radius nadal pokazuje czterech wymienionych konsumentów produkcyjnych.
+Komenda focused obejmująca dwa nowe testy, scoped coordination, invalid scope, denied lease, real LIVE single-file publish, recovery i output reuse: 13 passed, 1 zewnętrzne ostrzeżenie AuthlibDeprecationWarning. `py_compile` facade oraz testu: PASS. `git diff --check`: PASS. Nie uruchomiono pełnego suite.
 
-## LAYER_REGISTRY_EXCLUSION / SINGLE_FILE_REGISTRY_EXCLUSION
+## EXACT_PRODUCTION_DIFF
 
-CONTRACT_PROVED: testy instrumentują wejście do inicjalizacji registry i widzą wcześniejsze nabycie lease; wyjątek z tej ścieżki zwalnia lease. Osobne testy wywołują wyjątek przy generowaniu raportu i ponownie nabywają lease. Oryginalne bloki `registry.transaction` oraz algorytmy raportowe nie zostały zmienione.
+Jedyna produkcyjna zmiana: sześciowierszowa inicjalizacja `publication_result` na początku publicznego wrappera w `C:\Temp\Contextor_Repo\contextor\core\api\facade.py`. Pełny diff w FULL_DIFFS.
 
-## LOCAL_MCP_EXCLUSION / FULL_ANALYSIS_EXCLUSION / CROSS_PROCESS_EXCLUSION
+## IMPORT_CYCLE_EDGES
 
-CONTRACT_PROVED: międzyprocesowe testy uruchamiają proces `spawn` próbujący nabyć ten sam OS lease z `writer_kind=local_incremental` i `writer_kind=full_analysis` podczas działania publicznej metody scoped; obie próby zwracają busy. Test wątkowy dowodzi, że body scoped zaczyna się dopiero po zwolnieniu poprzedniego writera. Bezpośrednie wywołania facade są objęte ochroną.
+DIRECT_EVIDENCE z `get_module_context`: `contextor.core.api.facade -> contextor.core.analysis.full_analysis_coordinator` oraz edge odwrotny są obecne w canonical graph. Anchory: facade.py:1309–1311 i :1542–1544 importują `acquire_full_analysis` / `release_full_analysis` wewnątrz publicznych wrapperów; full_analysis_coordinator.py:660 importuje `ContextorFacade` wewnątrz `run_full_analysis_exclusive`. Event LIVE revision 234 z poprzedniego etapu zawiera `diagnostic_changes: ADDED cycle [facade, full_analysis_coordinator, facade]`; przed zmianą revision 231 diagnostics cycles=0. Po tej poprawce cycles=1.
 
-## INVALID_TARGET_BEHAVIOR
+## HARD_SOFT_CLASSIFICATION
 
-CONTRACT_PROVED: błędny layer scope, błędny file scope i plik nie-Python zgłaszają dotychczasowe `ValueError` przed próbą nabycia lease. Odmowa lease zatrzymuje body przed inicjalizacją identity/registry. Testy używają repozytoriów tymczasowych; późniejsze uruchomienia mają izolowane cache/state/output/registry.
+CONTRACT_PROVED: Contextor klasyfikuje obie krawędzie jako `hard_dependency` w `get_module_context`, mimo że importy są lokalne wewnątrz funkcji. `resolve_module_edges` daje hard dla `result.kind == MODULE`, soft tylko dla type-only lub FALLBACK; `ImportRef.is_local` nie jest w tym rozstrzygnięciu wyjątkiem. `validate_cycles` wykrywa cykle z `graph.hard_edges` i tworzy `ArchitectureCycle`. Stąd wykryty cykl jest rzeczywistą diagnostyką Contextora, nie tylko arbitralną wizualizacją importów.
 
-## LIVE_SINGLE_FILE_PUBLICATION_COMPATIBILITY
+## ACYCLIC_EXTRACTION_DEPENDENCIES
 
-CONTRACT_PROVED: nowy test używa prawdziwego `CanonicalLiveServer` i `LiveStateClient` w izolowanym fixture. Publiczna metoda single-file parsuje zmieniony plik i wykonuje prawdziwe IPC publish; przy publikacji lease pozostaje trzymany. Odpowiedź `publication_result.status=success`, revision zwiększona o 1. Istniejące testy reuse, recovery i output przechodzą.
+CODE_PATH_PROVED na kompletnym pliku koordynatora (Contextor `get_source_range` 1–207, 208–409, 410–700): niskopoziomowe `acquire_full_analysis` / `release_full_analysis` nie odwołują się do facade. Zależność zwrotna jest tylko w `run_full_analysis_exclusive` przy `analysis_fn is None`. Wspólna własność blokad i helperów oznacza, że ewentualny niezależny niższy owner musiałby zachować jeden zestaw stanu; samo skopiowanie funkcji lub słowników dałoby różne lock ownership. To warunek źródłowy, nie projekt patcha.
 
-## NESTED_LOCK_AND_DEADLOCK_GATE
+Literalne elementy współdzielonego stanu:
 
-PASS dla sprawdzonych ścieżek: prawdziwa publikacja IPC wróciła przed timeoutem 5 s, bez nested full-analysis acquisition. Testy blokady same-process i cross-process przechodzą. Contextor wykrył nowy statyczny cykl importów `facade <-> full_analysis_coordinator` (revision 234); oba importy są lokalne wewnątrz funkcji, a wykonany test nie wykazał runtime import failure. To pozostaje obserwacją statycznej diagnostyki, bez autonomicznego refaktoru.
+```python
+ORPHAN_RECOVERY_TIMEOUT_SECONDS = 5.0
+_PROCESS_LOCKS: dict[str, threading.Lock] = {}
+_PROCESS_LOCKS_GUARD = threading.Lock()
+_ADMISSION_LOCKS: dict[str, threading.Lock] = {}
+_ADMISSION_LOCKS_GUARD = threading.Lock()
+_ADMISSION_TRACE_FIELD_NAMES = (
+    "op", "path", "job_id", "idempotency_key", "queue_order",
+    "accepted_revision", "started_revision", "origin",
+)
+```
 
-## OUTPUT_AND_ARTIFACT_COMPATIBILITY
+Wymagane typy: `FullAnalysisLease` (fields: repo_key, token, owner, lock_path, repo_id, lock_fd, owner_pid, owner_process_start_identity), `FullAnalysisBusyError`. Helpery w tej samej jednostce: `_select_admission_trace_fields`, `_get_process_lock`, `_get_admission_lock`, `_acquire_process_lock_until`, `_canonical_writer_admission`, `_prepare_lock_fd`, `_try_lock_fd`, `_unlock_fd`, `_read_lease_metadata`, `_lease_metadata_path`, `_read_lease_metadata_file`, `_write_lease_metadata_file`, `_process_identity`, `_lease_owner_state`, `_log_orphan_recovery`, `_resolve_lock_path`. External owners: `AnalysisCancelled`, `repo_cache_dir`, `repo_key`, `read_repository_identity`, `trace_event`, `process_identity` (lokalny import). OS/stdlib: contextmanager, json, os, threading, time, uuid, dataclass, Path, typing. Niskopoziomowe ciało nie wymaga `ContextorFacade`; `run_full_analysis_exclusive` wymaga publicznego `analyze_project` przy domyślnym `analysis_fn=None`.
 
-Istniejące testy report/output, artifact reuse, staging, layer hydration i scope przechodzą. Oryginalne ciała obu metod zachowano bez wewnętrznych zmian. Interfejsy publiczne zachowują oryginalne parametry i typ zwrotu.
+## CURRENT_COORDINATOR_API_CONSUMERS
 
-## TARGETED_TEST_RESULTS
+DIRECT_EVIDENCE z Contextor blast radius i targeted `rg`: produkcyjne importy koordynatora występują w `C:\Temp\Contextor_Repo\contextor\cli.py` (`run_full_analysis_exclusive`), `C:\Temp\Contextor_Repo\contextor\mcp_worker.py` (run), `C:\Temp\Contextor_Repo\contextor\mcp\analysis_jobs.py` (run), `C:\Temp\Contextor_Repo\contextor\core\analysis\profile_runner.py` (run, BusyError), `C:\Temp\Contextor_Repo\contextor\core\live_state\runtime.py` (acquire/release), `C:\Temp\Contextor_Repo\contextor\mcp\tools\update_file.py` (acquire/release), `C:\Temp\Contextor_Repo\contextor\ui\gui.py` (BusyError, acquire/release, run), `C:\Temp\Contextor_Repo\contextor\core\api\facade.py` (acquire/release). Publiczny moduł jest również importowany przez testy: `test_full_analysis_coordination.py`, `test_live_desktop_integration.py`, `test_live_mutation_coordinator.py`, `test_live_watcher_startup_reconciliation.py`, `test_mcp_incremental_hydration.py`, `test_live_single_file_reuse.py`, `test_mcp_regressions.py`, `test_profile_runner.py`. `test_full_analysis_coordination.py` importuje ponadto prywatne `_lease_metadata_path`, `_prepare_lock_fd`, `_resolve_lock_path`, `_try_lock_fd`, `_unlock_fd`; są częścią obecnej testowej powierzchni zgodności.
 
-- RED: 5 failed zgodnie z oczekiwaniem.
-- GREEN po patchu: 5 passed dla nowych pierwszych regresji.
-- Wybrane pięć plików: 57 passed, 1 warning (zewnętrzne ostrzeżenie AuthlibDeprecationWarning).
-- Rzeczywiste IPC publish: 1 passed.
-- `py_compile` obu ownerów: PASS.
-- `git diff --check` czterech zmienionych plików: PASS. Git podał jedynie informację o przyszłej konwersji LF/CRLF.
+## MONKEYPATCH_COMPATIBILITY
+
+DIRECT_EVIDENCE: testy podmieniają `coordinator.acquire_full_analysis` i/lub `release_full_analysis` w `test_full_analysis_coordination.py` (m.in. linie 88–89, 549–550), `test_mcp_incremental_hydration.py` (232–233, 270, 319–320), `test_live_mutation_coordinator.py` (350–351), `test_live_watcher_startup_reconciliation.py` (463, 573). GUI testy podmieniają symbole zaimportowane do `gui` (`test_live_desktop_integration.py:443–444`). Każda przyszła zmiana ownera musi uwzględnić semantykę takich monkeypatchy; nie wykonano jej w tym zadaniu.
+
+## ARCHITECTURAL_INVARIANT_ASSESSMENT
+
+CONTRACT_PROVED: cykl jest hard/hard, `validate_cycles` mapuje go na `ArchitectureCycle`, a publiczne diagnostics podaje `cycles.count=1`, `attention_required=true`. Narusza poprzednio obserwowany stan zero-cycles i invariant bez cykli architektonicznych. UNKNOWN: dodatkowa formalna reguła granicy warstw contract/runtime; `get_layer_isolation` dla obu nazw odpowiedział, że nie ma dedykowanego raportu ani top-level index. Zgodnie z zakazem nie uruchomiono `analyze_layer`.
+
+## MINIMUM_ACYCLIC_PATCH_OWNERS
+
+Potwierdzone końce krawędzi i powierzchnia zgodności do decyzji audytora: `C:\Temp\Contextor_Repo\contextor\core\api\facade.py`, `C:\Temp\Contextor_Repo\contextor\core\analysis\full_analysis_coordinator.py`; lokalizacja ewentualnego niezależnego ownera pozostaje decyzją audytora. Testy zgodności i monkeypatchy wymienione powyżej. Ukrycie zależności przez importlib, global callback, service locator lub zmianę klasyfikacji importu nie usuwa realnej zależności; takich zmian nie wykonano.
 
 ## SOURCE_SYNC_VERIFICATION / LIVE_REVISION_BEFORE_AFTER
 
-Przed: 231. Po: 240. `get_live_events(after_revision=231)`: continuity=continuous, resync_required=false, 9 zdarzeń 232–240; zmiany produkcyjne 233–234 oraz testowe zostały przejęte przez desktop_watcher. Contextor fetch po zmianie: `workspace_sync=verified` dla obu wrapperów, prywatnych implementacji i koordynatora. To dowodzi odświeżenia źródła w canonical index; nie certyfikuje reloadu kodu w istniejących procesach MCP/Desktop.
+LIVE przed: 240. Po: 242. `get_live_events(after_revision=240)`: revision 241 test file, 242 facade, oba origin=desktop_watcher; continuity=continuous, resync_required=false, cycles.count=1. Po odświeżeniu `get_symbol_implementation` publicznego wrappera: complete=true, workspace_sync=verified, revision 242, nowy blok obecny. Source/test status: tylko dwa autoryzowane pliki plus walkthrough.md. Brak manual update_file i restartu. Nowy proces pytest nie certyfikuje reloadu istniejących procesów.
 
-## REMAINING_WRITER_BYPASSES
+## REMAINING_RISKS
 
-UNKNOWN poza scoped facade: bezpośrednie registry-only writery z poprzedniego handoffu nie są objęte tą zmianą. Nie rozszerzano scope. Statyczne blast radius nie dowodzi pełnej osiągalności dynamicznej.
-
-## RESTART_REQUIRED
-
-YES dla serving MCP/Desktop/LIVE procesów, jeżeli mają wykonywać nowe wersje zaimportowanych modułów; restartu nie wykonano. Testy uruchomiono w nowym procesie Python.
+- Hard/hard cycle pozostaje i blokuje architectural final pass; auditor ma zaprojektować dosłowny acyclic patch.
+- Polityka granicy warstw nie została potwierdzona dedykowanym raportem.
+- Runtime serving-code reload po zmianie facade nie został wykonany ani certyfikowany.
 
 ## FINAL_VERDICT
 
-L32H2D2B_TARGETED_PASS. Nie jest to FINAL PASS całego L32H ani certyfikacja już uruchomionych procesów.
+PUBLICATION_RESULT_CONTRACT_FIXED_TARGETED_PASS; ARCHITECTURAL_FINAL_PASS_WITHHELD. Nie zgłaszam L32H FINAL PASS.
 
 ## FULL_DIFFS
 
-Poniżej pełny surowy diff wszystkich czterech zmienionych plików produkcyjnych/testowych. Raport `walkthrough.md` nie jest liczony jako source/test diff.
+Pełny surowy diff wszystkich plików zmienionych w tym zadaniu; walkthrough.md jako raport nie jest source/test diff.
 
 ```diff
 
-diff --git a/contextor/core/analysis/full_analysis_coordinator.py b/contextor/core/analysis/full_analysis_coordinator.py
-index 5b43d1f..292fa9a 100644
---- a/contextor/core/analysis/full_analysis_coordinator.py
-+++ b/contextor/core/analysis/full_analysis_coordinator.py
-@@ -428,10 +428,11 @@ def acquire_full_analysis(
-         "live_mutation",
-         "startup_publish",
-         "local_incremental",
-+        "scoped_analysis",
-     }:
-         raise ValueError(
-             "writer_kind must be 'full_analysis', 'live_mutation', "
--            "'startup_publish', or 'local_incremental'"
-+            "'startup_publish', 'local_incremental', or 'scoped_analysis'"
-         )
- 
-     lock_file, key, repo_id = _resolve_lock_path(repo_path)
 diff --git a/contextor/core/api/facade.py b/contextor/core/api/facade.py
-index 64352e5..d927b65 100644
+index d927b65..7c90062 100644
 --- a/contextor/core/api/facade.py
 +++ b/contextor/core/api/facade.py
-@@ -1305,6 +1305,42 @@ class ContextorFacade:
-         log=None,
-         progress_callback=None,
-         additional_excludes: list[str] | None = None,
-+    ) -> str:
-+        from contextor.core.analysis.full_analysis_coordinator import (
-+            acquire_full_analysis,
-+            release_full_analysis,
-+        )
-+
-+        root_resolved, _ = _resolve_repository_target(
-+            root_dir,
-+            layer_dir,
-+            target_kind="layer",
-+        )
-+
-+        lease = acquire_full_analysis(
-+            root_resolved,
-+            owner="scoped_layer_analysis",
-+            writer_kind="scoped_analysis",
-+            timeout=10.0,
-+        )
-+        try:
-+            return ContextorFacade._analyze_layer_uncoordinated(
-+                root_dir,
-+                layer_dir,
-+                log=log,
-+                progress_callback=progress_callback,
-+                additional_excludes=additional_excludes,
-+            )
-+        finally:
-+            release_full_analysis(lease)
-+
-+    @staticmethod
-+    def _analyze_layer_uncoordinated(
-+        root_dir: str,
-+        layer_dir: str,
-+        log=None,
-+        progress_callback=None,
-+        additional_excludes: list[str] | None = None,
-     ) -> str:
-         """Analyzes a specific layer. Returns output pattern."""
-         progress = _StagedProgress(progress_callback, total_stages=10, log=log)
-@@ -1496,6 +1532,48 @@ class ContextorFacade:
-         progress_callback=None,
+@@ -1533,6 +1533,12 @@ class ContextorFacade:
          additional_excludes: list[str] | None = None,
          publication_result: dict[str, Any] | None = None,
-+    ) -> str:
-+        from contextor.core.analysis.full_analysis_coordinator import (
-+            acquire_full_analysis,
-+            release_full_analysis,
-+        )
-+
-+        root_resolved, target = _resolve_repository_target(
-+            repo_root,
-+            file_path,
-+            target_kind="file",
-+        )
-+        if target.suffix.lower() != ".py":
-+            raise ValueError(
-+                f"Selected file is not a Python file: {target}"
-+            )
-+
-+        lease = acquire_full_analysis(
-+            root_resolved,
-+            owner="scoped_single_file_analysis",
-+            writer_kind="scoped_analysis",
-+            timeout=10.0,
-+        )
-+        try:
-+            return ContextorFacade._analyze_single_file_uncoordinated(
-+                file_path,
-+                repo_root,
-+                log=log,
-+                progress_callback=progress_callback,
-+                additional_excludes=additional_excludes,
-+                publication_result=publication_result,
-+            )
-+        finally:
-+            release_full_analysis(lease)
-+
-+    @staticmethod
-+    def _analyze_single_file_uncoordinated(
-+        file_path: str,
-+        repo_root: str,
-+        log=None,
-+        progress_callback=None,
-+        additional_excludes: list[str] | None = None,
-+        publication_result: dict[str, Any] | None = None,
      ) -> str:
-         """Analyzes a single file within the context of a project. Returns report output path."""
-         if publication_result is not None:
++        if publication_result is not None:
++            publication_result.update(
++                status="not_attempted",
++                revision=None,
++                warning=None,
++            )
+         from contextor.core.analysis.full_analysis_coordinator import (
+             acquire_full_analysis,
+             release_full_analysis,
 diff --git a/tests/test_full_analysis_coordination.py b/tests/test_full_analysis_coordination.py
-index 5aa1566..75bbd19 100644
+index 75bbd19..10cfbdc 100644
 --- a/tests/test_full_analysis_coordination.py
 +++ b/tests/test_full_analysis_coordination.py
-@@ -40,6 +40,288 @@ from contextor.mcp import analysis_jobs
- from contextor.mcp import runtime as mcp_runtime
+@@ -239,6 +239,65 @@ def test_scoped_facade_non_python_target_does_not_acquire_lease(tmp_path, monkey
+         facade.ContextorFacade.analyze_single_file(str(target), str(repo))
  
  
-+def _worker_try_writer_kind(repo_path, writer_kind, result_queue):
-+    try:
-+        lease = acquire_full_analysis(
-+            repo_path,
-+            writer_kind=writer_kind,
-+            timeout=0.3,
-+            poll_interval=0.05,
-+        )
-+        release_full_analysis(lease)
-+        result_queue.put("acquired")
-+    except FullAnalysisBusyError:
-+        result_queue.put("busy")
-+
-+
-+@pytest.mark.parametrize("method,target_kind", [("analyze_layer", "layer"), ("analyze_single_file", "file")])
-+def test_scoped_facade_holds_writer_lease_before_identity_write(
-+    tmp_path, isolated_dirs, monkeypatch, method, target_kind
++def test_invalid_scoped_file_resets_publication_result_before_validation(
++    tmp_path, isolated_dirs, monkeypatch
 +):
 +    from contextor.core.api import facade
 +    from contextor.core.analysis import full_analysis_coordinator as coordinator
 +
 +    repo = tmp_path / "repo"
 +    repo.mkdir()
-+    target = repo / ("layer" if target_kind == "layer" else "module.py")
-+    if target_kind == "layer":
-+        target.mkdir()
-+    else:
-+        target.write_text("VALUE = 1\n", encoding="utf-8")
-+    events = []
-+    real_acquire = coordinator.acquire_full_analysis
-+    real_release = coordinator.release_full_analysis
-+
-+    def acquire(*args, **kwargs):
-+        lease = real_acquire(*args, **kwargs)
-+        events.append(("acquire", kwargs["writer_kind"], kwargs["owner"]))
-+        return lease
-+
-+    def release(lease):
-+        events.append(("release", lease.owner))
-+        return real_release(lease)
-+
-+    def fail_identity(_root):
-+        events.append(("identity",))
-+        raise RuntimeError("identity stop")
-+
-+    monkeypatch.setattr(coordinator, "acquire_full_analysis", acquire)
-+    monkeypatch.setattr(coordinator, "release_full_analysis", release)
-+    monkeypatch.setattr(facade, "_initialize_repository_identity", fail_identity)
-+    with pytest.raises(RuntimeError, match="identity stop"):
-+        if target_kind == "layer":
-+            facade.ContextorFacade.analyze_layer(str(repo), str(target))
-+        else:
-+            facade.ContextorFacade.analyze_single_file(str(target), str(repo))
-+    assert events == [
-+        ("acquire", "scoped_analysis", "scoped_layer_analysis" if target_kind == "layer" else "scoped_single_file_analysis"),
-+        ("identity",),
-+        ("release", "scoped_layer_analysis" if target_kind == "layer" else "scoped_single_file_analysis"),
-+    ]
-+
-+
-+@pytest.mark.parametrize("method,target_kind", [("analyze_layer", "layer"), ("analyze_single_file", "file")])
-+def test_scoped_facade_blocks_behind_existing_writer_before_body(
-+    tmp_path, isolated_dirs, monkeypatch, method, target_kind
-+):
-+    from contextor.core.api import facade
-+
-+    repo = tmp_path / "repo"
-+    repo.mkdir()
-+    target = repo / ("layer" if target_kind == "layer" else "module.py")
-+    if target_kind == "layer":
-+        target.mkdir()
-+    else:
-+        target.write_text("VALUE = 1\n", encoding="utf-8")
-+    entered = threading.Event()
-+    completed = threading.Event()
-+    errors = []
-+
-+    def body(*_args, **_kwargs):
-+        entered.set()
-+        return "done"
-+
-+    monkeypatch.setattr(
-+        facade.ContextorFacade,
-+        f"_analyze_{'layer' if target_kind == 'layer' else 'single_file'}_uncoordinated",
-+        staticmethod(body),
-+        raising=False,
-+    )
-+    held = acquire_full_analysis(repo, owner="prior_writer")
-+
-+    def invoke():
-+        try:
-+            if target_kind == "layer":
-+                assert facade.ContextorFacade.analyze_layer(str(repo), str(target)) == "done"
-+            else:
-+                assert facade.ContextorFacade.analyze_single_file(str(target), str(repo)) == "done"
-+        except Exception as exc:
-+            errors.append(exc)
-+        finally:
-+            completed.set()
-+
-+    worker = threading.Thread(target=invoke)
-+    worker.start()
-+    try:
-+        assert not entered.wait(0.3)
-+    finally:
-+        release_full_analysis(held)
-+        worker.join(timeout=5)
-+    assert completed.is_set()
-+    assert not errors
-+    assert entered.is_set()
-+
-+
-+def test_scoped_writer_kind_is_accepted(tmp_path):
-+    repo = tmp_path / "repo"
-+    repo.mkdir()
-+    lease = acquire_full_analysis(repo, writer_kind="scoped_analysis", timeout=1.0)
-+    release_full_analysis(lease)
-+
-+
-+@pytest.mark.parametrize("writer_kind", ["full_analysis", "local_incremental"])
-+def test_scoped_facade_excludes_cross_process_canonical_writer(
-+    tmp_path, isolated_dirs, monkeypatch, writer_kind
-+):
-+    from contextor.core.api import facade
-+
-+    repo = tmp_path / "repo"
-+    repo.mkdir()
-+    layer = repo / "layer"
-+    layer.mkdir()
-+    context = multiprocessing.get_context("spawn")
-+
-+    def body(*_args, **_kwargs):
-+        results = context.Queue()
-+        process = context.Process(
-+            target=_worker_try_writer_kind,
-+            args=(str(repo), writer_kind, results),
-+        )
-+        process.start()
-+        try:
-+            process.join(timeout=5)
-+            assert process.exitcode == 0
-+            assert results.get(timeout=2) == "busy"
-+        finally:
-+            if process.is_alive():
-+                process.terminate()
-+                process.join(timeout=3)
-+        return "done"
-+
-+    monkeypatch.setattr(
-+        facade.ContextorFacade,
-+        "_analyze_layer_uncoordinated",
-+        staticmethod(body),
-+    )
-+    assert facade.ContextorFacade.analyze_layer(str(repo), str(layer)) == "done"
-+
-+
-+@pytest.mark.parametrize("method,target_kind", [("analyze_layer", "layer"), ("analyze_single_file", "file")])
-+def test_scoped_facade_invalid_target_does_not_acquire_lease(
-+    tmp_path, monkeypatch, method, target_kind
-+):
-+    from contextor.core.api import facade
-+    from contextor.core.analysis import full_analysis_coordinator as coordinator
-+
-+    repo = tmp_path / "repo"
-+    repo.mkdir()
-+    outside = tmp_path / "outside"
-+    outside.mkdir()
-+    target = outside if target_kind == "layer" else outside / "module.py"
-+    if target_kind == "file":
-+        target.write_text("VALUE = 1\n", encoding="utf-8")
++    outside = tmp_path / "outside.py"
++    outside.write_text("VALUE = 1\n", encoding="utf-8")
++    publication = {"status": "stale", "revision": 99, "warning": "old"}
 +    monkeypatch.setattr(
 +        coordinator,
 +        "acquire_full_analysis",
-+        lambda *_a, **_k: pytest.fail("invalid target acquired writer lease"),
++        lambda *_a, **_k: pytest.fail("invalid target acquired lease"),
 +    )
++
 +    with pytest.raises(ValueError, match="outside the repository root"):
-+        if target_kind == "layer":
-+            facade.ContextorFacade.analyze_layer(str(repo), str(target))
-+        else:
-+            facade.ContextorFacade.analyze_single_file(str(target), str(repo))
++        facade.ContextorFacade.analyze_single_file(
++            str(outside), str(repo), publication_result=publication
++        )
++    assert publication == {
++        "status": "not_attempted", "revision": None, "warning": None,
++    }
 +
 +
-+def test_scoped_facade_non_python_target_does_not_acquire_lease(tmp_path, monkeypatch):
-+    from contextor.core.api import facade
-+    from contextor.core.analysis import full_analysis_coordinator as coordinator
-+
-+    repo = tmp_path / "repo"
-+    repo.mkdir()
-+    target = repo / "notes.txt"
-+    target.write_text("notes\n", encoding="utf-8")
-+    monkeypatch.setattr(
-+        coordinator,
-+        "acquire_full_analysis",
-+        lambda *_a, **_k: pytest.fail("non-Python target acquired writer lease"),
-+    )
-+    with pytest.raises(ValueError, match="not a Python file"):
-+        facade.ContextorFacade.analyze_single_file(str(target), str(repo))
-+
-+
-+@pytest.mark.parametrize("method,target_kind", [("analyze_layer", "layer"), ("analyze_single_file", "file")])
-+def test_scoped_facade_denied_lease_does_not_start_body_or_identity(
-+    tmp_path, isolated_dirs, monkeypatch, method, target_kind
++def test_denied_scoped_file_resets_publication_result_without_mutation(
++    tmp_path, isolated_dirs, monkeypatch
 +):
 +    from contextor.core.api import facade
 +    from contextor.core.analysis import full_analysis_coordinator as coordinator
 +
 +    repo = tmp_path / "repo"
 +    repo.mkdir()
-+    target = repo / ("layer" if target_kind == "layer" else "module.py")
-+    if target_kind == "layer":
-+        target.mkdir()
-+    else:
-+        target.write_text("VALUE = 1\n", encoding="utf-8")
++    target = repo / "module.py"
++    target.write_text("VALUE = 1\n", encoding="utf-8")
++    before = sorted(str(path.relative_to(tmp_path)) for path in tmp_path.rglob("*"))
++    publication = {"status": "stale", "revision": 99, "warning": "old"}
 +    monkeypatch.setattr(
 +        coordinator,
 +        "acquire_full_analysis",
 +        lambda *_a, **_k: (_ for _ in ()).throw(FullAnalysisBusyError("denied")),
 +    )
 +    monkeypatch.setattr(
-+        facade,
-+        "_initialize_repository_identity",
-+        lambda *_a: pytest.fail("identity mutated after lease denial"),
-+    )
-+    with pytest.raises(FullAnalysisBusyError, match="denied"):
-+        if target_kind == "layer":
-+            facade.ContextorFacade.analyze_layer(str(repo), str(target))
-+        else:
-+            facade.ContextorFacade.analyze_single_file(str(target), str(repo))
-+
-+
-+@pytest.mark.parametrize("method", ["layer", "single_file"])
-+def test_scoped_facade_releases_lease_after_report_failure(
-+    sample_repo, isolated_dirs, monkeypatch, method
-+):
-+    from contextor.core.api import facade
-+
-+    def fail_report(*_args, **_kwargs):
-+        raise RuntimeError("report stop")
-+
-+    if method == "layer":
-+        monkeypatch.setattr(facade, "generate_summary_report", fail_report)
-+    else:
-+        monkeypatch.setattr(facade, "generate_report", fail_report)
-+    with pytest.raises(RuntimeError, match="report stop"):
-+        if method == "layer":
-+            facade.ContextorFacade.analyze_layer(
-+                str(sample_repo), str(sample_repo / "core")
-+            )
-+        else:
-+            facade.ContextorFacade.analyze_single_file(
-+                str(sample_repo / "core" / "alpha.py"), str(sample_repo)
-+            )
-+    lease = acquire_full_analysis(sample_repo, writer_kind="local_incremental", timeout=0.5)
-+    release_full_analysis(lease)
-+
-+
-+@pytest.mark.parametrize("method", ["layer", "single_file"])
-+def test_scoped_facade_releases_lease_after_success(
-+    tmp_path, isolated_dirs, monkeypatch, method
-+):
-+    from contextor.core.api import facade
-+
-+    repo = tmp_path / "repo"
-+    repo.mkdir()
-+    target = repo / ("layer" if method == "layer" else "module.py")
-+    if method == "layer":
-+        target.mkdir()
-+    else:
-+        target.write_text("VALUE = 1\n", encoding="utf-8")
-+    monkeypatch.setattr(
 +        facade.ContextorFacade,
-+        f"_analyze_{method}_uncoordinated",
-+        staticmethod(lambda *_a, **_k: "done"),
++        "_analyze_single_file_uncoordinated",
++        staticmethod(lambda *_a, **_k: pytest.fail("private body executed")),
 +    )
-+    if method == "layer":
-+        assert facade.ContextorFacade.analyze_layer(str(repo), str(target)) == "done"
-+    else:
-+        assert facade.ContextorFacade.analyze_single_file(str(target), str(repo)) == "done"
-+    lease = acquire_full_analysis(repo, writer_kind="full_analysis", timeout=0.5)
-+    release_full_analysis(lease)
 +
-+
- def test_coordinator_lease_acquisition_and_release(tmp_path: Path):
-     repo_dir = tmp_path / "repo1"
-     repo_dir.mkdir()
-diff --git a/tests/test_live_single_file_reuse.py b/tests/test_live_single_file_reuse.py
-index f9726f1..b609cea 100644
---- a/tests/test_live_single_file_reuse.py
-+++ b/tests/test_live_single_file_reuse.py
-@@ -2,6 +2,10 @@
- 
- from types import SimpleNamespace
- from dataclasses import replace
-+from copy import copy
-+import threading
-+
-+from contextor.core.live_state.ipc import CanonicalLiveServer, LiveStateClient
- 
- from contextor.core.reporting_engine.canonical_artifacts import (
-     canonical_artifact_report,
-@@ -124,6 +128,64 @@ def test_single_file_reports_accepted_recovery_without_changing_string_return(
-     }
- 
- 
-+def test_scoped_single_file_publishes_to_real_live_server_under_writer_lease(
-+    sample_repo, isolated_dirs, monkeypatch
-+):
-+    import contextor.core.api.facade as facade_module
-+    from contextor.core.analysis import full_analysis_coordinator as coordinator
-+
-+    target = sample_repo / "core" / "alpha.py"
-+    ContextorFacade.analyze_project(str(sample_repo))
-+    resolved = facade_module.resolve_authoritative_repository_state(str(sample_repo))
-+    assert resolved is not None
-+    initial_revision = max(0, int(getattr(resolved.state, "revision", 0)) - 1)
-+    initial_state = copy(resolved.state)
-+    initial_state.revision = initial_revision
-+    server = CanonicalLiveServer(state=initial_state, revision=initial_revision)
-+    server_thread = threading.Thread(target=server.serve_forever, daemon=True)
-+    server_thread.start()
-+    client = LiveStateClient(server.endpoint)
-+    original_hydrate = facade_module.hydrate_repository_engine
-+    original_publish = client.publish
-+    observed = []
-+
-+    def hydrate_with_server(root):
-+        hydrated = original_hydrate(root)
-+        return replace(hydrated, client=client)
-+
-+    def publish_while_held(*args, **kwargs):
-+        observed.append("publish")
-+        try:
-+            coordinator.acquire_full_analysis(
-+                sample_repo, timeout=0.0, writer_kind="local_incremental"
-+            )
-+        except coordinator.FullAnalysisBusyError:
-+            observed.append("lease_held")
-+        else:
-+            pytest.fail("LIVE publication ran outside scoped lease")
-+        return original_publish(*args, **kwargs)
-+
-+    import pytest
-+    monkeypatch.setattr(facade_module, "hydrate_repository_engine", hydrate_with_server)
-+    monkeypatch.setattr(client, "publish", publish_while_held)
-+    target.write_text(
-+        target.read_text(encoding="utf-8").replace("MAX_ITEMS = 10", "MAX_ITEMS = 12"),
-+        encoding="utf-8",
-+    )
-+    publication = {}
-+    try:
-+        output = ContextorFacade.analyze_single_file(
-+            str(target), str(sample_repo), publication_result=publication
++    with pytest.raises(FullAnalysisBusyError, match="denied"):
++        facade.ContextorFacade.analyze_single_file(
++            str(target), str(repo), publication_result=publication
 +        )
-+        assert output.endswith("single_core.alpha.json")
-+        assert observed == ["publish", "lease_held"]
-+        assert publication["status"] == "success", publication
-+        assert publication["revision"] == initial_revision + 1
-+    finally:
-+        client.request("shutdown")
-+        server_thread.join(timeout=5)
++    assert publication == {
++        "status": "not_attempted", "revision": None, "warning": None,
++    }
++    assert sorted(str(path.relative_to(tmp_path)) for path in tmp_path.rglob("*")) == before
 +
 +
- def test_single_file_resync_state_rejects_state_only_path(
-     sample_repo, isolated_dirs, monkeypatch
- ):
+ @pytest.mark.parametrize("method,target_kind", [("analyze_layer", "layer"), ("analyze_single_file", "file")])
+ def test_scoped_facade_denied_lease_does_not_start_body_or_identity(
+     tmp_path, isolated_dirs, monkeypatch, method, target_kind
 ```

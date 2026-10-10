@@ -239,6 +239,65 @@ def test_scoped_facade_non_python_target_does_not_acquire_lease(tmp_path, monkey
         facade.ContextorFacade.analyze_single_file(str(target), str(repo))
 
 
+def test_invalid_scoped_file_resets_publication_result_before_validation(
+    tmp_path, isolated_dirs, monkeypatch
+):
+    from contextor.core.api import facade
+    from contextor.core.analysis import full_analysis_coordinator as coordinator
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    outside = tmp_path / "outside.py"
+    outside.write_text("VALUE = 1\n", encoding="utf-8")
+    publication = {"status": "stale", "revision": 99, "warning": "old"}
+    monkeypatch.setattr(
+        coordinator,
+        "acquire_full_analysis",
+        lambda *_a, **_k: pytest.fail("invalid target acquired lease"),
+    )
+
+    with pytest.raises(ValueError, match="outside the repository root"):
+        facade.ContextorFacade.analyze_single_file(
+            str(outside), str(repo), publication_result=publication
+        )
+    assert publication == {
+        "status": "not_attempted", "revision": None, "warning": None,
+    }
+
+
+def test_denied_scoped_file_resets_publication_result_without_mutation(
+    tmp_path, isolated_dirs, monkeypatch
+):
+    from contextor.core.api import facade
+    from contextor.core.analysis import full_analysis_coordinator as coordinator
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    target = repo / "module.py"
+    target.write_text("VALUE = 1\n", encoding="utf-8")
+    before = sorted(str(path.relative_to(tmp_path)) for path in tmp_path.rglob("*"))
+    publication = {"status": "stale", "revision": 99, "warning": "old"}
+    monkeypatch.setattr(
+        coordinator,
+        "acquire_full_analysis",
+        lambda *_a, **_k: (_ for _ in ()).throw(FullAnalysisBusyError("denied")),
+    )
+    monkeypatch.setattr(
+        facade.ContextorFacade,
+        "_analyze_single_file_uncoordinated",
+        staticmethod(lambda *_a, **_k: pytest.fail("private body executed")),
+    )
+
+    with pytest.raises(FullAnalysisBusyError, match="denied"):
+        facade.ContextorFacade.analyze_single_file(
+            str(target), str(repo), publication_result=publication
+        )
+    assert publication == {
+        "status": "not_attempted", "revision": None, "warning": None,
+    }
+    assert sorted(str(path.relative_to(tmp_path)) for path in tmp_path.rglob("*")) == before
+
+
 @pytest.mark.parametrize("method,target_kind", [("analyze_layer", "layer"), ("analyze_single_file", "file")])
 def test_scoped_facade_denied_lease_does_not_start_body_or_identity(
     tmp_path, isolated_dirs, monkeypatch, method, target_kind
