@@ -1465,51 +1465,83 @@ def run_service(
             )
 
             if materialization_required:
-                loaded_metadata = loaded[1]
-                step_started = time.monotonic()
-                from contextor.core.analysis.state_manager import FileStateManager
-                startup_timings_ms["file_state_manager_import_ms"] = round(
-                    (time.monotonic() - step_started) * 1000.0,
-                    3,
+                from contextor.core.analysis.full_analysis_lease import (
+                    acquire_full_analysis,
+                    release_full_analysis,
                 )
 
-                step_started = time.monotonic()
-                file_state_manager = FileStateManager(str(cache))
-                startup_timings_ms["file_state_manager_load_ms"] = round(
-                    (time.monotonic() - step_started) * 1000.0,
-                    3,
+                backfill_lease = acquire_full_analysis(
+                    root,
+                    owner="live_startup_module_usages_backfill",
+                    writer_kind="full_analysis",
+                    timeout=0.0,
                 )
-                step_started = time.monotonic()
-                ensure_module_usages(state)
-                startup_timings_ms["ensure_module_usages_ms"] = round(
-                    (time.monotonic() - step_started) * 1000.0,
-                    3,
-                )
-                target_revision = loaded_metadata.revision + 1
-                step_started = time.monotonic()
-                file_state_payload = file_state_manager.build_payload(
-                    loaded_metadata.state_id,
-                    target_revision,
-                )
-                startup_timings_ms["file_state_build_payload_ms"] = round(
-                    (time.monotonic() - step_started) * 1000.0,
-                    3,
-                )
-                step_started = time.monotonic()
-                save_snapshot(
-                    state,
-                    cache,
-                    loaded_metadata.state_id,
-                    writer="live-service-symbol-calls-backfill",
-                    repo_id=identity.repo_id,
-                    root_path=identity.root_path,
-                    exact_revision=target_revision,
-                    file_state_payload=file_state_payload,
-                )
-                startup_timings_ms["backfill_save_snapshot_ms"] = round(
-                    (time.monotonic() - step_started) * 1000.0,
-                    3,
-                )
+                try:
+                    reloaded = load_snapshot(
+                        cache,
+                        expected_repo_id=identity.repo_id,
+                        expected_root_path=identity.root_path,
+                    )
+                    if reloaded is None:
+                        raise RuntimeError(
+                            "Canonical snapshot disappeared during "
+                            "LIVE startup backfill admission."
+                        )
+
+                    loaded = reloaded
+                    state = loaded[0]
+                    materialization_required = (
+                        module_usages_require_materialization(state)
+                    )
+
+                    if materialization_required:
+                        loaded_metadata = loaded[1]
+                        step_started = time.monotonic()
+                        from contextor.core.analysis.state_manager import FileStateManager
+                        startup_timings_ms["file_state_manager_import_ms"] = round(
+                            (time.monotonic() - step_started) * 1000.0,
+                            3,
+                        )
+
+                        step_started = time.monotonic()
+                        file_state_manager = FileStateManager(str(cache))
+                        startup_timings_ms["file_state_manager_load_ms"] = round(
+                            (time.monotonic() - step_started) * 1000.0,
+                            3,
+                        )
+                        step_started = time.monotonic()
+                        ensure_module_usages(state)
+                        startup_timings_ms["ensure_module_usages_ms"] = round(
+                            (time.monotonic() - step_started) * 1000.0,
+                            3,
+                        )
+                        target_revision = loaded_metadata.revision + 1
+                        step_started = time.monotonic()
+                        file_state_payload = file_state_manager.build_payload(
+                            loaded_metadata.state_id,
+                            target_revision,
+                        )
+                        startup_timings_ms["file_state_build_payload_ms"] = round(
+                            (time.monotonic() - step_started) * 1000.0,
+                            3,
+                        )
+                        step_started = time.monotonic()
+                        save_snapshot(
+                            state,
+                            cache,
+                            loaded_metadata.state_id,
+                            writer="live-service-symbol-calls-backfill",
+                            repo_id=identity.repo_id,
+                            root_path=identity.root_path,
+                            exact_revision=target_revision,
+                            file_state_payload=file_state_payload,
+                        )
+                        startup_timings_ms["backfill_save_snapshot_ms"] = round(
+                            (time.monotonic() - step_started) * 1000.0,
+                            3,
+                        )
+                finally:
+                    release_full_analysis(backfill_lease)
         step_started = time.monotonic()
         startup_metadata = read_metadata(cache)
         startup_timings_ms["read_metadata_ms"] = round(
