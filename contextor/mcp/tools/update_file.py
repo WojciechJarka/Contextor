@@ -183,7 +183,118 @@ class _LocalCandidatePersistenceRejected(RuntimeError):
     """The local candidate was discarded because its snapshot was not committed."""
 
 
-def _execute_local_candidate_update(root: Path, target_file: Path, engine):
+def _assert_local_committed_baseline(root: Path, engine, root_key: str) -> None:
+    """Reject stale local RAM before registry or candidate mutation."""
+    from contextor.core.live_state import read_metadata
+    from contextor.core.paths import repo_cache_dir
+    from contextor.core.repository_identity import require_repository_identity
+
+    identity = require_repository_identity(root)
+    cache_dir = repo_cache_dir(root)
+    metadata_path = cache_dir / "engine_state.meta.json"
+    current = read_metadata(cache_dir)
+
+    if current is None and metadata_path.exists():
+        raise RuntimeError(
+            "Local writer denied: committed snapshot metadata is invalid."
+        )
+
+    if current is not None:
+        if current.repo_id and current.repo_id != identity.repo_id:
+            raise RuntimeError(
+                "Local writer denied: snapshot repository identity mismatch."
+            )
+        if (
+            current.root_path
+            and Path(current.root_path).expanduser().resolve()
+            != Path(identity.root_path).expanduser().resolve()
+        ):
+            raise RuntimeError(
+                "Local writer denied: snapshot repository root mismatch."
+            )
+
+    expected = int(current.revision) if current is not None else None
+
+    for owner, value in (
+        ("engine", getattr(engine, "revision", None)),
+        ("state", getattr(engine.state, "revision", None)),
+        ("cache", mcp_runtime._live_engine_revisions.get(root_key)),
+    ):
+        if value is None:
+            continue
+        if type(value) is not int:
+            raise RuntimeError(
+                f"Local writer denied: invalid {owner} revision."
+            )
+        if expected is None:
+            if value != 0:
+                raise RuntimeError(
+                    f"Local writer denied: {owner} has no committed baseline."
+                )
+        elif value != expected:
+            raise RuntimeError(
+                f"Local writer denied: stale {owner} revision."
+            )
+
+    if current is not None and current.state_id:
+        manager = getattr(engine, "state_manager", None)
+        for owner, value in (
+            ("state", getattr(engine.state, "state_id", None)),
+            ("FileStateManager", getattr(manager, "state_id", None)),
+        ):
+            if value and str(value) != current.state_id:
+                raise RuntimeError(
+                    f"Local writer denied: {owner} identity mismatch."
+                )
+
+
+def _execute_local_candidate_update(
+    root: Path, target_file: Path, engine
+):
+    """Fence LIVE authority before executing a local candidate transaction."""
+    from contextor.core.live_state.runtime import _production_domain
+    from contextor.core.live_state.runtime_lease import RuntimeLeaseManager
+    from contextor.core.repository_identity import require_repository_identity
+
+    with mcp_runtime._engine_cache_transaction(root) as root_key:
+        if mcp_runtime._live_engines.get(root_key) is not engine:
+            raise RuntimeError(
+                "Local cached engine ownership changed."
+            )
+
+        identity = require_repository_identity(root)
+        domain = _production_domain(identity)
+        lease_manager = RuntimeLeaseManager(domain)
+
+        with lease_manager._lock():
+            generation = lease_manager._read_generation()
+            live_lease = lease_manager._read_live_lease()
+
+            if (
+                live_lease is not None
+                or generation.status not in {"never_acquired", "released"}
+            ):
+                raise RuntimeError(
+                    "Local writer denied: LIVE authority is present "
+                    "or its ownership is unresolved."
+                )
+
+            _assert_local_committed_baseline(
+                root,
+                engine,
+                root_key,
+            )
+
+            return _execute_local_candidate_update_unfenced(
+                root,
+                target_file,
+                engine,
+            )
+
+
+def _execute_local_candidate_update_unfenced(
+    root: Path, target_file: Path, engine
+):
     """Commit a local update candidate before replacing the cached engine."""
     from contextor.core.analysis.incremental_engine import IncrementalAnalysisEngine
     from contextor.core.live_state import read_metadata

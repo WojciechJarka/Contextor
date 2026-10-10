@@ -2653,7 +2653,8 @@ def _real_local_update_fixture(root, monkeypatch):
     from contextor.core.paths import repo_cache_dir
 
     root = root.resolve()
-    monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(root / "cache"))
+    monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(root.parent / f"{root.name}-cache"))
+    monkeypatch.setenv("CONTEXTOR_STATE_DIR", str(root.parent / f"{root.name}-state"))
     state = RepositoryAnalysisState(
         modules={},
         artifacts={},

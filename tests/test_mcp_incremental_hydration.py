@@ -7,6 +7,8 @@ from pathlib import Path
 
 import pytest
 import threading
+import multiprocessing
+from dataclasses import replace
 from types import SimpleNamespace
 
 from contextor import mcp_server
@@ -35,6 +37,12 @@ from contextor.core.reference.shared import (
 from contextor.core.live_state import CanonicalLiveServer, LiveStateClient, read_metadata
 from contextor.core.live_state import store as snapshot_store
 from contextor.core.repository_identity import require_repository_identity
+from contextor.core.live_state.runtime import _production_domain
+from contextor.core.live_state.runtime_lease import (
+    RuntimeLeaseManager,
+    generation_metadata_path,
+    live_lease_path,
+)
 from contextor.mcp.tools import update_file as update_file_module
 
 pytestmark = pytest.mark.live
@@ -90,6 +98,363 @@ def _local_update(repo, provider):
 def _rehydrate_local_engine(repo):
     mcp_runtime._live_engines.clear()
     return mcp_runtime.get_or_init_engine(repo.resolve())
+
+
+def _local_lease_manager(repo, *, lock_timeout=10.0):
+    return RuntimeLeaseManager(
+        _production_domain(require_repository_identity(repo)),
+        lock_timeout=lock_timeout,
+    )
+
+
+def _cross_process_local_candidate_worker(
+    repo_text, target_text, cache_text, entered, release, ready, update_started, results, first
+):
+    os.environ["CONTEXTOR_CACHE_DIR"] = cache_text
+    from contextor.core import live_state
+
+    live_state.connect = lambda _root: None
+    mcp_runtime._live_engines.clear()
+    mcp_runtime._live_engine_revisions.clear()
+    real_persist = update_file_module._persist_live_engine
+    real_update = IncrementalAnalysisEngine.update_file
+
+    if first:
+        def wait_in_persist(root, candidate):
+            entered.set()
+            if not release.wait(10):
+                raise TimeoutError("cross-process persistence hold expired")
+            return real_persist(root, candidate)
+
+        update_file_module._persist_live_engine = wait_in_persist
+    else:
+        def observe_update(self, path):
+            update_started.set()
+            return real_update(self, path)
+
+        IncrementalAnalysisEngine.update_file = observe_update
+
+    try:
+        if not first:
+            assert mcp_runtime.get_or_init_engine(Path(repo_text)) is not None
+            ready.set()
+        results.put(_local_update(Path(repo_text), Path(target_text)))
+    except BaseException as exc:
+        results.put({"status": "WORKER_ERROR", "error": repr(exc)})
+
+
+@pytest.mark.parametrize("prior_generation", ["never_acquired", "released"])
+def test_local_writer_accepts_only_clean_absence_states(
+    tmp_path, monkeypatch, prior_generation
+):
+    repo, provider, engine = _build_local_fallback_engine(
+        tmp_path, monkeypatch, "def run():\n    return 1\n"
+    )
+    assert update_file_module._persist_live_engine(repo, engine) is True
+    if prior_generation == "released":
+        authority = _local_lease_manager(repo)
+        authority.release(authority.acquire())
+    provider.write_text("def run():\n    return 2\n", encoding="utf-8")
+
+    response = _local_update(repo, provider)
+
+    assert response["status"] == "UPDATED"
+    assert read_metadata(repo_cache_dir(repo)).revision == 2
+
+
+@pytest.mark.parametrize(
+    "authority_state",
+    [
+        "active",
+        "reserved",
+        "active_missing_lease",
+        "fenced",
+        "mismatched_generation",
+        "malformed_generation",
+        "malformed_lease",
+        "foreign_generation",
+        "foreign_lease",
+        "transport_failure_with_active_lease",
+    ],
+)
+def test_local_writer_rejects_untrusted_authority_before_mutation(
+    tmp_path, monkeypatch, authority_state
+):
+    repo, provider, engine = _build_local_fallback_engine(
+        tmp_path, monkeypatch, "def run():\n    return 1\n"
+    )
+    assert update_file_module._persist_live_engine(repo, engine) is True
+    cache_dir = repo_cache_dir(repo)
+    previous_meta = (cache_dir / "engine_state.meta.json").read_bytes()
+    previous_registry = engine.registry.create_checkpoint()
+    previous_engine = mcp_runtime._live_engines[str(repo.resolve())]
+    authority = _local_lease_manager(repo)
+    domain = authority.domain
+
+    if authority_state in {"active", "transport_failure_with_active_lease"}:
+        authority.acquire()
+    elif authority_state in {
+        "reserved", "active_missing_lease", "fenced", "mismatched_generation"
+    }:
+        lease = authority.acquire()
+        if authority_state == "reserved":
+            with authority._lock():
+                authority._write_generation(
+                    replace(authority._read_generation(), status="reserved")
+                )
+        elif authority_state == "active_missing_lease":
+            live_lease_path(domain).unlink()
+        elif authority_state == "fenced":
+            authority.fence_owner(lease)
+        else:
+            with authority._lock():
+                authority._write_generation(
+                    replace(
+                        authority._read_generation(),
+                        last_service_instance_id="different-service",
+                    )
+                )
+    elif authority_state == "malformed_generation":
+        generation_metadata_path(domain).write_text("{broken", encoding="utf-8")
+    elif authority_state == "malformed_lease":
+        live_lease_path(domain).write_text("{broken", encoding="utf-8")
+    elif authority_state == "foreign_generation":
+        generation_metadata_path(domain).write_text(
+            json.dumps(replace(authority.read_generation(), repo_id="foreign-repo").to_dict()),
+            encoding="utf-8",
+        )
+    elif authority_state == "foreign_lease":
+        lease = authority.acquire()
+        live_lease_path(domain).write_text(
+            json.dumps(replace(lease, repo_id="foreign-repo").to_dict()),
+            encoding="utf-8",
+        )
+
+    # The fixture forces connect(root)=None, including the transport-failure case.
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("local mutation started despite untrusted authority")
+
+    monkeypatch.setattr(IncrementalAnalysisEngine, "update_file", forbidden)
+    monkeypatch.setattr(engine.registry, "create_checkpoint", forbidden)
+    monkeypatch.setattr(update_file_module, "_persist_live_engine", forbidden)
+    provider.write_text("def run():\n    return 2\n", encoding="utf-8")
+
+    response = _local_update(repo, provider)
+
+    assert response["status"] == "ERROR"
+    assert "Local writer denied" in response["error"] or "malformed" in response["error"] or "belongs to another domain" in response["error"]
+    assert mcp_runtime._live_engines[str(repo.resolve())] is previous_engine
+    assert (cache_dir / "engine_state.meta.json").read_bytes() == previous_meta
+    assert engine.registry._state == previous_registry
+
+
+def test_local_writer_rejects_stale_revision_before_checkpoint_or_update(
+    tmp_path, monkeypatch
+):
+    repo, provider, engine = _build_local_fallback_engine(
+        tmp_path, monkeypatch, "def run():\n    return 1\n"
+    )
+    assert update_file_module._persist_live_engine(repo, engine) is True
+    before_meta = (repo_cache_dir(repo) / "engine_state.meta.json").read_bytes()
+    before_registry = engine.registry.create_checkpoint()
+    engine.revision = 0
+    provider.write_text("def run():\n    return 2\n", encoding="utf-8")
+
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("candidate or registry checkpoint began before baseline gate")
+
+    monkeypatch.setattr(IncrementalAnalysisEngine, "update_file", forbidden)
+    monkeypatch.setattr(engine.registry, "create_checkpoint", forbidden)
+    response = _local_update(repo, provider)
+
+    assert response["status"] == "ERROR"
+    assert "stale engine revision" in response["error"]
+    assert engine.registry._state == before_registry
+    assert (repo_cache_dir(repo) / "engine_state.meta.json").read_bytes() == before_meta
+
+
+def test_local_domain_fence_blocks_live_acquire_until_persistence_finishes(
+    tmp_path, monkeypatch
+):
+    repo, provider, engine = _build_local_fallback_engine(
+        tmp_path, monkeypatch, "def run():\n    return 1\n"
+    )
+    assert update_file_module._persist_live_engine(repo, engine) is True
+    provider.write_text("def run():\n    return 2\n", encoding="utf-8")
+    real_persist = update_file_module._persist_live_engine
+    entered = threading.Event()
+    release = threading.Event()
+    acquired = threading.Event()
+    results = {}
+
+    def wait_in_persist(root, candidate):
+        entered.set()
+        assert release.wait(10)
+        return real_persist(root, candidate)
+
+    def acquire_live():
+        results["lease"] = _local_lease_manager(repo, lock_timeout=3).acquire()
+        acquired.set()
+
+    monkeypatch.setattr(update_file_module, "_persist_live_engine", wait_in_persist)
+    local = threading.Thread(target=lambda: results.setdefault("local", _local_update(repo, provider)))
+    live = threading.Thread(target=acquire_live)
+    try:
+        local.start()
+        assert entered.wait(10)
+        live.start()
+        assert not acquired.wait(0.25)
+    finally:
+        release.set()
+        local.join(10)
+        live.join(10)
+
+    assert not local.is_alive() and not live.is_alive()
+    assert results["local"]["status"] == "UPDATED"
+    assert acquired.is_set()
+    assert results["lease"].lease_generation == 1
+
+
+def test_local_registry_rollback_completes_before_domain_fence_release(
+    tmp_path, monkeypatch
+):
+    repo, provider, engine = _build_local_fallback_engine(
+        tmp_path, monkeypatch, "def run():\n    return 1\n"
+    )
+    assert update_file_module._persist_live_engine(repo, engine) is True
+    provider.write_text("def run():\n    return 2\n", encoding="utf-8")
+    rollback_entered = threading.Event()
+    release_rollback = threading.Event()
+    acquired = threading.Event()
+    real_restore = engine.registry.restore_checkpoint
+    results = {}
+
+    def wait_in_rollback(checkpoint):
+        rollback_entered.set()
+        assert release_rollback.wait(10)
+        return real_restore(checkpoint)
+
+    def acquire_live():
+        results["lease"] = _local_lease_manager(repo, lock_timeout=3).acquire()
+        acquired.set()
+
+    monkeypatch.setattr(update_file_module, "_persist_live_engine", lambda *_args: False)
+    monkeypatch.setattr(engine.registry, "restore_checkpoint", wait_in_rollback)
+    local = threading.Thread(target=lambda: results.setdefault("local", _local_update(repo, provider)))
+    live = threading.Thread(target=acquire_live)
+    try:
+        local.start()
+        assert rollback_entered.wait(10)
+        live.start()
+        assert not acquired.wait(0.25)
+    finally:
+        release_rollback.set()
+        local.join(10)
+        live.join(10)
+
+    assert not local.is_alive() and not live.is_alive()
+    assert results["local"]["status"] == "ERROR"
+    assert acquired.is_set()
+
+
+def test_local_writer_domain_lock_timeout_preserves_state(tmp_path, monkeypatch):
+    repo, provider, engine = _build_local_fallback_engine(
+        tmp_path, monkeypatch, "def run():\n    return 1\n"
+    )
+    assert update_file_module._persist_live_engine(repo, engine) is True
+    before_meta = (repo_cache_dir(repo) / "engine_state.meta.json").read_bytes()
+    before_registry = engine.registry.create_checkpoint()
+    original_manager = RuntimeLeaseManager
+    held = _local_lease_manager(repo)
+    entered = threading.Event()
+    release = threading.Event()
+
+    def hold_lock():
+        with held._lock():
+            entered.set()
+            assert release.wait(10)
+
+    holder = threading.Thread(target=hold_lock)
+    holder.start()
+    assert entered.wait(10)
+    import contextor.core.live_state.runtime_lease as lease_module
+
+    monkeypatch.setattr(
+        lease_module,
+        "RuntimeLeaseManager",
+        lambda domain: original_manager(domain, lock_timeout=0.1),
+    )
+    provider.write_text("def run():\n    return 2\n", encoding="utf-8")
+    try:
+        response = _local_update(repo, provider)
+    finally:
+        release.set()
+        holder.join(10)
+
+    assert response["status"] == "ERROR"
+    assert "timed out waiting for domain lock" in response["error"]
+    assert mcp_runtime._live_engines[str(repo.resolve())] is engine
+    assert engine.registry._state == before_registry
+    assert (repo_cache_dir(repo) / "engine_state.meta.json").read_bytes() == before_meta
+
+
+def test_two_mcp_processes_cannot_enter_local_candidate_concurrently(
+    tmp_path, monkeypatch
+):
+    repo, provider, engine = _build_local_fallback_engine(
+        tmp_path, monkeypatch, "def run():\n    return 1\n"
+    )
+    assert update_file_module._persist_live_engine(repo, engine) is True
+    provider.write_text("def run():\n    return 2\n", encoding="utf-8")
+    extra = repo / "extra.py"
+    extra.write_text("value = 3\n", encoding="utf-8")
+    ctx = multiprocessing.get_context("spawn")
+    entered = ctx.Event()
+    release = ctx.Event()
+    ready = ctx.Event()
+    update_started = ctx.Event()
+    results = ctx.Queue()
+    cache_root = os.environ["CONTEXTOR_CACHE_DIR"]
+    first = ctx.Process(
+        target=_cross_process_local_candidate_worker,
+        args=(
+            str(repo), str(provider), cache_root, entered, release, ready,
+            update_started, results, True,
+        ),
+    )
+    second = ctx.Process(
+        target=_cross_process_local_candidate_worker,
+        args=(
+            str(repo), str(extra), cache_root, entered, release, ready,
+            update_started, results, False,
+        ),
+    )
+    try:
+        first.start()
+        assert entered.wait(15)
+        second.start()
+        assert ready.wait(15)
+        assert not update_started.wait(0.4)
+    finally:
+        release.set()
+        first.join(15)
+        if second.pid is not None:
+            second.join(15)
+        if first.is_alive():
+            first.terminate()
+            first.join(5)
+        if second.pid is not None and second.is_alive():
+            second.terminate()
+            second.join(5)
+
+    assert first.exitcode == 0
+    assert second.exitcode == 0
+    first_result = results.get(timeout=5)
+    second_result = results.get(timeout=5)
+    assert first_result["status"] == "UPDATED"
+    assert second_result["status"] in {"ERROR", "UPDATED"}
+    assert not update_started.is_set()
+    assert read_metadata(repo_cache_dir(repo)).revision == 2
 
 
 def test_local_candidate_cow_keeps_original_nested_facts_and_tracked_files(
