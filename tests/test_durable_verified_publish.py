@@ -1,6 +1,7 @@
 """Focused durable-generation publication contract."""
 
 import copy
+import threading
 from contextlib import contextmanager
 from multiprocessing import get_context
 from pathlib import Path
@@ -9,7 +10,7 @@ from types import SimpleNamespace
 import pytest
 
 from contextor.core.live_state import ipc as ipc_module
-from contextor.core.live_state.ipc import CanonicalLiveServer
+from contextor.core.live_state.ipc import CanonicalLiveServer, LiveStateClient
 from contextor.core.live_state.store import (
     load_snapshot,
     locked_committed_snapshot,
@@ -28,6 +29,30 @@ def _hold_snapshot_lock(lock_path, ready, release):
         release.wait(15)
     finally:
         _release_lock(fd)
+
+
+def _raw_publish_without_writer_lease(repo_path, endpoint, response_queue):
+    from contextor.core.analysis.full_analysis_lease import (
+        FullAnalysisBusyError,
+        acquire_full_analysis,
+        release_full_analysis,
+    )
+
+    try:
+        lease = acquire_full_analysis(
+            repo_path, owner="raw-publish-lease-probe", timeout=0.0
+        )
+    except FullAnalysisBusyError:
+        lease_denied = True
+    else:
+        release_full_analysis(lease)
+        lease_denied = False
+    response = LiveStateClient(endpoint).publish(
+        SimpleNamespace(state_id="sid", revision=2),
+        origin="unleased_raw_ipc",
+        timeout=10.0,
+    )
+    response_queue.put((lease_denied, response))
 
 
 @pytest.fixture
@@ -164,6 +189,112 @@ def test_r3_r5_r8_r9_r15_rejections_leave_live_and_event_unchanged(durable_harne
     latest = _unchanged(server)
     assert _publish(server, 3)["error"] == "non_monotonic_canonical_revision"
     _assert_unchanged(server, latest)
+
+
+def test_raw_ipc_publish_front_runs_lease_owner_same_committed_generation(
+    durable_harness,
+):
+    from contextor.core.analysis.full_analysis_lease import (
+        acquire_full_analysis,
+        release_full_analysis,
+    )
+    from contextor.core.analysis.state_manager import FileStateManager
+
+    durable_harness.commit(1)
+    initial = load_snapshot(
+        durable_harness.cache,
+        expected_repo_id=durable_harness.identity.repo_id,
+        expected_root_path=durable_harness.identity.root_path,
+    )
+    server = durable_harness.server(state=initial[0], revision=initial[1].revision)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    client = LiveStateClient(server.endpoint)
+    lease = acquire_full_analysis(
+        durable_harness.repo, owner="legitimate-full-writer", timeout=5.0
+    )
+    try:
+        candidate, committed = durable_harness.commit(2, value="owner-generation")
+        before = _unchanged(server)
+        assert client.publish(
+            SimpleNamespace(state_id="sid", revision=3),
+            origin="invalid_uncommitted",
+            timeout=10.0,
+        )["error"] == "committed_publish_generation_mismatch"
+        _assert_unchanged(server, before)
+        assert client.publish(
+            SimpleNamespace(state_id="wrong", revision=2),
+            origin="invalid_identity",
+            timeout=10.0,
+        )["error"] == "committed_publish_generation_mismatch"
+        _assert_unchanged(server, before)
+
+        context = get_context("spawn")
+        response_queue = context.Queue()
+        raw = context.Process(
+            target=_raw_publish_without_writer_lease,
+            args=(str(durable_harness.repo), server.endpoint, response_queue),
+        )
+        raw.start()
+        try:
+            lease_denied, raw_response = response_queue.get(timeout=12.0)
+            raw.join(5.0)
+        finally:
+            if raw.is_alive():
+                raw.terminate()
+                raw.join(5.0)
+        assert raw.exitcode == 0
+        assert lease_denied is True
+        assert raw_response == {
+            "status": "ok",
+            "revision": 2,
+            "seq": 1,
+            "source": "committed_snapshot",
+        }
+        assert server._revision == 2
+        assert server._state.state_id == committed.state_id
+        assert server._state.revision == 2
+        assert server._state.value == "owner-generation"
+        assert server._activity_seq == 1
+        assert len(server._events) == 1
+        assert server._events[0]["origin"] == "unleased_raw_ipc"
+        assert server._events[0]["canonical_revision"] == 2
+
+        owner_response = client.publish(
+            candidate, origin="legitimate_full_writer", timeout=10.0
+        )
+        assert owner_response == {
+            "status": "error",
+            "error": "non_monotonic_canonical_revision",
+            "revision": 2,
+            "candidate_revision": 2,
+            "expected_revision": 3,
+        }
+        before_retry = _unchanged(server)
+        assert client.publish(
+            candidate, origin="legitimate_full_writer", timeout=10.0
+        ) == owner_response
+        _assert_unchanged(server, before_retry)
+
+        disk = load_snapshot(
+            durable_harness.cache,
+            expected_repo_id=durable_harness.identity.repo_id,
+            expected_root_path=durable_harness.identity.root_path,
+        )
+        assert disk[1].revision == committed.revision == 2
+        assert disk[1].state_id == committed.state_id == "sid"
+        assert disk[0].revision == server._state.revision == 2
+        assert disk[0].state_id == server._state.state_id
+        assert FileStateManager(str(durable_harness.cache)).revision == 2
+        assert read_metadata(durable_harness.cache) == disk[1]
+        assert server._activity_seq == 1
+        assert len(server._events) == 1
+        assert server._events[0]["origin"] == "unleased_raw_ipc"
+    finally:
+        release_full_analysis(lease)
+        server.close()
+        thread.join(5.0)
+    assert not thread.is_alive()
 
 
 def test_r4_r12_r29_durable_catch_up_after_earlier_publish_failure(durable_harness):

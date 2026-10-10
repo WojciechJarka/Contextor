@@ -1,505 +1,239 @@
-# L32H2G1 — startup backfill canonical writer gate
+# L32H2G2 — direct publish generation ownership evidence
 
 ## FILES_CHANGED_THIS_TASK
-- C:\Temp\Contextor_Repo\contextor\core\live_state\runtime.py
-- C:\Temp\Contextor_Repo\tests\test_live_state_ipc.py
-- C:\Temp\Contextor_Repo\walkthrough.md (report only; excluded from source/test diff)
+- C:\Temp\Contextor_Repo\tests\test_durable_verified_publish.py
+- C:\Temp\Contextor_Repo\walkthrough.md (report only)
+No production file changed in this task. git status --short at completion showed only these two modified paths.
 
 ## SOURCE_PREFLIGHT
-DIRECT_EVIDENCE: Contextor MCP get_source_range returned complete runtime.py lines 1412–1560 and 1715–1820 with the exact auditor anchors. get_file_edit_context and blast radius identified tests.test_live_state_ipc and tests.test_live_authority_bootstrap as direct static test consumers. Canonical state was fresh, workspace_sync=verified, revision=287, resync_required=false. The source/test worktree was initially clean; only walkthrough.md had the previous task report. Pre-edit report named both planned changed files and the exact gate.
+DIRECT_EVIDENCE: Contextor MCP returned complete AST-bounded current implementations with workspace_sync=verified at revision 292 for CanonicalLiveServer._execute_committed_publish (C:\Temp\Contextor_Repo\contextor\core\live_state\ipc.py:1297), _execute_publish (:1506), _dispatch (:2131), LiveStateClient.publish (:2556), and locked_committed_snapshot (C:\Temp\Contextor_Repo\contextor\core\live_state\store.py:1949). Existing durable_harness uses actual locked_committed_snapshot, save_snapshot(exact_revision=...), versioned FileState payload, and CanonicalLiveServer with committed_snapshot_reader. No source preview was treated as complete. G1/F1/F2/F3 findings were not reopened.
 
-## RED_RESULTS
-DIRECT_EVIDENCE: After valid fixture setup and before production patch, seven new targeted test cases failed (0 passed, 89 deselected). Most direct RED: test_startup_backfill_fails_fast_behind_cross_process_writer reached CanonicalLiveServer while a spawned competing process held the actual full_analysis OS lease; expected FullAnalysisBusyError was absent. The lease-scope test recorded zero canonical lease acquisitions. The four injected-failure variants also recorded zero backfill lease acquisitions. The recheck scenario initially failed on the test fixture's missing versioned FileState payload; fixture was corrected before GREEN, so this run does not independently prove a RED recheck assertion. The first RED attempt failed during fixture setup due incomplete re-export facts; fixture was corrected before the meaningful RED run.
+## REAL_IPC_INTERLEAVING
+A test fixture initialized disk generation R=1 and a real listening CanonicalLiveServer at revision 1. The parent acquired the actual repository full_analysis.lock as legitimate-full-writer, then committed exact disk generation R+1=2 with FileState revision 2. The parent deliberately withheld its IPC publish. A spawned independent process attempted acquire_full_analysis(timeout=0.0), observed FullAnalysisBusyError, and nevertheless used LiveStateClient.publish through the real IPC endpoint. Its response was received before the parent resumed its own publish. Spawn, queue timeout, process join and server thread join were bounded; no sleeps or fake publish response were used.
 
-## BACKFILL_WRITER_ADMISSION
-CODE_PATH_PROVED: runtime.run_service preserves the initial module_usages_require_materialization check and existing timing measurement. Only when needed it acquires full_analysis with owner=live_startup_module_usages_backfill, writer_kind=full_analysis, timeout=0.0. Lease covers reload, recheck, existing ensure_module_usages, FileState payload build, and exact snapshot save. finally releases it. No additional runtime authority acquisition.
+## ACTUAL_LEASE_OWNERSHIP
+DIRECT_EVIDENCE from the passing spawned-process test: the legitimate writer retained its FullAnalysisLease across commit, raw client request and owner request. The raw process could not acquire the same OS lease. _dispatch("publish") has no _mutation_guard admission; _execute_publish uses the server mutation execution lock, and committed publish validates the locked durable generation. Thus A=NO: raw publish did not require a caller-held canonical lease; B=YES: it front-ran the owner.
 
-## FAIL_FAST_BOOTSTRAP_POLICY
-CONTRACT_PROVED: timeout=0.0 was preserved literally. Spawn-based cross-process test used ready/release Event barriers; startup failed before materialization or server construction, metadata revision stayed unchanged, and no delayed write appeared after competing lease release. Runtime bootstrap exception/finally cleanup was exercised.
+## RAW_PUBLISH_RESPONSE
+Exact response asserted and observed through real LiveStateClient.publish:
+```python
+{"status": "ok", "revision": 2, "seq": 1, "source": "committed_snapshot"}
+```
+Immediately afterward LIVE RAM held the disk-loaded state_id="sid", revision=2, value="owner-generation"; activity_seq=1 and one publish event existed.
 
-## RELOAD_AFTER_ADMISSION
-CODE_PATH_PROVED: load_snapshot is repeated under the canonical lease, with expected repo_id/root_path. None raises the specified RuntimeError. The reloaded state and loaded tuple replace stale pre-admission variables before materialization and server construction. The targeted recheck fixture committed a newer, already materialized generation between initial load and admission; server saw that state/revision and no ensure or backfill save occurred.
+## OWNER_PUBLISH_RESPONSE
+The same still-leased writer then called LiveStateClient.publish for its own committed generation 2. Exact response:
+```python
+{"status": "error", "error": "non_monotonic_canonical_revision",
+ "revision": 2, "candidate_revision": 2, "expected_revision": 3}
+```
+C=YES, E=YES: owner receives an error although its committed generation is already installed in LIVE RAM. This is a response/ownership semantic hazard, not proof of durable corruption.
 
-## NO_BACKFILL_FAST_PATH
-The second healthy startup in the lease-scope test acquired no backfill full-analysis lease and made no new snapshot generation. Existing startup hydration and timing branch remained in place.
+## RAM_DISK_FILESTATE_PARITY
+D=YES: after both requests, LIVE RAM revision/state_id=2/"sid"; load_snapshot metadata and state revision/state_id=2/"sid"; FileStateManager.revision=2; read_metadata equals loaded metadata. The raw publish did not write another generation. The test also sent uncommitted revision 3 and mismatched state_id="wrong" before the raw request; both returned committed_publish_generation_mismatch without changing RAM, activity seq or events. H=NO for these tested invalid/mismatched candidates; complete source requires exact committed revision/state_id under snapshot lock.
 
-## ACTUAL_CROSS_PROCESS_EXCLUSION
-A spawned Windows process acquired full_analysis.lock using acquire_full_analysis and signaled an Event. The parent started LIVE bootstrap while the lock was held. Parent admission failed promptly (asserted less than 5 seconds); ensure_module_usages was not called, CanonicalLiveServer was not reached, metadata revision and endpoint remained unchanged. Barrier release, child join, zero exit code and unchanged revision after release were asserted. This is actual OS exclusion evidence in an isolated fixture, not a serving-process certification.
+## EVENT_SEQUENCE_AND_ORIGIN
+F=YES: the sole event for revision 2 had origin="unleased_raw_ipc" rather than "legitimate_full_writer". G=NO extra event on rejected owner publish or its duplicate retry: activity_seq stayed 1 and event count stayed 1. Event operation was publish and canonical_revision=2.
 
-## FILESTATE_REVISION_PARITY
-The preexisting parity regression test passed. Existing body retains FileStateManager.build_payload(state_id, target_revision), exact_revision=target_revision, writer name and timing fields without duplication. Snapshot exact revision and FileState mismatch regressions passed.
+## DUPLICATE_RETRY_BEHAVIOR
+The legitimate writer retried the identical state_id and revision while the committed generation remained current. Response was the identical non_monotonic_canonical_revision error with expected_revision=3. The server state, event list and activity_seq were unchanged. Existing test_r3_r5_r8_r9_r15_rejections_leave_live_and_event_unchanged explicitly requires duplicate rejection; this task did not change that public behavior. EXPECTED_IDEMPOTENT_BEHAVIOR applies only to state/event nonmutation, not to an ok acknowledgement.
 
-## FAILURE_RELEASE
-Parameterized tests injected exceptions from second load_snapshot, ensure_module_usages, FileStateManager.build_payload and save_snapshot. All four passed. They asserted one canonical lease acquire/release, unchanged durable revision, absent endpoint and immediate ability to reacquire full_analysis.lock.
+## EXISTING_TEST_CONTRACTS
+Selected existing passing nodes:
+- C:\Temp\Contextor_Repo\tests\test_durable_verified_publish.py::test_r2_r11_committed_publish_installs_disk_object_and_isolates_candidate
+- C:\Temp\Contextor_Repo\tests\test_durable_verified_publish.py::test_r3_r5_r8_r9_r15_rejections_leave_live_and_event_unchanged
+- C:\Temp\Contextor_Repo\tests\test_durable_verified_publish.py::test_r4_r12_r29_durable_catch_up_after_earlier_publish_failure
+- C:\Temp\Contextor_Repo\tests\test_durable_verified_publish.py::test_r10_committed_publish_respects_cross_process_store_lock
+- C:\Temp\Contextor_Repo\tests\test_durable_verified_publish.py::test_r30_publish_does_not_persist_another_revision
+- C:\Temp\Contextor_Repo\tests\test_live_mutation_coordinator.py::test_publish_and_queued_update_are_single_writer_serialized
+- C:\Temp\Contextor_Repo\tests\test_full_analysis_coordination.py::test_lease_is_held_during_publication
+- C:\Temp\Contextor_Repo\tests\test_live_single_file_reuse.py::test_scoped_single_file_publishes_to_real_live_server_under_writer_lease
 
-## RUNTIME_AUTHORITY_CLEANUP
-Bootstrap failure tests and runtime failure/finally source confirmed authority cleanup remains in the outer finally. Cross-process contention and four injected-failure tests assert no endpoint publication. Existing authority bootstrap/restart/reconciliation tests passed. No service restart was performed.
+## TARGETED_TEST_RESULTS
+New real IPC interleaving test: 1 passed in 4.18 s. Eight selected existing compatibility tests: 8 passed in 12.28 s. py_compile on changed test file: PASS. git diff --check on changed test file: PASS. No full repository suite, analysis, process restart or manual update_file.
 
-## TARGETED_GREEN_RESULTS
-- Complete C:\Temp\Contextor_Repo\tests\test_live_state_ipc.py: 96 passed, 1 unrelated AuthlibDeprecationWarning, 75.38 s.
-- Seven selected direct startup/authority/snapshot/lease regressions: 7 passed, 23.70 s.
-- py_compile for both changed Python files: PASS.
-- git diff --check for both changed files: PASS.
-- No full repository pytest suite was run.
+## SEMANTIC_HAZARD_CLASSIFICATION
+PROVED_ACK_ORIGIN_SEMANTIC_HAZARD in an isolated real IPC, real OS lease, committed-generation fixture. Raw unleased request installed the valid durable generation and supplied its origin; the legitimate owner's subsequent publication was rejected as non-monotonic. PROVED_CORRUPTION: NO; RAM, snapshot metadata/state and FileState remained consistent. Uncommitted or mismatched candidate acceptance: not observed and rejected in targeted checks. No claim is made that this exact race occurred in a serving production environment.
+
+## PRODUCTION_CALLER_REACHABILITY
+Source audit confirms existing facade full, scoped and GUI startup publish call sites hold their full/scoped/startup lease across synchronous publication. No unleased production caller was confirmed. A raw LiveStateClient can reach the real IPC endpoint without the lease, as proved by the spawned fixture. Deployment reachability of such a client outside tests is UNKNOWN.
 
 ## SOURCE_SYNC
-Post-edit Contextor get_source_range returned the full changed backfill block through server construction. Blast radius reported workspace_sync=verified, canonical_state=fresh, canonical_revision=292, cycles.count=0. This certifies indexed source identity, not imported-code reload.
+Post-test Contextor get_file_edit_context for the changed test file and get_symbol_implementation for _execute_committed_publish returned canonical_state=fresh, workspace_sync=verified, canonical_revision=293, cycles.count=0. No production source was edited.
 
 ## LIVE_REVISION_BEFORE_AFTER
-Before: 287, continuity=continuous, resync_required=false. After: 292, continuity=continuous, resync_required=false. get_live_events(after_revision=287) returned desktop_watcher update_file events 288–292 for the changed test and runtime files, including runtime.py at revision 291. The watcher activity included intermediate test edits. No manual update_file was called.
+Before 292. After 293. get_live_events(after_revision=292) returned one desktop_watcher update_file event at revision 293 for C:\Temp\Contextor_Repo\tests\test_durable_verified_publish.py, continuity=continuous, resync_required=false.
 
-## RESTART_REQUIRED
-YES for serving Contextor MCP/LIVE processes that import runtime.py. No process was restarted, and these test results do not certify existing serving processes reloaded the implementation.
-
-## FINAL_VERDICT
-TARGETED_PASS_FOR_L32H2G1_SOURCE_AND_TESTS. No L32H FINAL PASS or serving-process certification claimed. Await auditor command proceduj.
-
-## FULL_DIFFS_FOR_ALL_CHANGED_FILES
+## FULL_DIFFS
 
 ```diff
-diff --git a/contextor/core/live_state/runtime.py b/contextor/core/live_state/runtime.py
-index 9cb2c40..4952fe4 100644
---- a/contextor/core/live_state/runtime.py
-+++ b/contextor/core/live_state/runtime.py
-@@ -1465,51 +1465,83 @@ def run_service(
-             )
+diff --git a/tests/test_durable_verified_publish.py b/tests/test_durable_verified_publish.py
+index 304ea9c..1825161 100644
+--- a/tests/test_durable_verified_publish.py
++++ b/tests/test_durable_verified_publish.py
+@@ -1,6 +1,7 @@
+ """Focused durable-generation publication contract."""
  
-             if materialization_required:
--                loaded_metadata = loaded[1]
--                step_started = time.monotonic()
--                from contextor.core.analysis.state_manager import FileStateManager
--                startup_timings_ms["file_state_manager_import_ms"] = round(
--                    (time.monotonic() - step_started) * 1000.0,
--                    3,
-+                from contextor.core.analysis.full_analysis_lease import (
-+                    acquire_full_analysis,
-+                    release_full_analysis,
-                 )
- 
--                step_started = time.monotonic()
--                file_state_manager = FileStateManager(str(cache))
--                startup_timings_ms["file_state_manager_load_ms"] = round(
--                    (time.monotonic() - step_started) * 1000.0,
--                    3,
--                )
--                step_started = time.monotonic()
--                ensure_module_usages(state)
--                startup_timings_ms["ensure_module_usages_ms"] = round(
--                    (time.monotonic() - step_started) * 1000.0,
--                    3,
--                )
--                target_revision = loaded_metadata.revision + 1
--                step_started = time.monotonic()
--                file_state_payload = file_state_manager.build_payload(
--                    loaded_metadata.state_id,
--                    target_revision,
--                )
--                startup_timings_ms["file_state_build_payload_ms"] = round(
--                    (time.monotonic() - step_started) * 1000.0,
--                    3,
--                )
--                step_started = time.monotonic()
--                save_snapshot(
--                    state,
--                    cache,
--                    loaded_metadata.state_id,
--                    writer="live-service-symbol-calls-backfill",
--                    repo_id=identity.repo_id,
--                    root_path=identity.root_path,
--                    exact_revision=target_revision,
--                    file_state_payload=file_state_payload,
--                )
--                startup_timings_ms["backfill_save_snapshot_ms"] = round(
--                    (time.monotonic() - step_started) * 1000.0,
--                    3,
-+                backfill_lease = acquire_full_analysis(
-+                    root,
-+                    owner="live_startup_module_usages_backfill",
-+                    writer_kind="full_analysis",
-+                    timeout=0.0,
-                 )
-+                try:
-+                    reloaded = load_snapshot(
-+                        cache,
-+                        expected_repo_id=identity.repo_id,
-+                        expected_root_path=identity.root_path,
-+                    )
-+                    if reloaded is None:
-+                        raise RuntimeError(
-+                            "Canonical snapshot disappeared during "
-+                            "LIVE startup backfill admission."
-+                        )
-+
-+                    loaded = reloaded
-+                    state = loaded[0]
-+                    materialization_required = (
-+                        module_usages_require_materialization(state)
-+                    )
-+
-+                    if materialization_required:
-+                        loaded_metadata = loaded[1]
-+                        step_started = time.monotonic()
-+                        from contextor.core.analysis.state_manager import FileStateManager
-+                        startup_timings_ms["file_state_manager_import_ms"] = round(
-+                            (time.monotonic() - step_started) * 1000.0,
-+                            3,
-+                        )
-+
-+                        step_started = time.monotonic()
-+                        file_state_manager = FileStateManager(str(cache))
-+                        startup_timings_ms["file_state_manager_load_ms"] = round(
-+                            (time.monotonic() - step_started) * 1000.0,
-+                            3,
-+                        )
-+                        step_started = time.monotonic()
-+                        ensure_module_usages(state)
-+                        startup_timings_ms["ensure_module_usages_ms"] = round(
-+                            (time.monotonic() - step_started) * 1000.0,
-+                            3,
-+                        )
-+                        target_revision = loaded_metadata.revision + 1
-+                        step_started = time.monotonic()
-+                        file_state_payload = file_state_manager.build_payload(
-+                            loaded_metadata.state_id,
-+                            target_revision,
-+                        )
-+                        startup_timings_ms["file_state_build_payload_ms"] = round(
-+                            (time.monotonic() - step_started) * 1000.0,
-+                            3,
-+                        )
-+                        step_started = time.monotonic()
-+                        save_snapshot(
-+                            state,
-+                            cache,
-+                            loaded_metadata.state_id,
-+                            writer="live-service-symbol-calls-backfill",
-+                            repo_id=identity.repo_id,
-+                            root_path=identity.root_path,
-+                            exact_revision=target_revision,
-+                            file_state_payload=file_state_payload,
-+                        )
-+                        startup_timings_ms["backfill_save_snapshot_ms"] = round(
-+                            (time.monotonic() - step_started) * 1000.0,
-+                            3,
-+                        )
-+                finally:
-+                    release_full_analysis(backfill_lease)
-         step_started = time.monotonic()
-         startup_metadata = read_metadata(cache)
-         startup_timings_ms["read_metadata_ms"] = round(
-diff --git a/tests/test_live_state_ipc.py b/tests/test_live_state_ipc.py
-index 6e5dcab..ee0aa92 100644
---- a/tests/test_live_state_ipc.py
-+++ b/tests/test_live_state_ipc.py
-@@ -5,6 +5,7 @@ import sys
- import threading
- import time
- import multiprocessing.connection as mpc
-+import multiprocessing
+ import copy
++import threading
+ from contextlib import contextmanager
+ from multiprocessing import get_context
  from pathlib import Path
- from types import SimpleNamespace
+@@ -9,7 +10,7 @@ from types import SimpleNamespace
+ import pytest
  
-@@ -41,6 +42,86 @@ def _poll_until_reconciled(watcher, expected, timeout=10.0):
- pytestmark = pytest.mark.live
+ from contextor.core.live_state import ipc as ipc_module
+-from contextor.core.live_state.ipc import CanonicalLiveServer
++from contextor.core.live_state.ipc import CanonicalLiveServer, LiveStateClient
+ from contextor.core.live_state.store import (
+     load_snapshot,
+     locked_committed_snapshot,
+@@ -30,6 +31,30 @@ def _hold_snapshot_lock(lock_path, ready, release):
+         _release_lock(fd)
  
  
-+def _hold_full_analysis_lease_for_startup(repo_path, ready, release):
++def _raw_publish_without_writer_lease(repo_path, endpoint, response_queue):
 +    from contextor.core.analysis.full_analysis_lease import (
++        FullAnalysisBusyError,
 +        acquire_full_analysis,
 +        release_full_analysis,
 +    )
 +
++    try:
++        lease = acquire_full_analysis(
++            repo_path, owner="raw-publish-lease-probe", timeout=0.0
++        )
++    except FullAnalysisBusyError:
++        lease_denied = True
++    else:
++        release_full_analysis(lease)
++        lease_denied = False
++    response = LiveStateClient(endpoint).publish(
++        SimpleNamespace(state_id="sid", revision=2),
++        origin="unleased_raw_ipc",
++        timeout=10.0,
++    )
++    response_queue.put((lease_denied, response))
++
++
+ @pytest.fixture
+ def durable_harness(tmp_path):
+     repo = tmp_path / "repo"
+@@ -166,6 +191,112 @@ def test_r3_r5_r8_r9_r15_rejections_leave_live_and_event_unchanged(durable_harne
+     _assert_unchanged(server, latest)
+ 
+ 
++def test_raw_ipc_publish_front_runs_lease_owner_same_committed_generation(
++    durable_harness,
++):
++    from contextor.core.analysis.full_analysis_lease import (
++        acquire_full_analysis,
++        release_full_analysis,
++    )
++    from contextor.core.analysis.state_manager import FileStateManager
++
++    durable_harness.commit(1)
++    initial = load_snapshot(
++        durable_harness.cache,
++        expected_repo_id=durable_harness.identity.repo_id,
++        expected_root_path=durable_harness.identity.root_path,
++    )
++    server = durable_harness.server(state=initial[0], revision=initial[1].revision)
++    thread = threading.Thread(target=server.serve_forever, daemon=True)
++    thread.start()
++    client = LiveStateClient(server.endpoint)
 +    lease = acquire_full_analysis(
-+        repo_path, owner="startup-backfill-competing-writer", timeout=5.0
++        durable_harness.repo, owner="legitimate-full-writer", timeout=5.0
 +    )
 +    try:
-+        ready.set()
-+        if not release.wait(10.0):
-+            raise RuntimeError("startup backfill test release barrier timed out")
++        candidate, committed = durable_harness.commit(2, value="owner-generation")
++        before = _unchanged(server)
++        assert client.publish(
++            SimpleNamespace(state_id="sid", revision=3),
++            origin="invalid_uncommitted",
++            timeout=10.0,
++        )["error"] == "committed_publish_generation_mismatch"
++        _assert_unchanged(server, before)
++        assert client.publish(
++            SimpleNamespace(state_id="wrong", revision=2),
++            origin="invalid_identity",
++            timeout=10.0,
++        )["error"] == "committed_publish_generation_mismatch"
++        _assert_unchanged(server, before)
++
++        context = get_context("spawn")
++        response_queue = context.Queue()
++        raw = context.Process(
++            target=_raw_publish_without_writer_lease,
++            args=(str(durable_harness.repo), server.endpoint, response_queue),
++        )
++        raw.start()
++        try:
++            lease_denied, raw_response = response_queue.get(timeout=12.0)
++            raw.join(5.0)
++        finally:
++            if raw.is_alive():
++                raw.terminate()
++                raw.join(5.0)
++        assert raw.exitcode == 0
++        assert lease_denied is True
++        assert raw_response == {
++            "status": "ok",
++            "revision": 2,
++            "seq": 1,
++            "source": "committed_snapshot",
++        }
++        assert server._revision == 2
++        assert server._state.state_id == committed.state_id
++        assert server._state.revision == 2
++        assert server._state.value == "owner-generation"
++        assert server._activity_seq == 1
++        assert len(server._events) == 1
++        assert server._events[0]["origin"] == "unleased_raw_ipc"
++        assert server._events[0]["canonical_revision"] == 2
++
++        owner_response = client.publish(
++            candidate, origin="legitimate_full_writer", timeout=10.0
++        )
++        assert owner_response == {
++            "status": "error",
++            "error": "non_monotonic_canonical_revision",
++            "revision": 2,
++            "candidate_revision": 2,
++            "expected_revision": 3,
++        }
++        before_retry = _unchanged(server)
++        assert client.publish(
++            candidate, origin="legitimate_full_writer", timeout=10.0
++        ) == owner_response
++        _assert_unchanged(server, before_retry)
++
++        disk = load_snapshot(
++            durable_harness.cache,
++            expected_repo_id=durable_harness.identity.repo_id,
++            expected_root_path=durable_harness.identity.root_path,
++        )
++        assert disk[1].revision == committed.revision == 2
++        assert disk[1].state_id == committed.state_id == "sid"
++        assert disk[0].revision == server._state.revision == 2
++        assert disk[0].state_id == server._state.state_id
++        assert FileStateManager(str(durable_harness.cache)).revision == 2
++        assert read_metadata(durable_harness.cache) == disk[1]
++        assert server._activity_seq == 1
++        assert len(server._events) == 1
++        assert server._events[0]["origin"] == "unleased_raw_ipc"
 +    finally:
 +        release_full_analysis(lease)
++        server.close()
++        thread.join(5.0)
++    assert not thread.is_alive()
 +
 +
-+def _startup_backfill_case(tmp_path, monkeypatch):
-+    from contextor.core.analysis.state_manager import RepositoryAnalysisState
-+    from contextor.core.domain.module import Module
-+    from contextor.core.live_state.store import save_snapshot
-+    from contextor.core.repository_identity import ensure_repository_identity
-+
-+    repo = tmp_path / "repo"
-+    repo.mkdir()
-+    identity = ensure_repository_identity(repo)[0]
-+    monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(tmp_path / "cache"))
-+    monkeypatch.setenv("CONTEXTOR_STATE_DIR", str(tmp_path / "state"))
-+    cache = repo_cache_dir(repo)
-+    state = RepositoryAnalysisState(
-+        modules={
-+            "a.py": Module(
-+                module_id="a.py",
-+                path="a.py",
-+                absolute_path=str(repo / "a.py"),
-+                imports=[],
-+            )
-+        },
-+        reexport_facts_by_module={
-+            "a.py": {
-+                "exporter": "a.py",
-+                "explicit_all": None,
-+                "bindings": {},
-+                "star_sources": [],
-+            }
-+        },
-+    )
-+    state.revision = 1
-+    metadata = save_snapshot(
-+        state, cache, "sid",
-+        repo_id=identity.repo_id, root_path=identity.root_path,
-+    )
-+    return repo, cache, identity, metadata
-+
-+
-+def _ready_then_stop_startup_server(monkeypatch, runtime, captured):
-+    class StubServer:
-+        def __init__(self, state, revision, **_kwargs):
-+            captured["state"] = state
-+            captured["revision"] = revision
-+            self.endpoint = SimpleNamespace(host="127.0.0.1", port=1, authkey_hex="00")
-+            self._stop = threading.Event()
-+            self.activity_epoch = "startup-backfill-gate"
-+
-+        def serve_forever(self):
-+            if not self._stop.wait(5.0):
-+                raise RuntimeError("startup backfill test server did not stop")
-+
-+        def record_authority_event(self, event):
-+            if event.get("event_type") == "RUNTIME_AUTHORITY_READY":
-+                self._stop.set()
-+            return {"accepted": True, "duplicate": False, "activity_epoch": self.activity_epoch}
-+
-+        def close(self, **_kwargs):
-+            self._stop.set()
-+            return True
-+
-+    monkeypatch.setattr(runtime, "CanonicalLiveServer", StubServer)
-+
-+
- def _diagnostic_state(*, syntax=None, collisions=None, cycles=None, freshness="fresh"):
-     return SimpleNamespace(
-         revision=0,
-@@ -1296,6 +1377,215 @@ def test_persistence_trace_operation_is_propagated_across_successful_real_update
-     assert FileStateManager(str(cache)).revision == expected
- 
- 
-+def test_startup_backfill_fails_fast_behind_cross_process_writer(tmp_path, monkeypatch):
-+    import contextor.core.live_state.runtime as runtime
-+    import contextor.core.analysis.incremental.materialization as materialization
-+    from contextor.core.analysis.full_analysis_lease import FullAnalysisBusyError
-+    from contextor.core.live_state.store import read_metadata
-+
-+    repo, cache, _identity, metadata = _startup_backfill_case(tmp_path, monkeypatch)
-+    context = multiprocessing.get_context("spawn")
-+    ready = context.Event()
-+    release = context.Event()
-+    owner = context.Process(
-+        target=_hold_full_analysis_lease_for_startup,
-+        args=(str(repo), ready, release),
-+    )
-+    owner.start()
-+    try:
-+        assert ready.wait(8.0), "competing writer did not acquire OS lease"
-+        calls = []
-+        monkeypatch.setattr(
-+            materialization, "ensure_module_usages",
-+            lambda _state: calls.append("materialize"),
-+        )
-+        monkeypatch.setattr(
-+            runtime, "CanonicalLiveServer",
-+            lambda *_args, **_kwargs: pytest.fail("server started despite writer contention"),
-+        )
-+        started = time.monotonic()
-+        with pytest.raises(FullAnalysisBusyError):
-+            runtime.run_service(repo)
-+        assert time.monotonic() - started < 5.0
-+        assert calls == []
-+        assert read_metadata(cache).revision == metadata.revision
-+        assert not endpoint_file(repo).exists()
-+    finally:
-+        release.set()
-+        owner.join(8.0)
-+        if owner.is_alive():
-+            owner.terminate()
-+            owner.join(5.0)
-+    assert owner.exitcode == 0
-+    assert read_metadata(cache).revision == metadata.revision
-+
-+
-+def test_startup_backfill_reloads_newer_materialized_generation(tmp_path, monkeypatch):
-+    import copy
-+    import contextor.core.live_state.runtime as runtime
-+    import contextor.core.analysis.incremental.materialization as materialization
-+    from contextor.core.analysis.state_manager import FileStateManager
-+    from contextor.core.live_state.store import load_snapshot, read_metadata, save_snapshot
-+
-+    repo, cache, identity, metadata = _startup_backfill_case(tmp_path, monkeypatch)
-+    original_load = runtime.load_snapshot
-+    calls = {"loads": 0, "ensure": 0}
-+    newer = {}
-+
-+    def load_with_intervening_commit(*args, **kwargs):
-+        calls["loads"] += 1
-+        result = original_load(*args, **kwargs)
-+        if calls["loads"] == 1:
-+            committed_state = copy.deepcopy(result[0])
-+            committed_state.module_usages = {
-+                "a.py": SimpleNamespace(
-+                    symbol_calls_materialized=True,
-+                    reference_evidence_materialized=True,
-+                )
-+            }
-+            newer["metadata"] = save_snapshot(
-+                committed_state, cache, metadata.state_id,
-+                writer="intervening-canonical-writer",
-+                repo_id=identity.repo_id,
-+                root_path=identity.root_path,
-+                exact_revision=metadata.revision + 1,
-+                file_state_payload=FileStateManager(str(cache)).build_payload(
-+                    metadata.state_id, metadata.revision + 1
-+                ),
-+            )
-+        return result
-+
-+    monkeypatch.setattr(runtime, "load_snapshot", load_with_intervening_commit)
-+    monkeypatch.setattr(
-+        materialization, "ensure_module_usages",
-+        lambda _state: calls.__setitem__("ensure", calls["ensure"] + 1),
-+    )
-+    captured = {}
-+    _ready_then_stop_startup_server(monkeypatch, runtime, captured)
-+    runtime.run_service(repo)
-+
-+    assert calls == {"loads": 2, "ensure": 0}
-+    assert read_metadata(cache).revision == newer["metadata"].revision
-+    assert captured["revision"] == newer["metadata"].revision
-+    assert captured["state"].module_usages["a.py"].symbol_calls_materialized
-+    assert load_snapshot(cache, "sid")[1].state_id == newer["metadata"].state_id
-+
-+
-+def test_startup_backfill_lease_scope_and_healthy_fast_path(tmp_path, monkeypatch):
-+    import contextor.core.live_state.runtime as runtime
-+    import contextor.core.analysis.incremental.materialization as materialization
-+    import contextor.core.analysis.full_analysis_lease as lease_module
-+    from contextor.core.live_state.store import read_metadata
-+
-+    repo, cache, _identity, metadata = _startup_backfill_case(tmp_path, monkeypatch)
-+    acquired = []
-+    released = []
-+    original_acquire = lease_module.acquire_full_analysis
-+    original_release = lease_module.release_full_analysis
-+
-+    def acquire(*args, **kwargs):
-+        assert kwargs["timeout"] == 0.0
-+        acquired.append(kwargs)
-+        return original_acquire(*args, **kwargs)
-+
-+    def release(lease):
-+        released.append(lease)
-+        return original_release(lease)
-+
-+    monkeypatch.setattr(lease_module, "acquire_full_analysis", acquire)
-+    monkeypatch.setattr(lease_module, "release_full_analysis", release)
-+    def ensure_under_lease(state):
-+        assert len(acquired) == 1 and len(released) == 0
-+        state.module_usages = {
-+            "a.py": SimpleNamespace(
-+                symbol_calls_materialized=True,
-+                reference_evidence_materialized=True,
-+            )
-+        }
-+
-+    monkeypatch.setattr(materialization, "ensure_module_usages", ensure_under_lease)
-+    captured = {}
-+    _ready_then_stop_startup_server(monkeypatch, runtime, captured)
-+    runtime.run_service(repo)
-+    assert len(acquired) == len(released) == 1
-+    assert acquired[0]["owner"] == "live_startup_module_usages_backfill"
-+    assert read_metadata(cache).revision == metadata.revision + 1
-+    assert captured["revision"] == metadata.revision + 1
-+
-+    acquired.clear()
-+    released.clear()
-+    captured.clear()
-+    runtime.run_service(repo)
-+    assert acquired == released == []
-+    assert read_metadata(cache).revision == metadata.revision + 1
-+    assert captured["revision"] == metadata.revision + 1
-+
-+
-+@pytest.mark.parametrize("failure_site", ["reload", "ensure", "payload", "save"])
-+def test_startup_backfill_failure_releases_writer_and_runtime_authority(
-+    tmp_path, monkeypatch, failure_site
-+):
-+    import contextor.core.live_state.runtime as runtime
-+    import contextor.core.analysis.incremental.materialization as materialization
-+    import contextor.core.analysis.full_analysis_lease as lease_module
-+    from contextor.core.analysis.state_manager import FileStateManager
-+    from contextor.core.live_state.store import read_metadata
-+
-+    repo, cache, _identity, metadata = _startup_backfill_case(tmp_path, monkeypatch)
-+    acquired = []
-+    released = []
-+    original_acquire = lease_module.acquire_full_analysis
-+    original_release = lease_module.release_full_analysis
-+    monkeypatch.setattr(
-+        runtime, "CanonicalLiveServer",
-+        lambda *_args, **_kwargs: pytest.fail("server started despite injected backfill failure"),
-+    )
-+
-+    def acquire(*args, **kwargs):
-+        acquired.append(original_acquire(*args, **kwargs))
-+        return acquired[-1]
-+
-+    def release(lease):
-+        released.append(lease)
-+        return original_release(lease)
-+
-+    monkeypatch.setattr(lease_module, "acquire_full_analysis", acquire)
-+    monkeypatch.setattr(lease_module, "release_full_analysis", release)
-+    if failure_site == "reload":
-+        original_load = runtime.load_snapshot
-+        loads = [0]
-+
-+        def fail_reload(*args, **kwargs):
-+            loads[0] += 1
-+            if loads[0] == 2:
-+                raise RuntimeError("injected reload failure")
-+            return original_load(*args, **kwargs)
-+
-+        monkeypatch.setattr(runtime, "load_snapshot", fail_reload)
-+    elif failure_site == "ensure":
-+        monkeypatch.setattr(
-+            materialization, "ensure_module_usages",
-+            lambda _state: (_ for _ in ()).throw(RuntimeError("injected ensure failure")),
-+        )
-+    elif failure_site == "payload":
-+        monkeypatch.setattr(
-+            FileStateManager, "build_payload",
-+            lambda *_args: (_ for _ in ()).throw(RuntimeError("injected payload failure")),
-+        )
-+    else:
-+        monkeypatch.setattr(
-+            runtime, "save_snapshot",
-+            lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("injected save failure")),
-+        )
-+    with pytest.raises(RuntimeError, match=f"injected {failure_site} failure"):
-+        runtime.run_service(repo)
-+    assert len(acquired) == len(released) == 1
-+    assert read_metadata(cache).revision == metadata.revision
-+    assert not endpoint_file(repo).exists()
-+    lease = original_acquire(repo, owner="after-startup-failure", timeout=0.0)
-+    original_release(lease)
-+
-+
- def test_startup_backfill_preserves_filestate_content_and_revision_parity(tmp_path, monkeypatch):
-     import contextor.core.live_state.runtime as runtime
-     from contextor.core.analysis.state_manager import FileState, FileStateManager, RepositoryAnalysisState
+ def test_r4_r12_r29_durable_catch_up_after_earlier_publish_failure(durable_harness):
+     durable_harness.commit(1)
+     failed = durable_harness.server(
 ```
+
+## FINAL_VERDICT
+PROVED_ACK_ORIGIN_SEMANTIC_HAZARD
+
