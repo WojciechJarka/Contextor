@@ -428,10 +428,11 @@ def acquire_full_analysis(
         "live_mutation",
         "startup_publish",
         "local_incremental",
+        "scoped_analysis",
     }:
         raise ValueError(
             "writer_kind must be 'full_analysis', 'live_mutation', "
-            "'startup_publish', or 'local_incremental'"
+            "'startup_publish', 'local_incremental', or 'scoped_analysis'"
         )
 
     lock_file, key, repo_id = _resolve_lock_path(repo_path)

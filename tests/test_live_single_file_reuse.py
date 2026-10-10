@@ -2,6 +2,10 @@
 
 from types import SimpleNamespace
 from dataclasses import replace
+from copy import copy
+import threading
+
+from contextor.core.live_state.ipc import CanonicalLiveServer, LiveStateClient
 
 from contextor.core.reporting_engine.canonical_artifacts import (
     canonical_artifact_report,
@@ -122,6 +126,64 @@ def test_single_file_reports_accepted_recovery_without_changing_string_return(
         "status": "recovery_required", "revision": 17,
         "warning": "release unverified",
     }
+
+
+def test_scoped_single_file_publishes_to_real_live_server_under_writer_lease(
+    sample_repo, isolated_dirs, monkeypatch
+):
+    import contextor.core.api.facade as facade_module
+    from contextor.core.analysis import full_analysis_coordinator as coordinator
+
+    target = sample_repo / "core" / "alpha.py"
+    ContextorFacade.analyze_project(str(sample_repo))
+    resolved = facade_module.resolve_authoritative_repository_state(str(sample_repo))
+    assert resolved is not None
+    initial_revision = max(0, int(getattr(resolved.state, "revision", 0)) - 1)
+    initial_state = copy(resolved.state)
+    initial_state.revision = initial_revision
+    server = CanonicalLiveServer(state=initial_state, revision=initial_revision)
+    server_thread = threading.Thread(target=server.serve_forever, daemon=True)
+    server_thread.start()
+    client = LiveStateClient(server.endpoint)
+    original_hydrate = facade_module.hydrate_repository_engine
+    original_publish = client.publish
+    observed = []
+
+    def hydrate_with_server(root):
+        hydrated = original_hydrate(root)
+        return replace(hydrated, client=client)
+
+    def publish_while_held(*args, **kwargs):
+        observed.append("publish")
+        try:
+            coordinator.acquire_full_analysis(
+                sample_repo, timeout=0.0, writer_kind="local_incremental"
+            )
+        except coordinator.FullAnalysisBusyError:
+            observed.append("lease_held")
+        else:
+            pytest.fail("LIVE publication ran outside scoped lease")
+        return original_publish(*args, **kwargs)
+
+    import pytest
+    monkeypatch.setattr(facade_module, "hydrate_repository_engine", hydrate_with_server)
+    monkeypatch.setattr(client, "publish", publish_while_held)
+    target.write_text(
+        target.read_text(encoding="utf-8").replace("MAX_ITEMS = 10", "MAX_ITEMS = 12"),
+        encoding="utf-8",
+    )
+    publication = {}
+    try:
+        output = ContextorFacade.analyze_single_file(
+            str(target), str(sample_repo), publication_result=publication
+        )
+        assert output.endswith("single_core.alpha.json")
+        assert observed == ["publish", "lease_held"]
+        assert publication["status"] == "success", publication
+        assert publication["revision"] == initial_revision + 1
+    finally:
+        client.request("shutdown")
+        server_thread.join(timeout=5)
 
 
 def test_single_file_resync_state_rejects_state_only_path(

@@ -1306,6 +1306,42 @@ class ContextorFacade:
         progress_callback=None,
         additional_excludes: list[str] | None = None,
     ) -> str:
+        from contextor.core.analysis.full_analysis_coordinator import (
+            acquire_full_analysis,
+            release_full_analysis,
+        )
+
+        root_resolved, _ = _resolve_repository_target(
+            root_dir,
+            layer_dir,
+            target_kind="layer",
+        )
+
+        lease = acquire_full_analysis(
+            root_resolved,
+            owner="scoped_layer_analysis",
+            writer_kind="scoped_analysis",
+            timeout=10.0,
+        )
+        try:
+            return ContextorFacade._analyze_layer_uncoordinated(
+                root_dir,
+                layer_dir,
+                log=log,
+                progress_callback=progress_callback,
+                additional_excludes=additional_excludes,
+            )
+        finally:
+            release_full_analysis(lease)
+
+    @staticmethod
+    def _analyze_layer_uncoordinated(
+        root_dir: str,
+        layer_dir: str,
+        log=None,
+        progress_callback=None,
+        additional_excludes: list[str] | None = None,
+    ) -> str:
         """Analyzes a specific layer. Returns output pattern."""
         progress = _StagedProgress(progress_callback, total_stages=10, log=log)
         progress.begin("Validating repository and layer scope")
@@ -1490,6 +1526,48 @@ class ContextorFacade:
 
     @staticmethod
     def analyze_single_file(
+        file_path: str,
+        repo_root: str,
+        log=None,
+        progress_callback=None,
+        additional_excludes: list[str] | None = None,
+        publication_result: dict[str, Any] | None = None,
+    ) -> str:
+        from contextor.core.analysis.full_analysis_coordinator import (
+            acquire_full_analysis,
+            release_full_analysis,
+        )
+
+        root_resolved, target = _resolve_repository_target(
+            repo_root,
+            file_path,
+            target_kind="file",
+        )
+        if target.suffix.lower() != ".py":
+            raise ValueError(
+                f"Selected file is not a Python file: {target}"
+            )
+
+        lease = acquire_full_analysis(
+            root_resolved,
+            owner="scoped_single_file_analysis",
+            writer_kind="scoped_analysis",
+            timeout=10.0,
+        )
+        try:
+            return ContextorFacade._analyze_single_file_uncoordinated(
+                file_path,
+                repo_root,
+                log=log,
+                progress_callback=progress_callback,
+                additional_excludes=additional_excludes,
+                publication_result=publication_result,
+            )
+        finally:
+            release_full_analysis(lease)
+
+    @staticmethod
+    def _analyze_single_file_uncoordinated(
         file_path: str,
         repo_root: str,
         log=None,

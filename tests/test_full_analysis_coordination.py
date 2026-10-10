@@ -40,6 +40,288 @@ from contextor.mcp import analysis_jobs
 from contextor.mcp import runtime as mcp_runtime
 
 
+def _worker_try_writer_kind(repo_path, writer_kind, result_queue):
+    try:
+        lease = acquire_full_analysis(
+            repo_path,
+            writer_kind=writer_kind,
+            timeout=0.3,
+            poll_interval=0.05,
+        )
+        release_full_analysis(lease)
+        result_queue.put("acquired")
+    except FullAnalysisBusyError:
+        result_queue.put("busy")
+
+
+@pytest.mark.parametrize("method,target_kind", [("analyze_layer", "layer"), ("analyze_single_file", "file")])
+def test_scoped_facade_holds_writer_lease_before_identity_write(
+    tmp_path, isolated_dirs, monkeypatch, method, target_kind
+):
+    from contextor.core.api import facade
+    from contextor.core.analysis import full_analysis_coordinator as coordinator
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    target = repo / ("layer" if target_kind == "layer" else "module.py")
+    if target_kind == "layer":
+        target.mkdir()
+    else:
+        target.write_text("VALUE = 1\n", encoding="utf-8")
+    events = []
+    real_acquire = coordinator.acquire_full_analysis
+    real_release = coordinator.release_full_analysis
+
+    def acquire(*args, **kwargs):
+        lease = real_acquire(*args, **kwargs)
+        events.append(("acquire", kwargs["writer_kind"], kwargs["owner"]))
+        return lease
+
+    def release(lease):
+        events.append(("release", lease.owner))
+        return real_release(lease)
+
+    def fail_identity(_root):
+        events.append(("identity",))
+        raise RuntimeError("identity stop")
+
+    monkeypatch.setattr(coordinator, "acquire_full_analysis", acquire)
+    monkeypatch.setattr(coordinator, "release_full_analysis", release)
+    monkeypatch.setattr(facade, "_initialize_repository_identity", fail_identity)
+    with pytest.raises(RuntimeError, match="identity stop"):
+        if target_kind == "layer":
+            facade.ContextorFacade.analyze_layer(str(repo), str(target))
+        else:
+            facade.ContextorFacade.analyze_single_file(str(target), str(repo))
+    assert events == [
+        ("acquire", "scoped_analysis", "scoped_layer_analysis" if target_kind == "layer" else "scoped_single_file_analysis"),
+        ("identity",),
+        ("release", "scoped_layer_analysis" if target_kind == "layer" else "scoped_single_file_analysis"),
+    ]
+
+
+@pytest.mark.parametrize("method,target_kind", [("analyze_layer", "layer"), ("analyze_single_file", "file")])
+def test_scoped_facade_blocks_behind_existing_writer_before_body(
+    tmp_path, isolated_dirs, monkeypatch, method, target_kind
+):
+    from contextor.core.api import facade
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    target = repo / ("layer" if target_kind == "layer" else "module.py")
+    if target_kind == "layer":
+        target.mkdir()
+    else:
+        target.write_text("VALUE = 1\n", encoding="utf-8")
+    entered = threading.Event()
+    completed = threading.Event()
+    errors = []
+
+    def body(*_args, **_kwargs):
+        entered.set()
+        return "done"
+
+    monkeypatch.setattr(
+        facade.ContextorFacade,
+        f"_analyze_{'layer' if target_kind == 'layer' else 'single_file'}_uncoordinated",
+        staticmethod(body),
+        raising=False,
+    )
+    held = acquire_full_analysis(repo, owner="prior_writer")
+
+    def invoke():
+        try:
+            if target_kind == "layer":
+                assert facade.ContextorFacade.analyze_layer(str(repo), str(target)) == "done"
+            else:
+                assert facade.ContextorFacade.analyze_single_file(str(target), str(repo)) == "done"
+        except Exception as exc:
+            errors.append(exc)
+        finally:
+            completed.set()
+
+    worker = threading.Thread(target=invoke)
+    worker.start()
+    try:
+        assert not entered.wait(0.3)
+    finally:
+        release_full_analysis(held)
+        worker.join(timeout=5)
+    assert completed.is_set()
+    assert not errors
+    assert entered.is_set()
+
+
+def test_scoped_writer_kind_is_accepted(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    lease = acquire_full_analysis(repo, writer_kind="scoped_analysis", timeout=1.0)
+    release_full_analysis(lease)
+
+
+@pytest.mark.parametrize("writer_kind", ["full_analysis", "local_incremental"])
+def test_scoped_facade_excludes_cross_process_canonical_writer(
+    tmp_path, isolated_dirs, monkeypatch, writer_kind
+):
+    from contextor.core.api import facade
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    layer = repo / "layer"
+    layer.mkdir()
+    context = multiprocessing.get_context("spawn")
+
+    def body(*_args, **_kwargs):
+        results = context.Queue()
+        process = context.Process(
+            target=_worker_try_writer_kind,
+            args=(str(repo), writer_kind, results),
+        )
+        process.start()
+        try:
+            process.join(timeout=5)
+            assert process.exitcode == 0
+            assert results.get(timeout=2) == "busy"
+        finally:
+            if process.is_alive():
+                process.terminate()
+                process.join(timeout=3)
+        return "done"
+
+    monkeypatch.setattr(
+        facade.ContextorFacade,
+        "_analyze_layer_uncoordinated",
+        staticmethod(body),
+    )
+    assert facade.ContextorFacade.analyze_layer(str(repo), str(layer)) == "done"
+
+
+@pytest.mark.parametrize("method,target_kind", [("analyze_layer", "layer"), ("analyze_single_file", "file")])
+def test_scoped_facade_invalid_target_does_not_acquire_lease(
+    tmp_path, monkeypatch, method, target_kind
+):
+    from contextor.core.api import facade
+    from contextor.core.analysis import full_analysis_coordinator as coordinator
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    target = outside if target_kind == "layer" else outside / "module.py"
+    if target_kind == "file":
+        target.write_text("VALUE = 1\n", encoding="utf-8")
+    monkeypatch.setattr(
+        coordinator,
+        "acquire_full_analysis",
+        lambda *_a, **_k: pytest.fail("invalid target acquired writer lease"),
+    )
+    with pytest.raises(ValueError, match="outside the repository root"):
+        if target_kind == "layer":
+            facade.ContextorFacade.analyze_layer(str(repo), str(target))
+        else:
+            facade.ContextorFacade.analyze_single_file(str(target), str(repo))
+
+
+def test_scoped_facade_non_python_target_does_not_acquire_lease(tmp_path, monkeypatch):
+    from contextor.core.api import facade
+    from contextor.core.analysis import full_analysis_coordinator as coordinator
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    target = repo / "notes.txt"
+    target.write_text("notes\n", encoding="utf-8")
+    monkeypatch.setattr(
+        coordinator,
+        "acquire_full_analysis",
+        lambda *_a, **_k: pytest.fail("non-Python target acquired writer lease"),
+    )
+    with pytest.raises(ValueError, match="not a Python file"):
+        facade.ContextorFacade.analyze_single_file(str(target), str(repo))
+
+
+@pytest.mark.parametrize("method,target_kind", [("analyze_layer", "layer"), ("analyze_single_file", "file")])
+def test_scoped_facade_denied_lease_does_not_start_body_or_identity(
+    tmp_path, isolated_dirs, monkeypatch, method, target_kind
+):
+    from contextor.core.api import facade
+    from contextor.core.analysis import full_analysis_coordinator as coordinator
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    target = repo / ("layer" if target_kind == "layer" else "module.py")
+    if target_kind == "layer":
+        target.mkdir()
+    else:
+        target.write_text("VALUE = 1\n", encoding="utf-8")
+    monkeypatch.setattr(
+        coordinator,
+        "acquire_full_analysis",
+        lambda *_a, **_k: (_ for _ in ()).throw(FullAnalysisBusyError("denied")),
+    )
+    monkeypatch.setattr(
+        facade,
+        "_initialize_repository_identity",
+        lambda *_a: pytest.fail("identity mutated after lease denial"),
+    )
+    with pytest.raises(FullAnalysisBusyError, match="denied"):
+        if target_kind == "layer":
+            facade.ContextorFacade.analyze_layer(str(repo), str(target))
+        else:
+            facade.ContextorFacade.analyze_single_file(str(target), str(repo))
+
+
+@pytest.mark.parametrize("method", ["layer", "single_file"])
+def test_scoped_facade_releases_lease_after_report_failure(
+    sample_repo, isolated_dirs, monkeypatch, method
+):
+    from contextor.core.api import facade
+
+    def fail_report(*_args, **_kwargs):
+        raise RuntimeError("report stop")
+
+    if method == "layer":
+        monkeypatch.setattr(facade, "generate_summary_report", fail_report)
+    else:
+        monkeypatch.setattr(facade, "generate_report", fail_report)
+    with pytest.raises(RuntimeError, match="report stop"):
+        if method == "layer":
+            facade.ContextorFacade.analyze_layer(
+                str(sample_repo), str(sample_repo / "core")
+            )
+        else:
+            facade.ContextorFacade.analyze_single_file(
+                str(sample_repo / "core" / "alpha.py"), str(sample_repo)
+            )
+    lease = acquire_full_analysis(sample_repo, writer_kind="local_incremental", timeout=0.5)
+    release_full_analysis(lease)
+
+
+@pytest.mark.parametrize("method", ["layer", "single_file"])
+def test_scoped_facade_releases_lease_after_success(
+    tmp_path, isolated_dirs, monkeypatch, method
+):
+    from contextor.core.api import facade
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    target = repo / ("layer" if method == "layer" else "module.py")
+    if method == "layer":
+        target.mkdir()
+    else:
+        target.write_text("VALUE = 1\n", encoding="utf-8")
+    monkeypatch.setattr(
+        facade.ContextorFacade,
+        f"_analyze_{method}_uncoordinated",
+        staticmethod(lambda *_a, **_k: "done"),
+    )
+    if method == "layer":
+        assert facade.ContextorFacade.analyze_layer(str(repo), str(target)) == "done"
+    else:
+        assert facade.ContextorFacade.analyze_single_file(str(target), str(repo)) == "done"
+    lease = acquire_full_analysis(repo, writer_kind="full_analysis", timeout=0.5)
+    release_full_analysis(lease)
+
+
 def test_coordinator_lease_acquisition_and_release(tmp_path: Path):
     repo_dir = tmp_path / "repo1"
     repo_dir.mkdir()
