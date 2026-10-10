@@ -1516,6 +1516,8 @@ def save_snapshot(
     exact_revision: int | None = None,
     file_state_payload: dict[str, Any] | None = None,
     previous_state: Any = None,
+    migration_file_state_source: str | Path | None = None,
+    migration_only_if_absent: bool = False,
 ) -> LiveStateMetadata:
     """Atomically publish a complete snapshot and monotonically increasing revision."""
 
@@ -1539,6 +1541,15 @@ def save_snapshot(
             "canonical re-export facts."
         )
 
+    if migration_file_state_source is not None and (
+        exact_revision is not None
+        or not migration_only_if_absent
+    ):
+        raise ValueError(
+            "Migration FileState source requires a non-exact "
+            "migration-only snapshot commit."
+        )
+
     state_file, meta_file, lock_file = _paths(cache_dir)
     state_file.parent.mkdir(parents=True, exist_ok=True)
     lock_fd = _acquire_lock(lock_file)
@@ -1551,9 +1562,15 @@ def save_snapshot(
     generation_lineage_chunks: list[Path] = []
     reusable_lineage_sources: dict[str, Any] = {}
     committed = False
+    migration_file_state_target = state_file.parent / "file_state.json"
+    migration_file_state_temp = state_file.parent / f".file_state.{token}.tmp"
+    migration_file_state_created = False
 
     try:
         current = read_metadata(cache_dir)
+        if migration_only_if_absent and current is not None:
+            return current
+
         normalized_root = (
             str(Path(root_path).expanduser().resolve())
             if root_path
@@ -1832,6 +1849,22 @@ def save_snapshot(
                 state_file,
             )
 
+        if migration_file_state_source is not None:
+            source_file = Path(migration_file_state_source)
+            if (
+                source_file.is_file()
+                and not migration_file_state_target.exists()
+            ):
+                shutil.copy2(source_file, migration_file_state_temp)
+                with migration_file_state_temp.open("ab") as stream:
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                os.replace(
+                    migration_file_state_temp,
+                    migration_file_state_target,
+                )
+                migration_file_state_created = True
+
         os.replace(
             meta_tmp,
             meta_file,
@@ -1870,6 +1903,17 @@ def save_snapshot(
                     temporary.unlink()
                 except OSError:
                     pass
+
+        if not committed and migration_file_state_created:
+            try:
+                migration_file_state_target.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+        try:
+            migration_file_state_temp.unlink(missing_ok=True)
+        except OSError:
+            pass
 
         _release_lock(lock_fd)
 
@@ -2400,10 +2444,7 @@ def migrate_legacy_snapshot(repo_root: str | Path) -> Path:
         repo_id=identity.repo_id,
         root_path=identity.root_path,
         revision_floor=metadata.revision,
+        migration_file_state_source=legacy / "file_state.json",
+        migration_only_if_absent=True,
     )
-    legacy_file_state = legacy / "file_state.json"
-    target_file_state = target / "file_state.json"
-    if legacy_file_state.is_file() and not target_file_state.exists():
-        target_file_state.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(legacy_file_state, target_file_state)
     return target
