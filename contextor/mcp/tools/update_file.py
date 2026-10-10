@@ -1,5 +1,6 @@
 import hashlib
 import json
+import copy
 from pathlib import Path
 
 from contextor.mcp import query_helpers
@@ -178,6 +179,98 @@ def _persist_live_engine(root: Path, engine) -> bool:
         return True
 
 
+class _LocalCandidatePersistenceRejected(RuntimeError):
+    """The local candidate was discarded because its snapshot was not committed."""
+
+
+def _execute_local_candidate_update(root: Path, target_file: Path, engine):
+    """Commit a local update candidate before replacing the cached engine."""
+    from contextor.core.analysis.incremental_engine import IncrementalAnalysisEngine
+    from contextor.core.live_state import read_metadata
+    from contextor.core.paths import repo_cache_dir
+
+    with mcp_runtime._engine_cache_transaction(root) as root_key:
+        if mcp_runtime._live_engines.get(root_key) is not engine:
+            raise RuntimeError("Local cached engine ownership changed.")
+
+        rel_path = target_file.relative_to(root)
+        module_path = ".".join(rel_path.with_suffix("").parts)
+        old_artifacts = engine.state.artifacts.get(module_path, {})
+
+        state = getattr(engine, "state", None)
+        if not callable(getattr(state, "clone_for_update", None)):
+            raise RuntimeError("Local canonical state cannot be cloned for update.")
+        manager = getattr(engine, "state_manager", None)
+        if manager is None or not isinstance(getattr(manager, "_state", None), dict):
+            raise RuntimeError("Local FileStateManager has no tracked-file mapping.")
+        registry = getattr(engine, "registry", None)
+        if (
+            registry is None
+            or not callable(getattr(registry, "create_checkpoint", None))
+            or not callable(getattr(registry, "restore_checkpoint", None))
+        ):
+            raise RuntimeError("Local identity registry has no checkpoint capability.")
+
+        cache_dir = repo_cache_dir(root)
+        metadata_path = cache_dir / "engine_state.meta.json"
+        previous_metadata = read_metadata(cache_dir)
+        previous_metadata_exists = metadata_path.exists()
+
+        candidate_state = state.clone_for_update()
+        if candidate_state is state:
+            raise RuntimeError("Local update candidate shares the canonical state holder.")
+        candidate_manager = copy.copy(manager)
+        candidate_manager._state = dict(manager._state)
+        checkpoint = registry.create_checkpoint()
+
+        try:
+            candidate_engine = IncrementalAnalysisEngine(
+                candidate_state,
+                registry,
+                candidate_manager,
+                str(root),
+            )
+            for name in ("revision", "provenance"):
+                if hasattr(engine, name):
+                    setattr(candidate_engine, name, getattr(engine, name))
+
+            res = candidate_engine.update_file(str(target_file))
+            persisted = _persist_live_engine(root, candidate_engine)
+            if not persisted:
+                raise _LocalCandidatePersistenceRejected(
+                    "Local candidate snapshot persistence failed."
+                )
+        except Exception as failure:
+            current_metadata = read_metadata(cache_dir)
+            if (
+                current_metadata != previous_metadata
+                or metadata_path.exists() != previous_metadata_exists
+            ):
+                mcp_runtime._live_engines.pop(root_key, None)
+                mcp_runtime._live_engine_revisions.pop(root_key, None)
+                mcp_runtime._live_engine_provenance.pop(root_key, None)
+                raise RuntimeError(
+                    "Local snapshot metadata changed during a rejected candidate; "
+                    "possible disk/cache divergence."
+                ) from failure
+            try:
+                registry.restore_checkpoint(checkpoint)
+            except Exception as rollback_failure:
+                mcp_runtime._live_engines.pop(root_key, None)
+                mcp_runtime._live_engine_revisions.pop(root_key, None)
+                mcp_runtime._live_engine_provenance.pop(root_key, None)
+                raise RuntimeError(
+                    "Local registry rollback failed after a rejected candidate."
+                ) from rollback_failure
+            raise
+
+        mcp_runtime._live_engines[root_key] = candidate_engine
+        candidate_engine.provenance = "snapshot"
+        candidate_engine.state.provenance = "snapshot"
+        mcp_runtime._live_engine_provenance[root_key] = "snapshot"
+        return res, candidate_engine, old_artifacts, True
+
+
 def _semantic_artifact_diff(old_artifacts: dict, new_artifacts: dict) -> dict:
     """Return a compact, JSON-safe semantic delta from cached symbol facts."""
     old_symbols = old_artifacts.get("symbols", {}) if old_artifacts else {}
@@ -294,10 +387,12 @@ def update_file(
                 engine = mcp_runtime.get_or_init_engine(root)
             live_state_persisted = True
         else:
-            res = engine.update_file(str(target_file))
-            live_state_persisted = _persist_live_engine(
-                root,
-                engine,
+            res, engine, old_artifacts, live_state_persisted = (
+                _execute_local_candidate_update(
+                    root,
+                    target_file,
+                    engine,
+                )
             )
         new_artifacts = engine.state.artifacts.get(module_path, {})
         semantic_diff = _semantic_artifact_diff(old_artifacts, new_artifacts)
@@ -365,4 +460,7 @@ def update_file(
             result = {field: result[field] for field in fields}
         return json.dumps(result, indent=2)
     except Exception as e:
-        return json.dumps({"status": "ERROR", "file_path": str(target_file), "error": str(e)}, indent=2)
+        error_result = {"status": "ERROR", "file_path": str(target_file), "error": str(e)}
+        if isinstance(e, _LocalCandidatePersistenceRejected):
+            error_result["live_state_persisted"] = False
+        return json.dumps(error_result, indent=2)

@@ -1,8 +1,9 @@
 """End-to-end MCP test for incremental state persistence and live context hydration."""
 
 import json
-from copy import deepcopy
+from copy import copy, deepcopy
 import os
+from pathlib import Path
 
 import pytest
 import threading
@@ -89,6 +90,384 @@ def _local_update(repo, provider):
 def _rehydrate_local_engine(repo):
     mcp_runtime._live_engines.clear()
     return mcp_runtime.get_or_init_engine(repo.resolve())
+
+
+def test_local_candidate_cow_keeps_original_nested_facts_and_tracked_files(
+    tmp_path, monkeypatch
+):
+    repo, provider, engine = _build_local_fallback_engine(
+        tmp_path, monkeypatch, "def run():\n    return 1\n"
+    )
+    original_state = engine.state
+    original_artifacts = original_state.artifacts["provider"]
+    original_module = original_state.modules["provider"]
+    artifact_content = deepcopy(original_artifacts)
+    original_tracked = engine.state_manager._state
+    tracked_content = deepcopy(original_tracked)
+    checkpoint = engine.registry.create_checkpoint()
+
+    candidate_state = original_state.clone_for_update()
+    candidate_manager = copy(engine.state_manager)
+    candidate_manager._state = dict(original_tracked)
+    candidate = IncrementalAnalysisEngine(
+        candidate_state, engine.registry, candidate_manager, str(repo)
+    )
+    assert candidate.state is not original_state
+    assert candidate.state_manager._state is not original_tracked
+
+    provider.write_text(
+        "def run():\n    return 1\n\ndef added():\n    return 2\n",
+        encoding="utf-8",
+    )
+    try:
+        assert candidate.update_file(str(provider)).status == "UPDATED"
+        assert original_state.modules["provider"] is original_module
+        assert original_state.artifacts["provider"] is original_artifacts
+        assert original_state.artifacts["provider"] == artifact_content
+        assert engine.state_manager._state is original_tracked
+        assert engine.state_manager._state == tracked_content
+    finally:
+        engine.registry.restore_checkpoint(checkpoint)
+
+
+def test_local_candidate_rejected_persistence_preserves_cache_state_manager_and_registry(
+    tmp_path, monkeypatch
+):
+    repo, provider, engine = _build_local_fallback_engine(
+        tmp_path, monkeypatch, "def run():\n    return 1\n"
+    )
+    assert update_file_module._persist_live_engine(repo, engine) is True
+    key = str(repo.resolve())
+    before_meta = (repo_cache_dir(repo) / "engine_state.meta.json").read_bytes()
+    before_modules = dict(engine.state.modules)
+    before_artifacts = deepcopy(engine.state.artifacts)
+    provider_module = engine.state.modules["provider"]
+    provider_artifacts = engine.state.artifacts["provider"]
+    before_tracked = engine.state_manager._state
+    before_tracked_content = deepcopy(before_tracked)
+    before_registry = engine.registry.create_checkpoint()
+
+    extra = repo / "extra.py"
+    extra.write_text("def added():\n    return 2\n", encoding="utf-8")
+    monkeypatch.setattr(update_file_module, "_persist_live_engine", lambda *_args: False)
+    response = _local_update(repo, extra)
+
+    assert response["status"] == "ERROR"
+    assert response["live_state_persisted"] is False
+    assert mcp_runtime._live_engines[key] is engine
+    assert engine.state.modules == before_modules
+    assert engine.state.modules["provider"] is provider_module
+    assert engine.state.artifacts == before_artifacts
+    assert engine.state.artifacts["provider"] is provider_artifacts
+    assert engine.state_manager._state is before_tracked
+    assert engine.state_manager._state == before_tracked_content
+    assert engine.revision == engine.state.revision == 1
+    assert mcp_runtime._live_engine_revisions[key] == 1
+    assert engine.registry._state == before_registry
+    assert (repo_cache_dir(repo) / "engine_state.meta.json").read_bytes() == before_meta
+    assert str(provider) in engine.state_manager.tracked_paths()
+
+
+def test_local_candidate_metadata_commit_failure_keeps_prior_cache_and_snapshot(
+    tmp_path, monkeypatch
+):
+    repo, provider, engine = _build_local_fallback_engine(
+        tmp_path, monkeypatch, "def run():\n    return 1\n"
+    )
+    assert update_file_module._persist_live_engine(repo, engine) is True
+    key = str(repo.resolve())
+    cache_dir = repo_cache_dir(repo)
+    before_meta = (cache_dir / "engine_state.meta.json").read_bytes()
+    before_artifacts = deepcopy(engine.state.artifacts)
+    before_registry = engine.registry.create_checkpoint()
+    provider.write_text("def run():\n    return 2\n", encoding="utf-8")
+    original_replace = snapshot_store.os.replace
+
+    def failing_replace(source, target):
+        if target.name == "engine_state.meta.json":
+            raise OSError("injected metadata commit failure")
+        return original_replace(source, target)
+
+    monkeypatch.setattr(snapshot_store.os, "replace", failing_replace)
+    response = _local_update(repo, provider)
+
+    assert response["status"] == "ERROR"
+    assert mcp_runtime._live_engines[key] is engine
+    assert engine.state.artifacts == before_artifacts
+    assert engine.state_manager.revision == engine.state.revision == 1
+    assert engine.registry._state == before_registry
+    assert (cache_dir / "engine_state.meta.json").read_bytes() == before_meta
+    assert read_metadata(cache_dir).revision == 1
+
+
+def test_local_candidate_persister_exception_before_commit_restores_registry(
+    tmp_path, monkeypatch
+):
+    repo, provider, engine = _build_local_fallback_engine(
+        tmp_path, monkeypatch, "def run():\n    return 1\n"
+    )
+    assert update_file_module._persist_live_engine(repo, engine) is True
+    key = str(repo.resolve())
+    cache_dir = repo_cache_dir(repo)
+    before_meta = (cache_dir / "engine_state.meta.json").read_bytes()
+    before_artifacts = deepcopy(engine.state.artifacts)
+    before_tracked = deepcopy(engine.state_manager._state)
+    before_registry = engine.registry.create_checkpoint()
+    provider.write_text("def run():\n    return 2\n", encoding="utf-8")
+
+    def fail_persist(*_args):
+        raise OSError("injected precommit persistence exception")
+
+    monkeypatch.setattr(update_file_module, "_persist_live_engine", fail_persist)
+    response = _local_update(repo, provider)
+
+    assert response["status"] == "ERROR"
+    assert "precommit persistence exception" in response["error"]
+    assert mcp_runtime._live_engines[key] is engine
+    assert engine.state.artifacts == before_artifacts
+    assert engine.state_manager._state == before_tracked
+    assert engine.registry._state == before_registry
+    assert engine.state.revision == mcp_runtime._live_engine_revisions[key] == 1
+    assert (cache_dir / "engine_state.meta.json").read_bytes() == before_meta
+
+
+def test_local_candidate_engine_error_after_candidate_publication_preserves_prior_cache(
+    tmp_path, monkeypatch
+):
+    repo, provider, engine = _build_local_fallback_engine(
+        tmp_path, monkeypatch, "def run():\n    return 1\n"
+    )
+    assert update_file_module._persist_live_engine(repo, engine) is True
+    key = str(repo.resolve())
+    before_meta = (repo_cache_dir(repo) / "engine_state.meta.json").read_bytes()
+    before_artifacts = deepcopy(engine.state.artifacts)
+    before_registry = engine.registry.create_checkpoint()
+    provider.write_text("def run():\n    return 2\n", encoding="utf-8")
+    real_update = IncrementalAnalysisEngine.update_file
+
+    def update_then_raise(self, file_path):
+        result = real_update(self, file_path)
+        assert result.status == "UPDATED"
+        raise RuntimeError("injected post-publication engine failure")
+
+    monkeypatch.setattr(IncrementalAnalysisEngine, "update_file", update_then_raise)
+    response = _local_update(repo, provider)
+
+    assert response["status"] == "ERROR"
+    assert "post-publication engine failure" in response["error"]
+    assert mcp_runtime._live_engines[key] is engine
+    assert engine.state.artifacts == before_artifacts
+    assert engine.state_manager.revision == engine.state.revision == 1
+    assert engine.registry._state == before_registry
+    assert (repo_cache_dir(repo) / "engine_state.meta.json").read_bytes() == before_meta
+
+
+def test_local_candidate_updated_installs_only_after_exact_persistence(
+    tmp_path, monkeypatch
+):
+    repo, provider, engine = _build_local_fallback_engine(
+        tmp_path, monkeypatch, "def run():\n    return 1\n"
+    )
+    assert update_file_module._persist_live_engine(repo, engine) is True
+    key = str(repo.resolve())
+    original_artifacts = deepcopy(engine.state.artifacts)
+    provider.write_text(
+        "def run():\n    return 1\n\ndef added():\n    return 2\n", encoding="utf-8"
+    )
+    real_persist = update_file_module._persist_live_engine
+    seen = []
+
+    def assert_before_publish(root, candidate):
+        seen.append((mcp_runtime._live_engines[key] is engine, candidate is not engine))
+        persisted = real_persist(root, candidate)
+        seen.append((mcp_runtime._live_engines[key] is engine, candidate is not engine))
+        return persisted
+
+    monkeypatch.setattr(update_file_module, "_persist_live_engine", assert_before_publish)
+    response = _local_update(repo, provider)
+    published = mcp_runtime._live_engines[key]
+
+    assert response["status"] == "UPDATED"
+    assert response["live_state_persisted"] is True
+    assert seen == [(True, True), (True, True)]
+    assert published is not engine
+    assert published.state is not engine.state
+    assert published.state_manager._state is not engine.state_manager._state
+    assert engine.state.artifacts == original_artifacts
+    assert published.state.artifacts != original_artifacts
+    assert read_metadata(repo_cache_dir(repo)).revision == 2
+    assert published.revision == mcp_runtime._live_engine_revisions[key] == 2
+
+
+def test_local_candidate_syntax_lkg_recovery_and_unchanged_publish_after_persist(
+    tmp_path, monkeypatch
+):
+    repo, provider, original = _build_local_fallback_engine(
+        tmp_path, monkeypatch, "def run():\n    return 1\n"
+    )
+    assert update_file_module._persist_live_engine(repo, original) is True
+    key = str(repo.resolve())
+    original_module = original.state.modules["provider"]
+    real_persist = update_file_module._persist_live_engine
+    calls = []
+
+    def assert_before_publish(root, candidate):
+        calls.append((mcp_runtime._live_engines[key], candidate))
+        return real_persist(root, candidate)
+
+    monkeypatch.setattr(update_file_module, "_persist_live_engine", assert_before_publish)
+    early = _local_update(repo, provider)
+    assert early["status"] == "UNCHANGED"
+    assert early["live_state_persisted"] is True
+    assert calls[-1][0] is original
+    early_engine = mcp_runtime._live_engines[key]
+    assert early_engine is not original
+
+    stat = provider.stat()
+    os.utime(provider, (stat.st_atime, stat.st_mtime + 2))
+    reconciled = _local_update(repo, provider)
+    assert reconciled["status"] in {"UPDATED", "UNCHANGED"}
+    assert reconciled["live_state_persisted"] is True
+    reconciled_engine = mcp_runtime._live_engines[key]
+    assert reconciled_engine is not early_engine
+    assert calls[-1][0] is early_engine
+
+    stat = provider.stat()
+    os.utime(provider, (stat.st_atime, stat.st_mtime + 2))
+    parsed = _local_update(repo, provider)
+    assert parsed["status"] == "UNCHANGED"
+    assert parsed["live_state_persisted"] is True
+    parsed_engine = mcp_runtime._live_engines[key]
+    assert parsed_engine is not reconciled_engine
+    assert calls[-1][0] is reconciled_engine
+
+    provider.write_text("def run(:\n    return 1\n", encoding="utf-8")
+    syntax = _local_update(repo, provider)
+    assert syntax["status"] == "SYNTAX_ERROR"
+    assert syntax["live_state_persisted"] is True
+    stale_engine = mcp_runtime._live_engines[key]
+    assert stale_engine is not parsed_engine
+    assert calls[-1][0] is parsed_engine
+    assert stale_engine.state.modules["provider"] is original_module
+    assert stale_engine.state.module_parse_freshness["provider"]["state"] == "stale"
+    assert "provider" not in original.state.module_parse_freshness
+
+    provider.write_text("def run():\n    return 2\n", encoding="utf-8")
+    recovered = _local_update(repo, provider)
+    assert recovered["status"] == "RECOVERED"
+    assert recovered["live_state_persisted"] is True
+    fresh_engine = mcp_runtime._live_engines[key]
+    assert fresh_engine is not stale_engine
+    assert calls[-1][0] is stale_engine
+    assert "provider" not in fresh_engine.state.module_parse_freshness
+    assert stale_engine.state.module_parse_freshness["provider"]["state"] == "stale"
+    assert read_metadata(repo_cache_dir(repo)).revision == 6
+
+
+def test_local_candidate_rollback_failure_evicts_cache(tmp_path, monkeypatch):
+    repo, provider, engine = _build_local_fallback_engine(
+        tmp_path, monkeypatch, "def run():\n    return 1\n"
+    )
+    assert update_file_module._persist_live_engine(repo, engine) is True
+    key = str(repo.resolve())
+    provider.write_text("def run():\n    return 2\n", encoding="utf-8")
+    monkeypatch.setattr(update_file_module, "_persist_live_engine", lambda *_args: False)
+
+    def failed_restore(_checkpoint):
+        raise OSError("injected registry rollback failure")
+
+    monkeypatch.setattr(engine.registry, "restore_checkpoint", failed_restore)
+    response = _local_update(repo, provider)
+
+    assert response["status"] == "ERROR"
+    assert "rollback" in response["error"].lower()
+    assert key not in mcp_runtime._live_engines
+    assert key not in mcp_runtime._live_engine_revisions
+    assert read_metadata(repo_cache_dir(repo)).revision == 1
+
+
+def test_local_candidate_disk_ahead_does_not_restore_older_registry(tmp_path, monkeypatch):
+    repo, provider, engine = _build_local_fallback_engine(
+        tmp_path, monkeypatch, "def run():\n    return 1\n"
+    )
+    assert update_file_module._persist_live_engine(repo, engine) is True
+    key = str(repo.resolve())
+    provider.write_text("def run():\n    return 2\n", encoding="utf-8")
+    real_persist = update_file_module._persist_live_engine
+    restore_calls = []
+
+    def commit_then_report_failure(root, candidate):
+        assert real_persist(root, candidate) is True
+        return False
+
+    def record_restore(checkpoint):
+        restore_calls.append(checkpoint)
+        raise AssertionError("older registry checkpoint must not be restored")
+
+    monkeypatch.setattr(update_file_module, "_persist_live_engine", commit_then_report_failure)
+    monkeypatch.setattr(engine.registry, "restore_checkpoint", record_restore)
+    response = _local_update(repo, provider)
+
+    assert response["status"] == "ERROR"
+    assert "divergence" in response["error"].lower()
+    assert restore_calls == []
+    assert key not in mcp_runtime._live_engines
+    assert key not in mcp_runtime._live_engine_revisions
+    assert read_metadata(repo_cache_dir(repo)).revision == 2
+
+
+def test_local_candidate_serializes_update_through_persistence(tmp_path, monkeypatch):
+    repo, provider, engine = _build_local_fallback_engine(
+        tmp_path, monkeypatch, "def run():\n    return 1\n"
+    )
+    assert update_file_module._persist_live_engine(repo, engine) is True
+    provider.write_text("def run():\n    return 2\n", encoding="utf-8")
+    extra = repo / "extra.py"
+    extra.write_text("value = 3\n", encoding="utf-8")
+    real_update = IncrementalAnalysisEngine.update_file
+    real_persist = update_file_module._persist_live_engine
+    persist_entered = threading.Event()
+    release_persist = threading.Event()
+    second_update_entered = threading.Event()
+    results = {}
+    calls = []
+
+    def observe_update(self, path):
+        if Path(path).name == "extra.py":
+            second_update_entered.set()
+        return real_update(self, path)
+
+    def block_first_persistence(root, candidate):
+        calls.append(candidate)
+        if len(calls) == 1:
+            persist_entered.set()
+            assert release_persist.wait(10)
+        return real_persist(root, candidate)
+
+    monkeypatch.setattr(IncrementalAnalysisEngine, "update_file", observe_update)
+    monkeypatch.setattr(update_file_module, "_persist_live_engine", block_first_persistence)
+    first = threading.Thread(
+        target=lambda: results.setdefault("first", _local_update(repo, provider)), daemon=True
+    )
+    second = threading.Thread(
+        target=lambda: results.setdefault("second", _local_update(repo, extra)), daemon=True
+    )
+    try:
+        first.start()
+        assert persist_entered.wait(10)
+        second.start()
+        assert second_update_entered.wait(0.3) is False
+    finally:
+        release_persist.set()
+        first.join(10)
+        second.join(10)
+
+    assert not first.is_alive() and not second.is_alive()
+    assert results["first"]["status"] == "UPDATED"
+    assert results["second"]["status"] == "UPDATED"
+    assert second_update_entered.is_set()
+    assert len(calls) == 2
+    assert read_metadata(repo_cache_dir(repo)).revision == 3
 
 
 def test_local_exact_generation_initial_successor_and_filestate_hydration(

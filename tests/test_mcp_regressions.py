@@ -2647,12 +2647,42 @@ def test_fastmcp_schema_exposes_analysis_parameters():
     assert "exclude_paths" in signature.parameters
     assert "job_id" in status_signature.parameters
     assert "public_api_only" in extraction_signature.parameters
-def test_update_file_marks_running_mcp_server_as_requiring_restart(monkeypatch):
-    server_path = Path(mcp_server.__file__).resolve()
-    repo = server_path.parents[1]
-    engine = SimpleNamespace(
-        state=SimpleNamespace(artifacts={"contextor.mcp_server": {}}),
-        update_file=lambda file_path: SimpleNamespace(
+def _real_local_update_fixture(root, monkeypatch):
+    from contextor.core.analysis.incremental_engine import IncrementalAnalysisEngine
+    from contextor.core.analysis.state_manager import FileStateManager
+    from contextor.core.paths import repo_cache_dir
+
+    root = root.resolve()
+    monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(root / "cache"))
+    state = RepositoryAnalysisState(
+        modules={},
+        artifacts={},
+        dependency_graph=None,
+        trie={},
+        package_root=None,
+        artifact_consumption={},
+    )
+    registry = PersistentIdentityRegistry(str(root))
+    manager = FileStateManager(str(repo_cache_dir(root)))
+    engine = IncrementalAnalysisEngine(state, registry, manager, str(root))
+    monkeypatch.setattr(mcp_runtime, "_live_engines", {str(root): engine})
+    monkeypatch.setattr(mcp_runtime, "_live_engine_revisions", {})
+    monkeypatch.setattr(mcp_runtime, "_live_engine_provenance", {})
+    monkeypatch.setattr("contextor.core.live_state.connect", lambda _root: None)
+    return engine
+
+
+def test_update_file_marks_running_mcp_server_as_requiring_restart(tmp_path, monkeypatch):
+    repo = tmp_path.resolve()
+    server_path = repo / "mcp_server.py"
+    server_path.write_text("value = 1\n", encoding="utf-8")
+    _real_local_update_fixture(repo, monkeypatch)
+    from contextor.core.analysis.incremental_engine import IncrementalAnalysisEngine
+
+    monkeypatch.setattr(
+        IncrementalAnalysisEngine,
+        "update_file",
+        lambda self, file_path: SimpleNamespace(
             status="UPDATED",
             file_path=file_path,
             graph_state="fresh",
@@ -2665,7 +2695,6 @@ def test_update_file_marks_running_mcp_server_as_requiring_restart(monkeypatch):
             delta=None,
         ),
     )
-    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: engine)
     monkeypatch.setattr(update_file_module, "_persist_live_engine", lambda *_args: True)
     monkeypatch.setattr(
         update_file_module,
@@ -2697,9 +2726,13 @@ def test_update_file_marks_running_mcp_server_as_requiring_restart(monkeypatch):
 def test_mcp_update_file_shapes_affected_modules_compact_full_and_fields(tmp_path, monkeypatch):
     target = tmp_path / "provider.py"
     target.write_text("def run(): pass\n", encoding="utf-8")
-    engine = SimpleNamespace(
-        state=SimpleNamespace(artifacts={"provider": {}}),
-        update_file=lambda file_path: SimpleNamespace(
+    _real_local_update_fixture(tmp_path, monkeypatch)
+    from contextor.core.analysis.incremental_engine import IncrementalAnalysisEngine
+
+    monkeypatch.setattr(
+        IncrementalAnalysisEngine,
+        "update_file",
+        lambda self, file_path: SimpleNamespace(
             status="UPDATED",
             file_path=file_path,
             graph_state="fresh",
@@ -2712,7 +2745,6 @@ def test_mcp_update_file_shapes_affected_modules_compact_full_and_fields(tmp_pat
             delta=None,
         ),
     )
-    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: engine)
     monkeypatch.setattr(update_file_module, "_persist_live_engine", lambda *_args: True)
 
     compact = json.loads(
@@ -2763,6 +2795,8 @@ def test_mcp_update_file_shapes_affected_modules_compact_full_and_fields(tmp_pat
 def test_mcp_update_file_local_fallback_persists_every_returned_status(
     tmp_path, monkeypatch, result_status, path_kind, persisted
 ):
+    from contextor.core.analysis.incremental_engine import IncrementalAnalysisEngine
+
     root = tmp_path.resolve()
     target = root / "provider.py"
     target.write_text("def run():\n    return 1\n", encoding="utf-8")
@@ -2783,14 +2817,12 @@ def test_mcp_update_file_local_fallback_persists_every_returned_status(
         delta=None,
     )
 
-    class FakeEngine:
-        state = SimpleNamespace(artifacts={"provider": {}})
+    engine = _real_local_update_fixture(root, monkeypatch)
 
-        def update_file(self, file_path):
-            update_calls.append(file_path)
-            return result
-
-    engine = FakeEngine()
+    def candidate_update(self, file_path):
+        assert self is not engine
+        update_calls.append(file_path)
+        return result
 
     def connect(_root):
         connect_calls.append(_root)
@@ -2801,7 +2833,7 @@ def test_mcp_update_file_local_fallback_persists_every_returned_status(
         return persisted
 
     monkeypatch.setattr("contextor.core.live_state.connect", connect)
-    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: engine)
+    monkeypatch.setattr(IncrementalAnalysisEngine, "update_file", candidate_update)
     monkeypatch.setattr(update_file_module, "_persist_live_engine", persist)
     monkeypatch.setattr(
         update_file_module, "_mcp_runtime_restart_required", lambda _path: False
@@ -2815,9 +2847,15 @@ def test_mcp_update_file_local_fallback_persists_every_returned_status(
     assert connect_calls
     assert all(call_root == root for call_root in connect_calls)
     assert update_calls == [str(target)]
-    assert persist_calls == [(root, engine)]
-    assert response["status"] == result_status
+    assert len(persist_calls) == 1
+    assert persist_calls[0][0] == root
+    assert persist_calls[0][1] is not engine
+    assert response["status"] == (result_status if persisted else "ERROR")
     assert response["live_state_persisted"] is persisted
+    if persisted:
+        assert mcp_runtime._live_engines[str(root)] is persist_calls[0][1]
+    else:
+        assert mcp_runtime._live_engines[str(root)] is engine
 
 
 def test_mcp_update_file_live_branch_delegates_without_local_persistence(
@@ -2880,6 +2918,8 @@ def test_mcp_update_file_live_branch_delegates_without_local_persistence(
 def test_mcp_update_file_local_persistence_exception_keeps_error_response(
     tmp_path, monkeypatch
 ):
+    from contextor.core.analysis.incremental_engine import IncrementalAnalysisEngine
+
     root = tmp_path.resolve()
     target = root / "provider.py"
     target.write_text("def run():\n    return 1\n", encoding="utf-8")
@@ -2895,16 +2935,14 @@ def test_mcp_update_file_local_persistence_exception_keeps_error_response(
         affected_modules=[],
         delta=None,
     )
-    engine = SimpleNamespace(
-        state=SimpleNamespace(artifacts={"provider": {}}),
-        update_file=lambda _path: result,
-    )
+    engine = _real_local_update_fixture(root, monkeypatch)
 
     def fail_persist(*_args):
         raise OSError("snapshot persistence failed")
 
-    monkeypatch.setattr("contextor.core.live_state.connect", lambda _root: None)
-    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: engine)
+    monkeypatch.setattr(
+        IncrementalAnalysisEngine, "update_file", lambda self, _path: result
+    )
     monkeypatch.setattr(update_file_module, "_persist_live_engine", fail_persist)
 
     response = json.loads(
@@ -2914,6 +2952,7 @@ def test_mcp_update_file_local_persistence_exception_keeps_error_response(
     assert response["status"] == "ERROR"
     assert "snapshot persistence failed" in response["error"]
     assert "live_state_persisted" not in response
+    assert mcp_runtime._live_engines[str(root)] is engine
 
 
 
