@@ -39,8 +39,12 @@ class PersistentIdentityRegistry:
         self._transaction_mode: str | None = None
         self._lock_file_obj = None
 
-        self._recover_transaction()
-        self._load_all()
+        self._lock()
+        try:
+            self._recover_transaction()
+            self._load_all()
+        finally:
+            self._unlock()
 
     def _lock(self):
         self._lock_file_obj = open(self.lock_file, "w")
