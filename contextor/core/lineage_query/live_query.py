@@ -525,6 +525,24 @@ def query_live_symbol_lineage(
                 ),
             )
 
+        package_init_module = f"{requested_module}.__init__"
+        modules = getattr(state, "modules", {})
+        if isinstance(modules, dict) and package_init_module in modules:
+            package_truth = module_current_truth(state, package_init_module)
+            if package_truth["state"] == "unavailable":
+                return LiveSymbolLineageQueryResult(
+                    resolution=LineageTargetResolution(
+                        status="unavailable",
+                        query=raw_query,
+                    ),
+                    unavailable_reason=package_truth["reason"],
+                    state_freshness=build_live_lineage_state_freshness(
+                        state,
+                        backend,
+                        target_module=package_init_module,
+                    ),
+                )
+
     try:
         canonical_query = backend.canonicalize_qualified_identity(
             raw_query

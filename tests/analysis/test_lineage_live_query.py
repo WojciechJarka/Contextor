@@ -1,3 +1,4 @@
+from copy import deepcopy
 from dataclasses import replace
 from types import SimpleNamespace
 from pathlib import Path
@@ -204,6 +205,32 @@ def _reexport_query_fixture(module_paths, reexport_facts, definitions):
         lineage_semantic_anchor_bindings_complete=anchor_complete,
     )
     return state
+
+
+def _package_alias_fixture(package_name="pkg"):
+    package_init = f"{package_name}.__init__"
+    provider = f"{package_name}.provider"
+    return _reexport_query_fixture(
+        {
+            package_init: f"{package_name.replace('.', '/')}/__init__.py",
+            provider: f"{provider.replace('.', '/')}.py",
+        },
+        {
+            package_init: {
+                "exporter": package_name,
+                "explicit_all": ["public_run"],
+                "bindings": {"public_run": f"{provider}.run"},
+                "star_sources": [],
+            },
+            provider: {
+                "exporter": provider,
+                "explicit_all": None,
+                "bindings": {"run": f"{provider}.run"},
+                "star_sources": [],
+            },
+        },
+        {provider: (("A30/1", f"{provider}::run"),)},
+    )
 
 
 def test_live_target_catalog_resolves_artifact_id_only_through_owner_index(
@@ -1414,34 +1441,126 @@ def test_live_lineage_rejects_untrusted_alias_or_origin(untrusted_module):
 
 
 def test_live_lineage_rejects_untrusted_package_init_alias():
-    state = _reexport_query_fixture(
-        {
-            "pkg.__init__": "pkg/__init__.py",
-            "pkg.provider": "pkg/provider.py",
-        },
-        {
-            "pkg.__init__": {
-                "exporter": "pkg",
-                "explicit_all": ["public_run"],
-                "bindings": {"public_run": "pkg.provider.run"},
-                "star_sources": [],
-            },
-            "pkg.provider": {
-                "exporter": "pkg.provider",
-                "explicit_all": None,
-                "bindings": {"run": "pkg.provider.run"},
-                "star_sources": [],
-            },
-        },
-        {"pkg.provider": (("A30/1", "pkg.provider::run"),)},
-    )
+    state = _package_alias_fixture()
     state.module_parse_freshness = {"pkg.__init__": {"state": "unknown"}}
+    modules = state.modules
+    freshness = state.module_parse_freshness
+    reexports = state.reexport_facts_by_module
+    lineage_facts = state.lineage_facts_by_source
+    provider_facts = lineage_facts["pkg/provider.py"]
+    canonical_snapshot = deepcopy(
+        {
+            "modules": state.modules,
+            "module_parse_freshness": state.module_parse_freshness,
+            "reexport_facts_by_module": state.reexport_facts_by_module,
+            "lineage_facts_by_source": state.lineage_facts_by_source,
+        }
+    )
 
     result = query_live_symbol_lineage(state, "pkg::public_run", ("interface",))
 
     assert result.resolution.status == "unavailable"
     assert result.selected is None
     assert result.owner_names == {}
+    assert result.state_freshness["canonical_state"] == "unavailable"
+    assert result.state_freshness["families"]["module"] == "unavailable"
+    assert state.modules is modules
+    assert state.module_parse_freshness is freshness
+    assert freshness["pkg.__init__"] == {"state": "unknown"}
+    assert state.reexport_facts_by_module is reexports
+    assert state.lineage_facts_by_source is lineage_facts
+    assert lineage_facts["pkg/provider.py"] is provider_facts
+    assert state.modules == canonical_snapshot["modules"]
+    assert state.module_parse_freshness == canonical_snapshot["module_parse_freshness"]
+    assert state.reexport_facts_by_module == canonical_snapshot["reexport_facts_by_module"]
+    assert state.lineage_facts_by_source == canonical_snapshot["lineage_facts_by_source"]
+
+
+def test_live_lineage_accepts_fresh_package_init_alias():
+    state = _package_alias_fixture()
+    state.module_parse_freshness = {
+        "pkg.__init__": {"state": "fresh"},
+    }
+
+    result = query_live_symbol_lineage(state, "pkg::public_run", ("interface",))
+
+    assert result.resolution.status == "resolved"
+    assert result.resolution.target is not None
+    assert result.resolution.target.qualified_name == "pkg.provider::run"
+    assert result.selected is not None
+
+
+def test_live_lineage_keeps_stale_package_init_lkg_alias_selection():
+    state = _package_alias_fixture()
+    state.resync_required = False
+    state.module_parse_freshness = {
+        "pkg.__init__": {"state": "stale", "error": "syntax failure"},
+    }
+    provider_facts = state.lineage_facts_by_source["pkg/provider.py"]
+
+    result = query_live_symbol_lineage(state, "pkg::public_run", ("interface",))
+
+    assert result.resolution.status == "resolved"
+    assert result.resolution.target is not None
+    assert result.resolution.target.qualified_name == "pkg.provider::run"
+    assert result.selected is not None
+    assert state.resync_required is False
+    assert state.lineage_facts_by_source["pkg/provider.py"] is provider_facts
+
+
+def test_live_lineage_unrelated_malformed_package_does_not_block_direct_module():
+    state, _backend = _fixture()
+    state.modules["unrelated.__init__"] = SimpleNamespace(
+        path="unrelated/__init__.py",
+    )
+    state.module_parse_freshness = {
+        "unrelated.__init__": {"state": "unknown"},
+    }
+
+    result = query_live_symbol_lineage(
+        state,
+        "pkg.mod::handler",
+        ("interface",),
+    )
+
+    assert result.resolution.status == "resolved"
+    assert result.selected is not None
+    assert result.state_freshness["families"]["module"] == "fresh"
+
+
+def test_live_lineage_nested_package_alias_checks_nested_init_freshness():
+    state = _package_alias_fixture("pkg.sub")
+    state.module_parse_freshness = {
+        "pkg.sub.__init__": {"state": "unknown"},
+    }
+
+    result = query_live_symbol_lineage(
+        state,
+        "pkg.sub::public_run",
+        ("interface",),
+    )
+
+    assert result.resolution.status == "unavailable"
+    assert result.selected is None
+    assert result.owner_names == {}
+    assert result.state_freshness["families"]["module"] == "unavailable"
+
+
+def test_live_lineage_package_alias_resync_is_fail_closed():
+    state = _package_alias_fixture()
+    state.resync_required = True
+    state.module_parse_freshness = {
+        "pkg.__init__": {"state": "unknown"},
+    }
+    original_facts = state.lineage_facts_by_source
+
+    result = query_live_symbol_lineage(state, "pkg::public_run", ("interface",))
+
+    assert result.resolution.status == "unavailable"
+    assert result.selected is None
+    assert result.owner_names == {}
+    assert result.state_freshness["canonical_state"] == "stale"
+    assert state.lineage_facts_by_source is original_facts
 
 
 def test_live_lineage_state_freshness_marks_resync_required():
