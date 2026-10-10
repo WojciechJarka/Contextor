@@ -1306,7 +1306,7 @@ class ContextorFacade:
         progress_callback=None,
         additional_excludes: list[str] | None = None,
     ) -> str:
-        from contextor.core.analysis.full_analysis_coordinator import (
+        from contextor.core.analysis.full_analysis_lease import (
             acquire_full_analysis,
             release_full_analysis,
         )
@@ -1539,7 +1539,7 @@ class ContextorFacade:
                 revision=None,
                 warning=None,
             )
-        from contextor.core.analysis.full_analysis_coordinator import (
+        from contextor.core.analysis.full_analysis_lease import (
             acquire_full_analysis,
             release_full_analysis,
         )

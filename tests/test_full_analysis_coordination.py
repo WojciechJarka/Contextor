@@ -12,6 +12,8 @@ Complete test suite certifying the single-writer full-analysis coordinator:
 from __future__ import annotations
 
 import json
+import ast
+import inspect
 import multiprocessing
 import os
 import threading
@@ -40,6 +42,67 @@ from contextor.mcp import analysis_jobs
 from contextor.mcp import runtime as mcp_runtime
 
 
+def test_acyclic_lease_import_contract():
+    from contextor.core.api import facade
+    from contextor.core.analysis import full_analysis_lease as lease
+    from contextor.core.analysis import full_analysis_coordinator as coordinator
+
+    def imported_modules(module):
+        tree = ast.parse(Path(module.__file__).read_text(encoding="utf-8"))
+        return {
+            node.module
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom) and node.module
+        }
+
+    assert "contextor.core.analysis.full_analysis_coordinator" not in imported_modules(facade)
+    assert "contextor.core.api.facade" not in imported_modules(lease)
+    assert "contextor.core.analysis.full_analysis_coordinator" not in imported_modules(lease)
+    assert "contextor.core.analysis.full_analysis_lease" in imported_modules(coordinator)
+    assert str(inspect.signature(facade.ContextorFacade.analyze_layer)) == (
+        "(root_dir: str, layer_dir: str, log=None, progress_callback=None, "
+        "additional_excludes: list[str] | None = None) -> str"
+    )
+    assert str(inspect.signature(facade.ContextorFacade.analyze_single_file)) == (
+        "(file_path: str, repo_root: str, log=None, progress_callback=None, "
+        "additional_excludes: list[str] | None = None, "
+        "publication_result: dict[str, typing.Any] | None = None) -> str"
+    )
+
+
+def test_extracted_lease_api_and_process_locks_have_one_owner():
+    from contextor.core.analysis import full_analysis_lease as lease_a
+    from contextor.core.analysis import full_analysis_lease as lease_b
+    from contextor.core.analysis import full_analysis_coordinator as coordinator
+
+    assert lease_a is lease_b
+    assert coordinator.acquire_full_analysis is lease_a.acquire_full_analysis
+    assert coordinator.release_full_analysis is lease_a.release_full_analysis
+    assert coordinator.FullAnalysisLease is lease_a.FullAnalysisLease
+    assert coordinator.FullAnalysisBusyError is lease_a.FullAnalysisBusyError
+    assert coordinator._PROCESS_LOCKS is lease_a._PROCESS_LOCKS
+    assert coordinator._ADMISSION_LOCKS is lease_a._ADMISSION_LOCKS
+    assert coordinator.acquire_full_analysis.__globals__["_PROCESS_LOCKS"] is lease_a._PROCESS_LOCKS
+    assert coordinator.acquire_full_analysis.__globals__["_ADMISSION_LOCKS"] is lease_a._ADMISSION_LOCKS
+
+
+@pytest.mark.parametrize("first", ["coordinator", "lease"])
+def test_coordinator_and_extracted_lease_exclude_each_other(tmp_path, first):
+    from contextor.core.analysis import full_analysis_lease as lease
+    from contextor.core.analysis import full_analysis_coordinator as coordinator
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    first_owner = coordinator if first == "coordinator" else lease
+    second_owner = lease if first == "coordinator" else coordinator
+    held = first_owner.acquire_full_analysis(repo, timeout=1.0)
+    try:
+        with pytest.raises(FullAnalysisBusyError):
+            second_owner.acquire_full_analysis(repo, timeout=0.1, poll_interval=0.01)
+    finally:
+        first_owner.release_full_analysis(held)
+
+
 def _worker_try_writer_kind(repo_path, writer_kind, result_queue):
     try:
         lease = acquire_full_analysis(
@@ -59,7 +122,7 @@ def test_scoped_facade_holds_writer_lease_before_identity_write(
     tmp_path, isolated_dirs, monkeypatch, method, target_kind
 ):
     from contextor.core.api import facade
-    from contextor.core.analysis import full_analysis_coordinator as coordinator
+    from contextor.core.analysis import full_analysis_lease as coordinator
 
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -201,7 +264,7 @@ def test_scoped_facade_invalid_target_does_not_acquire_lease(
     tmp_path, monkeypatch, method, target_kind
 ):
     from contextor.core.api import facade
-    from contextor.core.analysis import full_analysis_coordinator as coordinator
+    from contextor.core.analysis import full_analysis_lease as coordinator
 
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -224,7 +287,7 @@ def test_scoped_facade_invalid_target_does_not_acquire_lease(
 
 def test_scoped_facade_non_python_target_does_not_acquire_lease(tmp_path, monkeypatch):
     from contextor.core.api import facade
-    from contextor.core.analysis import full_analysis_coordinator as coordinator
+    from contextor.core.analysis import full_analysis_lease as coordinator
 
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -243,7 +306,7 @@ def test_invalid_scoped_file_resets_publication_result_before_validation(
     tmp_path, isolated_dirs, monkeypatch
 ):
     from contextor.core.api import facade
-    from contextor.core.analysis import full_analysis_coordinator as coordinator
+    from contextor.core.analysis import full_analysis_lease as coordinator
 
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -269,7 +332,7 @@ def test_denied_scoped_file_resets_publication_result_without_mutation(
     tmp_path, isolated_dirs, monkeypatch
 ):
     from contextor.core.api import facade
-    from contextor.core.analysis import full_analysis_coordinator as coordinator
+    from contextor.core.analysis import full_analysis_lease as coordinator
 
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -303,7 +366,7 @@ def test_scoped_facade_denied_lease_does_not_start_body_or_identity(
     tmp_path, isolated_dirs, monkeypatch, method, target_kind
 ):
     from contextor.core.api import facade
-    from contextor.core.analysis import full_analysis_coordinator as coordinator
+    from contextor.core.analysis import full_analysis_lease as coordinator
 
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -922,7 +985,7 @@ def test_unknown_owner_metadata_has_bounded_failure(
     monkeypatch,
 ):
     """An occupied lock with unreadable metadata cannot create an infinite wait."""
-    from contextor.core.analysis import full_analysis_coordinator as fac
+    from contextor.core.analysis import full_analysis_lease as fac
 
     monkeypatch.setattr(fac, "ORPHAN_RECOVERY_TIMEOUT_SECONDS", 0.2)
     repo = tmp_path / "repo_unknown_owner"
@@ -963,7 +1026,7 @@ def test_legacy_owner_metadata_has_bounded_failure(
     monkeypatch,
 ):
     """Legacy metadata without process identity is unknown, not silently live."""
-    from contextor.core.analysis import full_analysis_coordinator as fac
+    from contextor.core.analysis import full_analysis_lease as fac
 
     monkeypatch.setattr(fac, "ORPHAN_RECOVERY_TIMEOUT_SECONDS", 0.2)
     repo = tmp_path / "repo_legacy_owner"
