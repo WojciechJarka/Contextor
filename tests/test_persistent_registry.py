@@ -6,6 +6,7 @@ import pytest
 from pathlib import Path
 
 from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
+from contextor.mcp import query_helpers
 
 @pytest.fixture
 def temp_repo(tmp_path):
@@ -55,6 +56,72 @@ def test_checkpoint_restore_persists_exact_registry_state(temp_repo):
     assert reloaded._state["module_slots"] == checkpoint["module_slots"]
     assert reloaded._state["artifact_slots"] == checkpoint["artifact_slots"]
     assert reloaded._state["output_references"] == checkpoint["output_references"]
+
+
+def test_read_registries_healthy_read_keeps_bytes_mtime_and_ids(temp_repo):
+    registry = PersistentIdentityRegistry(temp_repo)
+    with registry.transaction():
+        registry.sync_with_workspace({"pkg.module"}, {"pkg.module::run"})
+    expected = (
+        copy.deepcopy(registry._state["module_registry"]["path_to_id"]),
+        copy.deepcopy(registry._state["module_registry"]["id_to_path"]),
+        copy.deepcopy(registry._state["artifact_registry"]["path_to_id"]),
+        copy.deepcopy(registry._state["artifact_registry"]["id_to_path"]),
+    )
+    files = tuple(registry.files.values())
+    before = {path: (path.read_bytes(), path.stat().st_mtime_ns) for path in files}
+    marker = registry.transaction_file
+    temporary = tuple(path.with_suffix(".json.tmp") for path in files)
+    assert not marker.exists()
+    assert not any(path.exists() for path in temporary)
+
+    first = query_helpers.read_registries(Path(temp_repo))
+    second = query_helpers.read_registries(Path(temp_repo))
+
+    assert first == expected == second
+    assert {path: (path.read_bytes(), path.stat().st_mtime_ns) for path in files} == before
+    assert not marker.exists()
+    assert not any(path.exists() for path in temporary)
+    reloaded = PersistentIdentityRegistry(temp_repo)
+    assert reloaded.get_module_id("pkg.module") == expected[0]["pkg.module"]
+    assert reloaded.get_artifact_id("pkg.module::run") == expected[2]["pkg.module::run"]
+
+
+def test_read_registries_does_not_enter_write_transaction(temp_repo, monkeypatch):
+    registry = PersistentIdentityRegistry(temp_repo)
+    with registry.transaction():
+        registry.sync_with_workspace({"pkg.module"}, {"pkg.module::run"})
+
+    def forbidden(_self):
+        pytest.fail("healthy read entered a write transaction")
+
+    monkeypatch.setattr(PersistentIdentityRegistry, "transaction", forbidden)
+    result = query_helpers.read_registries(Path(temp_repo))
+    assert result[0]["pkg.module"] == registry.get_module_id("pkg.module")
+    assert result[2]["pkg.module::run"] == registry.get_artifact_id("pkg.module::run")
+
+
+def test_read_registries_recovers_interrupted_commit(temp_repo):
+    registry = PersistentIdentityRegistry(temp_repo)
+    with registry.transaction():
+        registry.sync_with_workspace({"pkg.module"}, set())
+    path = registry.files["module_registry"]
+    next_state = json.loads(path.read_text(encoding="utf-8"))
+    next_state["path_to_id"]["pkg.recovered"] = "9/1"
+    next_state["id_to_path"]["9/1"] = "pkg.recovered"
+    staged = path.with_suffix(".json.tmp")
+    staged.write_text(json.dumps(next_state), encoding="utf-8")
+    registry.transaction_file.write_text(
+        json.dumps({"status": "committing", "files": ["module_registry"]}),
+        encoding="utf-8",
+    )
+
+    result = query_helpers.read_registries(Path(temp_repo))
+
+    assert result[0]["pkg.recovered"] == "9/1"
+    assert result[1]["9/1"] == "pkg.recovered"
+    assert not staged.exists()
+    assert not registry.transaction_file.exists()
 
 def test_identity_preservation(temp_repo):
     # nowy plik dostaje ID

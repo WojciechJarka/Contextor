@@ -85,7 +85,7 @@ def read_registries(root: Path) -> tuple[dict, dict, dict, dict]:
     )
 
     registry = PersistentIdentityRegistry(str(root))
-    with registry.transaction():
+    with registry.read_transaction():
         mod_reg = registry._state.get("module_registry", {})
         art_reg = registry._state.get("artifact_registry", {})
     return (

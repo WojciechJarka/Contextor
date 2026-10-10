@@ -77,6 +77,28 @@ def _patch_empty_registries(monkeypatch):
     monkeypatch.setattr(query_helpers, "read_registries", lambda _root: ({}, {}, {}, {}))
 
 
+def test_read_registries_observes_committed_write_and_propagates_read_error(
+    tmp_path, monkeypatch
+):
+    registry = PersistentIdentityRegistry(str(tmp_path))
+    with registry.transaction():
+        registry.sync_with_workspace({"first"}, {"first::run"})
+    assert query_helpers.read_registries(tmp_path)[0]["first"] == registry.get_module_id("first")
+
+    with registry.transaction():
+        registry.sync_with_workspace({"first", "second"}, {"first::run", "second::run"})
+    result = query_helpers.read_registries(tmp_path)
+    assert result[0]["second"] == registry.get_module_id("second")
+    assert result[2]["second::run"] == registry.get_artifact_id("second::run")
+
+    def fail_read(_self):
+        raise RuntimeError("registry read failed")
+
+    monkeypatch.setattr(PersistentIdentityRegistry, "read_transaction", fail_read)
+    with pytest.raises(RuntimeError, match="registry read failed"):
+        query_helpers.read_registries(tmp_path)
+
+
 class _ObservedRLock:
     def __init__(self, watched_thread_name: str):
         self._lock = threading.RLock()
