@@ -2,9 +2,11 @@
 
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
+import json
 import multiprocessing
 import os
 from pathlib import Path
+import threading
 import time
 from types import SimpleNamespace
 
@@ -2503,8 +2505,15 @@ def test_legacy_snapshot_migrates_to_repo_id_cache_without_deleting_source(
     repo = tmp_path / "repo"
     repo.mkdir()
     legacy = legacy_repo_cache_dir(repo)
-    save_snapshot({"value": 7}, legacy, "legacy-state", writer="desktop")
-    (legacy / "file_state.json").write_text('{"files": {}}', encoding="utf-8")
+    legacy_metadata = save_snapshot(
+        {"value": 7}, legacy, "legacy-state", writer="desktop"
+    )
+    legacy_file_state = legacy / "file_state.json"
+    legacy_file_state.write_text(
+        json.dumps({"legacy.py": {"size": 4}}, indent=2),
+        encoding="utf-8",
+    )
+    legacy_file_state_bytes = legacy_file_state.read_bytes()
     registry = PersistentIdentityRegistry(str(repo))
 
     target = migrate_legacy_snapshot(repo)
@@ -2517,8 +2526,350 @@ def test_legacy_snapshot_migrates_to_repo_id_cache_without_deleting_source(
     assert target == repo_cache_dir(repo)
     assert loaded is not None and loaded[0] == {"value": 7}
     assert loaded[1].repo_id == registry.repo_id
+    assert loaded[1].state_id == "legacy-state"
+    assert loaded[1].revision == legacy_metadata.revision + 1
     assert (target / "file_state.json").is_file()
+    assert (target / "file_state.json").read_bytes() == legacy_file_state_bytes
+    migrated_file_state = FileStateManager(str(target))
+    assert "legacy.py" in migrated_file_state._state
+    assert migrated_file_state.baseline_status == "untrusted"
     assert (legacy / "engine_state.pkl").is_file()
+
+
+def _migration_race_full_analysis_holder(
+    repo_text, cache_text, lease_held, release_lease, results
+):
+    os.environ["CONTEXTOR_CACHE_DIR"] = cache_text
+    from contextor.core.analysis.full_analysis_coordinator import (
+        acquire_full_analysis,
+        release_full_analysis,
+    )
+
+    lease = None
+    try:
+        lease = acquire_full_analysis(
+            repo_text,
+            owner="migration_race_full_writer",
+            writer_kind="full_analysis",
+            timeout=5.0,
+        )
+        lease_held.set()
+        if not release_lease.wait(15):
+            raise TimeoutError("full-analysis lease hold expired")
+        results.put({"worker": "lease", "status": "released"})
+    except BaseException as exc:
+        results.put({"worker": "lease", "status": "error", "error": repr(exc)})
+    finally:
+        if lease is not None:
+            release_full_analysis(lease)
+
+
+def _migration_race_migrate_worker(
+    repo_text,
+    cache_text,
+    migration_started,
+    snapshot_write_entered,
+    allow_snapshot_write,
+    results,
+):
+    os.environ["CONTEXTOR_CACHE_DIR"] = cache_text
+    import contextor.core.live_state.store as store
+
+    real_save_snapshot = store.save_snapshot
+
+    def observe_snapshot_write(*args, **kwargs):
+        snapshot_write_entered.set()
+        if not allow_snapshot_write.wait(15):
+            raise TimeoutError("migration snapshot write hold expired")
+        return real_save_snapshot(*args, **kwargs)
+
+    store.save_snapshot = observe_snapshot_write
+    try:
+        migration_started.set()
+        target = store.migrate_legacy_snapshot(repo_text)
+        results.put({"worker": "migration", "status": "completed", "target": str(target)})
+    except BaseException as exc:
+        results.put({"worker": "migration", "status": "error", "error": repr(exc)})
+    finally:
+        store.save_snapshot = real_save_snapshot
+
+
+def test_migration_does_not_enter_snapshot_write_while_full_analysis_lease_is_held(
+    tmp_path, monkeypatch
+):
+    cache_root = tmp_path / "cache"
+    monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(cache_root))
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    identity = PersistentIdentityRegistry(str(repo))
+    assert identity.repo_id
+
+    legacy = legacy_repo_cache_dir(repo)
+    legacy_metadata = save_snapshot(
+        {"value": 7}, legacy, "legacy-state", writer="desktop"
+    )
+    assert load_snapshot(legacy) is not None
+    target = repo_cache_dir(repo)
+    assert read_metadata(target) is None
+
+    context = multiprocessing.get_context("spawn")
+    lease_held = context.Event()
+    release_lease = context.Event()
+    migration_started = context.Event()
+    snapshot_write_entered = context.Event()
+    allow_snapshot_write = context.Event()
+    results = context.Queue()
+    holder = context.Process(
+        target=_migration_race_full_analysis_holder,
+        args=(str(repo), str(cache_root), lease_held, release_lease, results),
+    )
+    migrator = context.Process(
+        target=_migration_race_migrate_worker,
+        args=(
+            str(repo),
+            str(cache_root),
+            migration_started,
+            snapshot_write_entered,
+            allow_snapshot_write,
+            results,
+        ),
+    )
+    processes = (holder, migrator)
+    early_snapshot_write = False
+    migration_reached_write = False
+    worker_results = []
+    try:
+        holder.start()
+        assert lease_held.wait(5), "Process A did not acquire full_analysis.lock"
+
+        migrator.start()
+        assert migration_started.wait(5), "Process B did not start legacy migration"
+        early_snapshot_write = snapshot_write_entered.wait(1.0)
+
+        # Release both explicit holds only after recording whether the real
+        # migration writer boundary was entered while Process A owned the lease.
+        release_lease.set()
+        allow_snapshot_write.set()
+        migration_reached_write = snapshot_write_entered.wait(5)
+
+        for process in processes:
+            process.join(timeout=10)
+        worker_results = [results.get(timeout=2) for _ in range(2)]
+    finally:
+        release_lease.set()
+        allow_snapshot_write.set()
+        for process in processes:
+            if process.pid is not None:
+                process.join(timeout=5)
+                if process.is_alive():
+                    process.terminate()
+                    process.join(timeout=5)
+        results.close()
+        results.join_thread()
+
+    assert migration_reached_write, f"migration did not reach save_snapshot: {worker_results}"
+    assert all(not process.is_alive() for process in processes)
+    assert all(process.exitcode == 0 for process in processes), worker_results
+    assert {result["status"] for result in worker_results} == {"released", "completed"}, worker_results
+    assert legacy_metadata.revision == 1
+    assert not early_snapshot_write, (
+        "migration entered the real save_snapshot boundary while another process "
+        "held the repository full_analysis.lock"
+    )
+
+
+def test_migration_does_not_publish_legacy_filestate_after_newer_generation_commit(
+    tmp_path, monkeypatch
+):
+    import contextor.core.live_state.store as store
+
+    cache_root = tmp_path / "cache"
+    monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(cache_root))
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    registry = PersistentIdentityRegistry(str(repo))
+    identity = read_repository_identity(repo)
+    assert identity is not None and identity.repo_id == registry.repo_id
+
+    legacy = legacy_repo_cache_dir(repo)
+    target = repo_cache_dir(repo)
+    legacy_metadata = save_snapshot(
+        {"value": "legacy"}, legacy, "legacy-state", writer="desktop"
+    )
+    legacy_file_state = legacy / "file_state.json"
+    legacy_file_state.write_text(
+        json.dumps(
+            {
+                "_meta": {
+                    "state_id": legacy_metadata.state_id,
+                    "revision": legacy_metadata.revision,
+                },
+                "files": {"legacy.py": {"size": 6}},
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    legacy_file_state_bytes = legacy_file_state.read_bytes()
+
+    real_store_save = store.save_snapshot
+    real_copy2 = store.shutil.copy2
+    migration_snapshot_returned = threading.Event()
+    resume_migration = threading.Event()
+    observations = {"order": [], "copy": []}
+    migration_outcome = []
+
+    def pause_after_migration_snapshot_save(*args, **kwargs):
+        metadata = real_store_save(*args, **kwargs)
+        if threading.current_thread().name == "legacy-migration":
+            observations["migration_metadata"] = metadata
+            observations["order"].append("migration_snapshot_saved")
+            migration_snapshot_returned.set()
+            if not resume_migration.wait(10):
+                raise TimeoutError("migration resume hold expired")
+        return metadata
+
+    def observe_legacy_file_state_copy(src, dst, *args, **kwargs):
+        result = real_copy2(src, dst, *args, **kwargs)
+        observations["copy"].append(
+            {"src": str(src), "dst": str(dst), "bytes": Path(dst).read_bytes()}
+        )
+        observations["order"].append("legacy_file_state_copy_committed")
+        return result
+
+    monkeypatch.setattr(store, "save_snapshot", pause_after_migration_snapshot_save)
+    monkeypatch.setattr(store.shutil, "copy2", observe_legacy_file_state_copy)
+
+    def run_migration():
+        try:
+            migration_outcome.append(migrate_legacy_snapshot(repo))
+        except BaseException as exc:
+            migration_outcome.append(exc)
+
+    migration = threading.Thread(target=run_migration, name="legacy-migration")
+    try:
+        migration.start()
+        assert migration_snapshot_returned.wait(5), "migration did not return from snapshot save"
+
+        migration_metadata = read_metadata(target)
+        assert migration_metadata is not None
+        assert migration_metadata.revision == legacy_metadata.revision + 1
+        assert migration_metadata.state_id == legacy_metadata.state_id
+        assert migration_metadata.file_state_file == ""
+        assert not (target / "file_state.json").exists()
+
+        next_revision = migration_metadata.revision + 1
+        new_file_state_payload = {
+            "_meta": {"state_id": migration_metadata.state_id, "revision": next_revision},
+            "files": {"current.py": {"size": 11}},
+        }
+        newer_metadata = save_snapshot(
+            {"value": "newer"},
+            target,
+            migration_metadata.state_id,
+            writer="competing_snapshot_writer",
+            repo_id=identity.repo_id,
+            root_path=identity.root_path,
+            exact_revision=next_revision,
+            file_state_payload=new_file_state_payload,
+        )
+        observations["order"].append("newer_generation_committed")
+        newer_metadata_bytes = (target / "engine_state.meta.json").read_bytes()
+        newer_file_state_path = target / newer_metadata.file_state_file
+        newer_file_state_bytes = newer_file_state_path.read_bytes()
+
+        resume_migration.set()
+        migration.join(timeout=10)
+    finally:
+        resume_migration.set()
+        migration.join(timeout=5)
+
+    assert not migration.is_alive(), "migration thread did not terminate"
+    assert len(migration_outcome) == 1 and isinstance(migration_outcome[0], Path), migration_outcome
+    assert observations["order"].index("newer_generation_committed") < (
+        observations["order"].index("legacy_file_state_copy_committed")
+        if "legacy_file_state_copy_committed" in observations["order"]
+        else len(observations["order"])
+    )
+
+    final_metadata = read_metadata(target)
+    assert final_metadata == newer_metadata
+    assert final_metadata.revision == next_revision
+    assert final_metadata.state_id == legacy_metadata.state_id
+    assert final_metadata.file_state_file == newer_metadata.file_state_file
+    assert (target / "engine_state.meta.json").read_bytes() == newer_metadata_bytes
+    assert newer_file_state_path.read_bytes() == newer_file_state_bytes
+    assert legacy_file_state_bytes == legacy_file_state.read_bytes()
+
+    legacy_target_file_state = target / "file_state.json"
+    assert legacy_target_file_state.is_file()
+    assert legacy_target_file_state.read_bytes() == legacy_file_state_bytes
+    assert observations["copy"] == [
+        {
+            "src": str(legacy_file_state),
+            "dst": str(legacy_target_file_state),
+            "bytes": legacy_file_state_bytes,
+        }
+    ]
+
+    loaded = load_snapshot(
+        target,
+        expected_repo_id=identity.repo_id,
+        expected_root_path=identity.root_path,
+    )
+    assert loaded is not None and loaded[0]["value"] == "newer"
+    loaded_file_state = FileStateManager(str(target))
+    assert loaded_file_state.state_id == newer_metadata.state_id
+    assert loaded_file_state.revision == newer_metadata.revision
+    assert loaded_file_state.baseline_status == "trusted"
+    assert loaded_file_state._state["current.py"].size == 11
+
+    assert "legacy_file_state_copy_committed" not in observations["order"], (
+        "migration published the stale unversioned legacy FileState after a newer "
+        f"generation committed; order={observations['order']}; "
+        f"metadata_file_state={final_metadata.file_state_file!r}; "
+        "the metadata-referenced FileState consumer remained trusted"
+    )
+
+
+def test_migration_does_not_write_when_valid_target_metadata_exists(
+    tmp_path, monkeypatch
+):
+    import contextor.core.live_state.store as store
+
+    cache_root = tmp_path / "cache"
+    monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(cache_root))
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    identity = read_repository_identity(repo)
+    if identity is None:
+        registry = PersistentIdentityRegistry(str(repo))
+        identity = read_repository_identity(repo)
+        assert identity is not None and identity.repo_id == registry.repo_id
+
+    legacy = legacy_repo_cache_dir(repo)
+    target = repo_cache_dir(repo)
+    save_snapshot({"value": "legacy"}, legacy, "legacy-state", writer="desktop")
+    target_metadata = save_snapshot(
+        {"value": "already-current"},
+        target,
+        "target-state",
+        writer="existing-target",
+        repo_id=identity.repo_id,
+        root_path=identity.root_path,
+    )
+    metadata_bytes = (target / "engine_state.meta.json").read_bytes()
+    state_bytes = (target / "engine_state.pkl").read_bytes()
+
+    def forbidden_migration_write(*_args, **_kwargs):
+        pytest.fail("migration wrote despite valid target metadata")
+
+    monkeypatch.setattr(store, "save_snapshot", forbidden_migration_write)
+    assert migrate_legacy_snapshot(repo) == target
+    assert read_metadata(target) == target_metadata
+    assert (target / "engine_state.meta.json").read_bytes() == metadata_bytes
+    assert (target / "engine_state.pkl").read_bytes() == state_bytes
+    assert not (target / "file_state.json").exists()
 
 
 def test_concurrent_writers_publish_complete_monotonic_snapshots(tmp_path):

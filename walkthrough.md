@@ -1,634 +1,818 @@
-# L32H2F2_REGISTRY_CONSTRUCTOR_RECOVERY_LOCK
+# L32H2F3A_MIGRATION_RACE_RED_REGRESSIONS
 
 ## FILES_CHANGED_THIS_TASK
 
-- C:\Temp\Contextor_Repo\contextor\core\reporting_engine\persistent_registry.py
-- C:\Temp\Contextor_Repo\tests\test_persistent_registry.py
+- C:\Temp\Contextor_Repo\tests\test_live_state_store.py — test-only changes.
+- C:\Temp\Contextor_Repo\tests\test_mcp_incremental_hydration.py — test-only changes.
+- C:\Temp\Contextor_Repo\walkthrough.md — report only; excluded from source/test change accounting.
 
-Only the authorized production and test files changed. No edits were made to tests/test_mcp_regressions.py or tests/mcp/tools/test_minimal_registry_read_path.py. walkthrough.md is the requested report and is excluded from the source/test change list.
+Git worktree has exactly the two authorized test files modified. Production files are clean. No changes were made to tests\test_full_analysis_coordination.py.
 
-## SOURCE_CONTRACT_VERIFICATION
+## SOURCE_VERIFICATION
 
-Contextor MCP was used first. Its documentation was read for symbol implementation, lineage, call context, source ranges, file-edit context, search, blast radius, and LIVE events. No standalone deferred tests_covering tool was registered; get_file_edit_context exposes tests_covering. That field reported 128 statically reachable test modules (static dependency reachability, depth 6). Relevant targeted consumers were selected from that evidence and source call sites.
+Contextor MCP was used first. The current source was fetched with get_symbol_implementation(mode="fetch", include=["implementation"]); the FileState consumer methods were fetched with the documented methods selection. All fetches reported implementation_is_complete=true and no_partial_symbol_source=true. The latest fetches report canonical_state=fresh, workspace_sync=verified, canonical_revision=260, and fresh diagnostics with zero cycles.
 
-Contextor fetched the complete PersistentIdentityRegistry class methods with implementation_is_complete=true and no_partial_symbol_source=true at revision 254, workspace_sync=verified. It returned complete implementations of __init__, _lock, _unlock, _recover_transaction, _load_all, transaction, read_transaction, _load_json, and _repair_kind. After the patch, it fetched the complete updated __init__ with implementation_is_complete=true at revision 257, workspace_sync=verified. The updated source is:
+Exact current source locations:
 
-    def __init__(self, repo_path: str):
-        self.repo_path = Path(repo_path).expanduser().resolve()
-        from contextor.core.repository_identity import ensure_repository_identity
+- C:\Temp\Contextor_Repo\contextor\core\live_state\store.py::migrate_legacy_snapshot, lines 2375–2409.
+- C:\Temp\Contextor_Repo\contextor\core\live_state\store.py::save_snapshot, lines 1507–1874.
+- C:\Temp\Contextor_Repo\contextor\mcp\runtime.py::_engine_cache_transaction, lines 286–295.
+- C:\Temp\Contextor_Repo\contextor\mcp\runtime.py::get_or_init_engine, lines 311–419.
+- C:\Temp\Contextor_Repo\contextor\core\analysis\full_analysis_lease.py::acquire_full_analysis, lines 410–588; release_full_analysis, lines 591–610.
+- C:\Temp\Contextor_Repo\contextor\core\analysis\state_manager.py::FileStateManager.__init__, lines 317–323; _load, lines 325–407.
 
-        identity, self.registry_dir = ensure_repository_identity(self.repo_path)
-        self.repo_id = identity.repo_id
+The complete current migration implementation is:
 
-        self.meta_file = self.registry_dir / "repo.meta.json"
+~~~~python
+def migrate_legacy_snapshot(repo_root: str | Path) -> Path:
+    """Copy a verified path-keyed snapshot into its repo-ID cache directory."""
 
-        self.lock_file = self.registry_dir / ".lock"
-        self.transaction_file = self.registry_dir / "transaction.tmp"
+    from contextor.core.paths import legacy_repo_cache_dir, repo_cache_dir
+    from contextor.core.repository_identity import require_repository_identity
 
-        self.files = {
-            "module_slots": self.registry_dir / "module_slots.json",
-            "artifact_slots": self.registry_dir / "artifact_slots.json",
-            "module_recovery": self.registry_dir / "module_recovery.json",
-            "artifact_recovery": self.registry_dir / "artifact_recovery.json",
-            "output_references": self.registry_dir / "output_references.json",
-            "module_registry": self.registry_dir / "module_registry.json",
-            "artifact_registry": self.registry_dir / "artifact_registry.json",
-        }
+    root = Path(repo_root).expanduser().resolve()
+    identity = require_repository_identity(root)
+    target = repo_cache_dir(root)
+    if read_metadata(target) is not None:
+        return target
 
-        self._state = {}
-        self._in_transaction = False
-        self._transaction_mode: str | None = None
-        self._lock_file_obj = None
+    legacy = legacy_repo_cache_dir(root)
+    if legacy == target:
+        return target
+    loaded = load_snapshot(legacy)
+    if loaded is None:
+        return target
 
-        self._lock()
-        try:
-            self._recover_transaction()
-            self._load_all()
-        finally:
-            self._unlock()
+    state, metadata = loaded
+    save_snapshot(
+        state,
+        target,
+        metadata.state_id,
+        writer=f"migration:{metadata.writer}",
+        repo_id=identity.repo_id,
+        root_path=identity.root_path,
+        revision_floor=metadata.revision,
+    )
+    legacy_file_state = legacy / "file_state.json"
+    target_file_state = target / "file_state.json"
+    if legacy_file_state.is_file() and not target_file_state.exists():
+        target_file_state.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(legacy_file_state, target_file_state)
+    return target
+~~~~
 
-Source contracts verified:
+The cache transaction source is:
 
-- lock_file and _lock_file_obj exist before constructor recovery.
-- _lock opens the existing repository registry .lock file and obtains the existing OS byte lock on Windows (msvcrt) or flock on POSIX. _unlock releases that lock and closes the file.
-- _recover_transaction and _load_all do not acquire a lock internally. _load_all reads JSON and applies _repair_kind to in-memory state.
-- transaction and read_transaction already use the same _lock around recovery and loading. transaction retains its existing write/commit behavior; read_transaction retains its non-committing behavior. Both release via finally.
-- Existing same-object nested transaction/read_transaction behavior is preserved by their _in_transaction fast paths.
-- Contextor call context showed constructor-local callees, while artifact blast radius for the exact constructor symbol reported zero direct static artifact consumers. File-level Contextor context reported 58 module consumers and 128 test-covering modules, with truncated evidence in the compact projection.
-- Contextor literal search and targeted workspace text search located production constructor call sites in MCP runtime hydration, query_helpers.read_registries, LIVE _repository_updater, hydrate_repository_engine, get_file_edit_context, facade repository identity initialization, catalog_from_registry, and build_artifact_pipeline. The inspected caller order places construction before read_transaction/transaction/checkpoint usage. _repository_updater is called inside the distinct full-analysis writer lease; it does not already hold the registry OS lock. No confirmed production constructor call recursively constructs another registry for the same repository while already holding that registry OS lock.
-- Allowed source/test paths were clean before this task's edits. The exact patch anchor matched.
+~~~~python
+@contextmanager
+def _engine_cache_transaction(root: Path | str) -> Iterator[str]:
+    root_key = _engine_cache_key(root)
+    with _engine_cache_locks_guard:
+        lock = _engine_cache_locks.get(root_key)
+        if lock is None:
+            lock = threading.RLock()
+            _engine_cache_locks[root_key] = lock
+    with lock:
+        yield root_key
+~~~~
 
-## F2_RED_RESULT
+The complete get_or_init_engine body is 109 lines and was fetched without preview/truncation. The relevant literal control-flow anchors are:
 
-Before the production edit, the newly added targeted regressions produced 5 failed and 1 passed in 17.59 seconds:
+~~~~python
+root = Path(root).expanduser().resolve()
+with _engine_cache_transaction(root) as root_key:
+    ...
+    if not engine:
+        ...
+        from contextor.core.live_state import migrate_legacy_snapshot, read_metadata
+        ...
+        cache_dir = str(migrate_legacy_snapshot(root))
+~~~~
 
-- Constructor recovery ran while a spawned process held the registry OS lock.
-- A second process acquired the registry lock while constructor recovery was paused.
-- A constructor entered recovery and consumed the active writer's staged transaction generation.
-- Both recovery-failure and load-failure workers showed the constructor had not acquired the lock.
-- The independent-instance lock-path assertion passed, as expected because both instances already derived the same path.
+migrate_legacy_snapshot does not acquire full_analysis.lock; it calls save_snapshot directly, then copies the legacy unversioned FileState if the target file_state.json path does not exist. get_or_init_engine enters _engine_cache_transaction before this fallback call.
 
-The RED results demonstrate the constructor's recovery/load sequence was not serialized by the registry lock.
+save_snapshot was fetched completely. Its actual writer acquires the per-snapshot lock with _acquire_lock(lock_file). Exact-generation writes create versioned state/FileState files, replace the metadata pointer, set committed=True, return metadata, then release the snapshot lock in finally. Migration calls it without exact_revision, so migration publishes the ordinary target snapshot before its separate legacy FileState copy.
 
-## F2_GREEN_RESULT
+The complete FileState loader was fetched. It selects engine_state.meta.json["file_state_file"] when present; otherwise it reads file_state.json. A referenced generation must contain _meta and match the engine metadata revision/state ID to become trusted. This source contract matches the Race B assertions.
 
-The same new regressions passed after the exact patch: 6 passed in 13.27 seconds.
+## RACE_A_RED_EVIDENCE
 
-The complete tests/test_persistent_registry.py passed: 22 passed in 14.57 seconds.
+New test: tests/test_live_state_store.py::test_migration_does_not_enter_snapshot_write_while_full_analysis_lease_is_held.
 
-Additional targeted existing tests passed: 7 passed in 6.00 seconds, covering the complete minimal registry read-path file, read_registries committed-write/error handling, same-root engine hydration serialization, and persisted-update snapshot hydration.
+- Process A acquired the real full_analysis.lock through acquire_full_analysis and signaled the parent only after acquisition.
+- Process B began migrate_legacy_snapshot against the same verified-identity temporary repository.
+- A wrapper signaled entry at the migration's save_snapshot boundary and then delegated to the real save_snapshot; it did not replace writer coordination.
+- snapshot_write_entered=true while Process A still held the lease. The assertion failed at tests/test_live_state_store.py:2675, proving entry by synchronization events rather than by comparing final revisions.
+- After that observation, both holds were released; both spawned processes exited cleanly and reported released / completed. No worker remained alive.
 
-The complete tests/test_repository_identity_initialization.py passed: 4 passed in 2.28 seconds.
+Result: expected RED. The valid legacy snapshot had revision 1 and target snapshot metadata was absent before the race.
 
-Across the final green runs, 33 distinct targeted tests passed. No full repository pytest suite was run.
+## RACE_B_RED_EVIDENCE
 
-## CONSTRUCTOR_LOCK_ORDER
+New test: tests/test_live_state_store.py::test_migration_does_not_publish_legacy_filestate_after_newer_generation_commit.
 
-Initialization still resolves the repository identity and sets registry paths/fields first. It then acquires the same existing registry OS lock used by transaction and read_transaction, runs _recover_transaction followed by _load_all while holding that lock, and releases in finally. No full_analysis.lock, second mutex, schema change, path change, or transaction semantic change was introduced.
+Controlled order:
 
-## CROSS_PROCESS_RECOVERY_EXCLUSION
+1. Migration's real save_snapshot returned after committing the migrated target snapshot. A wrapper paused before returning to the caller and before the legacy FileState conditional.
+2. The test committed a newer exact generation through the real save_snapshot.
+3. The test resumed migration and observed the legacy shutil.copy2.
 
-The tests use multiprocessing spawn and real PersistentIdentityRegistry._lock calls against isolated temporary repositories.
+Observed order from the test: migration_snapshot_saved → newer_generation_committed → legacy_file_state_copy_committed. The test failed at tests/test_live_state_store.py:2827 because the stale legacy copy was published after the newer generation.
 
-- A constructor process cannot enter _recover_transaction while another process holds the .lock byte lock.
-- The lock-probe process cannot acquire during either a paused recovery phase or a paused _load_all phase.
-- A writer process pauses after writing its committing marker and all staged JSON files but before the first staged-file replace. While the writer still holds the registry lock, an independent constructor cannot enter recovery; marker bytes and every staged file remain unchanged.
-- After writer release, the writer commits generation 2/1, the constructor then loads both seed.py=1/1 and during_write.py=2/1, and transaction marker/staging files are cleared.
+Recorded state:
 
-## RECOVERY_AND_LOAD_ATOMICITY
+- Migration metadata before the interleaving: revision 2, state ID legacy-state, empty file_state_file; target file_state.json absent.
+- New generation: revision 3, same state ID, metadata pointer to file_state.r3.<token>.json.
+- After migration: metadata still referenced the revision-3 versioned FileState; the versioned FileState bytes were unchanged.
+- The stale legacy bytes were copied into physical target file_state.json after the revision-3 commit.
+- FileStateManager loaded the metadata-referenced versioned file, reported revision 3 and baseline_status="trusted", and contained current.py size 11.
 
-The new phase-barrier regression proves another process cannot enter the same OS lock while recovery or _load_all is active. Existing transaction/read_transaction paths continue to use the same lock around both operations. Constructor now uses that existing lock once around both operations, with no unlocked interval between its recovery and load steps.
+Classification: stale physical unversioned extra is proved; consumer-visible inconsistency is not observed. The metadata-referenced current FileState remained trusted.
 
-## INTERRUPTED_COMMIT_COMPATIBILITY
+## RACE_C_RED_EVIDENCE
 
-Existing tests/test_persistent_registry.py::test_read_registries_recovers_interrupted_commit passed. It creates a real committing marker and staged module registry file, calls read_registries (whose constructor now performs the recovery under the lock), then verifies the recovered mapping and removal of both the staged file and transaction marker.
+New test: tests/test_mcp_incremental_hydration.py::test_legacy_migration_writer_admission_precedes_mcp_cache_lock.
 
-## HEALTHY_READ_NO_WRITE
+The real get_or_init_engine fallback was run with only the migration callback instrumented to pause. A second thread attempted the same actual _engine_cache_transaction.
 
-Existing tests/test_persistent_registry.py::test_read_registries_healthy_read_keeps_bytes_mtime_and_ids passed. It compares registry JSON bytes and mtimes before and after repeated healthy read_registries calls, checks that marker and temporary files remain absent, and verifies IDs after reload. No unconditional registry JSON rewrite was observed.
+Recorded event sequence:
 
-## EXCEPTION_LOCK_RELEASE
+cache_acquired(mcp-hydration) → migration_callback(mcp-hydration) → cache_acquired(same-cache-probe).
 
-New parametrized recovery and load failure cases inject an exception after confirming the constructor acquired the OS lock. The failing process retains the exception traceback and stays alive while a separate spawned process constructs another registry for the same repository. That second constructor succeeds in each case, proving the first constructor's finally released the lock. The injected exception itself remains propagated.
+The second cache transaction remained blocked until the paused callback resumed, then acquired the lock. The observed callback state was full_analysis_held_at_migration=false; there was no full_analysis_acquired event from the initializer. The regression failed at tests/test_mcp_incremental_hydration.py:1515 because the current path has no writer admission before the cache RLock.
 
-## NESTED_LOCK_GATE
+The test does not itself acquire a full-analysis lease while a cache lock is held. Its wrappers only delegate if production code invokes the real coordinator API.
 
-No production same-repository constructor-under-registry-lock call site was confirmed in the inspected direct production constructor usages. The change adds no constructor recursion and no new lock acquisition to transaction/read_transaction. Existing write-inside-read rejection and read-inside-write generation visibility tests passed in the complete registry test file.
+Result: expected RED; the source and test establish cache-before-migration ordering and absence of an outer full-analysis lease on this current path.
 
-## PERSISTENT_ID_COMPATIBILITY
+## LEGACY_COMPATIBILITY_BASELINE
 
-Persistent identity, slot-generation, recovery, checkpoint/restore, garbage-collection, and multi-repository isolation tests passed as part of the complete test_persistent_registry.py file. The active writer/constructor regression also verifies the expected 1/1 and 2/1 module identities across commit and subsequent constructor load.
+Selected migration/FileState compatibility command result: 5 passed, 1 warning (5.64s).
 
-## TARGETED_TEST_RESULTS
+Selected nodes:
 
-Commands used the repository .venv Python. No full suite was run.
+- tests/test_live_state_store.py::test_legacy_snapshot_migrates_to_repo_id_cache_without_deleting_source — extended assertions pass for repository identity, valid state ID, revision increment, loaded state, copied FileState bytes/content, and legacy source retention.
+- tests/test_live_state_store.py::test_migration_does_not_write_when_valid_target_metadata_exists — pass; the writer was replaced with a forbidden-call assertion and was not called.
+- tests/test_live_state_store.py::test_legacy_filestate_without_meta_loads_entries_but_remains_unverified — pass.
+- tests/test_mcp_incremental_hydration.py::test_local_exact_generation_migrates_legacy_filestate_and_state_id — both existing_state_id parameters pass.
 
-RED command selected the five newly added test functions (the exception test has two parameters): 5 failed, 1 passed.
+The new focused gate ran only three race nodes and the existing-target no-write node: 3 failed, 1 passed. The three failures are the expected RED observations above; the no-write regression passed. Race C was rerun after improving its failure evidence and remained expected RED (1 failed). The only warning was an Authlib deprecation warning from the installed test dependency.
 
-New F2 regression command after patch: 6 passed:
-- tests/test_persistent_registry.py::test_constructor_waits_for_registry_lock_held_by_another_process
-- tests/test_persistent_registry.py::test_constructor_holds_registry_os_lock_during_recovery_and_load
-- tests/test_persistent_registry.py::test_constructor_does_not_consume_active_writer_staging_and_loads_commit
-- tests/test_persistent_registry.py::test_constructor_releases_registry_lock_after_recovery_or_load_failure[recovery]
-- tests/test_persistent_registry.py::test_constructor_releases_registry_lock_after_recovery_or_load_failure[load]
-- tests/test_persistent_registry.py::test_independent_registry_instances_share_the_same_os_lock_path
+## EXACT_INTERLEAVING_SCHEDULES
 
-Complete registry suite:
-- tests/test_persistent_registry.py: 22 passed.
+- A: Parent creates identity and valid legacy snapshot; spawned A acquires the actual repository lease and signals; spawned B signals start and attempts migration; B signals at the real snapshot-writer boundary; parent records whether that happened while A still owns the lease; parent releases both events; processes join with bounded waits and unconditional release/terminate cleanup.
+- B: Migration's real snapshot writer returns and signals a pause before the caller reaches its FileState conditional; the test commits revision 3 with the real exact-generation writer and records metadata/FileState bytes; it releases migration; the copy wrapper records any physical unversioned copy; the thread joins.
+- C: Initializer enters the real per-root cache transaction and pauses in the actual fallback callback; second thread signals immediately before entering the same real transaction; the test records non-acquisition during the pause; release lets both threads finish. All waits are bounded.
 
-Contextor-selected existing targeted regressions:
-- tests/mcp/tools/test_minimal_registry_read_path.py: 4 passed.
-- tests/test_mcp_regressions.py::test_read_registries_observes_committed_write_and_propagates_read_error: passed.
-- tests/test_mcp_regressions.py::test_same_root_double_hydration_is_serialized: passed.
-- tests/test_mcp_incremental_hydration.py::test_update_persist_restart_hydrate_keeps_live_reverse_context: passed.
+No timing sleep is used to create the interleavings. Bounded event waits only observe exclusion while the opposing owner is explicitly held.
 
-Facade repository identity consumer:
-- tests/test_repository_identity_initialization.py: 4 passed.
+## ACTUAL_FILESTATE_AND_METADATA_OBSERVATIONS
 
-py_compile passed for the modified production and test files. git diff --check passed. Git emitted LF-to-CRLF advisories only; there were no whitespace errors.
+| Observation | Before competing generation | Newer generation committed | After migration resumes |
+|---|---|---|---|
+| engine_state.meta.json revision | 2 | 3 | 3 |
+| state_id | legacy-state | legacy-state | legacy-state |
+| file_state_file | empty | file_state.r3.<token>.json | same revision-3 filename |
+| metadata-referenced FileState bytes | none | recorded versioned bytes | same bytes |
+| target file_state.json | absent | absent | present with original stale legacy bytes |
+| FileState consumer | not yet loaded | points to revision 3 | trusted revision 3; current.py size 11 |
+
+The final combined focused run recorded the exact metadata pointer filename as file_state.r3.3c26d1bb6a3b4934b011ca38b178d57c.json. The legacy unversioned FileState bytes, UTF-8 without a trailing newline, were:
+
+~~~~json
+{
+  "_meta": {
+    "state_id": "legacy-state",
+    "revision": 1
+  },
+  "files": {
+    "legacy.py": {
+      "size": 6
+    }
+  }
+}
+~~~~
+
+The metadata-referenced revision-3 FileState bytes, also UTF-8 without a trailing newline, were:
+
+~~~~json
+{
+  "_meta": {
+    "state_id": "legacy-state",
+    "revision": 3
+  },
+  "files": {
+    "current.py": {
+      "size": 11
+    }
+  }
+}
+~~~~
+
+The test records and byte-compares both payloads before and after migration resumes. The legacy source bytes and copied target bytes are identical; the versioned FileState bytes and metadata file bytes remain unchanged after the stale extra copy.
+
+## LOCK_ORDER_PROOF
+
+- Contextor returned the complete _engine_cache_transaction and get_or_init_engine symbols with workspace_sync=verified.
+- Current get_or_init_engine acquires the per-repository threading.RLock before entering its if not engine fallback.
+- Current migration calls the real snapshot writer inside that fallback and contains no full-analysis acquisition.
+- Race C records cache acquisition before migration callback; a second cache transaction cannot acquire until callback release.
+- Race A uses the actual acquire_full_analysis API in a separate process and observes the migration writer boundary while that lease remains held.
+
+## NESTED_LEASE_HAZARD
+
+Current source proves no nested full-analysis acquisition: neither get_or_init_engine nor migrate_legacy_snapshot calls acquire_full_analysis. The proved current condition is cache-first migration without the canonical full-analysis lease. No test performed an acquisition from inside the held cache transaction. Whether later code adds a nested acquisition is outside this current-source result.
+
+## MINIMUM_PATCH_BOUNDARIES
+
+Source boundaries implicated by the regressions; this is evidence scope, not an implementation proposal:
+
+- C:\Temp\Contextor_Repo\contextor\core\live_state\store.py, migrate_legacy_snapshot lines 2375–2409; actual snapshot commit owner save_snapshot lines 1507–1874.
+- C:\Temp\Contextor_Repo\contextor\mcp\runtime.py, _engine_cache_transaction lines 286–295 and get_or_init_engine lines 311–419.
+- C:\Temp\Contextor_Repo\contextor\core\analysis\full_analysis_lease.py, acquire_full_analysis lines 410–588 and release_full_analysis lines 591–610.
+- C:\Temp\Contextor_Repo\contextor\core\analysis\state_manager.py, FileStateManager.__init__ lines 317–323 and _load lines 325–407.
+
+No production file is authorized or changed by this task.
 
 ## SOURCE_SYNC_VERIFICATION
 
-Post-edit Contextor source retrieval for PersistentIdentityRegistry.__init__ was complete and workspace_sync=verified at canonical revision 257. get_file_edit_context also reported workspace_sync=verified. Contextor reported cycles.count=0 with fresh availability.
+Contextor complete-source fetches after the test runs reported workspace_sync=verified for migrate_legacy_snapshot, save_snapshot, get_or_init_engine, _engine_cache_transaction, acquire_full_analysis, release_full_analysis, and FileStateManager.__init__ / _load. The canonical state remained fresh at revision 260, with cycles count 0 and availability fresh.
 
-Desktop watcher events after starting revision 254 were continuous:
-- revision 255: tests/test_persistent_registry.py UPDATED.
-- revision 256: tests/test_persistent_registry.py UNCHANGED.
-- revision 257: contextor/core/reporting_engine/persistent_registry.py UPDATED; blast-radius analytics were deferred for that event.
-LIVE reported continuity=continuous, resync_required=false, and unchanged activity_epoch 9e9a2a2edcb046bba00df0850244ad36.
+LIVE revision advanced from 257 to 260. get_live_events(after_revision=257) reported continuity="continuous", resync_required=false, and three desktop_watcher UPDATED events only for the two authorized Python test files (the hydration test file was updated twice). The final hydration-file event had blast_radius_state="deferred" with zero affected modules; this did not set resync. This is direct watcher evidence for the authorized test edits, not a production-code edit.
 
-## LIVE_REVISION_BEFORE_AFTER
+py_compile passed for both changed test files. git diff --check passed. Git emitted only the line-ending notice that LF in tests/test_mcp_incremental_hydration.py will be replaced by CRLF on a future Git touch. git diff --quiet confirmed no diff in the production files listed above.
 
-254 -> 257. Event continuity was continuous and resync_required=false. No manual update_file or full analysis was used.
+No full repository pytest, full analysis, restart, commit, reset, checkout, or manual update_file was run.
 
-## REMAINING_F3_RISKS
+## FILES_CHANGED
 
-F3 migration coordination remains outside this task and was not changed or certified. This result covers constructor recovery/load serialization under the existing registry OS lock; it does not claim completion of the broader writer-coverage program.
+- C:\Temp\Contextor_Repo\tests\test_live_state_store.py
+- C:\Temp\Contextor_Repo\tests\test_mcp_incremental_hydration.py
 
-## RESTART_REQUIRED
+walkthrough.md is the report-only file.
 
-No MCP, Desktop, or LIVE restart was performed. A serving-process runtime reload is still required before claiming those running processes imported this production change; watcher source events and verified indexing do not prove process reload.
-
-## FINAL_VERDICT
-
-F2 exact constructor-lock patch and targeted regressions: PASS. The existing registry OS lock now serializes constructor recovery and loading, including against active cross-process staged commits. Registry recovery, healthy read behavior, transaction semantics, identities, exception propagation, and selected hydration consumers passed. This is not an L32H final pass, and no serving-process reload certification is claimed.
+## ACTUAL_DIFF
 
 ## FULL_DIFFS
 
-diff --git a/contextor/core/reporting_engine/persistent_registry.py b/contextor/core/reporting_engine/persistent_registry.py
-index c7644a5..e622237 100644
---- a/contextor/core/reporting_engine/persistent_registry.py
-+++ b/contextor/core/reporting_engine/persistent_registry.py
-@@ -39,8 +39,12 @@ class PersistentIdentityRegistry:
-         self._transaction_mode: str | None = None
-         self._lock_file_obj = None
+The following are the complete Git diffs for every changed test file. walkthrough.md is excluded.
+
+~~~~diff
+diff --git a/tests/test_live_state_store.py b/tests/test_live_state_store.py
+index b084f20..7b47623 100644
+--- a/tests/test_live_state_store.py
++++ b/tests/test_live_state_store.py
+@@ -2,9 +2,11 @@
  
--        self._recover_transaction()
--        self._load_all()
-+        self._lock()
-+        try:
-+            self._recover_transaction()
-+            self._load_all()
-+        finally:
-+            self._unlock()
- 
-     def _lock(self):
-         self._lock_file_obj = open(self.lock_file, "w")
-diff --git a/tests/test_persistent_registry.py b/tests/test_persistent_registry.py
-index c985889..b850799 100644
---- a/tests/test_persistent_registry.py
-+++ b/tests/test_persistent_registry.py
-@@ -2,6 +2,7 @@ import os
- import json
- import shutil
- import copy
-+import multiprocessing
- import pytest
+ from concurrent.futures import ThreadPoolExecutor
+ from copy import deepcopy
++import json
+ import multiprocessing
+ import os
  from pathlib import Path
++import threading
+ import time
+ from types import SimpleNamespace
  
-@@ -15,6 +16,167 @@ def temp_repo(tmp_path):
-     yield str(repo_dir)
-     shutil.rmtree(repo_dir, ignore_errors=True)
- 
-+
-+def _hold_registry_lock_process(repo_path, acquired, release):
-+    registry = PersistentIdentityRegistry(repo_path)
-+    registry._lock()
-+    try:
-+        acquired.set()
-+        release.wait(timeout=10)
-+    finally:
-+        if registry._lock_file_obj is not None:
-+            registry._unlock()
-+
-+
-+def _observe_registry_constructor_process(
-+    repo_path, started, recovery_entered, completed, outcome
-+):
-+    original_recover = PersistentIdentityRegistry._recover_transaction
-+
-+    def observe_recovery(self):
-+        recovery_entered.set()
-+        return original_recover(self)
-+
-+    PersistentIdentityRegistry._recover_transaction = observe_recovery
-+    started.set()
-+    try:
-+        registry = PersistentIdentityRegistry(repo_path)
-+        module_ids = dict(
-+            registry._state.get("module_registry", {}).get("path_to_id", {})
-+        )
-+        outcome.put(("ok", module_ids))
-+    except BaseException as exc:
-+        outcome.put(("error", f"{type(exc).__name__}: {exc}"))
-+    finally:
-+        completed.set()
-+
-+
-+def _pause_registry_constructor_process(
-+    repo_path,
-+    recovery_entered,
-+    release_recovery,
-+    load_entered,
-+    release_load,
-+    completed,
-+    outcome,
-+):
-+    original_recover = PersistentIdentityRegistry._recover_transaction
-+    original_load = PersistentIdentityRegistry._load_all
-+
-+    def pause_recovery(self):
-+        recovery_entered.set()
-+        if not release_recovery.wait(timeout=10):
-+            raise TimeoutError("recovery phase was not released")
-+        return original_recover(self)
-+
-+    def pause_load(self):
-+        load_entered.set()
-+        if not release_load.wait(timeout=10):
-+            raise TimeoutError("load phase was not released")
-+        return original_load(self)
-+
-+    PersistentIdentityRegistry._recover_transaction = pause_recovery
-+    PersistentIdentityRegistry._load_all = pause_load
-+    try:
-+        PersistentIdentityRegistry(repo_path)
-+        outcome.put("constructed")
-+    except BaseException as exc:
-+        outcome.put(f"error:{type(exc).__name__}:{exc}")
-+    finally:
-+        completed.set()
-+
-+
-+def _probe_registry_lock_process(
-+    repo_path, ready, attempt, attempted, acquired
-+):
-+    registry = PersistentIdentityRegistry(repo_path)
-+    ready.set()
-+    if not attempt.wait(timeout=10):
-+        return
-+    attempted.set()
-+    registry._lock()
-+    try:
-+        acquired.set()
-+    finally:
-+        registry._unlock()
-+
-+
-+def _pause_registry_writer_replace_process(
-+    repo_path, staged, release, completed, outcome
-+):
-+    import contextor.core.reporting_engine.persistent_registry as registry_module
-+
-+    original_replace = registry_module.os.replace
-+    paused = False
-+
-+    def pause_first_registry_replace(source, destination):
-+        nonlocal paused
-+        if not paused and Path(source).name.endswith(".json.tmp"):
-+            paused = True
-+            staged.set()
-+            if not release.wait(timeout=10):
-+                raise TimeoutError("staged transaction was not released")
-+        return original_replace(source, destination)
-+
-+    registry_module.os.replace = pause_first_registry_replace
-+    try:
-+        registry = PersistentIdentityRegistry(repo_path)
-+        with registry.transaction():
-+            registry.sync_with_workspace({"seed.py", "during_write.py"}, set())
-+        outcome.put(("committed", registry.get_module_id("during_write.py")))
-+    except BaseException as exc:
-+        outcome.put(("error", f"{type(exc).__name__}: {exc}"))
-+    finally:
-+        registry_module.os.replace = original_replace
-+        completed.set()
-+
-+
-+def _fail_registry_constructor_process(
-+    repo_path, failure_stage, lock_acquired, failed, release, outcome
-+):
-+    original_lock = PersistentIdentityRegistry._lock
-+
-+    def observe_lock(self):
-+        original_lock(self)
-+        lock_acquired.set()
-+
-+    PersistentIdentityRegistry._lock = observe_lock
-+    if failure_stage == "recovery":
-+        def fail_recovery(self):
-+            raise RuntimeError("injected recovery failure")
-+
-+        PersistentIdentityRegistry._recover_transaction = fail_recovery
-+    else:
-+        def fail_load(self):
-+            raise RuntimeError("injected load failure")
-+
-+        PersistentIdentityRegistry._load_all = fail_load
-+
-+    captured_exception = None
-+    try:
-+        PersistentIdentityRegistry(repo_path)
-+        outcome.put("unexpected_success")
-+    except BaseException as exc:
-+        captured_exception = exc
-+        outcome.put(("failed", failure_stage, str(exc)))
-+        failed.set()
-+        release.wait(timeout=10)
-+    finally:
-+        # Retain the traceback (and failed constructor instance) until the
-+        # parent has checked that another process can acquire the same lock.
-+        _ = captured_exception
-+
-+
-+def _probe_registry_constructor_process(repo_path, started, completed, outcome):
-+    started.set()
-+    try:
-+        registry = PersistentIdentityRegistry(repo_path)
-+        outcome.put(("ok", registry.lock_file.as_posix()))
-+    except BaseException as exc:
-+        outcome.put(("error", f"{type(exc).__name__}: {exc}"))
-+    finally:
-+        completed.set()
-+
- def test_checkpoint_restore_persists_exact_registry_state(temp_repo):
-     registry = PersistentIdentityRegistry(temp_repo)
-     with registry.transaction():
-@@ -383,3 +545,257 @@ def test_read_transaction_repairs_in_memory_without_persisting_projection(temp_r
-         assert registry._state["module_slots"]["9"] == 3
- 
-     assert registry_file.read_bytes() == before
-+
-+
-+def test_constructor_waits_for_registry_lock_held_by_another_process(temp_repo):
-+    registry = PersistentIdentityRegistry(temp_repo)
-+    context = multiprocessing.get_context("spawn")
-+    holder_acquired = context.Event()
-+    release_holder = context.Event()
-+    constructor_started = context.Event()
-+    recovery_entered = context.Event()
-+    constructor_completed = context.Event()
-+    outcome = context.Queue()
-+    holder = context.Process(
-+        target=_hold_registry_lock_process,
-+        args=(temp_repo, holder_acquired, release_holder),
+@@ -2503,8 +2505,15 @@ def test_legacy_snapshot_migrates_to_repo_id_cache_without_deleting_source(
+     repo = tmp_path / "repo"
+     repo.mkdir()
+     legacy = legacy_repo_cache_dir(repo)
+-    save_snapshot({"value": 7}, legacy, "legacy-state", writer="desktop")
+-    (legacy / "file_state.json").write_text('{"files": {}}', encoding="utf-8")
++    legacy_metadata = save_snapshot(
++        {"value": 7}, legacy, "legacy-state", writer="desktop"
 +    )
-+    constructor = context.Process(
-+        target=_observe_registry_constructor_process,
++    legacy_file_state = legacy / "file_state.json"
++    legacy_file_state.write_text(
++        json.dumps({"legacy.py": {"size": 4}}, indent=2),
++        encoding="utf-8",
++    )
++    legacy_file_state_bytes = legacy_file_state.read_bytes()
+     registry = PersistentIdentityRegistry(str(repo))
+ 
+     target = migrate_legacy_snapshot(repo)
+@@ -2517,10 +2526,352 @@ def test_legacy_snapshot_migrates_to_repo_id_cache_without_deleting_source(
+     assert target == repo_cache_dir(repo)
+     assert loaded is not None and loaded[0] == {"value": 7}
+     assert loaded[1].repo_id == registry.repo_id
++    assert loaded[1].state_id == "legacy-state"
++    assert loaded[1].revision == legacy_metadata.revision + 1
+     assert (target / "file_state.json").is_file()
++    assert (target / "file_state.json").read_bytes() == legacy_file_state_bytes
++    migrated_file_state = FileStateManager(str(target))
++    assert "legacy.py" in migrated_file_state._state
++    assert migrated_file_state.baseline_status == "untrusted"
+     assert (legacy / "engine_state.pkl").is_file()
+ 
+ 
++def _migration_race_full_analysis_holder(
++    repo_text, cache_text, lease_held, release_lease, results
++):
++    os.environ["CONTEXTOR_CACHE_DIR"] = cache_text
++    from contextor.core.analysis.full_analysis_coordinator import (
++        acquire_full_analysis,
++        release_full_analysis,
++    )
++
++    lease = None
++    try:
++        lease = acquire_full_analysis(
++            repo_text,
++            owner="migration_race_full_writer",
++            writer_kind="full_analysis",
++            timeout=5.0,
++        )
++        lease_held.set()
++        if not release_lease.wait(15):
++            raise TimeoutError("full-analysis lease hold expired")
++        results.put({"worker": "lease", "status": "released"})
++    except BaseException as exc:
++        results.put({"worker": "lease", "status": "error", "error": repr(exc)})
++    finally:
++        if lease is not None:
++            release_full_analysis(lease)
++
++
++def _migration_race_migrate_worker(
++    repo_text,
++    cache_text,
++    migration_started,
++    snapshot_write_entered,
++    allow_snapshot_write,
++    results,
++):
++    os.environ["CONTEXTOR_CACHE_DIR"] = cache_text
++    import contextor.core.live_state.store as store
++
++    real_save_snapshot = store.save_snapshot
++
++    def observe_snapshot_write(*args, **kwargs):
++        snapshot_write_entered.set()
++        if not allow_snapshot_write.wait(15):
++            raise TimeoutError("migration snapshot write hold expired")
++        return real_save_snapshot(*args, **kwargs)
++
++    store.save_snapshot = observe_snapshot_write
++    try:
++        migration_started.set()
++        target = store.migrate_legacy_snapshot(repo_text)
++        results.put({"worker": "migration", "status": "completed", "target": str(target)})
++    except BaseException as exc:
++        results.put({"worker": "migration", "status": "error", "error": repr(exc)})
++    finally:
++        store.save_snapshot = real_save_snapshot
++
++
++def test_migration_does_not_enter_snapshot_write_while_full_analysis_lease_is_held(
++    tmp_path, monkeypatch
++):
++    cache_root = tmp_path / "cache"
++    monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(cache_root))
++    repo = tmp_path / "repo"
++    repo.mkdir()
++    identity = PersistentIdentityRegistry(str(repo))
++    assert identity.repo_id
++
++    legacy = legacy_repo_cache_dir(repo)
++    legacy_metadata = save_snapshot(
++        {"value": 7}, legacy, "legacy-state", writer="desktop"
++    )
++    assert load_snapshot(legacy) is not None
++    target = repo_cache_dir(repo)
++    assert read_metadata(target) is None
++
++    context = multiprocessing.get_context("spawn")
++    lease_held = context.Event()
++    release_lease = context.Event()
++    migration_started = context.Event()
++    snapshot_write_entered = context.Event()
++    allow_snapshot_write = context.Event()
++    results = context.Queue()
++    holder = context.Process(
++        target=_migration_race_full_analysis_holder,
++        args=(str(repo), str(cache_root), lease_held, release_lease, results),
++    )
++    migrator = context.Process(
++        target=_migration_race_migrate_worker,
 +        args=(
-+            temp_repo,
-+            constructor_started,
-+            recovery_entered,
-+            constructor_completed,
-+            outcome,
++            str(repo),
++            str(cache_root),
++            migration_started,
++            snapshot_write_entered,
++            allow_snapshot_write,
++            results,
 +        ),
 +    )
++    processes = (holder, migrator)
++    early_snapshot_write = False
++    migration_reached_write = False
++    worker_results = []
 +    try:
 +        holder.start()
-+        assert holder_acquired.wait(timeout=5)
-+        constructor.start()
-+        assert constructor_started.wait(timeout=5)
-+        assert recovery_entered.wait(timeout=0.5) is False
++        assert lease_held.wait(5), "Process A did not acquire full_analysis.lock"
 +
-+        release_holder.set()
-+        assert recovery_entered.wait(timeout=5)
-+        assert constructor_completed.wait(timeout=5)
-+        assert outcome.get(timeout=2)[0] == "ok"
-+        constructor.join(timeout=5)
-+        holder.join(timeout=5)
-+        assert constructor.exitcode == 0
-+        assert holder.exitcode == 0
++        migrator.start()
++        assert migration_started.wait(5), "Process B did not start legacy migration"
++        early_snapshot_write = snapshot_write_entered.wait(1.0)
++
++        # Release both explicit holds only after recording whether the real
++        # migration writer boundary was entered while Process A owned the lease.
++        release_lease.set()
++        allow_snapshot_write.set()
++        migration_reached_write = snapshot_write_entered.wait(5)
++
++        for process in processes:
++            process.join(timeout=10)
++        worker_results = [results.get(timeout=2) for _ in range(2)]
 +    finally:
-+        release_holder.set()
-+        for process in (constructor, holder):
++        release_lease.set()
++        allow_snapshot_write.set()
++        for process in processes:
 +            if process.pid is not None:
-+                process.join(timeout=3)
++                process.join(timeout=5)
 +                if process.is_alive():
 +                    process.terminate()
-+                    process.join(timeout=2)
++                    process.join(timeout=5)
++        results.close()
++        results.join_thread()
 +
-+
-+def test_constructor_holds_registry_os_lock_during_recovery_and_load(temp_repo):
-+    PersistentIdentityRegistry(temp_repo)
-+    context = multiprocessing.get_context("spawn")
-+    probe_ready = context.Event()
-+    attempt_probe = context.Event()
-+    probe_attempted = context.Event()
-+    probe_acquired = context.Event()
-+    probe = context.Process(
-+        target=_probe_registry_lock_process,
-+        args=(temp_repo, probe_ready, attempt_probe, probe_attempted, probe_acquired),
++    assert migration_reached_write, f"migration did not reach save_snapshot: {worker_results}"
++    assert all(not process.is_alive() for process in processes)
++    assert all(process.exitcode == 0 for process in processes), worker_results
++    assert {result["status"] for result in worker_results} == {"released", "completed"}, worker_results
++    assert legacy_metadata.revision == 1
++    assert not early_snapshot_write, (
++        "migration entered the real save_snapshot boundary while another process "
++        "held the repository full_analysis.lock"
 +    )
-+    recovery_entered = context.Event()
-+    release_recovery = context.Event()
-+    load_entered = context.Event()
-+    release_load = context.Event()
-+    constructor_completed = context.Event()
-+    outcome = context.Queue()
-+    constructor = context.Process(
-+        target=_pause_registry_constructor_process,
-+        args=(
-+            temp_repo,
-+            recovery_entered,
-+            release_recovery,
-+            load_entered,
-+            release_load,
-+            constructor_completed,
-+            outcome,
-+        ),
-+    )
-+    try:
-+        probe.start()
-+        assert probe_ready.wait(timeout=5)
-+        constructor.start()
-+        assert recovery_entered.wait(timeout=5)
-+
-+        attempt_probe.set()
-+        assert probe_attempted.wait(timeout=5)
-+        assert probe_acquired.wait(timeout=0.5) is False
-+
-+        release_recovery.set()
-+        assert load_entered.wait(timeout=5)
-+        assert probe_acquired.wait(timeout=0.5) is False
-+
-+        release_load.set()
-+        assert constructor_completed.wait(timeout=5)
-+        assert outcome.get(timeout=2) == "constructed"
-+        assert probe_acquired.wait(timeout=5)
-+        constructor.join(timeout=5)
-+        probe.join(timeout=5)
-+        assert constructor.exitcode == 0
-+        assert probe.exitcode == 0
-+    finally:
-+        release_recovery.set()
-+        release_load.set()
-+        attempt_probe.set()
-+        for process in (constructor, probe):
-+            if process.pid is not None:
-+                process.join(timeout=3)
-+                if process.is_alive():
-+                    process.terminate()
-+                    process.join(timeout=2)
 +
 +
-+def test_constructor_does_not_consume_active_writer_staging_and_loads_commit(temp_repo):
-+    initial = PersistentIdentityRegistry(temp_repo)
-+    with initial.transaction():
-+        initial.sync_with_workspace({"seed.py"}, set())
-+    assert initial.get_module_id("seed.py") == "1/1"
-+
-+    context = multiprocessing.get_context("spawn")
-+    staged = context.Event()
-+    release_writer = context.Event()
-+    writer_completed = context.Event()
-+    writer_outcome = context.Queue()
-+    writer = context.Process(
-+        target=_pause_registry_writer_replace_process,
-+        args=(temp_repo, staged, release_writer, writer_completed, writer_outcome),
-+    )
-+    constructor_started = context.Event()
-+    recovery_entered = context.Event()
-+    constructor_completed = context.Event()
-+    constructor_outcome = context.Queue()
-+    constructor = context.Process(
-+        target=_observe_registry_constructor_process,
-+        args=(
-+            temp_repo,
-+            constructor_started,
-+            recovery_entered,
-+            constructor_completed,
-+            constructor_outcome,
-+        ),
-+    )
-+    try:
-+        writer.start()
-+        assert staged.wait(timeout=5)
-+
-+        marker = initial.transaction_file
-+        temporary_files = {
-+            name: path.with_suffix(".json.tmp")
-+            for name, path in initial.files.items()
-+        }
-+        assert marker.exists()
-+        assert all(path.exists() for path in temporary_files.values())
-+        marker_before = marker.read_bytes()
-+        staged_before = {
-+            name: path.read_bytes() for name, path in temporary_files.items()
-+        }
-+
-+        constructor.start()
-+        assert constructor_started.wait(timeout=5)
-+        assert recovery_entered.wait(timeout=0.5) is False
-+        assert marker.read_bytes() == marker_before
-+        assert {
-+            name: path.read_bytes() for name, path in temporary_files.items()
-+        } == staged_before
-+
-+        release_writer.set()
-+        assert writer_completed.wait(timeout=5)
-+        writer_result = writer_outcome.get(timeout=2)
-+        assert writer_result == ("committed", "2/1")
-+        assert recovery_entered.wait(timeout=5)
-+        assert constructor_completed.wait(timeout=5)
-+        constructor_result = constructor_outcome.get(timeout=2)
-+        assert constructor_result == (
-+            "ok",
-+            {"seed.py": "1/1", "during_write.py": "2/1"},
-+        )
-+        assert not marker.exists()
-+        assert not any(path.exists() for path in temporary_files.values())
-+        writer.join(timeout=5)
-+        constructor.join(timeout=5)
-+        assert writer.exitcode == 0
-+        assert constructor.exitcode == 0
-+    finally:
-+        release_writer.set()
-+        for process in (constructor, writer):
-+            if process.pid is not None:
-+                process.join(timeout=3)
-+                if process.is_alive():
-+                    process.terminate()
-+                    process.join(timeout=2)
-+
-+
-+@pytest.mark.parametrize("failure_stage", ["recovery", "load"])
-+def test_constructor_releases_registry_lock_after_recovery_or_load_failure(
-+    temp_repo, failure_stage
++def test_migration_does_not_publish_legacy_filestate_after_newer_generation_commit(
++    tmp_path, monkeypatch
 +):
-+    PersistentIdentityRegistry(temp_repo)
-+    context = multiprocessing.get_context("spawn")
-+    lock_acquired = context.Event()
-+    failed = context.Event()
-+    release_failure = context.Event()
-+    failure_outcome = context.Queue()
-+    failing_process = context.Process(
-+        target=_fail_registry_constructor_process,
-+        args=(
-+            temp_repo,
-+            failure_stage,
-+            lock_acquired,
-+            failed,
-+            release_failure,
-+            failure_outcome,
-+        ),
++    import contextor.core.live_state.store as store
++
++    cache_root = tmp_path / "cache"
++    monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(cache_root))
++    repo = tmp_path / "repo"
++    repo.mkdir()
++    registry = PersistentIdentityRegistry(str(repo))
++    identity = read_repository_identity(repo)
++    assert identity is not None and identity.repo_id == registry.repo_id
++
++    legacy = legacy_repo_cache_dir(repo)
++    target = repo_cache_dir(repo)
++    legacy_metadata = save_snapshot(
++        {"value": "legacy"}, legacy, "legacy-state", writer="desktop"
 +    )
-+    probe_started = context.Event()
-+    probe_completed = context.Event()
-+    probe_outcome = context.Queue()
-+    probe = context.Process(
-+        target=_probe_registry_constructor_process,
-+        args=(temp_repo, probe_started, probe_completed, probe_outcome),
++    legacy_file_state = legacy / "file_state.json"
++    legacy_file_state.write_text(
++        json.dumps(
++            {
++                "_meta": {
++                    "state_id": legacy_metadata.state_id,
++                    "revision": legacy_metadata.revision,
++                },
++                "files": {"legacy.py": {"size": 6}},
++            },
++            indent=2,
++        ),
++        encoding="utf-8",
++    )
++    legacy_file_state_bytes = legacy_file_state.read_bytes()
++
++    real_store_save = store.save_snapshot
++    real_copy2 = store.shutil.copy2
++    migration_snapshot_returned = threading.Event()
++    resume_migration = threading.Event()
++    observations = {"order": [], "copy": []}
++    migration_outcome = []
++
++    def pause_after_migration_snapshot_save(*args, **kwargs):
++        metadata = real_store_save(*args, **kwargs)
++        if threading.current_thread().name == "legacy-migration":
++            observations["migration_metadata"] = metadata
++            observations["order"].append("migration_snapshot_saved")
++            migration_snapshot_returned.set()
++            if not resume_migration.wait(10):
++                raise TimeoutError("migration resume hold expired")
++        return metadata
++
++    def observe_legacy_file_state_copy(src, dst, *args, **kwargs):
++        result = real_copy2(src, dst, *args, **kwargs)
++        observations["copy"].append(
++            {"src": str(src), "dst": str(dst), "bytes": Path(dst).read_bytes()}
++        )
++        observations["order"].append("legacy_file_state_copy_committed")
++        return result
++
++    monkeypatch.setattr(store, "save_snapshot", pause_after_migration_snapshot_save)
++    monkeypatch.setattr(store.shutil, "copy2", observe_legacy_file_state_copy)
++
++    def run_migration():
++        try:
++            migration_outcome.append(migrate_legacy_snapshot(repo))
++        except BaseException as exc:
++            migration_outcome.append(exc)
++
++    migration = threading.Thread(target=run_migration, name="legacy-migration")
++    try:
++        migration.start()
++        assert migration_snapshot_returned.wait(5), "migration did not return from snapshot save"
++
++        migration_metadata = read_metadata(target)
++        assert migration_metadata is not None
++        assert migration_metadata.revision == legacy_metadata.revision + 1
++        assert migration_metadata.state_id == legacy_metadata.state_id
++        assert migration_metadata.file_state_file == ""
++        assert not (target / "file_state.json").exists()
++
++        next_revision = migration_metadata.revision + 1
++        new_file_state_payload = {
++            "_meta": {"state_id": migration_metadata.state_id, "revision": next_revision},
++            "files": {"current.py": {"size": 11}},
++        }
++        newer_metadata = save_snapshot(
++            {"value": "newer"},
++            target,
++            migration_metadata.state_id,
++            writer="competing_snapshot_writer",
++            repo_id=identity.repo_id,
++            root_path=identity.root_path,
++            exact_revision=next_revision,
++            file_state_payload=new_file_state_payload,
++        )
++        observations["order"].append("newer_generation_committed")
++        newer_metadata_bytes = (target / "engine_state.meta.json").read_bytes()
++        newer_file_state_path = target / newer_metadata.file_state_file
++        newer_file_state_bytes = newer_file_state_path.read_bytes()
++
++        resume_migration.set()
++        migration.join(timeout=10)
++    finally:
++        resume_migration.set()
++        migration.join(timeout=5)
++
++    assert not migration.is_alive(), "migration thread did not terminate"
++    assert len(migration_outcome) == 1 and isinstance(migration_outcome[0], Path), migration_outcome
++    assert observations["order"].index("newer_generation_committed") < (
++        observations["order"].index("legacy_file_state_copy_committed")
++        if "legacy_file_state_copy_committed" in observations["order"]
++        else len(observations["order"])
++    )
++
++    final_metadata = read_metadata(target)
++    assert final_metadata == newer_metadata
++    assert final_metadata.revision == next_revision
++    assert final_metadata.state_id == legacy_metadata.state_id
++    assert final_metadata.file_state_file == newer_metadata.file_state_file
++    assert (target / "engine_state.meta.json").read_bytes() == newer_metadata_bytes
++    assert newer_file_state_path.read_bytes() == newer_file_state_bytes
++    assert legacy_file_state_bytes == legacy_file_state.read_bytes()
++
++    legacy_target_file_state = target / "file_state.json"
++    assert legacy_target_file_state.is_file()
++    assert legacy_target_file_state.read_bytes() == legacy_file_state_bytes
++    assert observations["copy"] == [
++        {
++            "src": str(legacy_file_state),
++            "dst": str(legacy_target_file_state),
++            "bytes": legacy_file_state_bytes,
++        }
++    ]
++
++    loaded = load_snapshot(
++        target,
++        expected_repo_id=identity.repo_id,
++        expected_root_path=identity.root_path,
++    )
++    assert loaded is not None and loaded[0]["value"] == "newer"
++    loaded_file_state = FileStateManager(str(target))
++    assert loaded_file_state.state_id == newer_metadata.state_id
++    assert loaded_file_state.revision == newer_metadata.revision
++    assert loaded_file_state.baseline_status == "trusted"
++    assert loaded_file_state._state["current.py"].size == 11
++
++    assert "legacy_file_state_copy_committed" not in observations["order"], (
++        "migration published the stale unversioned legacy FileState after a newer "
++        f"generation committed; order={observations['order']}; "
++        f"metadata_file_state={final_metadata.file_state_file!r}; "
++        "the metadata-referenced FileState consumer remained trusted"
++    )
++
++
++def test_migration_does_not_write_when_valid_target_metadata_exists(
++    tmp_path, monkeypatch
++):
++    import contextor.core.live_state.store as store
++
++    cache_root = tmp_path / "cache"
++    monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(cache_root))
++    repo = tmp_path / "repo"
++    repo.mkdir()
++    identity = read_repository_identity(repo)
++    if identity is None:
++        registry = PersistentIdentityRegistry(str(repo))
++        identity = read_repository_identity(repo)
++        assert identity is not None and identity.repo_id == registry.repo_id
++
++    legacy = legacy_repo_cache_dir(repo)
++    target = repo_cache_dir(repo)
++    save_snapshot({"value": "legacy"}, legacy, "legacy-state", writer="desktop")
++    target_metadata = save_snapshot(
++        {"value": "already-current"},
++        target,
++        "target-state",
++        writer="existing-target",
++        repo_id=identity.repo_id,
++        root_path=identity.root_path,
++    )
++    metadata_bytes = (target / "engine_state.meta.json").read_bytes()
++    state_bytes = (target / "engine_state.pkl").read_bytes()
++
++    def forbidden_migration_write(*_args, **_kwargs):
++        pytest.fail("migration wrote despite valid target metadata")
++
++    monkeypatch.setattr(store, "save_snapshot", forbidden_migration_write)
++    assert migrate_legacy_snapshot(repo) == target
++    assert read_metadata(target) == target_metadata
++    assert (target / "engine_state.meta.json").read_bytes() == metadata_bytes
++    assert (target / "engine_state.pkl").read_bytes() == state_bytes
++    assert not (target / "file_state.json").exists()
++
++
+ def test_concurrent_writers_publish_complete_monotonic_snapshots(tmp_path):
+     def publish(value):
+         return save_snapshot({"value": value}, tmp_path, "same", writer=str(value)).revision
+~~~~
+
+### C:\Temp\Contextor_Repo\tests\test_mcp_incremental_hydration.py
+
+~~~~diff
+diff --git a/tests/test_mcp_incremental_hydration.py b/tests/test_mcp_incremental_hydration.py
+index 96671e6..644b570 100644
+--- a/tests/test_mcp_incremental_hydration.py
++++ b/tests/test_mcp_incremental_hydration.py
+@@ -1375,6 +1375,154 @@ def test_local_exact_generation_migrates_legacy_filestate_and_state_id(
+     assert hydrated.state_manager.get_tracked_sha256(str(provider)) == tracked_sha
+ 
+ 
++def test_legacy_migration_writer_admission_precedes_mcp_cache_lock(
++    tmp_path, monkeypatch
++):
++    from contextlib import contextmanager
++    from contextor.core.analysis import full_analysis_lease
++
++    repo = tmp_path / "repo_migration_lock_order"
++    repo.mkdir()
++    PersistentIdentityRegistry(str(repo))
++    monkeypatch.setattr("contextor.core.live_state.connect", lambda _root: None)
++    monkeypatch.setattr(mcp_runtime, "_live_engines", {})
++    monkeypatch.setattr(mcp_runtime, "_live_engine_revisions", {})
++    monkeypatch.setattr(mcp_runtime, "_live_engine_provenance", {})
++    monkeypatch.setattr(mcp_runtime, "_live_sessions", {})
++    monkeypatch.setattr(mcp_runtime, "_live_journal_revisions", {})
++
++    callback_entered = threading.Event()
++    resume_callback = threading.Event()
++    cache_probe_attempted = threading.Event()
++    cache_probe_acquired = threading.Event()
++    initializer_cache_acquired = threading.Event()
++    events = []
++    active_leases = {}
++    observations = {}
++    event_lock = threading.Lock()
++    real_cache_transaction = mcp_runtime._engine_cache_transaction
++    real_acquire = coordinator.acquire_full_analysis
++    real_release = coordinator.release_full_analysis
++
++    def record(event, thread_name=None):
++        with event_lock:
++            events.append((event, thread_name or threading.current_thread().name))
++
++    @contextmanager
++    def observe_cache_transaction(root):
++        thread_name = threading.current_thread().name
++        if thread_name == "same-cache-probe":
++            cache_probe_attempted.set()
++        with real_cache_transaction(root) as root_key:
++            record("cache_acquired", thread_name)
++            if thread_name == "mcp-hydration":
++                initializer_cache_acquired.set()
++            elif thread_name == "same-cache-probe":
++                cache_probe_acquired.set()
++            yield root_key
++
++    def observe_acquire(*args, **kwargs):
++        lease = real_acquire(*args, **kwargs)
++        thread_id = threading.get_ident()
++        with event_lock:
++            active_leases[thread_id] = lease
++            events.append(("full_analysis_acquired", threading.current_thread().name))
++        return lease
++
++    def observe_release(lease):
++        thread_id = threading.get_ident()
++        with event_lock:
++            events.append(("full_analysis_released", threading.current_thread().name))
++        try:
++            return real_release(lease)
++        finally:
++            with event_lock:
++                active_leases.pop(thread_id, None)
++
++    def pause_migration(_root):
++        thread_id = threading.get_ident()
++        with event_lock:
++            events.append(("migration_callback", threading.current_thread().name))
++            observations["full_analysis_held_at_migration"] = thread_id in active_leases
++        callback_entered.set()
++        if not resume_callback.wait(10):
++            raise TimeoutError("migration callback hold expired")
++        raise RuntimeError("intentional migration callback stop")
++
++    monkeypatch.setattr(mcp_runtime, "_engine_cache_transaction", observe_cache_transaction)
++    monkeypatch.setattr(coordinator, "acquire_full_analysis", observe_acquire)
++    monkeypatch.setattr(coordinator, "release_full_analysis", observe_release)
++    monkeypatch.setattr(full_analysis_lease, "acquire_full_analysis", observe_acquire)
++    monkeypatch.setattr(full_analysis_lease, "release_full_analysis", observe_release)
++    monkeypatch.setattr(
++        "contextor.core.live_state.migrate_legacy_snapshot",
++        pause_migration,
++    )
++
++    initializer_outcome = []
++
++    def run_initializer():
++        try:
++            mcp_runtime.get_or_init_engine(repo.resolve())
++        except BaseException as exc:
++            initializer_outcome.append(exc)
++
++    def probe_same_cache_transaction():
++        with mcp_runtime._engine_cache_transaction(repo):
++            cache_probe_acquired.set()
++
++    initializer = threading.Thread(target=run_initializer, name="mcp-hydration")
++    cache_probe = threading.Thread(
++        target=probe_same_cache_transaction,
++        name="same-cache-probe",
 +    )
 +    try:
-+        failing_process.start()
-+        assert lock_acquired.wait(timeout=5)
-+        assert failed.wait(timeout=5)
-+        assert failure_outcome.get(timeout=2) == (
-+            "failed",
-+            failure_stage,
-+            f"injected {failure_stage} failure",
-+        )
++        initializer.start()
++        assert callback_entered.wait(5), "get_or_init_engine did not reach migration fallback"
++        assert initializer_cache_acquired.is_set()
 +
-+        probe.start()
-+        assert probe_started.wait(timeout=5)
-+        assert probe_completed.wait(timeout=2)
-+        assert probe_outcome.get(timeout=2)[0] == "ok"
-+        probe.join(timeout=5)
-+        assert probe.exitcode == 0
++        cache_probe.start()
++        assert cache_probe_attempted.wait(5), "second thread did not attempt the same cache transaction"
++        cache_probe_was_blocked = not cache_probe_acquired.wait(0.5)
 +    finally:
-+        release_failure.set()
-+        for process in (probe, failing_process):
-+            if process.pid is not None:
-+                process.join(timeout=3)
-+                if process.is_alive():
-+                    process.terminate()
-+                    process.join(timeout=2)
++        resume_callback.set()
++        initializer.join(timeout=5)
++        if cache_probe.ident is not None:
++            cache_probe.join(timeout=5)
++
++    assert not initializer.is_alive(), "hydration thread did not terminate"
++    assert not cache_probe.is_alive(), "same-cache probe thread did not terminate"
++    assert len(initializer_outcome) == 1
++    assert isinstance(initializer_outcome[0], RuntimeError)
++    lease_positions = [
++        index for index, (event, owner) in enumerate(events)
++        if event == "full_analysis_acquired" and owner == "mcp-hydration"
++    ]
++    cache_positions = [
++        index for index, (event, owner) in enumerate(events)
++        if event == "cache_acquired" and owner == "mcp-hydration"
++    ]
++    migration_positions = [
++        index for index, (event, owner) in enumerate(events)
++        if event == "migration_callback" and owner == "mcp-hydration"
++    ]
++    assert cache_positions and migration_positions and cache_positions[0] < migration_positions[0], (
++        f"migration callback did not execute inside the MCP cache transaction: events={events}"
++    )
++    assert cache_probe_was_blocked, (
++        f"second thread acquired the same MCP cache RLock while migration was paused: {events}"
++    )
++    assert lease_positions and cache_positions and lease_positions[0] < cache_positions[0], (
++        "full_analysis.lock must be acquired before the MCP cache RLock; "
++        f"callback_had_full_analysis_lease={observations.get('full_analysis_held_at_migration')}; "
++        f"events={events}"
++    )
++    assert observations.get("full_analysis_held_at_migration") is True, (
++        "migration callback ran without a full_analysis lease owned by the "
++        f"get_or_init_engine thread; events={events}"
++    )
 +
 +
-+def test_independent_registry_instances_share_the_same_os_lock_path(temp_repo):
-+    first = PersistentIdentityRegistry(temp_repo)
-+    second = PersistentIdentityRegistry(temp_repo)
-+
-+    assert first.registry_dir == second.registry_dir
-+    assert first.lock_file == second.lock_file
-+    assert first.lock_file.resolve() == second.lock_file.resolve()
+ def test_mcp_refreshes_its_engine_from_a_newer_shared_live_revision(tmp_path, monkeypatch):
+     first = RepositoryAnalysisState(modules={"old": object()})
+     second = RepositoryAnalysisState(modules={"new": object()})
+~~~~
+
+## FINAL_VERDICT
+
+Three deterministic race regressions are RED against current production code; the selected migration compatibility baseline passes. No production or unauthorized test files changed. The race-B observation is a physical stale legacy FileState extra without consumer-visible corruption.
+
+F3_RED_EVIDENCE_READY

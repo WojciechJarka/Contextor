@@ -1375,6 +1375,154 @@ def test_local_exact_generation_migrates_legacy_filestate_and_state_id(
     assert hydrated.state_manager.get_tracked_sha256(str(provider)) == tracked_sha
 
 
+def test_legacy_migration_writer_admission_precedes_mcp_cache_lock(
+    tmp_path, monkeypatch
+):
+    from contextlib import contextmanager
+    from contextor.core.analysis import full_analysis_lease
+
+    repo = tmp_path / "repo_migration_lock_order"
+    repo.mkdir()
+    PersistentIdentityRegistry(str(repo))
+    monkeypatch.setattr("contextor.core.live_state.connect", lambda _root: None)
+    monkeypatch.setattr(mcp_runtime, "_live_engines", {})
+    monkeypatch.setattr(mcp_runtime, "_live_engine_revisions", {})
+    monkeypatch.setattr(mcp_runtime, "_live_engine_provenance", {})
+    monkeypatch.setattr(mcp_runtime, "_live_sessions", {})
+    monkeypatch.setattr(mcp_runtime, "_live_journal_revisions", {})
+
+    callback_entered = threading.Event()
+    resume_callback = threading.Event()
+    cache_probe_attempted = threading.Event()
+    cache_probe_acquired = threading.Event()
+    initializer_cache_acquired = threading.Event()
+    events = []
+    active_leases = {}
+    observations = {}
+    event_lock = threading.Lock()
+    real_cache_transaction = mcp_runtime._engine_cache_transaction
+    real_acquire = coordinator.acquire_full_analysis
+    real_release = coordinator.release_full_analysis
+
+    def record(event, thread_name=None):
+        with event_lock:
+            events.append((event, thread_name or threading.current_thread().name))
+
+    @contextmanager
+    def observe_cache_transaction(root):
+        thread_name = threading.current_thread().name
+        if thread_name == "same-cache-probe":
+            cache_probe_attempted.set()
+        with real_cache_transaction(root) as root_key:
+            record("cache_acquired", thread_name)
+            if thread_name == "mcp-hydration":
+                initializer_cache_acquired.set()
+            elif thread_name == "same-cache-probe":
+                cache_probe_acquired.set()
+            yield root_key
+
+    def observe_acquire(*args, **kwargs):
+        lease = real_acquire(*args, **kwargs)
+        thread_id = threading.get_ident()
+        with event_lock:
+            active_leases[thread_id] = lease
+            events.append(("full_analysis_acquired", threading.current_thread().name))
+        return lease
+
+    def observe_release(lease):
+        thread_id = threading.get_ident()
+        with event_lock:
+            events.append(("full_analysis_released", threading.current_thread().name))
+        try:
+            return real_release(lease)
+        finally:
+            with event_lock:
+                active_leases.pop(thread_id, None)
+
+    def pause_migration(_root):
+        thread_id = threading.get_ident()
+        with event_lock:
+            events.append(("migration_callback", threading.current_thread().name))
+            observations["full_analysis_held_at_migration"] = thread_id in active_leases
+        callback_entered.set()
+        if not resume_callback.wait(10):
+            raise TimeoutError("migration callback hold expired")
+        raise RuntimeError("intentional migration callback stop")
+
+    monkeypatch.setattr(mcp_runtime, "_engine_cache_transaction", observe_cache_transaction)
+    monkeypatch.setattr(coordinator, "acquire_full_analysis", observe_acquire)
+    monkeypatch.setattr(coordinator, "release_full_analysis", observe_release)
+    monkeypatch.setattr(full_analysis_lease, "acquire_full_analysis", observe_acquire)
+    monkeypatch.setattr(full_analysis_lease, "release_full_analysis", observe_release)
+    monkeypatch.setattr(
+        "contextor.core.live_state.migrate_legacy_snapshot",
+        pause_migration,
+    )
+
+    initializer_outcome = []
+
+    def run_initializer():
+        try:
+            mcp_runtime.get_or_init_engine(repo.resolve())
+        except BaseException as exc:
+            initializer_outcome.append(exc)
+
+    def probe_same_cache_transaction():
+        with mcp_runtime._engine_cache_transaction(repo):
+            cache_probe_acquired.set()
+
+    initializer = threading.Thread(target=run_initializer, name="mcp-hydration")
+    cache_probe = threading.Thread(
+        target=probe_same_cache_transaction,
+        name="same-cache-probe",
+    )
+    try:
+        initializer.start()
+        assert callback_entered.wait(5), "get_or_init_engine did not reach migration fallback"
+        assert initializer_cache_acquired.is_set()
+
+        cache_probe.start()
+        assert cache_probe_attempted.wait(5), "second thread did not attempt the same cache transaction"
+        cache_probe_was_blocked = not cache_probe_acquired.wait(0.5)
+    finally:
+        resume_callback.set()
+        initializer.join(timeout=5)
+        if cache_probe.ident is not None:
+            cache_probe.join(timeout=5)
+
+    assert not initializer.is_alive(), "hydration thread did not terminate"
+    assert not cache_probe.is_alive(), "same-cache probe thread did not terminate"
+    assert len(initializer_outcome) == 1
+    assert isinstance(initializer_outcome[0], RuntimeError)
+    lease_positions = [
+        index for index, (event, owner) in enumerate(events)
+        if event == "full_analysis_acquired" and owner == "mcp-hydration"
+    ]
+    cache_positions = [
+        index for index, (event, owner) in enumerate(events)
+        if event == "cache_acquired" and owner == "mcp-hydration"
+    ]
+    migration_positions = [
+        index for index, (event, owner) in enumerate(events)
+        if event == "migration_callback" and owner == "mcp-hydration"
+    ]
+    assert cache_positions and migration_positions and cache_positions[0] < migration_positions[0], (
+        f"migration callback did not execute inside the MCP cache transaction: events={events}"
+    )
+    assert cache_probe_was_blocked, (
+        f"second thread acquired the same MCP cache RLock while migration was paused: {events}"
+    )
+    assert lease_positions and cache_positions and lease_positions[0] < cache_positions[0], (
+        "full_analysis.lock must be acquired before the MCP cache RLock; "
+        f"callback_had_full_analysis_lease={observations.get('full_analysis_held_at_migration')}; "
+        f"events={events}"
+    )
+    assert observations.get("full_analysis_held_at_migration") is True, (
+        "migration callback ran without a full_analysis lease owned by the "
+        f"get_or_init_engine thread; events={events}"
+    )
+
+
 def test_mcp_refreshes_its_engine_from_a_newer_shared_live_revision(tmp_path, monkeypatch):
     first = RepositoryAnalysisState(modules={"old": object()})
     second = RepositoryAnalysisState(modules={"new": object()})
