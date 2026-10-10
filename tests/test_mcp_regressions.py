@@ -2737,6 +2737,175 @@ def test_mcp_update_file_shapes_affected_modules_compact_full_and_fields(tmp_pat
     assert filtered["status"] == "UPDATED"
 
 
+@pytest.mark.parametrize(
+    ("result_status", "path_kind"),
+    [
+        pytest.param("UPDATED", "updated", id="updated"),
+        pytest.param("DELETED", "deleted", id="deleted"),
+        pytest.param("SYNTAX_ERROR", "syntax-error", id="syntax-error"),
+        pytest.param("RECOVERED", "recovered", id="recovered"),
+        pytest.param("UNCHANGED", "parsed-semantic-no-op", id="parsed-unchanged"),
+        pytest.param("UNCHANGED", "early-no-op", id="early-unchanged"),
+        pytest.param("ERROR", "structured-error", id="structured-error"),
+    ],
+)
+@pytest.mark.parametrize("persisted", [True, False], ids=["persisted", "not-persisted"])
+def test_mcp_update_file_local_fallback_persists_every_returned_status(
+    tmp_path, monkeypatch, result_status, path_kind, persisted
+):
+    root = tmp_path.resolve()
+    target = root / "provider.py"
+    target.write_text("def run():\n    return 1\n", encoding="utf-8")
+    connect_calls = []
+    update_calls = []
+    persist_calls = []
+
+    result = SimpleNamespace(
+        status=result_status,
+        file_path=str(target),
+        graph_state="fresh",
+        dependencies_state="fresh",
+        blast_radius_state="deferred",
+        local_metrics_state="deferred",
+        global_metrics_state="deferred",
+        artifact_consumption_state="fresh",
+        affected_modules=[],
+        delta=None,
+    )
+
+    class FakeEngine:
+        state = SimpleNamespace(artifacts={"provider": {}})
+
+        def update_file(self, file_path):
+            update_calls.append(file_path)
+            return result
+
+    engine = FakeEngine()
+
+    def connect(_root):
+        connect_calls.append(_root)
+        return None
+
+    def persist(_root, candidate_engine):
+        persist_calls.append((_root, candidate_engine))
+        return persisted
+
+    monkeypatch.setattr("contextor.core.live_state.connect", connect)
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: engine)
+    monkeypatch.setattr(update_file_module, "_persist_live_engine", persist)
+    monkeypatch.setattr(
+        update_file_module, "_mcp_runtime_restart_required", lambda _path: False
+    )
+
+    response = json.loads(
+        mcp_server.update_file.fn(repo_path=str(root), file_path=str(target))
+    )
+
+    assert bool(path_kind)
+    assert connect_calls
+    assert all(call_root == root for call_root in connect_calls)
+    assert update_calls == [str(target)]
+    assert persist_calls == [(root, engine)]
+    assert response["status"] == result_status
+    assert response["live_state_persisted"] is persisted
+
+
+def test_mcp_update_file_live_branch_delegates_without_local_persistence(
+    tmp_path, monkeypatch
+):
+    root = tmp_path.resolve()
+    target = root / "provider.py"
+    target.write_text("def run():\n    return 1\n", encoding="utf-8")
+    remote_result = SimpleNamespace(
+        status="UPDATED",
+        file_path=str(target),
+        graph_state="fresh",
+        dependencies_state="fresh",
+        blast_radius_state="fresh",
+        local_metrics_state="deferred",
+        global_metrics_state="deferred",
+        artifact_consumption_state="fresh",
+        affected_modules=[],
+        delta=None,
+    )
+    remote_calls = []
+
+    class FakeLiveClient:
+        def update_file(self, file_path, *, origin):
+            remote_calls.append((file_path, origin))
+            return {"status": "ok", "revision": 42, "result": remote_result}
+
+    engine = SimpleNamespace(
+        state=SimpleNamespace(artifacts={"provider": {}}),
+        update_file=lambda *_args: pytest.fail("LIVE path used local engine update"),
+    )
+    monkeypatch.setattr(
+        "contextor.core.live_state.connect", lambda _root: FakeLiveClient()
+    )
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: engine)
+    monkeypatch.setattr(
+        mcp_runtime,
+        "_engine_cache_transaction",
+        lambda _root: nullcontext(str(root)),
+    )
+    monkeypatch.setattr(mcp_runtime, "_live_engine_revisions", {})
+    monkeypatch.setattr(
+        update_file_module,
+        "_persist_live_engine",
+        lambda *_args: pytest.fail("LIVE path called the local persister"),
+    )
+    monkeypatch.setattr(
+        update_file_module, "_mcp_runtime_restart_required", lambda _path: False
+    )
+
+    response = json.loads(
+        mcp_server.update_file.fn(repo_path=str(root), file_path=str(target))
+    )
+
+    assert remote_calls == [(str(target), "mcp")]
+    assert response["status"] == "UPDATED"
+    assert response["live_state_persisted"] is True
+
+
+def test_mcp_update_file_local_persistence_exception_keeps_error_response(
+    tmp_path, monkeypatch
+):
+    root = tmp_path.resolve()
+    target = root / "provider.py"
+    target.write_text("def run():\n    return 1\n", encoding="utf-8")
+    result = SimpleNamespace(
+        status="SYNTAX_ERROR",
+        file_path=str(target),
+        graph_state="stale",
+        dependencies_state="stale",
+        blast_radius_state="deferred",
+        local_metrics_state="deferred",
+        global_metrics_state="deferred",
+        artifact_consumption_state="stale",
+        affected_modules=[],
+        delta=None,
+    )
+    engine = SimpleNamespace(
+        state=SimpleNamespace(artifacts={"provider": {}}),
+        update_file=lambda _path: result,
+    )
+
+    def fail_persist(*_args):
+        raise OSError("snapshot persistence failed")
+
+    monkeypatch.setattr("contextor.core.live_state.connect", lambda _root: None)
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: engine)
+    monkeypatch.setattr(update_file_module, "_persist_live_engine", fail_persist)
+
+    response = json.loads(
+        mcp_server.update_file.fn(repo_path=str(root), file_path=str(target))
+    )
+
+    assert response["status"] == "ERROR"
+    assert "snapshot persistence failed" in response["error"]
+    assert "live_state_persisted" not in response
+
+
 
 def test_mcp_bootstrap_keeps_an_existing_virtual_environment(monkeypatch):
     monkeypatch.setattr(mcp_server.sys, "prefix", "C:/repo/.venv")

@@ -221,10 +221,9 @@ def update_file(
             live_state_persisted = True
         else:
             res = engine.update_file(str(target_file))
-            live_state_persisted = (
-                _persist_live_engine(root, engine)
-                if res.status in {"UPDATED", "DELETED"}
-                else True
+            live_state_persisted = _persist_live_engine(
+                root,
+                engine,
             )
         new_artifacts = engine.state.artifacts.get(module_path, {})
         semantic_diff = _semantic_artifact_diff(old_artifacts, new_artifacts)

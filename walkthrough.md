@@ -1,428 +1,562 @@
-# L32G_C_AGGREGATE_MODULE_FRESHNESS_FAIL_CLOSED
+# L32H1_LOCAL_FALLBACK_PERSIST_ALL_RESULTS
 
 ## FILES_CHANGED_THIS_TASK
 
-- C:\Temp\Contextor_Repo\contextor\mcp\query_helpers.py
-- C:\Temp\Contextor_Repo\tests\mcp\tools\test_lineage_freshness.py
-- C:\Temp\Contextor_Repo\tests\mcp\tools\test_get_project_architecture_full_reports.py
-- C:\Temp\Contextor_Repo\tests\mcp\tools\test_contextor_fact_lineage.py
-- C:\Temp\Contextor_Repo\tests\mcp\tools\test_get_file_edit_context_syntax.py
+- C:\Temp\Contextor_Repo\contextor\mcp\tools\update_file.py
+- C:\Temp\Contextor_Repo\tests\test_mcp_incremental_hydration.py
+- C:\Temp\Contextor_Repo\tests\test_mcp_regressions.py
+- C:\Temp\Contextor_Repo\walkthrough.md is the requested report and is excluded from source/test changes.
 
-The final path is the focused supplementary regression expressly requested in Step 5; it uses the existing get_file_edit_context test fixture. No other production or test files changed. walkthrough.md is the report only.
+The three source/test paths were clean before editing. Scoped post-edit status reports exactly those three modified paths. No other production or test file was changed. Commits, HEAD, and SHA were not inspected.
 
 ## CURRENT_SOURCE_VERIFICATION
 
-Contextor MCP discovery was performed first, including documentation for implementation, call-context, lineage, module blast radius, source-range and get_file_edit_context tools.
+DIRECT_EVIDENCE — Contextor MCP before the source edit:
 
-Before editing, Contextor returned the complete build_state_freshness implementation from C:\Temp\Contextor_Repo\contextor\mcp\query_helpers.py, lines 322-526. source_contract reported implementation_is_complete=true and no_partial_symbol_source=true; workspace_sync=verified at LIVE revision 184. Local text matched the required exact anchors.
+- Read current MCP documentation and discovered the Contextor source, call-context, lineage, blast-radius, and LIVE-event tools before using them.
+- update_file was fetched in full from contextor/mcp/tools/update_file.py, lines 188–295. Contextor marked implementation_is_complete=true, no_partial_symbol_source=true, canonical state fresh, and workspace_sync=verified at revision 194 before source editing.
+- The exact defect was present in the local branch: call _persist_live_engine only for UPDATED/DELETED; all other result statuses set live_state_persisted=True without the helper call.
+- _persist_live_engine was fetched in full, lines 73–104. It returns false when save_engine_state returns no metadata; after metadata it updates the engine/revision and invokes the manager save path when available, then returns true.
+- IncrementalAnalysisEngine.update_file was fetched as a complete Contextor source range, lines 453–736 of a 1,046-line file (284 lines; no preview/truncation). It confirms the early UNCHANGED return before parsing, syntax-failure state publication, parse-and-plan semantic no-op, RECOVERED, and UPDATED/DELETED result paths.
+- _commit_syntax_candidate and _update_candidate_lineage_slice were fetched as complete implementations; both were workspace-synchronized at revision 194.
+- Call context identifies update_file as the sole direct caller of _persist_live_engine in that module. The wrapper constructs the public response and its live_state_persisted field.
+- Blast radius: direct static consumers include contextor.mcp_server and four test modules; downstream module reachability reports 32 modules (one production module, contextor.mcp_main, and 31 test modules). Contextor explicitly scopes this to direct static evidence.
 
-The pre-patch implementation had:
-- canonical_state stale when resync_required; otherwise target-local module_current_truth when target_module was supplied; otherwise literal fresh.
-- families.module equal to module_current_truth(target_module).state only for a target; otherwise literal fresh.
-- public get_project_architecture and contextor_fact_lineage callers invoking the helper without target_module.
+DIRECT_EVIDENCE — after the exact source edit:
 
-Contextor blast radius identified get_project_architecture, contextor_fact_lineage, get_file_edit_context, get_module_blast_radius, get_source_range and other public tools as consumers. Post-edit direct module blast radius reported 32 direct consumers, 45 downstream consumers, 5 production and 40 test modules, no truncation. The symbol call-context tool is intra-module only: zero caller edges and six callee edges; it does not represent cross-module consumers.
+Contextor fetched the complete updated update_file, lines 188–294, with implementation_is_complete=true, no_partial_symbol_source=true, canonical_state=fresh, workspace_sync=verified, and revision 204. The local branch now calls:
 
-After the change, Contextor fetched the complete updated implementation at lines 322-547 with source_contract implementation_is_complete=true, no_partial_symbol_source=true, workspace_sync=verified, LIVE revision 192. It shows the exact requested aggregation and only the module family field now uses module_parse_state.
+    res = engine.update_file(str(target_file))
+    live_state_persisted = _persist_live_engine(
+        root,
+        engine,
+    )
+
+The LIVE-connected branch remains separate and still sets its flag after a successful LIVE update and engine-cache refresh. _persist_live_engine itself was not changed.
 
 ## RED_RESULT
 
-Before production change, the focused regression command ran 17 parameterized/caller cases: **12 failed, 5 passed**. The failures were the expected old behavior: unscoped canonical_state remained fresh for stale/untrusted/invalid map cases; resync family.module remained fresh instead of the independent aggregate marker; public architecture had no module family marker; and fact-lineage freshness remained fresh.
+Before the production edit, the corrected focused regression command ran 20 cases: 14 failed, 6 passed.
 
-Exact failing nodes:
-- tests/mcp/tools/test_lineage_freshness.py::test_unscoped_module_freshness_aggregates_parse_truth_without_mutation[untrusted]
-- tests/mcp/tools/test_lineage_freshness.py::test_unscoped_module_freshness_aggregates_parse_truth_without_mutation[stale]
-- tests/mcp/tools/test_lineage_freshness.py::test_unscoped_module_freshness_aggregates_parse_truth_without_mutation[mixed-untrusted-wins]
-- tests/mcp/tools/test_lineage_freshness.py::test_unscoped_module_freshness_aggregates_parse_truth_without_mutation[invalid-key]
-- tests/mcp/tools/test_lineage_freshness.py::test_unscoped_module_freshness_rejects_malformed_whole_map[none]
-- tests/mcp/tools/test_lineage_freshness.py::test_unscoped_module_freshness_rejects_malformed_whole_map[false]
-- tests/mcp/tools/test_lineage_freshness.py::test_unscoped_module_freshness_rejects_malformed_whole_map[empty-list]
-- tests/mcp/tools/test_lineage_freshness.py::test_unscoped_module_freshness_rejects_malformed_whole_map[pair-iterable]
-- tests/mcp/tools/test_lineage_freshness.py::test_global_resync_keeps_aggregate_parse_truth_but_stales_canonical_state[untrusted]
-- tests/mcp/tools/test_lineage_freshness.py::test_global_resync_keeps_aggregate_parse_truth_but_stales_canonical_state[stale]
-- tests/mcp/tools/test_get_project_architecture_full_reports.py::test_project_architecture_overlay_distinguishes_untrusted_from_lkg
-- tests/mcp/tools/test_contextor_fact_lineage.py::test_untrusted_module_truth_prevents_symbol_calls_complete_coverage
-
-The five passing RED cases were fresh-only map, empty map, missing legacy attribute, target-local truth despite unrelated malformed entry, and global resync with fresh module truth.
+- The six passing cases were the newly added UPDATED/DELETED matrix cases across both helper outcomes (those statuses were already persisted by the old branch), the LIVE-delegation check, and the existing local UPDATED snapshot-hydration integration.
+- The 14 failures were the SYNTAX_ERROR, RECOVERED, both UNCHANGED labels, and structured ERROR statuses for both helper return values; the helper-exception contract; syntax-error snapshot hydration; early-UNCHANGED helper invocation; and structured preparation-error persistence.
+- Failures showed skipped helper calls, a fabricated true response flag, or missing snapshot hydration for state mutations. The independent LIVE delegation case was green before and after the patch.
 
 ## GREEN_RESULT
 
-The final focused run of the three named regression owners plus the new diagnostic-path regression passed: **117 passed, 1 dependency deprecation warning**.
+After the production edit, the new focused regressions passed: 20 passed, 1 third-party Authlib deprecation warning. The complete requested test command passed: 114 passed, 1 third-party Authlib deprecation warning.
 
-The exact 13-file combined gate passed: **440 passed, 1 dependency deprecation warning in 130.46s**.
+## ALL_STATUS_PERSISTENCE_MATRIX
 
-The modified production owner compiled in memory successfully with repository .venv Python. git diff --check returned no whitespace errors. Git emitted LF-to-CRLF normalization warnings for the five changed files.
+The parameterized local-fallback test forces every connect(root) call to return None. For each returned status it checks one engine update, exactly one persister call, original status preservation, and the public flag against both helper outcomes.
 
-During test integration, the first owner-file run exposed two expectation/fixture mismatches: the architecture fixture stub omitted families.module, and the fact-lineage test expected the prior partial status despite canonical_state now being unavailable. The architecture case now invokes the actual helper and the lineage expectation matches the required fail-closed aggregate. A subsequent temporary unrelated assertion edit was corrected before the final passing owner and combined runs; no production changes resulted from it.
+| Engine result status | Helper True | Helper False | Additional real local evidence |
+|---|---:|---:|---|
+| UPDATED | flag true | flag false | Updated artifact facts survive snapshot hydration. |
+| DELETED | flag true | flag false | Local-wrapper result exercised through the isolated status fixture. |
+| SYNTAX_ERROR | flag true | flag false | Retained module/artifacts, syntax error, and stale parse marker survive hydration. |
+| RECOVERED | flag true | flag false | Recovery snapshot has checked syntax and no old parse-stale entry. |
+| Parsed semantic no-op UNCHANGED | flag true | flag false | A parsed no-op persists syntax, lineage, and FileState tracking through hydration. |
+| Early UNCHANGED | flag true | flag false | Real engine returns early; a spy confirms the persister is explicitly called. |
+| Structured ERROR | flag true | flag false | The engine error branch mutates parse freshness; the resulting state is persisted and hydrates. |
 
-## AGGREGATE_FRESHNESS_MATRIX
+These status-table booleans are tested with an isolated wrapper fixture and a controlled helper return value. The real local integrations use the repository engine and snapshot hydration where listed.
 
-| Input to unscoped build_state_freshness | canonical_state when resync=false | families.module |
-|---|---|---|
-| Missing legacy attribute | fresh | fresh |
-| Empty dict | fresh | fresh |
-| All entries state=fresh | fresh | fresh |
-| Any valid stale, otherwise fresh | stale | stale |
-| Any malformed individual entry or non-string module key | unavailable | unavailable |
-| Whole map None, False, empty list, or non-dict pair iterable | unavailable | unavailable |
-| Mixed fresh, stale and untrusted entries | unavailable | unavailable |
-| Mixed fresh and stale, no untrusted entries | stale | stale |
-| Any parse marker while resync_required=true | stale | aggregate parse truth independently remains fresh, stale or unavailable |
+## TRUE_FALSE_RESPONSE_CONTRACT
 
-Tests assert the source mapping object and each nested entry identity remain unchanged. No in-place normalization is performed. The implementation iterates only the already-materialized dict keys and calls module_current_truth; it introduces no disk read, source parse, repository scan, graph calculation, or persistence call.
+CODE_PATH_PROVED: In local fallback, the wrapper assigns the helper's Boolean return directly to live_state_persisted. Both Boolean outcomes are covered for all seven listed statuses. If the helper raises, the existing outer exception handler returns status=ERROR and does not include live_state_persisted.
 
-## TARGET_LOCAL_COMPATIBILITY
+CONTRACT LIMIT: A true flag means _persist_live_engine returned true. It is not a claim of atomic publication across snapshot and FileStateManager storage, crash safety, read-back verification, or power-loss durability.
 
-With target_module supplied, module_parse_state is obtained only from module_current_truth for that target. The regression uses a fresh target plus an unrelated unknown marker and asserts target canonical_state/families.module remain fresh and the source map and both nested entries retain identity. Existing targeted tests also cover target stale and untrusted outcomes.
+## SYNTAX_SNAPSHOT_HYDRATION
 
-## GLOBAL_RESYNC_COMPATIBILITY
+DIRECT_EVIDENCE: The real local integration starts with a valid indexed provider.py, introduces a syntax error, and calls the public wrapper with connect(root) -> None. It receives SYNTAX_ERROR and a true helper result. After clearing the runtime engine cache and hydrating from the saved snapshot:
 
-resync_required controls canonical_state after module_parse_state has been computed: canonical_state remains stale. families.module reports the independent aggregate parse truth, including unavailable for malformed whole map, unavailable for untrusted entry, stale for valid stale, and fresh for valid fresh. Parameterized regressions cover all four under resync=true. Existing target-specific global resync regression remains unchanged.
+- the previous provider module and artifact payloads remain equal to their pre-error values (LKG);
+- module_parse_freshness['provider']['state'] == 'stale';
+- syntax_diagnostics_by_path['provider.py']['status'] == 'checked_with_errors'.
 
-## PUBLIC_ARCHITECTURE_CONTRACT
+## RECOVERY_AND_NOOP_HYDRATION
 
-C:\Temp\Contextor_Repo\contextor\mcp\tools\get_project_architecture.py calls build_state_freshness without target_module. Its overlay separately derives parse_stale_modules and can downgrade canonical_state. The updated regression uses the real build_state_freshness rather than the prior fixture stub and verifies that malformed pkg.mod produces:
-- parse_stale_modules.pkg.mod.state=unavailable, provenance=untrusted
-- state_freshness.canonical_state=unavailable
-- state_freshness.families.module=unavailable
-- an untrusted advisory warning
-The original module_parse_freshness entry remains unchanged.
+- A subsequent valid parse with changed source returns RECOVERED; its hydrated snapshot contains checked_and_none syntax diagnostics and no provider parse-stale entry.
+- The early no-op path returns UNCHANGED without parsing; the persistence spy records one helper call.
+- The parsed semantic no-op is driven by a changed file timestamp after the fixture's initial reconciliation, while source text stays identical. It returns UNCHANGED, persists, and hydrates checked_and_none syntax, the same non-empty provider.py lineage source facts, and a FileStateManager record for which has_changed(path) is false.
 
-## PUBLIC_FACT_LINEAGE_CONTRACT
+## LIVE_BRANCH_COMPATIBILITY
 
-C:\Temp\Contextor_Repo\contextor\mcp\tools\contextor_fact_lineage.py calls build_state_freshness without target_module. With pkg.alpha state=unknown, symbol_calls coverage still records stale_module_count=1 and the aggregate coverage gap. Freshness now reports canonical_state=unavailable and families.module=unavailable; public result status is unavailable because canonical unavailability outranks the family coverage partial. The regression verifies all these values and the unresolved coverage gap remains present.
+The isolated LIVE test returns a successful remote result and verifies delegation with origin='mcp'. The fake local engine is never invoked and the local persister is configured to fail the test if called. The LIVE response retains its existing true flag. No LIVE process or service was restarted.
 
-## DIAGNOSTICS_PUBLIC_GATE
+## TARGETED_TEST_RESULTS
 
-Contextor source-range retrieval for C:\Temp\Contextor_Repo\contextor\mcp\tools\get_file_edit_context.py:455-470 is complete for the requested range. It calls module_truth_unavailable before building structural metrics. On unavailable module truth it returns immediately after attaching the separately materialized syntax_diagnostics projection. Other inspected call sites at lines 232-250, 395-414 and 590-610 have the same per-module gate before structural result construction. Contextor documentation states syntax diagnostics are an independent canonical syntax-family projection and stale structural responses may include that projection.
+Before production edit (RED): 20 newly added focused cases; 14 failed and 6 passed, as detailed above.
 
-The new test tests/mcp/tools/test_get_file_edit_context_syntax.py::test_untrusted_module_truth_is_gated_before_canonical_syntax_projection uses the real module_truth_unavailable helper with module_parse_freshness={"pkg.module":{"state":"unknown"}} and syntax_diagnostics_state=fresh. It passes and verifies:
-- top-level status=unavailable and provenance=untrusted;
-- the separately materialized syntax_diagnostics retains availability=fresh and its exact syntax error;
-- structural consumers and risk_score are absent.
+After production edit (new focused regressions):
 
-This is not a bypass of the per-module structural gate: the public response is unavailable/untrusted and returns before structural payload construction. No diagnostics production file was changed. No BLOCKED_ADDITIONAL_CONSUMER condition was demonstrated.
+    20 passed, 1 warning
 
-## COMBINED_13_FILE_GATE
+Complete requested targeted gate:
 
-Exact command:
-    & .\.venv\Scripts\python.exe -m pytest -q tests/mcp/tools/test_lineage_freshness.py tests/mcp/tools/test_contextor_fact_lineage.py tests/mcp/tools/test_get_module_blast_radius.py tests/mcp/tools/test_get_project_architecture_full_reports.py tests/mcp/tools/test_get_source_range_direct_lookup.py tests/test_module_usage_reuse.py tests/test_canonical_state_contract.py tests/test_reporting_single_file.py tests/analysis/test_lineage_live_query.py tests/test_live_e2e_corrections.py tests/test_refresh_plan_execution.py tests/test_syntax_diagnostics_full_analysis.py tests/test_live_state_ipc.py
+    & .\.venv\Scripts\python.exe -m pytest -q tests/test_mcp_incremental_hydration.py tests/test_mcp_regressions.py tests/test_incremental_equivalence.py::test_incremental_syntax_error tests/test_incremental_equivalence.py::test_incremental_successful_modify_after_failed_modify
 
-Result: 440 passed, 1 AuthlibDeprecationWarning in 130.46s. No full repository pytest was run.
+    114 passed, 1 warning in 28.27s
 
-## SOURCE_SYNC_VERIFICATION
+The warning is Authlib's third-party deprecation warning from the installed FastMCP environment.
 
-Contextor post-edit full symbol retrieval reported the exact updated implementation, no partial source, workspace_sync=verified at canonical LIVE revision 192. The public caller/blast-radius evidence was refreshed after the edit. Current project LIVE summary reports canonical_state=fresh, provenance=live, resync_required=false, parse_stale_modules empty. The unscoped project response workspace_sync=unverified because it is not target-file-scoped.
-
-The final diff contains only the authorized production owner and the three named targeted test owners plus the Step 5 supplementary get_file_edit_context syntax regression. git status showed no unexpected changed files.
+Compilation of the production file and both changed test files passed with .venv\Scripts\python.exe -m py_compile. git diff --check returned exit code 0 with no whitespace errors. Git printed only line-ending notices that LF will be converted to CRLF the next time it touches these files.
 
 ## LIVE_REVISION_BEFORE_AFTER
 
-- Before: canonical LIVE revision 184, canonical_state=fresh, provenance=live, resync_required=false.
-- After: canonical LIVE revision 192, canonical_state=fresh, provenance=live, resync_required=false.
-- get_live_events(after_revision=184): continuity=continuous, resync_required=false, eight ordered desktop_watcher update_file events for revisions 185-192. Revision 188 is query_helpers.py; revisions 185-187 and 190-192 reflect the three targeted test owners; revision 189 reflects the supplementary syntax test.
-- No manual update_file, restart or source mutation through MCP was performed.
+- Initial Contextor baseline: revision 194, activity epoch 9e9a2a2edcb046bba00df0850244ad36, resync_required=false.
+- Immediately before the production edit: revision 195, continuous from 194, resync_required=false.
+- After edits and tests: revision 204, same activity epoch, event continuity continuous, resync_required=false.
+- The watcher emitted revisions 196–204 for the authorized test/source file edits. Revision 199 identifies the production edit to contextor\mcp\tools\update_file.py; later events are the two authorized test files. No artificial file event was generated.
+
+## SOURCE_SYNC_VERIFICATION
+
+Contextor's post-edit complete source fetch reports revision 204, canonical state fresh, workspace_sync=verified, and every returned family marker fresh. Post-edit call context and blast radius also resolve against revision 204. The source fetch was complete and not truncated.
+
+The modified Python file is under the MCP package path. The complete _is_mcp_runtime_source_path and _mcp_runtime_restart_required implementations confirm that changed MCP package code requires a serving MCP process restart when it differs from its startup fingerprint.
 
 ## FULL_DIFFS
 
-Complete raw git diff for all five changed source/test files follows:
+Complete actual working-tree diffs for every changed production/test file follow. walkthrough.md is the requested report and is not a source/test diff.
 
-```diff
-diff --git a/contextor/mcp/query_helpers.py b/contextor/mcp/query_helpers.py
-index c3200c6..0d48511 100644
---- a/contextor/mcp/query_helpers.py
-+++ b/contextor/mcp/query_helpers.py
-@@ -362,14 +362,39 @@ def build_state_freshness(
-         provenance = "snapshot"
+FULL_DIFFS_BEGIN
+diff --git a/contextor/mcp/tools/update_file.py b/contextor/mcp/tools/update_file.py
+index 86f3c46..8bcde7e 100644
+--- a/contextor/mcp/tools/update_file.py
++++ b/contextor/mcp/tools/update_file.py
+@@ -221,10 +221,9 @@ def update_file(
+             live_state_persisted = True
+         else:
+             res = engine.update_file(str(target_file))
+-            live_state_persisted = (
+-                _persist_live_engine(root, engine)
+-                if res.status in {"UPDATED", "DELETED"}
+-                else True
++            live_state_persisted = _persist_live_engine(
++                root,
++                engine,
+             )
+         new_artifacts = engine.state.artifacts.get(module_path, {})
+         semantic_diff = _semantic_artifact_diff(old_artifacts, new_artifacts)
+diff --git a/tests/test_mcp_incremental_hydration.py b/tests/test_mcp_incremental_hydration.py
+index 20e0ec0..9bf8523 100644
+--- a/tests/test_mcp_incremental_hydration.py
++++ b/tests/test_mcp_incremental_hydration.py
+@@ -1,11 +1,15 @@
+ """End-to-end MCP test for incremental state persistence and live context hydration."""
  
-     # 2. Canonical State Internal Health
--    resync_required = getattr(state, "resync_required", False)
--    if resync_required:
--        canonical_state = "stale"
--    elif target_module:
--        truth = module_current_truth(state, target_module)
--        canonical_state = truth.get("state", "fresh")
-+    if target_module:
-+        module_parse_state = module_current_truth(
-+            state,
-+            target_module,
-+        )["state"]
-     else:
--        canonical_state = "fresh"
-+        raw_module_freshness = getattr(
-+            state,
-+            "module_parse_freshness",
-+            {},
-+        )
-+        if not isinstance(raw_module_freshness, dict):
-+            module_parse_state = "unavailable"
-+        else:
-+            module_parse_state = "fresh"
-+            for module_name in raw_module_freshness:
-+                if type(module_name) is not str:
-+                    module_parse_state = "unavailable"
-+                    break
-+                entry_state = module_current_truth(
-+                    state,
-+                    module_name,
-+                )["state"]
-+                if entry_state == "unavailable":
-+                    module_parse_state = "unavailable"
-+                    break
-+                if entry_state == "stale":
-+                    module_parse_state = "stale"
-+
-+    resync_required = getattr(state, "resync_required", False)
-+    canonical_state = (
-+        "stale" if resync_required else module_parse_state
-+    )
+ import json
++from copy import deepcopy
++import os
  
-     # 3. Positive Generation Coherence Proof (Blocker 1 - Fail Closed)
-     state_mgr = getattr(engine, "state_manager", None)
-@@ -462,11 +487,7 @@ def build_state_freshness(
+ import pytest
+ import threading
++from types import SimpleNamespace
  
-     # 5. Families
-     families = {
--        "module": (
--            module_current_truth(state, target_module)["state"]
--            if target_module
--            else "fresh"
--        ),
-+        "module": module_parse_state,
-         "graph": (
-             "fresh"
-             if getattr(state, "dependency_graph", None) is not None
-diff --git a/tests/mcp/tools/test_contextor_fact_lineage.py b/tests/mcp/tools/test_contextor_fact_lineage.py
-index 824c28b..0dfce4e 100644
---- a/tests/mcp/tools/test_contextor_fact_lineage.py
-+++ b/tests/mcp/tools/test_contextor_fact_lineage.py
-@@ -337,8 +337,10 @@ def test_untrusted_module_truth_prevents_symbol_calls_complete_coverage(tmp_path
- 
-     result = _load(contextor_fact_lineage(str(tmp_path), "symbol_calls"))
- 
--    assert result["status"] == "partial"
-+    assert result["status"] == "unavailable"
-     assert result["coverage"]["stale_module_count"] == 1
-+    assert result["freshness"]["canonical_state"] == "unavailable"
-+    assert result["freshness"]["families"]["module"] == "unavailable"
-     assert any(
-         gap["expected_edge"] == "COMPLETE_SYMBOL_CALLS_COVERAGE"
-         for gap in result["unresolved"]
-diff --git a/tests/mcp/tools/test_get_file_edit_context_syntax.py b/tests/mcp/tools/test_get_file_edit_context_syntax.py
-index 5d7d73f..c48b262 100644
---- a/tests/mcp/tools/test_get_file_edit_context_syntax.py
-+++ b/tests/mcp/tools/test_get_file_edit_context_syntax.py
-@@ -5,6 +5,7 @@ import pytest
- 
- from contextor.core.report_query import IndexCatalog
- from contextor.mcp import query_helpers
-+from contextor.mcp.query_helpers import module_truth_unavailable as canonical_module_truth_unavailable
+ from contextor import mcp_server
++from contextor.core.analysis.incremental import engine as incremental_engine_module
+ from contextor.mcp import report_helpers
  from contextor.mcp import runtime as mcp_runtime
- from contextor.mcp.tools.get_file_edit_context import get_file_edit_context
+ from contextor.core.analysis.incremental_engine import IncrementalAnalysisEngine
+@@ -23,10 +27,63 @@ from contextor.core.reference.shared import (
+     validate_reexport_facts_by_module,
+ )
+ from contextor.core.live_state import CanonicalLiveServer, LiveStateClient
++from contextor.mcp.tools import update_file as update_file_module
  
-@@ -106,6 +107,38 @@ def test_syntax_error_survives_structural_fail_closed_response(monkeypatch, harn
-     assert result["syntax_diagnostics"]["availability"] == "fresh"
+ pytestmark = pytest.mark.live
  
  
-+def test_untrusted_module_truth_is_gated_before_canonical_syntax_projection(
-+    monkeypatch, harness
-+):
-+    state = _state(
-+        family_state="fresh",
-+        fact={
-+            "status": "checked_with_errors",
-+            "errors": [{"message": "invalid syntax", "line_number": 3, "column_number": 7}],
-+        },
++def _build_local_fallback_engine(tmp_path, monkeypatch, source):
++    repo = tmp_path / "repo"
++    repo.mkdir()
++    provider = repo / "provider.py"
++    provider.write_text(source, encoding="utf-8")
++    index = index_repository(str(repo))
++    modules = index.modules
++    reexport_facts_by_module = materialize_reexport_facts_by_module(
++        modules,
++        index.reference_facts_by_module,
 +    )
-+    state.module_parse_freshness = {"pkg.module": {"state": "unknown"}}
-+    _install_state(monkeypatch, harness, state)
++    artifacts, failures = collect_module_artifacts(modules, str(repo))
++    assert not failures
++    trie = build_trie(modules)
++    package_root = detect_package_root(modules, trie)
++    state = RepositoryAnalysisState(
++        modules=dict(modules),
++        reexport_facts_by_module=reexport_facts_by_module,
++        artifacts=artifacts,
++        dependency_graph=build_graph(modules, trie=trie, package_root=package_root),
++        trie=trie,
++        package_root=package_root,
++        artifact_consumption={},
++    )
++    registry = PersistentIdentityRegistry(str(repo))
++    with registry.transaction():
++        registry.sync_with_workspace(
++            set(modules), collect_qualified_artifact_identities(artifacts)
++        )
++    cache_root = tmp_path / "cache"
++    monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(cache_root))
++    cache_dir = repo_cache_dir(repo)
++    state_manager = FileStateManager(str(cache_dir))
++    state_manager.update_state(str(provider))
++    engine = IncrementalAnalysisEngine(state, registry, state_manager, str(repo))
++    monkeypatch.setattr(mcp_runtime, "_live_engines", {str(repo.resolve()): engine})
++    monkeypatch.setattr(mcp_runtime, "_live_engine_revisions", {})
++    monkeypatch.setattr("contextor.core.live_state.connect", lambda _root: None)
++    return repo, provider, engine
++
++
++def _local_update(repo, provider):
++    return json.loads(
++        mcp_server.update_file.fn(repo_path=str(repo), file_path=str(provider))
++    )
++
++
++def _rehydrate_local_engine(repo):
++    mcp_runtime._live_engines.clear()
++    return mcp_runtime.get_or_init_engine(repo.resolve())
++
++
+ def test_mcp_refreshes_its_engine_from_a_newer_shared_live_revision(tmp_path, monkeypatch):
+     first = RepositoryAnalysisState(modules={"old": object()})
+     second = RepositoryAnalysisState(modules={"new": object()})
+@@ -147,3 +204,139 @@ def test_update_persist_restart_hydrate_keeps_live_reverse_context(tmp_path, mon
+         {"module_id": registry.get_module_id("consumer"), "module": "consumer"}
+     ]
+     assert context["dependency_data_source"] == "live_canonical_graph"
++
++
++def test_local_fallback_updated_facts_survive_snapshot_hydration(tmp_path, monkeypatch):
++    repo, provider, engine = _build_local_fallback_engine(
++        tmp_path, monkeypatch, "def run():\n    return 1\n"
++    )
++    original_artifacts = deepcopy(engine.state.artifacts["provider"])
++    provider.write_text(
++        "def run():\n    return 1\n\ndef added():\n    return 2\n",
++        encoding="utf-8",
++    )
++
++    response = _local_update(repo, provider)
++    assert response["status"] == "UPDATED"
++    assert response["live_state_persisted"] is True
++
++    updated_engine = mcp_runtime._live_engines[str(repo.resolve())]
++    assert updated_engine.state.artifacts["provider"] != original_artifacts
++    hydrated = _rehydrate_local_engine(repo)
++    assert hydrated is not None
++    assert hydrated.state.artifacts["provider"] == updated_engine.state.artifacts["provider"]
++
++
++def test_local_fallback_syntax_error_and_recovery_survive_snapshot_hydration(
++    tmp_path, monkeypatch
++):
++    repo, provider, engine = _build_local_fallback_engine(
++        tmp_path, monkeypatch, "def run():\n    return 1\n"
++    )
++    original_module = deepcopy(engine.state.modules["provider"])
++    original_artifacts = deepcopy(engine.state.artifacts["provider"])
++
++    provider.write_text("def run(:\n    return 1\n", encoding="utf-8")
++    syntax_error = _local_update(repo, provider)
++    assert syntax_error["status"] == "SYNTAX_ERROR"
++    assert syntax_error["live_state_persisted"] is True
++
++    syntax_hydrated = _rehydrate_local_engine(repo)
++    assert syntax_hydrated is not None
++    assert syntax_hydrated.state.modules["provider"] == original_module
++    assert syntax_hydrated.state.artifacts["provider"] == original_artifacts
++    assert syntax_hydrated.state.module_parse_freshness["provider"]["state"] == "stale"
++    assert (
++        syntax_hydrated.state.syntax_diagnostics_by_path["provider.py"]["status"]
++        == "checked_with_errors"
++    )
++
++    provider.write_text("def run():\n    return 2\n", encoding="utf-8")
++    recovered = _local_update(repo, provider)
++    assert recovered["status"] == "RECOVERED"
++    assert recovered["live_state_persisted"] is True
++
++    recovered_hydrated = _rehydrate_local_engine(repo)
++    assert recovered_hydrated is not None
++    assert "provider" not in recovered_hydrated.state.module_parse_freshness
++    assert (
++        recovered_hydrated.state.syntax_diagnostics_by_path["provider.py"]["status"]
++        == "checked_and_none"
++    )
++
++
++def test_local_fallback_early_and_parsed_unchanged_are_persisted_and_hydrated(
++    tmp_path, monkeypatch
++):
++    repo, provider, _engine = _build_local_fallback_engine(
++        tmp_path, monkeypatch, "def run():\n    return 1\n"
++    )
++    real_persist = update_file_module._persist_live_engine
++    persist_calls = []
++
++    def persist_and_record(root, engine):
++        persist_calls.append((root, engine))
++        return real_persist(root, engine)
++
++    monkeypatch.setattr(update_file_module, "_persist_live_engine", persist_and_record)
++
++    early_unchanged = _local_update(repo, provider)
++    assert early_unchanged["status"] == "UNCHANGED"
++    assert early_unchanged["live_state_persisted"] is True
++    assert len(persist_calls) == 1
++
++    stat = provider.stat()
++    os.utime(provider, (stat.st_atime, stat.st_mtime + 2))
++    reconciled = _local_update(repo, provider)
++    assert reconciled["status"] in {"UPDATED", "UNCHANGED"}
++    assert reconciled["live_state_persisted"] is True
++    assert len(persist_calls) == 2
++
++    stat = provider.stat()
++    os.utime(provider, (stat.st_atime, stat.st_mtime + 2))
++    parsed_unchanged = _local_update(repo, provider)
++    assert parsed_unchanged["status"] == "UNCHANGED", parsed_unchanged
++    assert parsed_unchanged["live_state_persisted"] is True
++    assert len(persist_calls) == 3
++
++    parsed_engine = mcp_runtime._live_engines[str(repo.resolve())]
++    expected_lineage = deepcopy(parsed_engine.state.lineage_facts_by_source)
++    assert "provider.py" in expected_lineage
++    hydrated = _rehydrate_local_engine(repo)
++    assert hydrated is not None
++    assert (
++        hydrated.state.syntax_diagnostics_by_path["provider.py"]["status"]
++        == "checked_and_none"
++    )
++    assert hydrated.state.lineage_facts_by_source == expected_lineage
++    assert hydrated.state_manager.has_changed(str(provider)) is False
++
++
++def test_local_fallback_structured_preparation_error_persists_published_mutations(
++    tmp_path, monkeypatch
++):
++    repo, provider, _engine = _build_local_fallback_engine(
++        tmp_path, monkeypatch, "def run():\n    return 1\n"
++    )
++    provider.write_text(
++        "def run():\n    return 1\n# trigger preparation\n", encoding="utf-8"
++    )
 +    monkeypatch.setattr(
-+        query_helpers,
-+        "module_truth_unavailable",
-+        canonical_module_truth_unavailable,
++        incremental_engine_module,
++        "prepare_source_update",
++        lambda **_kwargs: SimpleNamespace(
++            has_error=True,
++            error_status="ERROR",
++            error_message="structured preparation failure",
++            line_number=2,
++            column_number=3,
++        ),
 +    )
 +
-+    result = json.loads(
-+        get_file_edit_context(str(harness.root), file_path="pkg/module.py")
++    response = _local_update(repo, provider)
++    assert response["status"] == "ERROR"
++    assert response["live_state_persisted"] is True
++
++    hydrated = _rehydrate_local_engine(repo)
++    assert hydrated is not None
++    assert hydrated.state.module_parse_freshness["provider"]["state"] == "stale"
+diff --git a/tests/test_mcp_regressions.py b/tests/test_mcp_regressions.py
+index b4bbe05..010bdeb 100644
+--- a/tests/test_mcp_regressions.py
++++ b/tests/test_mcp_regressions.py
+@@ -2737,6 +2737,175 @@ def test_mcp_update_file_shapes_affected_modules_compact_full_and_fields(tmp_pat
+     assert filtered["status"] == "UPDATED"
+ 
+ 
++@pytest.mark.parametrize(
++    ("result_status", "path_kind"),
++    [
++        pytest.param("UPDATED", "updated", id="updated"),
++        pytest.param("DELETED", "deleted", id="deleted"),
++        pytest.param("SYNTAX_ERROR", "syntax-error", id="syntax-error"),
++        pytest.param("RECOVERED", "recovered", id="recovered"),
++        pytest.param("UNCHANGED", "parsed-semantic-no-op", id="parsed-unchanged"),
++        pytest.param("UNCHANGED", "early-no-op", id="early-unchanged"),
++        pytest.param("ERROR", "structured-error", id="structured-error"),
++    ],
++)
++@pytest.mark.parametrize("persisted", [True, False], ids=["persisted", "not-persisted"])
++def test_mcp_update_file_local_fallback_persists_every_returned_status(
++    tmp_path, monkeypatch, result_status, path_kind, persisted
++):
++    root = tmp_path.resolve()
++    target = root / "provider.py"
++    target.write_text("def run():\n    return 1\n", encoding="utf-8")
++    connect_calls = []
++    update_calls = []
++    persist_calls = []
++
++    result = SimpleNamespace(
++        status=result_status,
++        file_path=str(target),
++        graph_state="fresh",
++        dependencies_state="fresh",
++        blast_radius_state="deferred",
++        local_metrics_state="deferred",
++        global_metrics_state="deferred",
++        artifact_consumption_state="fresh",
++        affected_modules=[],
++        delta=None,
 +    )
 +
-+    assert result["status"] == "unavailable"
-+    assert result["provenance"] == "untrusted"
-+    assert result["syntax_diagnostics"]["availability"] == "fresh"
-+    assert result["syntax_diagnostics"]["errors"] == [
-+        {"message": "invalid syntax", "line_number": 3, "column_number": 7}
-+    ]
-+    assert "consumers" not in result
-+    assert "risk_score" not in result
++    class FakeEngine:
++        state = SimpleNamespace(artifacts={"provider": {}})
 +
++        def update_file(self, file_path):
++            update_calls.append(file_path)
++            return result
 +
- @pytest.mark.parametrize("family_state", ["not_materialized", "deferred"])
- def test_unavailable_syntax_family_never_fabricates_empty_errors(monkeypatch, harness, family_state):
-     state = _state(family_state=family_state)
-diff --git a/tests/mcp/tools/test_get_project_architecture_full_reports.py b/tests/mcp/tools/test_get_project_architecture_full_reports.py
-index 8cc432a..907e9ed 100644
---- a/tests/mcp/tools/test_get_project_architecture_full_reports.py
-+++ b/tests/mcp/tools/test_get_project_architecture_full_reports.py
-@@ -190,6 +190,11 @@ def test_project_architecture_overlay_distinguishes_untrusted_from_lkg(tmp_path,
-     engine = architecture_tool.mcp_runtime.get_or_init_engine(tmp_path)
-     entry = {"state": "unknown"}
-     engine.state.module_parse_freshness = {"pkg.mod": entry}
++    engine = FakeEngine()
++
++    def connect(_root):
++        connect_calls.append(_root)
++        return None
++
++    def persist(_root, candidate_engine):
++        persist_calls.append((_root, candidate_engine))
++        return persisted
++
++    monkeypatch.setattr("contextor.core.live_state.connect", connect)
++    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: engine)
++    monkeypatch.setattr(update_file_module, "_persist_live_engine", persist)
 +    monkeypatch.setattr(
-+        architecture_tool.query_helpers,
-+        "build_state_freshness",
-+        build_state_freshness,
++        update_file_module, "_mcp_runtime_restart_required", lambda _path: False
 +    )
- 
-     result = json.loads(mcp_server.get_project_architecture.fn(repo_path=str(tmp_path)))
- 
-@@ -197,6 +202,7 @@ def test_project_architecture_overlay_distinguishes_untrusted_from_lkg(tmp_path,
-     assert live["parse_stale_modules"]["pkg.mod"]["state"] == "unavailable"
-     assert live["parse_stale_modules"]["pkg.mod"]["provenance"] == "untrusted"
-     assert live["state_freshness"]["canonical_state"] == "unavailable"
-+    assert live["state_freshness"]["families"]["module"] == "unavailable"
-     assert "untrusted" in live["state_freshness"]["advisory_warning"]
-     assert "last-known-good" not in live["state_freshness"]["advisory_warning"]
-     assert engine.state.module_parse_freshness["pkg.mod"] is entry
-diff --git a/tests/mcp/tools/test_lineage_freshness.py b/tests/mcp/tools/test_lineage_freshness.py
-index 415c3f0..a32a15c 100644
---- a/tests/mcp/tools/test_lineage_freshness.py
-+++ b/tests/mcp/tools/test_lineage_freshness.py
-@@ -159,3 +159,123 @@ def test_global_resync_still_wins_over_untrusted_module_canonical_state(tmp_path
- 
-     assert freshness["canonical_state"] == "stale"
-     assert freshness["families"]["module"] == "unavailable"
++
++    response = json.loads(
++        mcp_server.update_file.fn(repo_path=str(root), file_path=str(target))
++    )
++
++    assert bool(path_kind)
++    assert connect_calls
++    assert all(call_root == root for call_root in connect_calls)
++    assert update_calls == [str(target)]
++    assert persist_calls == [(root, engine)]
++    assert response["status"] == result_status
++    assert response["live_state_persisted"] is persisted
 +
 +
-+@pytest.mark.parametrize(
-+    "raw_map, expected",
-+    [
-+        ({"pkg.mod": {"state": "unknown"}}, "unavailable"),
-+        ({"pkg.mod": {"state": "stale"}}, "stale"),
-+        (
-+            {
-+                "pkg.fresh": {"state": "fresh"},
-+                "pkg.stale": {"state": "stale"},
-+                "pkg.unknown": {"state": "unknown"},
-+            },
-+            "unavailable",
-+        ),
-+        (
-+            {"pkg.fresh": {"state": "fresh"}, "pkg.stale": {"state": "stale"}},
-+            "stale",
-+        ),
-+        (
-+            {"pkg.one": {"state": "fresh"}, "pkg.two": {"state": "fresh"}},
-+            "fresh",
-+        ),
-+        ({}, "fresh"),
-+        ({1: {"state": "fresh"}}, "unavailable"),
-+    ],
-+    ids=[
-+        "untrusted",
-+        "stale",
-+        "mixed-untrusted-wins",
-+        "stale-wins-over-fresh",
-+        "fresh-only",
-+        "empty",
-+        "invalid-key",
-+    ],
-+)
-+def test_unscoped_module_freshness_aggregates_parse_truth_without_mutation(
-+    tmp_path, raw_map, expected
++def test_mcp_update_file_live_branch_delegates_without_local_persistence(
++    tmp_path, monkeypatch
 +):
-+    state = _state("fresh")
-+    state.module_parse_freshness = raw_map
-+    entries = dict(raw_map)
++    root = tmp_path.resolve()
++    target = root / "provider.py"
++    target.write_text("def run():\n    return 1\n", encoding="utf-8")
++    remote_result = SimpleNamespace(
++        status="UPDATED",
++        file_path=str(target),
++        graph_state="fresh",
++        dependencies_state="fresh",
++        blast_radius_state="fresh",
++        local_metrics_state="deferred",
++        global_metrics_state="deferred",
++        artifact_consumption_state="fresh",
++        affected_modules=[],
++        delta=None,
++    )
++    remote_calls = []
 +
-+    freshness = build_state_freshness(tmp_path, state)
++    class FakeLiveClient:
++        def update_file(self, file_path, *, origin):
++            remote_calls.append((file_path, origin))
++            return {"status": "ok", "revision": 42, "result": remote_result}
 +
-+    assert freshness["canonical_state"] == expected
-+    assert freshness["families"]["module"] == expected
-+    assert state.module_parse_freshness is raw_map
-+    for module_name, entry in entries.items():
-+        assert state.module_parse_freshness[module_name] is entry
++    engine = SimpleNamespace(
++        state=SimpleNamespace(artifacts={"provider": {}}),
++        update_file=lambda *_args: pytest.fail("LIVE path used local engine update"),
++    )
++    monkeypatch.setattr(
++        "contextor.core.live_state.connect", lambda _root: FakeLiveClient()
++    )
++    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: engine)
++    monkeypatch.setattr(
++        mcp_runtime,
++        "_engine_cache_transaction",
++        lambda _root: nullcontext(str(root)),
++    )
++    monkeypatch.setattr(mcp_runtime, "_live_engine_revisions", {})
++    monkeypatch.setattr(
++        update_file_module,
++        "_persist_live_engine",
++        lambda *_args: pytest.fail("LIVE path called the local persister"),
++    )
++    monkeypatch.setattr(
++        update_file_module, "_mcp_runtime_restart_required", lambda _path: False
++    )
 +
++    response = json.loads(
++        mcp_server.update_file.fn(repo_path=str(root), file_path=str(target))
++    )
 +
-+@pytest.mark.parametrize(
-+    "raw_map",
-+    [None, False, [], [("pkg.mod", {"state": "fresh"})]],
-+    ids=["none", "false", "empty-list", "pair-iterable"],
-+)
-+def test_unscoped_module_freshness_rejects_malformed_whole_map(tmp_path, raw_map):
-+    state = _state("fresh")
-+    state.module_parse_freshness = raw_map
-+
-+    freshness = build_state_freshness(tmp_path, state)
-+
-+    assert freshness["canonical_state"] == "unavailable"
-+    assert freshness["families"]["module"] == "unavailable"
-+    assert state.module_parse_freshness is raw_map
-+
-+
-+def test_unscoped_module_freshness_missing_legacy_map_attribute_remains_fresh(tmp_path):
-+    state = _state("fresh")
-+
-+    freshness = build_state_freshness(tmp_path, state)
-+
-+    assert freshness["canonical_state"] == "fresh"
-+    assert freshness["families"]["module"] == "fresh"
-+    assert not hasattr(state, "module_parse_freshness")
-+
-+
-+def test_target_module_freshness_ignores_unrelated_untrusted_module(tmp_path):
-+    state = _state("fresh")
-+    state.module_parse_freshness = {
-+        "pkg.target": {"state": "fresh"},
-+        "pkg.other": {"state": "unknown"},
-+    }
-+    raw_map = state.module_parse_freshness
-+    target_entry = raw_map["pkg.target"]
-+    other_entry = raw_map["pkg.other"]
-+
-+    freshness = build_state_freshness(tmp_path, state, target_module="pkg.target")
-+
-+    assert freshness["canonical_state"] == "fresh"
-+    assert freshness["families"]["module"] == "fresh"
-+    assert state.module_parse_freshness is raw_map
-+    assert raw_map["pkg.target"] is target_entry
-+    assert raw_map["pkg.other"] is other_entry
++    assert remote_calls == [(str(target), "mcp")]
++    assert response["status"] == "UPDATED"
++    assert response["live_state_persisted"] is True
 +
 +
-+@pytest.mark.parametrize(
-+    "raw_map, expected_family",
-+    [
-+        (None, "unavailable"),
-+        ({"pkg.mod": {"state": "unknown"}}, "unavailable"),
-+        ({"pkg.mod": {"state": "stale"}}, "stale"),
-+        ({"pkg.mod": {"state": "fresh"}}, "fresh"),
-+    ],
-+    ids=["malformed-map", "untrusted", "stale", "fresh"],
-+)
-+def test_global_resync_keeps_aggregate_parse_truth_but_stales_canonical_state(
-+    tmp_path, raw_map, expected_family
++def test_mcp_update_file_local_persistence_exception_keeps_error_response(
++    tmp_path, monkeypatch
 +):
-+    state = _state("fresh")
-+    state.resync_required = True
-+    state.module_parse_freshness = raw_map
++    root = tmp_path.resolve()
++    target = root / "provider.py"
++    target.write_text("def run():\n    return 1\n", encoding="utf-8")
++    result = SimpleNamespace(
++        status="SYNTAX_ERROR",
++        file_path=str(target),
++        graph_state="stale",
++        dependencies_state="stale",
++        blast_radius_state="deferred",
++        local_metrics_state="deferred",
++        global_metrics_state="deferred",
++        artifact_consumption_state="stale",
++        affected_modules=[],
++        delta=None,
++    )
++    engine = SimpleNamespace(
++        state=SimpleNamespace(artifacts={"provider": {}}),
++        update_file=lambda _path: result,
++    )
 +
-+    freshness = build_state_freshness(tmp_path, state)
++    def fail_persist(*_args):
++        raise OSError("snapshot persistence failed")
 +
-+    assert freshness["canonical_state"] == "stale"
-+    assert freshness["families"]["module"] == expected_family
-+    assert state.resync_required is True
-+    assert state.module_parse_freshness is raw_map
-```
++    monkeypatch.setattr("contextor.core.live_state.connect", lambda _root: None)
++    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: engine)
++    monkeypatch.setattr(update_file_module, "_persist_live_engine", fail_persist)
++
++    response = json.loads(
++        mcp_server.update_file.fn(repo_path=str(root), file_path=str(target))
++    )
++
++    assert response["status"] == "ERROR"
++    assert "snapshot persistence failed" in response["error"]
++    assert "live_state_persisted" not in response
++
++
+ 
+ def test_mcp_bootstrap_keeps_an_existing_virtual_environment(monkeypatch):
+     monkeypatch.setattr(mcp_server.sys, "prefix", "C:/repo/.venv")
+FULL_DIFFS_END
 
-## REMAINING_RISKS
+## REMAINING_ATOMICITY_RISKS
 
-No unresolved code-path blocker in the authorized scope. The fresh syntax diagnostic remains in the unavailable get_file_edit_context response as a separately materialized canonical syntax-family fact; this is covered by the focused regression and documented behavior. Serving-process code reload was not certified.
+OUT OF SCOPE / NOT CERTIFIED: This patch does not roll back canonical RAM state if persistence returns false or raises. It does not prove atomic snapshot plus FileStateManager publication, partial-write crash safety, read-back durability, or recovery from a split disk state. A persister exception still becomes an ERROR response after engine execution may already have mutated RAM.
 
 ## RESTART_REQUIRED
 
-No restart was performed or needed for the source/workspace evidence and test gate. Serving-process certification would require a manual reload/restart boundary for the MCP/LIVE Python authority; Desktop would also need a manual boundary if it retains its own imported server code. Neither was performed.
+YES — MCP server process. The changed update_file.py is MCP package source, and the existing restart gate treats changed package code as requiring restart relative to its startup fingerprint. No MCP, Desktop, or LIVE process was restarted. The tests and Contextor source synchronization do not certify that an already-running MCP process imported the new code.
 
 ## FINAL_VERDICT
 
-PASS_TARGETED_REGRESSION_GATE. The exact authorized production patch is present; aggregate marker, target-local, global-resync, public architecture, fact-lineage, diagnostics gate, compile, diff and 13-file test checks passed. No serving-process runtime certification is claimed.
+FOCUSED_PATCH_PASS; TARGETED_TESTS_PASS; MCP_RUNTIME_RELOAD_PENDING. The exact authorized local-fallback change is present, the complete targeted gate passed, Contextor confirms the updated source is synchronized, and watcher revisions are continuous with no resync requirement. Serving-process behavior awaits the required manual MCP restart and a separate runtime certification.
+
 
 
