@@ -2596,9 +2596,17 @@ def test_file_edit_context_prefers_fresh_live_graph_over_stale_saved_matrix(
 def test_incremental_live_state_persistence_roundtrips_for_restart(
     tmp_path, monkeypatch
 ):
+    from contextor.core.analysis.state_manager import FileStateManager
+    from contextor.core.paths import repo_cache_dir
+
     cache_root = tmp_path / "cache"
     monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(cache_root))
     registry = PersistentIdentityRegistry(str(tmp_path))
+    tracked_file = tmp_path / "tracked.py"
+    tracked_file.write_text("value = 1\n", encoding="utf-8")
+    state_manager = FileStateManager(str(repo_cache_dir(tmp_path)))
+    state_manager.update_state(str(tracked_file))
+    state_manager.state_id = "after-incremental-update"
     state = RepositoryAnalysisState(
         modules={},
         artifacts={"new.module": {"symbols": {"functions": ["run"]}}},
@@ -2609,12 +2617,10 @@ def test_incremental_live_state_persistence_roundtrips_for_restart(
     )
     engine = SimpleNamespace(
         state=state,
-        state_manager=SimpleNamespace(state_id="after-incremental-update"),
+        state_manager=state_manager,
     )
 
     persisted = update_file_module._persist_live_engine(tmp_path, engine)
-
-    from contextor.core.paths import repo_cache_dir
 
     loaded = load_engine_state(
         str(repo_cache_dir(tmp_path)),
@@ -2625,6 +2631,10 @@ def test_incremental_live_state_persistence_roundtrips_for_restart(
     assert persisted is True
     assert loaded is not None
     assert loaded.artifacts == state.artifacts
+    reloaded_manager = FileStateManager(str(repo_cache_dir(tmp_path)))
+    assert reloaded_manager.state_id == "after-incremental-update"
+    assert reloaded_manager.revision == 1
+    assert reloaded_manager.has_changed(str(tracked_file)) is False
 
 
 def test_fastmcp_schema_exposes_analysis_parameters():

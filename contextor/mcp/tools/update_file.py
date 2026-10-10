@@ -71,37 +71,111 @@ def _mcp_runtime_restart_required(target_file: Path) -> bool:
 
 
 def _persist_live_engine(root: Path, engine) -> bool:
-    """Persist incremental canonical state so the next MCP process can hydrate it."""
+    """Persist local state and FileState in one exact snapshot generation."""
     from contextor.core.analysis.state_manager import save_engine_state
+    from contextor.core.live_state import read_metadata
     from contextor.core.paths import repo_cache_dir
     from contextor.core.repository_identity import require_repository_identity
 
     identity = require_repository_identity(root)
     cache_dir = repo_cache_dir(root)
     cache_dir.mkdir(parents=True, exist_ok=True)
-    meta = save_engine_state(
-        engine.state,
-        str(cache_dir),
-        getattr(engine.state_manager, "state_id", ""),
-        writer="mcp",
-        repo_id=identity.repo_id,
-        root_path=identity.root_path,
-    )
-    if meta is not None:
-        new_rev = int(meta.revision)
-        with mcp_runtime._engine_cache_transaction(root) as root_key:
-            engine.revision = new_rev
-            if hasattr(engine.state, "revision"):
-                engine.state.revision = new_rev
-            mcp_runtime._live_engine_revisions[root_key] = new_rev
-            if hasattr(engine, "state_manager") and engine.state_manager:
-                engine.state_manager.revision = new_rev
-                if hasattr(engine.state_manager, "save"):
-                    engine.state_manager.save(
-                        getattr(engine.state_manager, "state_id", ""), revision=new_rev
+
+    manager = getattr(engine, "state_manager", None)
+    if manager is None or not callable(getattr(manager, "build_payload", None)):
+        raise RuntimeError(
+            "Local persistence requires a FileStateManager with build_payload."
+        )
+
+    with mcp_runtime._engine_cache_transaction(root) as root_key:
+        current = read_metadata(cache_dir)
+        metadata_path = cache_dir / "engine_state.meta.json"
+
+        if current is None and metadata_path.exists():
+            raise RuntimeError(
+                "Existing canonical snapshot metadata is invalid; "
+                "local persistence cannot bootstrap over it."
+            )
+
+        expected_previous_revision = (
+            int(current.revision) if current is not None else None
+        )
+
+        for revision_name, value in (
+            ("engine", getattr(engine, "revision", None)),
+            ("state", getattr(engine.state, "revision", None)),
+            ("cache", mcp_runtime._live_engine_revisions.get(root_key)),
+        ):
+            if value is None:
+                continue
+            if isinstance(value, bool) or type(value) is not int:
+                raise RuntimeError(
+                    f"Local {revision_name} revision is invalid."
+                )
+            if expected_previous_revision is None:
+                if value != 0:
+                    raise RuntimeError(
+                        f"Local {revision_name} revision has no committed baseline."
                     )
+            elif value != expected_previous_revision:
+                raise RuntimeError(
+                    f"Local {revision_name} revision differs from "
+                    "committed snapshot revision."
+                )
+
+        state_id = str(
+            (current.state_id if current is not None else "")
+            or getattr(engine.state, "state_id", "")
+            or getattr(manager, "state_id", "")
+            or identity.repo_id
+        )
+
+        if current is not None and current.state_id:
+            for existing_id in (
+                getattr(engine.state, "state_id", None),
+                getattr(manager, "state_id", None),
+            ):
+                if existing_id and str(existing_id) != current.state_id:
+                    raise RuntimeError(
+                        "Local state identity differs from committed snapshot."
+                    )
+
+        next_revision = (
+            expected_previous_revision + 1
+            if expected_previous_revision is not None
+            else 1
+        )
+
+        candidate = engine.state.clone_for_update()
+        payload = manager.build_payload(state_id, next_revision)
+
+        meta = save_engine_state(
+            candidate,
+            str(cache_dir),
+            state_id,
+            writer="mcp",
+            repo_id=identity.repo_id,
+            root_path=identity.root_path,
+            exact_revision=next_revision,
+            file_state_payload=payload,
+        )
+
+        if meta is None:
+            return False
+
+        if meta.revision != next_revision or meta.state_id != state_id:
+            raise RuntimeError(
+                "Exact local snapshot returned mismatching commit identity."
+            )
+
+        engine.revision = next_revision
+        engine.state.revision = next_revision
+        engine.state.state_id = state_id
+        manager.state_id = state_id
+        manager.revision = next_revision
+        mcp_runtime._live_engine_revisions[root_key] = next_revision
+
         return True
-    return False
 
 
 def _semantic_artifact_diff(old_artifacts: dict, new_artifacts: dict) -> dict:

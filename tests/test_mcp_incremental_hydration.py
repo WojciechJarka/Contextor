@@ -13,7 +13,12 @@ from contextor.core.analysis.incremental import engine as incremental_engine_mod
 from contextor.mcp import report_helpers
 from contextor.mcp import runtime as mcp_runtime
 from contextor.core.analysis.incremental_engine import IncrementalAnalysisEngine
-from contextor.core.analysis.state_manager import FileStateManager, RepositoryAnalysisState
+from contextor.core.analysis.state_manager import (
+    FileStateManager,
+    RepositoryAnalysisState,
+    load_engine_state,
+    save_engine_state,
+)
 from contextor.core.graph.graph import build_graph, build_trie, detect_package_root
 from contextor.core.paths import repo_cache_dir
 from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
@@ -26,7 +31,9 @@ from contextor.core.reference.shared import (
     materialize_reexport_facts_by_module,
     validate_reexport_facts_by_module,
 )
-from contextor.core.live_state import CanonicalLiveServer, LiveStateClient
+from contextor.core.live_state import CanonicalLiveServer, LiveStateClient, read_metadata
+from contextor.core.live_state import store as snapshot_store
+from contextor.core.repository_identity import require_repository_identity
 from contextor.mcp.tools import update_file as update_file_module
 
 pytestmark = pytest.mark.live
@@ -82,6 +89,183 @@ def _local_update(repo, provider):
 def _rehydrate_local_engine(repo):
     mcp_runtime._live_engines.clear()
     return mcp_runtime.get_or_init_engine(repo.resolve())
+
+
+def test_local_exact_generation_initial_successor_and_filestate_hydration(
+    tmp_path, monkeypatch
+):
+    repo, provider, engine = _build_local_fallback_engine(
+        tmp_path, monkeypatch, "def run():\n    return 1\n"
+    )
+    cache_dir = repo_cache_dir(repo)
+    tracked_sha = engine.state_manager.get_tracked_sha256(str(provider))
+    assert tracked_sha
+
+    def forbidden_save(*_args, **_kwargs):
+        raise AssertionError("FileStateManager.save must not be called")
+
+    monkeypatch.setattr(engine.state_manager, "save", forbidden_save)
+    assert update_file_module._persist_live_engine(repo, engine) is True
+    initial = read_metadata(cache_dir)
+    assert initial.revision == 1
+    assert initial.state_file.startswith("engine_state.r1.")
+    assert initial.file_state_file.startswith("file_state.r1.")
+    assert (cache_dir / initial.state_file).is_file()
+    initial_payload = json.loads((cache_dir / initial.file_state_file).read_text())
+    assert initial_payload["_meta"] == {"state_id": initial.state_id, "revision": 1}
+    assert initial_payload["files"][str(provider)]["sha256"] == tracked_sha
+    assert not (cache_dir / "file_state.json").exists()
+
+    hydrated = _rehydrate_local_engine(repo)
+    assert hydrated is not None
+    assert hydrated.state.revision == hydrated.state_manager.revision == 1
+    assert hydrated.state.state_id == hydrated.state_manager.state_id == initial.state_id
+    assert hydrated.state_manager.get_tracked_sha256(str(provider)) == tracked_sha
+    assert hydrated.state_manager.has_changed(str(provider)) is False
+
+    assert update_file_module._persist_live_engine(repo, hydrated) is True
+    successor = read_metadata(cache_dir)
+    assert successor.revision == 2
+    assert successor.state_id == initial.state_id
+    assert successor.state_file != initial.state_file
+    assert successor.file_state_file != initial.file_state_file
+    assert json.loads((cache_dir / successor.file_state_file).read_text())["_meta"] == {
+        "state_id": initial.state_id,
+        "revision": 2,
+    }
+
+
+@pytest.mark.parametrize("revision_owner", ["engine", "state", "cache"])
+def test_local_exact_generation_rejects_stale_revision_before_publication(
+    tmp_path, monkeypatch, revision_owner
+):
+    repo, _provider, engine = _build_local_fallback_engine(
+        tmp_path, monkeypatch, "def run():\n    return 1\n"
+    )
+    assert update_file_module._persist_live_engine(repo, engine) is True
+    cache_dir = repo_cache_dir(repo)
+    before = (cache_dir / "engine_state.meta.json").read_bytes()
+    if revision_owner == "engine":
+        engine.revision = 0
+    elif revision_owner == "state":
+        engine.state.revision = 0
+    else:
+        mcp_runtime._live_engine_revisions[str(repo.resolve())] = 0
+
+    with pytest.raises(RuntimeError, match="revision"):
+        update_file_module._persist_live_engine(repo, engine)
+    assert (cache_dir / "engine_state.meta.json").read_bytes() == before
+
+
+def test_local_exact_generation_rejects_invalid_existing_metadata(
+    tmp_path, monkeypatch
+):
+    repo, _provider, engine = _build_local_fallback_engine(
+        tmp_path, monkeypatch, "def run():\n    return 1\n"
+    )
+    cache_dir = repo_cache_dir(repo)
+    metadata_path = cache_dir / "engine_state.meta.json"
+    metadata_path.write_text("{invalid", encoding="utf-8")
+    with pytest.raises(RuntimeError, match="metadata is invalid"):
+        update_file_module._persist_live_engine(repo, engine)
+    assert metadata_path.read_text(encoding="utf-8") == "{invalid"
+
+
+def test_local_exact_generation_serializer_failure_preserves_original_identity(
+    tmp_path, monkeypatch
+):
+    repo, _provider, engine = _build_local_fallback_engine(
+        tmp_path, monkeypatch, "def run():\n    return 1\n"
+    )
+    before_revision = getattr(engine.state, "revision", None)
+    before_state_id = getattr(engine.state, "state_id", None)
+
+    def failing_dump(*_args, **_kwargs):
+        raise OSError("injected serializer failure")
+
+    monkeypatch.setattr(snapshot_store.pickle, "dump", failing_dump)
+    assert update_file_module._persist_live_engine(repo, engine) is False
+    assert getattr(engine.state, "revision", None) == before_revision
+    assert getattr(engine.state, "state_id", None) == before_state_id
+    assert read_metadata(repo_cache_dir(repo)) is None
+
+
+@pytest.mark.parametrize("failure_stage", ["file_state", "metadata_pointer"])
+def test_local_exact_generation_staging_failure_preserves_prior_generation(
+    tmp_path, monkeypatch, failure_stage
+):
+    repo, provider, engine = _build_local_fallback_engine(
+        tmp_path, monkeypatch, "def run():\n    return 1\n"
+    )
+    assert update_file_module._persist_live_engine(repo, engine) is True
+    cache_dir = repo_cache_dir(repo)
+    before = (cache_dir / "engine_state.meta.json").read_bytes()
+    previous = read_metadata(cache_dir)
+    tracked_sha = engine.state_manager.get_tracked_sha256(str(provider))
+
+    if failure_stage == "file_state":
+        original_dump = snapshot_store.json.dump
+
+        def failing_dump(value, stream, *args, **kwargs):
+            if stream.name.endswith(".json") and "file_state.r2." in stream.name:
+                raise OSError("injected FileState generation failure")
+            return original_dump(value, stream, *args, **kwargs)
+
+        monkeypatch.setattr(snapshot_store.json, "dump", failing_dump)
+    else:
+        original_replace = snapshot_store.os.replace
+
+        def failing_replace(source, target):
+            if target.name == "engine_state.meta.json":
+                raise OSError("injected metadata pointer failure")
+            return original_replace(source, target)
+
+        monkeypatch.setattr(snapshot_store.os, "replace", failing_replace)
+
+    assert update_file_module._persist_live_engine(repo, engine) is False
+    assert (cache_dir / "engine_state.meta.json").read_bytes() == before
+    assert read_metadata(cache_dir) == previous
+    assert engine.state.revision == engine.revision == 1
+    assert engine.state_manager.revision == 1
+    loaded = load_engine_state(
+        str(cache_dir), previous.state_id,
+        expected_repo_id=require_repository_identity(repo).repo_id,
+        expected_root_path=repo,
+    )
+    assert loaded is not None and loaded.revision == 1
+    reloaded_manager = FileStateManager(str(cache_dir))
+    assert reloaded_manager.revision == 1
+    assert reloaded_manager.get_tracked_sha256(str(provider)) == tracked_sha
+
+
+@pytest.mark.parametrize("existing_state_id", ["", "legacy-valid-id"])
+def test_local_exact_generation_migrates_legacy_filestate_and_state_id(
+    tmp_path, monkeypatch, existing_state_id
+):
+    repo, provider, engine = _build_local_fallback_engine(
+        tmp_path, monkeypatch, "def run():\n    return 1\n"
+    )
+    cache_dir = repo_cache_dir(repo)
+    identity = require_repository_identity(repo)
+    baseline = save_engine_state(
+        engine.state, str(cache_dir), existing_state_id,
+        writer="mcp", repo_id=identity.repo_id, root_path=identity.root_path,
+    )
+    assert baseline is not None and baseline.revision == 1
+    engine.state_manager.save(existing_state_id, revision=1)
+    tracked_sha = engine.state_manager.get_tracked_sha256(str(provider))
+    assert not read_metadata(cache_dir).file_state_file
+
+    assert update_file_module._persist_live_engine(repo, engine) is True
+    migrated = read_metadata(cache_dir)
+    assert migrated.revision == 2
+    assert migrated.state_id == (existing_state_id or identity.repo_id)
+    assert migrated.file_state_file.startswith("file_state.r2.")
+    assert (cache_dir / migrated.file_state_file).is_file()
+    hydrated = _rehydrate_local_engine(repo)
+    assert hydrated.state.state_id == hydrated.state_manager.state_id == migrated.state_id
+    assert hydrated.state_manager.revision == 2
+    assert hydrated.state_manager.get_tracked_sha256(str(provider)) == tracked_sha
 
 
 def test_mcp_refreshes_its_engine_from_a_newer_shared_live_revision(tmp_path, monkeypatch):

@@ -1,562 +1,499 @@
-# L32H1_LOCAL_FALLBACK_PERSIST_ALL_RESULTS
+# L32H2A_LOCAL_EXACT_GENERATION_PERSISTENCE
 
 ## FILES_CHANGED_THIS_TASK
 
-- C:\Temp\Contextor_Repo\contextor\mcp\tools\update_file.py
-- C:\Temp\Contextor_Repo\tests\test_mcp_incremental_hydration.py
-- C:\Temp\Contextor_Repo\tests\test_mcp_regressions.py
-- C:\Temp\Contextor_Repo\walkthrough.md is the requested report and is excluded from source/test changes.
+- C:\Temp\Contextor_Repo\contextor\mcp\tools\update_file.py — exact literal replacement of `_persist_live_engine` only.
+- C:\Temp\Contextor_Repo\tests\test_mcp_incremental_hydration.py — focused exact-generation and failure regressions.
+- C:\Temp\Contextor_Repo\tests\test_mcp_regressions.py — existing roundtrip test now uses real `FileStateManager` instead of a legacy state-id-only stub; its persisted-state assertions remain and the tracked file roundtrip is asserted.
+- C:\Temp\Contextor_Repo\walkthrough.md — this report; excluded from source/test diff accounting.
+- C:\Temp\Contextor_Repo\tests\test_live_state_store.py — unchanged.
 
-The three source/test paths were clean before editing. Scoped post-edit status reports exactly those three modified paths. No other production or test file was changed. Commits, HEAD, and SHA were not inspected.
+## SOURCE_CONTRACT_VERIFICATION
 
-## CURRENT_SOURCE_VERIFICATION
+DIRECT_EVIDENCE: Before edits, Contextor MCP returned complete `_persist_live_engine` at lines 73-104, canonical revision 204, `canonical_state=fresh`, `workspace_sync=verified`, `provenance=live`. It used `save_engine_state` without exact revision, then `FileStateManager.save` as an independent write. Contextor returned complete `save_engine_state` with `exact_revision` and `file_state_payload`; complete `RepositoryAnalysisState.clone_for_update`; complete `FileStateManager.build_payload`; complete `read_metadata`. `read_metadata` is exported by `contextor.core.live_state.__init__`.
 
-DIRECT_EVIDENCE — Contextor MCP before the source edit:
-
-- Read current MCP documentation and discovered the Contextor source, call-context, lineage, blast-radius, and LIVE-event tools before using them.
-- update_file was fetched in full from contextor/mcp/tools/update_file.py, lines 188–295. Contextor marked implementation_is_complete=true, no_partial_symbol_source=true, canonical state fresh, and workspace_sync=verified at revision 194 before source editing.
-- The exact defect was present in the local branch: call _persist_live_engine only for UPDATED/DELETED; all other result statuses set live_state_persisted=True without the helper call.
-- _persist_live_engine was fetched in full, lines 73–104. It returns false when save_engine_state returns no metadata; after metadata it updates the engine/revision and invokes the manager save path when available, then returns true.
-- IncrementalAnalysisEngine.update_file was fetched as a complete Contextor source range, lines 453–736 of a 1,046-line file (284 lines; no preview/truncation). It confirms the early UNCHANGED return before parsing, syntax-failure state publication, parse-and-plan semantic no-op, RECOVERED, and UPDATED/DELETED result paths.
-- _commit_syntax_candidate and _update_candidate_lineage_slice were fetched as complete implementations; both were workspace-synchronized at revision 194.
-- Call context identifies update_file as the sole direct caller of _persist_live_engine in that module. The wrapper constructs the public response and its live_state_persisted field.
-- Blast radius: direct static consumers include contextor.mcp_server and four test modules; downstream module reachability reports 32 modules (one production module, contextor.mcp_main, and 31 test modules). Contextor explicitly scopes this to direct static evidence.
-
-DIRECT_EVIDENCE — after the exact source edit:
-
-Contextor fetched the complete updated update_file, lines 188–294, with implementation_is_complete=true, no_partial_symbol_source=true, canonical_state=fresh, workspace_sync=verified, and revision 204. The local branch now calls:
-
-    res = engine.update_file(str(target_file))
-    live_state_persisted = _persist_live_engine(
-        root,
-        engine,
-    )
-
-The LIVE-connected branch remains separate and still sets its flag after a successful LIVE update and engine-cache refresh. _persist_live_engine itself was not changed.
+Contextor call context confirms the sole direct intra-module caller `contextor.mcp.tools.update_file::update_file` at the local fallback branch (line 224 before edit); blast radius reports two confirmed test consumers, `tests.test_mcp_incremental_hydration` and `tests.test_mcp_regressions`. Dynamic Python consumers are outside that static claim. No source mismatch with the literal patch was found. The public `update_file` wrapper and its persist-all-returned-statuses policy were not edited.
 
 ## RED_RESULT
 
-Before the production edit, the corrected focused regression command ran 20 cases: 14 failed, 6 passed.
-
-- The six passing cases were the newly added UPDATED/DELETED matrix cases across both helper outcomes (those statuses were already persisted by the old branch), the LIVE-delegation check, and the existing local UPDATED snapshot-hydration integration.
-- The 14 failures were the SYNTAX_ERROR, RECOVERED, both UNCHANGED labels, and structured ERROR statuses for both helper return values; the helper-exception contract; syntax-error snapshot hydration; early-UNCHANGED helper invocation; and structured preparation-error persistence.
-- Failures showed skipped helper calls, a fabricated true response flag, or missing snapshot hydration for state mutations. The independent LIVE delegation case was green before and after the patch.
+Before the production edit, `.venv\Scripts\python.exe -m pytest -q tests/test_mcp_incremental_hydration.py -k local_exact_generation` returned **10 failed, 6 deselected**. The new tests failed on old behavior: independent `FileStateManager.save`, absent exact generation, stale revision acceptance, invalid metadata bootstrap, mutation of original state during failed serialization, failed staging behavior, and missing legacy migration. The RED run was completed before the literal production replacement.
 
 ## GREEN_RESULT
 
-After the production edit, the new focused regressions passed: 20 passed, 1 third-party Authlib deprecation warning. The complete requested test command passed: 114 passed, 1 third-party Authlib deprecation warning.
+After the literal replacement, the same focused selection returned **10 passed, 6 deselected**. The complete scoped gate then initially returned **130 passed, 1 failed**: `tests/test_mcp_regressions.py::test_incremental_live_state_persistence_roundtrips_for_restart` used a `SimpleNamespace` manager without the now-required `build_payload`. This was an obsolete storage fixture, so the test was changed to use real `FileStateManager` and to check tracked-file recovery. Its isolated rerun passed.
 
-## ALL_STATUS_PERSISTENCE_MATRIX
+Final scoped gate: `.venv\Scripts\python.exe -m pytest -q tests/test_mcp_incremental_hydration.py tests/test_mcp_regressions.py tests/test_live_state_store.py::test_cleanup_failure_cannot_mask_persistence_failure_or_leak_lock tests/test_live_state_store.py::test_exact_snapshot_revision_rules_and_disk_ahead_without_overwrite tests/test_live_state_store.py::test_exact_snapshot_rejects_file_state_payload_mismatches tests/test_live_state_store.py::test_exact_snapshot_revision_binds_embedded_state_and_metadata tests/test_live_state_store.py::test_referenced_filestate_generation_fail_closed_without_legacy_fallback tests/test_live_state_store.py::test_referenced_filestate_without_meta_fails_closed tests/test_live_state_store.py::test_legacy_filestate_without_meta_loads_entries_but_remains_unverified` returned **131 passed, 0 failed, 1 external Authlib deprecation warning** in 35.91 seconds. This includes the L32H1 returned-status test and the syntax-error/recovery hydration regression. No full repository suite was run.
 
-The parameterized local-fallback test forces every connect(root) call to return None. For each returned status it checks one engine update, exactly one persister call, original status preservation, and the public flag against both helper outcomes.
+Read-only `compile(...)` of `contextor\mcp\tools\update_file.py` returned `COMPILE_OK`. `git diff --check` on all authorized files returned exit 0, with only Git's working-copy LF/CRLF conversion notices.
 
-| Engine result status | Helper True | Helper False | Additional real local evidence |
-|---|---:|---:|---|
-| UPDATED | flag true | flag false | Updated artifact facts survive snapshot hydration. |
-| DELETED | flag true | flag false | Local-wrapper result exercised through the isolated status fixture. |
-| SYNTAX_ERROR | flag true | flag false | Retained module/artifacts, syntax error, and stale parse marker survive hydration. |
-| RECOVERED | flag true | flag false | Recovery snapshot has checked syntax and no old parse-stale entry. |
-| Parsed semantic no-op UNCHANGED | flag true | flag false | A parsed no-op persists syntax, lineage, and FileState tracking through hydration. |
-| Early UNCHANGED | flag true | flag false | Real engine returns early; a spy confirms the persister is explicitly called. |
-| Structured ERROR | flag true | flag false | The engine error branch mutates parse freshness; the resulting state is persisted and hydrates. |
+## INITIAL_AND_SUCCESSOR_REVISIONS
 
-These status-table booleans are tested with an isolated wrapper fixture and a controlled helper return value. The real local integrations use the repository engine and snapshot hydration where listed.
+DIRECT TEST EVIDENCE: With no existing metadata, local exact persistence commits revision 1. A hydrated engine then commits revision 2, retaining its state identity. Tests reject stale revisions independently in engine, state, and MCP cache before a new metadata pointer is published. The literal helper checks type and previous revision before building the candidate.
 
-## TRUE_FALSE_RESPONSE_CONTRACT
+## STATE_ID_COMPATIBILITY
 
-CODE_PATH_PROVED: In local fallback, the wrapper assigns the helper's Boolean return directly to live_state_persisted. Both Boolean outcomes are covered for all seven listed statuses. If the helper raises, the existing outer exception handler returns status=ERROR and does not include live_state_persisted.
+DIRECT TEST EVIDENCE: A legacy empty `state_id` is initialized from repository identity; a valid nonempty `legacy-valid-id` is retained. Both migrate to exact generation and hydrate with matching engine/FileState identity. CODE_PATH_PROVED: when committed metadata has a nonempty state ID, a conflicting nonempty engine or manager state ID raises before publication. That mismatch branch was inspected in the complete post-edit implementation but not separately failure-injected.
 
-CONTRACT LIMIT: A true flag means _persist_live_engine returned true. It is not a claim of atomic publication across snapshot and FileStateManager storage, crash safety, read-back verification, or power-loss durability.
+## EXACT_GENERATION_PUBLICATION
 
-## SYNTAX_SNAPSHOT_HYDRATION
+DIRECT TEST EVIDENCE: The metadata pointer references `engine_state.r1.*.pkl` and `file_state.r1.*.json`; both exist and the FileState `_meta` matches revision and state ID. Revision 2 uses different generation files. `FileStateManager.save` was patched to raise in the initial publication test and was not called. The helper passes a cloned state plus `manager.build_payload(state_id, next_revision)` to one exact `save_engine_state` call.
 
-DIRECT_EVIDENCE: The real local integration starts with a valid indexed provider.py, introduces a syntax error, and calls the public wrapper with connect(root) -> None. It receives SYNTAX_ERROR and a true helper result. After clearing the runtime engine cache and hydrating from the saved snapshot:
+## FILESTATE_HYDRATION
 
-- the previous provider module and artifact payloads remain equal to their pre-error values (LKG);
-- module_parse_freshness['provider']['state'] == 'stale';
-- syntax_diagnostics_by_path['provider.py']['status'] == 'checked_with_errors'.
+DIRECT TEST EVIDENCE: After clearing the MCP engine cache, hydration restores matching state and manager revisions/state IDs and the tracked source file SHA-256. `has_changed` is false for the unchanged tracked file. Existing UPDATED, SYNTAX_ERROR, RECOVERED, early UNCHANGED, parsed UNCHANGED and structured ERROR fallback hydration regressions passed in the complete targeted file.
 
-## RECOVERY_AND_NOOP_HYDRATION
+## SNAPSHOT_FAILURE_MATRIX
 
-- A subsequent valid parse with changed source returns RECOVERED; its hydrated snapshot contains checked_and_none syntax diagnostics and no provider parse-stale entry.
-- The early no-op path returns UNCHANGED without parsing; the persistence spy records one helper call.
-- The parsed semantic no-op is driven by a changed file timestamp after the fixture's initial reconciliation, while source text stays identical. It returns UNCHANGED, persists, and hydrates checked_and_none syntax, the same non-empty provider.py lineage source facts, and a FileStateManager record for which has_changed(path) is false.
+| Injected/checked condition | Result and evidence |
+| --- | --- |
+| Missing metadata | Exact generation 1 is committed with both generation files; tested. |
+| Engine/state/cache revision stale | `RuntimeError` before publication; previous pointer bytes unchanged; three cases tested. |
+| Existing invalid metadata file | `RuntimeError`; invalid file remains; tested. |
+| Serializer failure | `save_engine_state` returns `None`, helper returns `False`; original engine state's revision/state_id and absent metadata remain unchanged; tested. |
+| FileState generation write failure | Helper returns `False`; prior pointer bytes and prior generation remain loadable; original engine/manager revisions remain 1; tested. |
+| Metadata `os.replace` failure | Helper returns `False`; prior pointer bytes and prior generation remain loadable; original engine/manager revisions remain 1; tested. |
+| `FileStateManager.save` attempted | Test raises; initial exact publication succeeds, proving this old separate write is not called. |
+| Exact snapshot revision/payload mismatch | Existing selected `test_live_state_store.py` regressions passed. |
 
-## LIVE_BRANCH_COMPATIBILITY
+The failure injections use isolated temporary repositories. They do not certify crash durability or concurrent writer exclusion.
 
-The isolated LIVE test returns a successful remote result and verifies delegation with origin='mcp'. The fake local engine is never invoked and the local persister is configured to fail the test if called. The LIVE response retains its existing true flag. No LIVE process or service was restarted.
+## LEGACY_MIGRATION
 
-## TARGETED_TEST_RESULTS
-
-Before production edit (RED): 20 newly added focused cases; 14 failed and 6 passed, as detailed above.
-
-After production edit (new focused regressions):
-
-    20 passed, 1 warning
-
-Complete requested targeted gate:
-
-    & .\.venv\Scripts\python.exe -m pytest -q tests/test_mcp_incremental_hydration.py tests/test_mcp_regressions.py tests/test_incremental_equivalence.py::test_incremental_syntax_error tests/test_incremental_equivalence.py::test_incremental_successful_modify_after_failed_modify
-
-    114 passed, 1 warning in 28.27s
-
-The warning is Authlib's third-party deprecation warning from the installed FastMCP environment.
-
-Compilation of the production file and both changed test files passed with .venv\Scripts\python.exe -m py_compile. git diff --check returned exit code 0 with no whitespace errors. Git printed only line-ending notices that LF will be converted to CRLF the next time it touches these files.
-
-## LIVE_REVISION_BEFORE_AFTER
-
-- Initial Contextor baseline: revision 194, activity epoch 9e9a2a2edcb046bba00df0850244ad36, resync_required=false.
-- Immediately before the production edit: revision 195, continuous from 194, resync_required=false.
-- After edits and tests: revision 204, same activity epoch, event continuity continuous, resync_required=false.
-- The watcher emitted revisions 196–204 for the authorized test/source file edits. Revision 199 identifies the production edit to contextor\mcp\tools\update_file.py; later events are the two authorized test files. No artificial file event was generated.
+DIRECT TEST EVIDENCE: Both blank-ID and valid nonempty-ID legacy non-exact snapshots with a separately stored `file_state.json` migrate on the next local persistence to revision 2 with referenced generation-specific FileState. The tracked SHA-256 survives hydration. No legacy file or snapshot was manipulated outside temporary test fixtures.
 
 ## SOURCE_SYNC_VERIFICATION
 
-Contextor's post-edit complete source fetch reports revision 204, canonical state fresh, workspace_sync=verified, and every returned family marker fresh. Post-edit call context and blast radius also resolve against revision 204. The source fetch was complete and not truncated.
+After edits, Contextor MCP returned the complete `_persist_live_engine` at lines 73-178 with `implementation_is_complete=true`, `no_partial_symbol_source=true`, canonical revision 207, `canonical_state=fresh`, `workspace_sync=verified`, and `provenance=live`. Its returned implementation matches the literal authorized replacement. The post-edit blast radius still reports the same two confirmed test consumer modules. The worktree inspection showed only the three authorized source/test files plus `walkthrough.md` modified; `tests/test_live_state_store.py` remained unchanged. Contextor source indexing does not prove the already-running MCP process reimported edited Python code.
 
-The modified Python file is under the MCP package path. The complete _is_mcp_runtime_source_path and _mcp_runtime_restart_required implementations confirm that changed MCP package code requires a serving MCP process restart when it differs from its startup fingerprint.
+## LIVE_REVISION_BEFORE_AFTER
+
+Before edit: LIVE revision 204, activity epoch `9e9a2a2edcb046bba00df0850244ad36`, `resync_required=false`. After edit: revision 207 in the same activity epoch. `get_live_events(after_revision=204)` returned `continuity=continuous`, `resync_required=false` and three `desktop_watcher` UPDATED events: revision 205 for `tests\test_mcp_incremental_hydration.py`, revision 206 for `contextor\mcp\tools\update_file.py`, and revision 207 for `tests\test_mcp_regressions.py`. No manual `update_file` was called.
+
+## REMAINING_LOCAL_ATOMICITY_RISKS
+
+This stage does not establish rollback of a previously mutated local engine, isolation of `engine.update_file`, registry rollback, inter-request update/persist serialization, exclusion of an active LIVE writer, or power-loss durability. No claim of `LOCAL_ATOMICITY_FINAL_PASS` is made.
+
+## RESTART_REQUIRED
+
+The edited owner is imported MCP runtime code. A manual MCP serving-process reload is required before runtime certification of this new helper; it was not performed. LIVE watcher source synchronization and fresh-process pytest do not attest to imported-code reload in the existing MCP process. No Desktop or LIVE restart was performed.
+
+## FINAL_VERDICT
+
+**L32H2A_TARGETED_CODE_GATE_PASS; RUNTIME_RELOAD_PENDING.** The exact local snapshot/FileState generation publication contract and selected failure behavior pass the authorized targeted tests. This is not `LOCAL_ATOMICITY_FINAL_PASS`.
 
 ## FULL_DIFFS
 
-Complete actual working-tree diffs for every changed production/test file follow. walkthrough.md is the requested report and is not a source/test diff.
+The following are full, unabridged source/test diffs for every file modified in this task. `walkthrough.md` is the report and is excluded from source/test diff accounting.
+### contextor/mcp/tools/update_file.py
 
-FULL_DIFFS_BEGIN
+```diff
 diff --git a/contextor/mcp/tools/update_file.py b/contextor/mcp/tools/update_file.py
-index 86f3c46..8bcde7e 100644
+index 8bcde7e..a26645f 100644
 --- a/contextor/mcp/tools/update_file.py
 +++ b/contextor/mcp/tools/update_file.py
-@@ -221,10 +221,9 @@ def update_file(
-             live_state_persisted = True
-         else:
-             res = engine.update_file(str(target_file))
--            live_state_persisted = (
--                _persist_live_engine(root, engine)
--                if res.status in {"UPDATED", "DELETED"}
--                else True
-+            live_state_persisted = _persist_live_engine(
-+                root,
-+                engine,
-             )
-         new_artifacts = engine.state.artifacts.get(module_path, {})
-         semantic_diff = _semantic_artifact_diff(old_artifacts, new_artifacts)
+@@ -71,37 +71,111 @@ def _mcp_runtime_restart_required(target_file: Path) -> bool:
+ 
+ 
+ def _persist_live_engine(root: Path, engine) -> bool:
+-    """Persist incremental canonical state so the next MCP process can hydrate it."""
++    """Persist local state and FileState in one exact snapshot generation."""
+     from contextor.core.analysis.state_manager import save_engine_state
++    from contextor.core.live_state import read_metadata
+     from contextor.core.paths import repo_cache_dir
+     from contextor.core.repository_identity import require_repository_identity
+ 
+     identity = require_repository_identity(root)
+     cache_dir = repo_cache_dir(root)
+     cache_dir.mkdir(parents=True, exist_ok=True)
+-    meta = save_engine_state(
+-        engine.state,
+-        str(cache_dir),
+-        getattr(engine.state_manager, "state_id", ""),
+-        writer="mcp",
+-        repo_id=identity.repo_id,
+-        root_path=identity.root_path,
+-    )
+-    if meta is not None:
+-        new_rev = int(meta.revision)
+-        with mcp_runtime._engine_cache_transaction(root) as root_key:
+-            engine.revision = new_rev
+-            if hasattr(engine.state, "revision"):
+-                engine.state.revision = new_rev
+-            mcp_runtime._live_engine_revisions[root_key] = new_rev
+-            if hasattr(engine, "state_manager") and engine.state_manager:
+-                engine.state_manager.revision = new_rev
+-                if hasattr(engine.state_manager, "save"):
+-                    engine.state_manager.save(
+-                        getattr(engine.state_manager, "state_id", ""), revision=new_rev
++
++    manager = getattr(engine, "state_manager", None)
++    if manager is None or not callable(getattr(manager, "build_payload", None)):
++        raise RuntimeError(
++            "Local persistence requires a FileStateManager with build_payload."
++        )
++
++    with mcp_runtime._engine_cache_transaction(root) as root_key:
++        current = read_metadata(cache_dir)
++        metadata_path = cache_dir / "engine_state.meta.json"
++
++        if current is None and metadata_path.exists():
++            raise RuntimeError(
++                "Existing canonical snapshot metadata is invalid; "
++                "local persistence cannot bootstrap over it."
++            )
++
++        expected_previous_revision = (
++            int(current.revision) if current is not None else None
++        )
++
++        for revision_name, value in (
++            ("engine", getattr(engine, "revision", None)),
++            ("state", getattr(engine.state, "revision", None)),
++            ("cache", mcp_runtime._live_engine_revisions.get(root_key)),
++        ):
++            if value is None:
++                continue
++            if isinstance(value, bool) or type(value) is not int:
++                raise RuntimeError(
++                    f"Local {revision_name} revision is invalid."
++                )
++            if expected_previous_revision is None:
++                if value != 0:
++                    raise RuntimeError(
++                        f"Local {revision_name} revision has no committed baseline."
+                     )
++            elif value != expected_previous_revision:
++                raise RuntimeError(
++                    f"Local {revision_name} revision differs from "
++                    "committed snapshot revision."
++                )
++
++        state_id = str(
++            (current.state_id if current is not None else "")
++            or getattr(engine.state, "state_id", "")
++            or getattr(manager, "state_id", "")
++            or identity.repo_id
++        )
++
++        if current is not None and current.state_id:
++            for existing_id in (
++                getattr(engine.state, "state_id", None),
++                getattr(manager, "state_id", None),
++            ):
++                if existing_id and str(existing_id) != current.state_id:
++                    raise RuntimeError(
++                        "Local state identity differs from committed snapshot."
++                    )
++
++        next_revision = (
++            expected_previous_revision + 1
++            if expected_previous_revision is not None
++            else 1
++        )
++
++        candidate = engine.state.clone_for_update()
++        payload = manager.build_payload(state_id, next_revision)
++
++        meta = save_engine_state(
++            candidate,
++            str(cache_dir),
++            state_id,
++            writer="mcp",
++            repo_id=identity.repo_id,
++            root_path=identity.root_path,
++            exact_revision=next_revision,
++            file_state_payload=payload,
++        )
++
++        if meta is None:
++            return False
++
++        if meta.revision != next_revision or meta.state_id != state_id:
++            raise RuntimeError(
++                "Exact local snapshot returned mismatching commit identity."
++            )
++
++        engine.revision = next_revision
++        engine.state.revision = next_revision
++        engine.state.state_id = state_id
++        manager.state_id = state_id
++        manager.revision = next_revision
++        mcp_runtime._live_engine_revisions[root_key] = next_revision
++
+         return True
+-    return False
+ 
+ 
+ def _semantic_artifact_diff(old_artifacts: dict, new_artifacts: dict) -> dict:
+```
+
+### tests/test_mcp_incremental_hydration.py
+
+```diff
 diff --git a/tests/test_mcp_incremental_hydration.py b/tests/test_mcp_incremental_hydration.py
-index 20e0ec0..9bf8523 100644
+index 9bf8523..fe37c79 100644
 --- a/tests/test_mcp_incremental_hydration.py
 +++ b/tests/test_mcp_incremental_hydration.py
-@@ -1,11 +1,15 @@
- """End-to-end MCP test for incremental state persistence and live context hydration."""
- 
- import json
-+from copy import deepcopy
-+import os
- 
- import pytest
- import threading
-+from types import SimpleNamespace
- 
- from contextor import mcp_server
-+from contextor.core.analysis.incremental import engine as incremental_engine_module
+@@ -13,7 +13,12 @@ from contextor.core.analysis.incremental import engine as incremental_engine_mod
  from contextor.mcp import report_helpers
  from contextor.mcp import runtime as mcp_runtime
  from contextor.core.analysis.incremental_engine import IncrementalAnalysisEngine
-@@ -23,10 +27,63 @@ from contextor.core.reference.shared import (
+-from contextor.core.analysis.state_manager import FileStateManager, RepositoryAnalysisState
++from contextor.core.analysis.state_manager import (
++    FileStateManager,
++    RepositoryAnalysisState,
++    load_engine_state,
++    save_engine_state,
++)
+ from contextor.core.graph.graph import build_graph, build_trie, detect_package_root
+ from contextor.core.paths import repo_cache_dir
+ from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
+@@ -26,7 +31,9 @@ from contextor.core.reference.shared import (
+     materialize_reexport_facts_by_module,
      validate_reexport_facts_by_module,
  )
- from contextor.core.live_state import CanonicalLiveServer, LiveStateClient
-+from contextor.mcp.tools import update_file as update_file_module
+-from contextor.core.live_state import CanonicalLiveServer, LiveStateClient
++from contextor.core.live_state import CanonicalLiveServer, LiveStateClient, read_metadata
++from contextor.core.live_state import store as snapshot_store
++from contextor.core.repository_identity import require_repository_identity
+ from contextor.mcp.tools import update_file as update_file_module
  
  pytestmark = pytest.mark.live
+@@ -84,6 +91,183 @@ def _rehydrate_local_engine(repo):
+     return mcp_runtime.get_or_init_engine(repo.resolve())
  
  
-+def _build_local_fallback_engine(tmp_path, monkeypatch, source):
-+    repo = tmp_path / "repo"
-+    repo.mkdir()
-+    provider = repo / "provider.py"
-+    provider.write_text(source, encoding="utf-8")
-+    index = index_repository(str(repo))
-+    modules = index.modules
-+    reexport_facts_by_module = materialize_reexport_facts_by_module(
-+        modules,
-+        index.reference_facts_by_module,
++def test_local_exact_generation_initial_successor_and_filestate_hydration(
++    tmp_path, monkeypatch
++):
++    repo, provider, engine = _build_local_fallback_engine(
++        tmp_path, monkeypatch, "def run():\n    return 1\n"
 +    )
-+    artifacts, failures = collect_module_artifacts(modules, str(repo))
-+    assert not failures
-+    trie = build_trie(modules)
-+    package_root = detect_package_root(modules, trie)
-+    state = RepositoryAnalysisState(
-+        modules=dict(modules),
-+        reexport_facts_by_module=reexport_facts_by_module,
-+        artifacts=artifacts,
-+        dependency_graph=build_graph(modules, trie=trie, package_root=package_root),
-+        trie=trie,
-+        package_root=package_root,
-+        artifact_consumption={},
-+    )
-+    registry = PersistentIdentityRegistry(str(repo))
-+    with registry.transaction():
-+        registry.sync_with_workspace(
-+            set(modules), collect_qualified_artifact_identities(artifacts)
-+        )
-+    cache_root = tmp_path / "cache"
-+    monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(cache_root))
 +    cache_dir = repo_cache_dir(repo)
-+    state_manager = FileStateManager(str(cache_dir))
-+    state_manager.update_state(str(provider))
-+    engine = IncrementalAnalysisEngine(state, registry, state_manager, str(repo))
-+    monkeypatch.setattr(mcp_runtime, "_live_engines", {str(repo.resolve()): engine})
-+    monkeypatch.setattr(mcp_runtime, "_live_engine_revisions", {})
-+    monkeypatch.setattr("contextor.core.live_state.connect", lambda _root: None)
-+    return repo, provider, engine
++    tracked_sha = engine.state_manager.get_tracked_sha256(str(provider))
++    assert tracked_sha
++
++    def forbidden_save(*_args, **_kwargs):
++        raise AssertionError("FileStateManager.save must not be called")
++
++    monkeypatch.setattr(engine.state_manager, "save", forbidden_save)
++    assert update_file_module._persist_live_engine(repo, engine) is True
++    initial = read_metadata(cache_dir)
++    assert initial.revision == 1
++    assert initial.state_file.startswith("engine_state.r1.")
++    assert initial.file_state_file.startswith("file_state.r1.")
++    assert (cache_dir / initial.state_file).is_file()
++    initial_payload = json.loads((cache_dir / initial.file_state_file).read_text())
++    assert initial_payload["_meta"] == {"state_id": initial.state_id, "revision": 1}
++    assert initial_payload["files"][str(provider)]["sha256"] == tracked_sha
++    assert not (cache_dir / "file_state.json").exists()
++
++    hydrated = _rehydrate_local_engine(repo)
++    assert hydrated is not None
++    assert hydrated.state.revision == hydrated.state_manager.revision == 1
++    assert hydrated.state.state_id == hydrated.state_manager.state_id == initial.state_id
++    assert hydrated.state_manager.get_tracked_sha256(str(provider)) == tracked_sha
++    assert hydrated.state_manager.has_changed(str(provider)) is False
++
++    assert update_file_module._persist_live_engine(repo, hydrated) is True
++    successor = read_metadata(cache_dir)
++    assert successor.revision == 2
++    assert successor.state_id == initial.state_id
++    assert successor.state_file != initial.state_file
++    assert successor.file_state_file != initial.file_state_file
++    assert json.loads((cache_dir / successor.file_state_file).read_text())["_meta"] == {
++        "state_id": initial.state_id,
++        "revision": 2,
++    }
 +
 +
-+def _local_update(repo, provider):
-+    return json.loads(
-+        mcp_server.update_file.fn(repo_path=str(repo), file_path=str(provider))
++@pytest.mark.parametrize("revision_owner", ["engine", "state", "cache"])
++def test_local_exact_generation_rejects_stale_revision_before_publication(
++    tmp_path, monkeypatch, revision_owner
++):
++    repo, _provider, engine = _build_local_fallback_engine(
++        tmp_path, monkeypatch, "def run():\n    return 1\n"
 +    )
++    assert update_file_module._persist_live_engine(repo, engine) is True
++    cache_dir = repo_cache_dir(repo)
++    before = (cache_dir / "engine_state.meta.json").read_bytes()
++    if revision_owner == "engine":
++        engine.revision = 0
++    elif revision_owner == "state":
++        engine.state.revision = 0
++    else:
++        mcp_runtime._live_engine_revisions[str(repo.resolve())] = 0
++
++    with pytest.raises(RuntimeError, match="revision"):
++        update_file_module._persist_live_engine(repo, engine)
++    assert (cache_dir / "engine_state.meta.json").read_bytes() == before
 +
 +
-+def _rehydrate_local_engine(repo):
-+    mcp_runtime._live_engines.clear()
-+    return mcp_runtime.get_or_init_engine(repo.resolve())
++def test_local_exact_generation_rejects_invalid_existing_metadata(
++    tmp_path, monkeypatch
++):
++    repo, _provider, engine = _build_local_fallback_engine(
++        tmp_path, monkeypatch, "def run():\n    return 1\n"
++    )
++    cache_dir = repo_cache_dir(repo)
++    metadata_path = cache_dir / "engine_state.meta.json"
++    metadata_path.write_text("{invalid", encoding="utf-8")
++    with pytest.raises(RuntimeError, match="metadata is invalid"):
++        update_file_module._persist_live_engine(repo, engine)
++    assert metadata_path.read_text(encoding="utf-8") == "{invalid"
++
++
++def test_local_exact_generation_serializer_failure_preserves_original_identity(
++    tmp_path, monkeypatch
++):
++    repo, _provider, engine = _build_local_fallback_engine(
++        tmp_path, monkeypatch, "def run():\n    return 1\n"
++    )
++    before_revision = getattr(engine.state, "revision", None)
++    before_state_id = getattr(engine.state, "state_id", None)
++
++    def failing_dump(*_args, **_kwargs):
++        raise OSError("injected serializer failure")
++
++    monkeypatch.setattr(snapshot_store.pickle, "dump", failing_dump)
++    assert update_file_module._persist_live_engine(repo, engine) is False
++    assert getattr(engine.state, "revision", None) == before_revision
++    assert getattr(engine.state, "state_id", None) == before_state_id
++    assert read_metadata(repo_cache_dir(repo)) is None
++
++
++@pytest.mark.parametrize("failure_stage", ["file_state", "metadata_pointer"])
++def test_local_exact_generation_staging_failure_preserves_prior_generation(
++    tmp_path, monkeypatch, failure_stage
++):
++    repo, provider, engine = _build_local_fallback_engine(
++        tmp_path, monkeypatch, "def run():\n    return 1\n"
++    )
++    assert update_file_module._persist_live_engine(repo, engine) is True
++    cache_dir = repo_cache_dir(repo)
++    before = (cache_dir / "engine_state.meta.json").read_bytes()
++    previous = read_metadata(cache_dir)
++    tracked_sha = engine.state_manager.get_tracked_sha256(str(provider))
++
++    if failure_stage == "file_state":
++        original_dump = snapshot_store.json.dump
++
++        def failing_dump(value, stream, *args, **kwargs):
++            if stream.name.endswith(".json") and "file_state.r2." in stream.name:
++                raise OSError("injected FileState generation failure")
++            return original_dump(value, stream, *args, **kwargs)
++
++        monkeypatch.setattr(snapshot_store.json, "dump", failing_dump)
++    else:
++        original_replace = snapshot_store.os.replace
++
++        def failing_replace(source, target):
++            if target.name == "engine_state.meta.json":
++                raise OSError("injected metadata pointer failure")
++            return original_replace(source, target)
++
++        monkeypatch.setattr(snapshot_store.os, "replace", failing_replace)
++
++    assert update_file_module._persist_live_engine(repo, engine) is False
++    assert (cache_dir / "engine_state.meta.json").read_bytes() == before
++    assert read_metadata(cache_dir) == previous
++    assert engine.state.revision == engine.revision == 1
++    assert engine.state_manager.revision == 1
++    loaded = load_engine_state(
++        str(cache_dir), previous.state_id,
++        expected_repo_id=require_repository_identity(repo).repo_id,
++        expected_root_path=repo,
++    )
++    assert loaded is not None and loaded.revision == 1
++    reloaded_manager = FileStateManager(str(cache_dir))
++    assert reloaded_manager.revision == 1
++    assert reloaded_manager.get_tracked_sha256(str(provider)) == tracked_sha
++
++
++@pytest.mark.parametrize("existing_state_id", ["", "legacy-valid-id"])
++def test_local_exact_generation_migrates_legacy_filestate_and_state_id(
++    tmp_path, monkeypatch, existing_state_id
++):
++    repo, provider, engine = _build_local_fallback_engine(
++        tmp_path, monkeypatch, "def run():\n    return 1\n"
++    )
++    cache_dir = repo_cache_dir(repo)
++    identity = require_repository_identity(repo)
++    baseline = save_engine_state(
++        engine.state, str(cache_dir), existing_state_id,
++        writer="mcp", repo_id=identity.repo_id, root_path=identity.root_path,
++    )
++    assert baseline is not None and baseline.revision == 1
++    engine.state_manager.save(existing_state_id, revision=1)
++    tracked_sha = engine.state_manager.get_tracked_sha256(str(provider))
++    assert not read_metadata(cache_dir).file_state_file
++
++    assert update_file_module._persist_live_engine(repo, engine) is True
++    migrated = read_metadata(cache_dir)
++    assert migrated.revision == 2
++    assert migrated.state_id == (existing_state_id or identity.repo_id)
++    assert migrated.file_state_file.startswith("file_state.r2.")
++    assert (cache_dir / migrated.file_state_file).is_file()
++    hydrated = _rehydrate_local_engine(repo)
++    assert hydrated.state.state_id == hydrated.state_manager.state_id == migrated.state_id
++    assert hydrated.state_manager.revision == 2
++    assert hydrated.state_manager.get_tracked_sha256(str(provider)) == tracked_sha
 +
 +
  def test_mcp_refreshes_its_engine_from_a_newer_shared_live_revision(tmp_path, monkeypatch):
      first = RepositoryAnalysisState(modules={"old": object()})
      second = RepositoryAnalysisState(modules={"new": object()})
-@@ -147,3 +204,139 @@ def test_update_persist_restart_hydrate_keeps_live_reverse_context(tmp_path, mon
-         {"module_id": registry.get_module_id("consumer"), "module": "consumer"}
-     ]
-     assert context["dependency_data_source"] == "live_canonical_graph"
-+
-+
-+def test_local_fallback_updated_facts_survive_snapshot_hydration(tmp_path, monkeypatch):
-+    repo, provider, engine = _build_local_fallback_engine(
-+        tmp_path, monkeypatch, "def run():\n    return 1\n"
-+    )
-+    original_artifacts = deepcopy(engine.state.artifacts["provider"])
-+    provider.write_text(
-+        "def run():\n    return 1\n\ndef added():\n    return 2\n",
-+        encoding="utf-8",
-+    )
-+
-+    response = _local_update(repo, provider)
-+    assert response["status"] == "UPDATED"
-+    assert response["live_state_persisted"] is True
-+
-+    updated_engine = mcp_runtime._live_engines[str(repo.resolve())]
-+    assert updated_engine.state.artifacts["provider"] != original_artifacts
-+    hydrated = _rehydrate_local_engine(repo)
-+    assert hydrated is not None
-+    assert hydrated.state.artifacts["provider"] == updated_engine.state.artifacts["provider"]
-+
-+
-+def test_local_fallback_syntax_error_and_recovery_survive_snapshot_hydration(
-+    tmp_path, monkeypatch
-+):
-+    repo, provider, engine = _build_local_fallback_engine(
-+        tmp_path, monkeypatch, "def run():\n    return 1\n"
-+    )
-+    original_module = deepcopy(engine.state.modules["provider"])
-+    original_artifacts = deepcopy(engine.state.artifacts["provider"])
-+
-+    provider.write_text("def run(:\n    return 1\n", encoding="utf-8")
-+    syntax_error = _local_update(repo, provider)
-+    assert syntax_error["status"] == "SYNTAX_ERROR"
-+    assert syntax_error["live_state_persisted"] is True
-+
-+    syntax_hydrated = _rehydrate_local_engine(repo)
-+    assert syntax_hydrated is not None
-+    assert syntax_hydrated.state.modules["provider"] == original_module
-+    assert syntax_hydrated.state.artifacts["provider"] == original_artifacts
-+    assert syntax_hydrated.state.module_parse_freshness["provider"]["state"] == "stale"
-+    assert (
-+        syntax_hydrated.state.syntax_diagnostics_by_path["provider.py"]["status"]
-+        == "checked_with_errors"
-+    )
-+
-+    provider.write_text("def run():\n    return 2\n", encoding="utf-8")
-+    recovered = _local_update(repo, provider)
-+    assert recovered["status"] == "RECOVERED"
-+    assert recovered["live_state_persisted"] is True
-+
-+    recovered_hydrated = _rehydrate_local_engine(repo)
-+    assert recovered_hydrated is not None
-+    assert "provider" not in recovered_hydrated.state.module_parse_freshness
-+    assert (
-+        recovered_hydrated.state.syntax_diagnostics_by_path["provider.py"]["status"]
-+        == "checked_and_none"
-+    )
-+
-+
-+def test_local_fallback_early_and_parsed_unchanged_are_persisted_and_hydrated(
-+    tmp_path, monkeypatch
-+):
-+    repo, provider, _engine = _build_local_fallback_engine(
-+        tmp_path, monkeypatch, "def run():\n    return 1\n"
-+    )
-+    real_persist = update_file_module._persist_live_engine
-+    persist_calls = []
-+
-+    def persist_and_record(root, engine):
-+        persist_calls.append((root, engine))
-+        return real_persist(root, engine)
-+
-+    monkeypatch.setattr(update_file_module, "_persist_live_engine", persist_and_record)
-+
-+    early_unchanged = _local_update(repo, provider)
-+    assert early_unchanged["status"] == "UNCHANGED"
-+    assert early_unchanged["live_state_persisted"] is True
-+    assert len(persist_calls) == 1
-+
-+    stat = provider.stat()
-+    os.utime(provider, (stat.st_atime, stat.st_mtime + 2))
-+    reconciled = _local_update(repo, provider)
-+    assert reconciled["status"] in {"UPDATED", "UNCHANGED"}
-+    assert reconciled["live_state_persisted"] is True
-+    assert len(persist_calls) == 2
-+
-+    stat = provider.stat()
-+    os.utime(provider, (stat.st_atime, stat.st_mtime + 2))
-+    parsed_unchanged = _local_update(repo, provider)
-+    assert parsed_unchanged["status"] == "UNCHANGED", parsed_unchanged
-+    assert parsed_unchanged["live_state_persisted"] is True
-+    assert len(persist_calls) == 3
-+
-+    parsed_engine = mcp_runtime._live_engines[str(repo.resolve())]
-+    expected_lineage = deepcopy(parsed_engine.state.lineage_facts_by_source)
-+    assert "provider.py" in expected_lineage
-+    hydrated = _rehydrate_local_engine(repo)
-+    assert hydrated is not None
-+    assert (
-+        hydrated.state.syntax_diagnostics_by_path["provider.py"]["status"]
-+        == "checked_and_none"
-+    )
-+    assert hydrated.state.lineage_facts_by_source == expected_lineage
-+    assert hydrated.state_manager.has_changed(str(provider)) is False
-+
-+
-+def test_local_fallback_structured_preparation_error_persists_published_mutations(
-+    tmp_path, monkeypatch
-+):
-+    repo, provider, _engine = _build_local_fallback_engine(
-+        tmp_path, monkeypatch, "def run():\n    return 1\n"
-+    )
-+    provider.write_text(
-+        "def run():\n    return 1\n# trigger preparation\n", encoding="utf-8"
-+    )
-+    monkeypatch.setattr(
-+        incremental_engine_module,
-+        "prepare_source_update",
-+        lambda **_kwargs: SimpleNamespace(
-+            has_error=True,
-+            error_status="ERROR",
-+            error_message="structured preparation failure",
-+            line_number=2,
-+            column_number=3,
-+        ),
-+    )
-+
-+    response = _local_update(repo, provider)
-+    assert response["status"] == "ERROR"
-+    assert response["live_state_persisted"] is True
-+
-+    hydrated = _rehydrate_local_engine(repo)
-+    assert hydrated is not None
-+    assert hydrated.state.module_parse_freshness["provider"]["state"] == "stale"
+```
+
+### tests/test_mcp_regressions.py
+
+```diff
 diff --git a/tests/test_mcp_regressions.py b/tests/test_mcp_regressions.py
-index b4bbe05..010bdeb 100644
+index 010bdeb..19eca67 100644
 --- a/tests/test_mcp_regressions.py
 +++ b/tests/test_mcp_regressions.py
-@@ -2737,6 +2737,175 @@ def test_mcp_update_file_shapes_affected_modules_compact_full_and_fields(tmp_pat
-     assert filtered["status"] == "UPDATED"
+@@ -2596,9 +2596,17 @@ def test_file_edit_context_prefers_fresh_live_graph_over_stale_saved_matrix(
+ def test_incremental_live_state_persistence_roundtrips_for_restart(
+     tmp_path, monkeypatch
+ ):
++    from contextor.core.analysis.state_manager import FileStateManager
++    from contextor.core.paths import repo_cache_dir
++
+     cache_root = tmp_path / "cache"
+     monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(cache_root))
+     registry = PersistentIdentityRegistry(str(tmp_path))
++    tracked_file = tmp_path / "tracked.py"
++    tracked_file.write_text("value = 1\n", encoding="utf-8")
++    state_manager = FileStateManager(str(repo_cache_dir(tmp_path)))
++    state_manager.update_state(str(tracked_file))
++    state_manager.state_id = "after-incremental-update"
+     state = RepositoryAnalysisState(
+         modules={},
+         artifacts={"new.module": {"symbols": {"functions": ["run"]}}},
+@@ -2609,13 +2617,11 @@ def test_incremental_live_state_persistence_roundtrips_for_restart(
+     )
+     engine = SimpleNamespace(
+         state=state,
+-        state_manager=SimpleNamespace(state_id="after-incremental-update"),
++        state_manager=state_manager,
+     )
+ 
+     persisted = update_file_module._persist_live_engine(tmp_path, engine)
+ 
+-    from contextor.core.paths import repo_cache_dir
+-
+     loaded = load_engine_state(
+         str(repo_cache_dir(tmp_path)),
+         "after-incremental-update",
+@@ -2625,6 +2631,10 @@ def test_incremental_live_state_persistence_roundtrips_for_restart(
+     assert persisted is True
+     assert loaded is not None
+     assert loaded.artifacts == state.artifacts
++    reloaded_manager = FileStateManager(str(repo_cache_dir(tmp_path)))
++    assert reloaded_manager.state_id == "after-incremental-update"
++    assert reloaded_manager.revision == 1
++    assert reloaded_manager.has_changed(str(tracked_file)) is False
  
  
-+@pytest.mark.parametrize(
-+    ("result_status", "path_kind"),
-+    [
-+        pytest.param("UPDATED", "updated", id="updated"),
-+        pytest.param("DELETED", "deleted", id="deleted"),
-+        pytest.param("SYNTAX_ERROR", "syntax-error", id="syntax-error"),
-+        pytest.param("RECOVERED", "recovered", id="recovered"),
-+        pytest.param("UNCHANGED", "parsed-semantic-no-op", id="parsed-unchanged"),
-+        pytest.param("UNCHANGED", "early-no-op", id="early-unchanged"),
-+        pytest.param("ERROR", "structured-error", id="structured-error"),
-+    ],
-+)
-+@pytest.mark.parametrize("persisted", [True, False], ids=["persisted", "not-persisted"])
-+def test_mcp_update_file_local_fallback_persists_every_returned_status(
-+    tmp_path, monkeypatch, result_status, path_kind, persisted
-+):
-+    root = tmp_path.resolve()
-+    target = root / "provider.py"
-+    target.write_text("def run():\n    return 1\n", encoding="utf-8")
-+    connect_calls = []
-+    update_calls = []
-+    persist_calls = []
-+
-+    result = SimpleNamespace(
-+        status=result_status,
-+        file_path=str(target),
-+        graph_state="fresh",
-+        dependencies_state="fresh",
-+        blast_radius_state="deferred",
-+        local_metrics_state="deferred",
-+        global_metrics_state="deferred",
-+        artifact_consumption_state="fresh",
-+        affected_modules=[],
-+        delta=None,
-+    )
-+
-+    class FakeEngine:
-+        state = SimpleNamespace(artifacts={"provider": {}})
-+
-+        def update_file(self, file_path):
-+            update_calls.append(file_path)
-+            return result
-+
-+    engine = FakeEngine()
-+
-+    def connect(_root):
-+        connect_calls.append(_root)
-+        return None
-+
-+    def persist(_root, candidate_engine):
-+        persist_calls.append((_root, candidate_engine))
-+        return persisted
-+
-+    monkeypatch.setattr("contextor.core.live_state.connect", connect)
-+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: engine)
-+    monkeypatch.setattr(update_file_module, "_persist_live_engine", persist)
-+    monkeypatch.setattr(
-+        update_file_module, "_mcp_runtime_restart_required", lambda _path: False
-+    )
-+
-+    response = json.loads(
-+        mcp_server.update_file.fn(repo_path=str(root), file_path=str(target))
-+    )
-+
-+    assert bool(path_kind)
-+    assert connect_calls
-+    assert all(call_root == root for call_root in connect_calls)
-+    assert update_calls == [str(target)]
-+    assert persist_calls == [(root, engine)]
-+    assert response["status"] == result_status
-+    assert response["live_state_persisted"] is persisted
-+
-+
-+def test_mcp_update_file_live_branch_delegates_without_local_persistence(
-+    tmp_path, monkeypatch
-+):
-+    root = tmp_path.resolve()
-+    target = root / "provider.py"
-+    target.write_text("def run():\n    return 1\n", encoding="utf-8")
-+    remote_result = SimpleNamespace(
-+        status="UPDATED",
-+        file_path=str(target),
-+        graph_state="fresh",
-+        dependencies_state="fresh",
-+        blast_radius_state="fresh",
-+        local_metrics_state="deferred",
-+        global_metrics_state="deferred",
-+        artifact_consumption_state="fresh",
-+        affected_modules=[],
-+        delta=None,
-+    )
-+    remote_calls = []
-+
-+    class FakeLiveClient:
-+        def update_file(self, file_path, *, origin):
-+            remote_calls.append((file_path, origin))
-+            return {"status": "ok", "revision": 42, "result": remote_result}
-+
-+    engine = SimpleNamespace(
-+        state=SimpleNamespace(artifacts={"provider": {}}),
-+        update_file=lambda *_args: pytest.fail("LIVE path used local engine update"),
-+    )
-+    monkeypatch.setattr(
-+        "contextor.core.live_state.connect", lambda _root: FakeLiveClient()
-+    )
-+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: engine)
-+    monkeypatch.setattr(
-+        mcp_runtime,
-+        "_engine_cache_transaction",
-+        lambda _root: nullcontext(str(root)),
-+    )
-+    monkeypatch.setattr(mcp_runtime, "_live_engine_revisions", {})
-+    monkeypatch.setattr(
-+        update_file_module,
-+        "_persist_live_engine",
-+        lambda *_args: pytest.fail("LIVE path called the local persister"),
-+    )
-+    monkeypatch.setattr(
-+        update_file_module, "_mcp_runtime_restart_required", lambda _path: False
-+    )
-+
-+    response = json.loads(
-+        mcp_server.update_file.fn(repo_path=str(root), file_path=str(target))
-+    )
-+
-+    assert remote_calls == [(str(target), "mcp")]
-+    assert response["status"] == "UPDATED"
-+    assert response["live_state_persisted"] is True
-+
-+
-+def test_mcp_update_file_local_persistence_exception_keeps_error_response(
-+    tmp_path, monkeypatch
-+):
-+    root = tmp_path.resolve()
-+    target = root / "provider.py"
-+    target.write_text("def run():\n    return 1\n", encoding="utf-8")
-+    result = SimpleNamespace(
-+        status="SYNTAX_ERROR",
-+        file_path=str(target),
-+        graph_state="stale",
-+        dependencies_state="stale",
-+        blast_radius_state="deferred",
-+        local_metrics_state="deferred",
-+        global_metrics_state="deferred",
-+        artifact_consumption_state="stale",
-+        affected_modules=[],
-+        delta=None,
-+    )
-+    engine = SimpleNamespace(
-+        state=SimpleNamespace(artifacts={"provider": {}}),
-+        update_file=lambda _path: result,
-+    )
-+
-+    def fail_persist(*_args):
-+        raise OSError("snapshot persistence failed")
-+
-+    monkeypatch.setattr("contextor.core.live_state.connect", lambda _root: None)
-+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: engine)
-+    monkeypatch.setattr(update_file_module, "_persist_live_engine", fail_persist)
-+
-+    response = json.loads(
-+        mcp_server.update_file.fn(repo_path=str(root), file_path=str(target))
-+    )
-+
-+    assert response["status"] == "ERROR"
-+    assert "snapshot persistence failed" in response["error"]
-+    assert "live_state_persisted" not in response
-+
-+
- 
- def test_mcp_bootstrap_keeps_an_existing_virtual_environment(monkeypatch):
-     monkeypatch.setattr(mcp_server.sys, "prefix", "C:/repo/.venv")
-FULL_DIFFS_END
-
-## REMAINING_ATOMICITY_RISKS
-
-OUT OF SCOPE / NOT CERTIFIED: This patch does not roll back canonical RAM state if persistence returns false or raises. It does not prove atomic snapshot plus FileStateManager publication, partial-write crash safety, read-back durability, or recovery from a split disk state. A persister exception still becomes an ERROR response after engine execution may already have mutated RAM.
-
-## RESTART_REQUIRED
-
-YES — MCP server process. The changed update_file.py is MCP package source, and the existing restart gate treats changed package code as requiring restart relative to its startup fingerprint. No MCP, Desktop, or LIVE process was restarted. The tests and Contextor source synchronization do not certify that an already-running MCP process imported the new code.
-
-## FINAL_VERDICT
-
-FOCUSED_PATCH_PASS; TARGETED_TESTS_PASS; MCP_RUNTIME_RELOAD_PENDING. The exact authorized local-fallback change is present, the complete targeted gate passed, Contextor confirms the updated source is synchronized, and watcher revisions are continuous with no resync requirement. Serving-process behavior awaits the required manual MCP restart and a separate runtime certification.
-
-
-
+ def test_fastmcp_schema_exposes_analysis_parameters():
+```
