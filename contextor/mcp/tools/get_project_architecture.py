@@ -209,11 +209,26 @@ def _live_state_overlay(root: Path) -> dict[str, Any]:
     stale_modules = _stale_module_truths(state)
     if stale_modules:
         freshness = dict(freshness)
-        freshness["canonical_state"] = "stale"
+        has_untrusted = any(
+            truth.get("state") == "unavailable"
+            for truth in stale_modules.values()
+        )
+        freshness["canonical_state"] = (
+            "stale"
+            if getattr(state, "resync_required", False)
+            else "unavailable"
+            if has_untrusted
+            else "stale"
+        )
         existing_warning = freshness.get("advisory_warning")
         stale_warning = (
-            "One or more modules are parse-stale; canonical facts for those "
-            "modules are last-known-good."
+            "One or more modules have invalid parse freshness metadata; "
+            "their canonical facts are untrusted."
+            if has_untrusted
+            else (
+                "One or more modules are parse-stale; canonical facts for those "
+                "modules are last-known-good."
+            )
         )
         freshness["advisory_warning"] = (
             f"{existing_warning} {stale_warning}"

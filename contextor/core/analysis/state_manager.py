@@ -226,10 +226,36 @@ def build_syntax_diagnostics_from_index(index: Any) -> tuple[Dict[str, Dict[str,
 
 def module_current_truth(state: RepositoryAnalysisState, module_name: str) -> Dict[str, Any]:
     """Return authoritative per-module parse freshness and provenance."""
-    freshness = getattr(state, "module_parse_freshness", {}) or {}
-    entry = freshness.get(module_name)
-    if not isinstance(entry, dict) or entry.get("state") != "stale":
+    missing = object()
+    freshness = getattr(state, "module_parse_freshness", missing)
+
+    if freshness is missing:
+        freshness = {}
+
+    entry = (
+        freshness.get(module_name, missing)
+        if isinstance(freshness, dict)
+        else None
+    )
+
+    if entry is missing:
         return {"available": True, "state": "fresh", "provenance": "current"}
+
+    if (
+        not isinstance(entry, dict)
+        or type(entry.get("state")) is not str
+        or entry["state"] not in {"fresh", "stale"}
+    ):
+        return {
+            "available": False,
+            "state": "unavailable",
+            "provenance": "untrusted",
+            "reason": "Canonical module parse freshness metadata is invalid or untrusted.",
+        }
+
+    if entry["state"] == "fresh":
+        return {"available": True, "state": "fresh", "provenance": "current"}
+
     return {
         "available": False,
         "state": "stale",

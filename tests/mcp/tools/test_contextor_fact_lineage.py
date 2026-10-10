@@ -330,6 +330,21 @@ def test_symbol_calls_complete_reports_coverage_and_three_update_branches(tmp_pa
     assert _edge(result, "PERSISTS") and _edge(result, "HYDRATES")
 
 
+def test_untrusted_module_truth_prevents_symbol_calls_complete_coverage(tmp_path, monkeypatch):
+    state = _state()
+    state.module_parse_freshness = {"pkg.alpha": {"state": "unknown"}}
+    _install(monkeypatch, tmp_path, state)
+
+    result = _load(contextor_fact_lineage(str(tmp_path), "symbol_calls"))
+
+    assert result["status"] == "partial"
+    assert result["coverage"]["stale_module_count"] == 1
+    assert any(
+        gap["expected_edge"] == "COMPLETE_SYMBOL_CALLS_COVERAGE"
+        for gap in result["unresolved"]
+    )
+
+
 def test_symbol_calls_partial_uses_one_aggregate_coverage_gap(tmp_path, monkeypatch):
     usages = {
         "pkg.alpha": SimpleNamespace(

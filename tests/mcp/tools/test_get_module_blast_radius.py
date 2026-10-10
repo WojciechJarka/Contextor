@@ -115,6 +115,20 @@ def _fixture(monkeypatch):
     return state, registry
 
 
+def test_malformed_module_truth_blocks_fact_bearing_blast_radius(tmp_path, monkeypatch):
+    state, _registry = _fixture(monkeypatch)
+    entry = {"state": "unknown"}
+    state.module_parse_freshness = {"pkg.mod": entry}
+
+    result = json.loads(get_module_blast_radius(str(tmp_path), module="pkg.mod"))
+
+    assert result["status"] == "unavailable"
+    assert result["available"] is False
+    assert result["provenance"] == "untrusted"
+    assert "artifacts" not in result
+    assert state.module_parse_freshness["pkg.mod"] is entry
+
+
 def _zero_identity_large_fixture(monkeypatch):
     state, registry = _fixture(monkeypatch)
     symbols = [f"symbol_{index:02d}" for index in range(48)]

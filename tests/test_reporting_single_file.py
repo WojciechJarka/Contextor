@@ -1,5 +1,48 @@
 import pytest
+from types import SimpleNamespace
+from contextor.core.single_file.builders.layer0_builders import _canonical_state_module_is_current
+from contextor.core.single_file.builders.layer2_builders import TestContextBuilder as _TestContextBuilder
 from contextor.core.reporting_layer.reporting_single_file import generate_single_file_report
+
+
+def test_untrusted_module_parse_freshness_cannot_certify_single_file_canonical_facts():
+    entry = {"state": "unknown"}
+    state = SimpleNamespace(
+        artifacts={"pkg.mod": {"symbols": {}}},
+        module_parse_freshness={"pkg.mod": entry},
+    )
+
+    assert _canonical_state_module_is_current(state, "pkg.mod") is False
+    assert state.module_parse_freshness["pkg.mod"] is entry
+
+
+def test_untrusted_module_is_not_reused_by_test_context_builder(monkeypatch, tmp_path):
+    module = SimpleNamespace(ast_tree=object(), path="pkg/mod.py")
+    modules = {"pkg.mod": module}
+    engine_state = SimpleNamespace(
+        modules=modules,
+        module_parse_freshness={"pkg.mod": {"state": "unknown"}},
+    )
+    payload = SimpleNamespace(
+        module_id="pkg.mod",
+        root_path=str(tmp_path),
+        modules=modules,
+        engine_state=engine_state,
+    )
+    captured = {}
+
+    def fake_build_test_context(*_args, **kwargs):
+        captured.update(kwargs)
+        return {}
+
+    monkeypatch.setattr(
+        "contextor.core.analysis.test_context.build_test_context",
+        fake_build_test_context,
+    )
+
+    _TestContextBuilder().build(payload, {"public_api": []})
+
+    assert captured["modules"] == {}
 
 def test_single_file_report_header_and_node_id(tmp_path):
     ctx = {

@@ -445,11 +445,15 @@ def execute_projection(state: Any, request: Any) -> dict[str, Any]:
             module_name: module_current_truth(state, module_name)
             for module_name in sorted(affected_modules)
         }
+        has_untrusted = any(
+            truth.get("state") == "unavailable"
+            for truth in details.values()
+        )
         return {
-            "status": "stale",
+            "status": "unavailable" if has_untrusted else "stale",
             "available": False,
             "root": normalized["root"],
-            "provenance": "last_known_good",
+            "provenance": "untrusted" if has_untrusted else "last_known_good",
             "affected_modules": details,
         }
     limit = normalized["limit"]

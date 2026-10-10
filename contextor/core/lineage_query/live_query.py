@@ -251,7 +251,11 @@ def build_live_lineage_state_freshness(
     resync_required = bool(getattr(state, "resync_required", False))
     canonical_state = (
         "stale"
-        if resync_required or module_state == "stale"
+        if resync_required
+        else "unavailable"
+        if module_state == "unavailable"
+        else "stale"
+        if module_state == "stale"
         else "fresh"
     )
 
@@ -262,6 +266,11 @@ def build_live_lineage_state_freshness(
         advisory_warning = (
             module_truth.get("reason")
             or "Target module canonical facts are last-known-good."
+        )
+    elif module_state == "unavailable":
+        advisory_warning = (
+            module_truth.get("reason")
+            or "Target module canonical freshness is unavailable."
         )
 
     return {
@@ -499,6 +508,23 @@ def query_live_symbol_lineage(
             ),
         )
 
+    if raw_query.count("::") == 1:
+        requested_module = raw_query.split("::", 1)[0]
+        requested_truth = module_current_truth(state, requested_module)
+        if requested_truth["state"] == "unavailable":
+            return LiveSymbolLineageQueryResult(
+                resolution=LineageTargetResolution(
+                    status="unavailable",
+                    query=raw_query,
+                ),
+                unavailable_reason=requested_truth["reason"],
+                state_freshness=build_live_lineage_state_freshness(
+                    state,
+                    backend,
+                    target_module=requested_module,
+                ),
+            )
+
     try:
         canonical_query = backend.canonicalize_qualified_identity(
             raw_query
@@ -669,6 +695,24 @@ def query_live_symbol_lineage(
                     state,
                     backend,
                 )
+            ),
+        )
+
+    target_truth = module_current_truth(
+        state,
+        resolution.target.module_name,
+    )
+    if target_truth["state"] == "unavailable":
+        return LiveSymbolLineageQueryResult(
+            resolution=LineageTargetResolution(
+                status="unavailable",
+                query=raw_query,
+            ),
+            unavailable_reason=target_truth["reason"],
+            state_freshness=build_live_lineage_state_freshness(
+                state,
+                backend,
+                target_module=resolution.target.module_name,
             ),
         )
 

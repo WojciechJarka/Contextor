@@ -185,6 +185,39 @@ def test_get_project_architecture_normalizes_malformed_public_family(tmp_path, m
     assert engine.state.cycles_state == "pretend_fresh"
 
 
+def test_project_architecture_overlay_distinguishes_untrusted_from_lkg(tmp_path, monkeypatch):
+    _install_runtime(tmp_path, monkeypatch, _small_bundle())
+    engine = architecture_tool.mcp_runtime.get_or_init_engine(tmp_path)
+    entry = {"state": "unknown"}
+    engine.state.module_parse_freshness = {"pkg.mod": entry}
+
+    result = json.loads(mcp_server.get_project_architecture.fn(repo_path=str(tmp_path)))
+
+    live = result["live_state"]
+    assert live["parse_stale_modules"]["pkg.mod"]["state"] == "unavailable"
+    assert live["parse_stale_modules"]["pkg.mod"]["provenance"] == "untrusted"
+    assert live["state_freshness"]["canonical_state"] == "unavailable"
+    assert "untrusted" in live["state_freshness"]["advisory_warning"]
+    assert "last-known-good" not in live["state_freshness"]["advisory_warning"]
+    assert engine.state.module_parse_freshness["pkg.mod"] is entry
+
+
+def test_project_architecture_overlay_keeps_stale_and_resync_contract(tmp_path, monkeypatch):
+    _install_runtime(tmp_path, monkeypatch, _small_bundle())
+    engine = architecture_tool.mcp_runtime.get_or_init_engine(tmp_path)
+    engine.state.module_parse_freshness = {"pkg.mod": {"state": "stale"}}
+
+    stale = json.loads(mcp_server.get_project_architecture.fn(repo_path=str(tmp_path)))
+    assert stale["live_state"]["state_freshness"]["canonical_state"] == "stale"
+    assert stale["live_state"]["parse_stale_modules"]["pkg.mod"]["provenance"] == "last_known_good"
+
+    engine.state.module_parse_freshness = {"pkg.mod": {"state": "unknown"}}
+    engine.state.resync_required = True
+    resync = json.loads(mcp_server.get_project_architecture.fn(repo_path=str(tmp_path)))
+    assert resync["live_state"]["state_freshness"]["canonical_state"] == "stale"
+    assert resync["live_state"]["parse_stale_modules"]["pkg.mod"]["state"] == "unavailable"
+
+
 def test_get_project_architecture_preflights_over_50k_and_reports_section_sizes(
     tmp_path,
     monkeypatch,

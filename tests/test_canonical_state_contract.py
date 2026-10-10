@@ -100,6 +100,63 @@ def test_modules_projection_is_canonical_bounded_and_excludes_absolute_path():
     assert "absolute_path" not in result["results"][0]
 
 
+def test_projection_rejects_untrusted_matched_module_without_rows():
+    state = _state()
+    entry = {"state": "unknown"}
+    state.module_parse_freshness = {"pkg.used": entry}
+
+    result = execute_projection(
+        state,
+        _request("modules", filters=[], select=["module_name"], limit=20),
+    )
+
+    assert result["status"] == "unavailable"
+    assert result["available"] is False
+    assert result["provenance"] == "untrusted"
+    assert result["affected_modules"]["pkg.used"]["state"] == "unavailable"
+    assert "results" not in result
+    assert state.module_parse_freshness["pkg.used"] is entry
+
+
+def test_projection_mixed_stale_and_untrusted_prefers_untrusted():
+    state = _state()
+    state.module_parse_freshness = {
+        "pkg.empty": {"state": "stale"},
+        "pkg.used": {"state": None},
+    }
+
+    result = execute_projection(state, _request("modules", select=["module_name"]))
+
+    assert result["status"] == "unavailable"
+    assert result["provenance"] == "untrusted"
+    assert result["affected_modules"]["pkg.empty"]["state"] == "stale"
+    assert result["affected_modules"]["pkg.used"]["state"] == "unavailable"
+    assert "results" not in result
+
+
+def test_projection_explicit_stale_retains_lkg_response():
+    state = _state()
+    state.module_parse_freshness = {"pkg.used": {"state": "stale"}}
+
+    result = execute_projection(state, _request("modules", select=["module_name"]))
+
+    assert result == {
+        "status": "stale",
+        "available": False,
+        "root": "modules",
+        "provenance": "last_known_good",
+        "affected_modules": {
+            "pkg.used": {
+                "available": False,
+                "state": "stale",
+                "provenance": "last_known_good",
+                "reason": "Current source could not be parsed; canonical facts are last-known-good.",
+                "parse_failure": {},
+            }
+        },
+    }
+
+
 def test_artifact_projection_preserves_unknown_consumer_state_and_null_rules():
     unknown = execute_projection(
         _state(),

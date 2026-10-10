@@ -127,3 +127,35 @@ def test_resync_keeps_canonical_stale_and_normalizes_only_malformed_family(tmp_p
     assert freshness["workspace_sync"] == "unverified"
     assert state.resync_required is True
     assert state.cycles_state == "pretend_fresh"
+
+
+@pytest.mark.parametrize(
+    "entry, expected",
+    [
+        ({"state": "unknown"}, "unavailable"),
+        ({"state": "stale"}, "stale"),
+        ({"state": "fresh"}, "fresh"),
+    ],
+)
+def test_target_module_truth_controls_common_freshness_without_mutation(
+    tmp_path, entry, expected
+):
+    state = _state("fresh")
+    state.module_parse_freshness = {"pkg.mod": entry}
+
+    freshness = build_state_freshness(tmp_path, state, target_module="pkg.mod")
+
+    assert freshness["canonical_state"] == expected
+    assert freshness["families"]["module"] == expected
+    assert state.module_parse_freshness["pkg.mod"] is entry
+
+
+def test_global_resync_still_wins_over_untrusted_module_canonical_state(tmp_path):
+    state = _state("fresh")
+    state.module_parse_freshness = {"pkg.mod": {"state": "unknown"}}
+    state.resync_required = True
+
+    freshness = build_state_freshness(tmp_path, state, target_module="pkg.mod")
+
+    assert freshness["canonical_state"] == "stale"
+    assert freshness["families"]["module"] == "unavailable"

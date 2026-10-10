@@ -94,6 +94,27 @@ def test_stale_same_sha_extracts(monkeypatch,tmp_path):
     monkeypatch.setattr("contextor.core.reference.module_usage_reuse.extract_module_usage_facts",lambda mid,*a,**k:calls.append(mid) or good)
     build_module_usage_baseline_with_reuse(modules,prior,_manager({paths[0]:"sha",paths[1]:"sha"})); assert calls==["a"]
 
+
+def test_untrusted_same_sha_extracts_instead_of_reusing(monkeypatch, tmp_path):
+    modules, paths, good = _two(tmp_path)
+    prior = _state(
+        modules,
+        {"a": good, "b": good},
+        {"a": _entry("a", paths[0]), "b": _entry("b", paths[1])},
+        module_parse_freshness={"a": {"state": "unknown"}},
+    )
+    calls = []
+    monkeypatch.setattr(
+        "contextor.core.reference.module_usage_reuse.extract_module_usage_facts",
+        lambda mid, *_a, **_k: calls.append(mid) or good,
+    )
+
+    build_module_usage_baseline_with_reuse(
+        modules, prior, _manager({paths[0]: "sha", paths[1]: "sha"})
+    )
+
+    assert calls == ["a"]
+
 def test_unmaterialized_channels_extract(monkeypatch,tmp_path):
     modules,paths,good=_two(tmp_path); bad=ModuleUsageFacts(symbol_calls_materialized=False,reference_evidence_materialized=True); prior=_state(modules,{"a":bad,"b":good},{"a":_entry("a",paths[0]),"b":_entry("b",paths[1])}); calls=[]
     monkeypatch.setattr("contextor.core.reference.module_usage_reuse.extract_module_usage_facts",lambda mid,*a,**k:calls.append(mid) or good)

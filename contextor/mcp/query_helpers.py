@@ -113,7 +113,7 @@ def module_truth_unavailable(state, module_name: str) -> dict | None:
     if truth["available"]:
         return None
     return {
-        "status": "stale",
+        "status": "stale" if truth.get("state") == "stale" else "unavailable",
         "available": False,
         "module": module_name,
         **{key: value for key, value in truth.items() if key != "available"},

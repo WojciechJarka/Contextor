@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from contextor.mcp import query_helpers
+from contextor.mcp.query_helpers import module_truth_unavailable as real_module_truth_unavailable
 from contextor.mcp import runtime as mcp_runtime
 from contextor.mcp import source_helpers
 from contextor.mcp.tools.get_source_range import get_source_range
@@ -154,6 +155,20 @@ def test_module_truth_unavailable_missing_engine_and_resync_remain_fail_closed(t
         "status": "error", "error": "canonical_state_unavailable"
     }
 
+
+def test_malformed_module_truth_blocks_public_source_range(tmp_path, monkeypatch):
+    record = _record(tmp_path, "module.py")
+    engine = _engine(tmp_path, [record])
+    engine.state.module_parse_freshness = {"module": {"state": "unknown"}}
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: engine)
+    monkeypatch.setattr(query_helpers, "module_truth_unavailable", real_module_truth_unavailable)
+
+    result = json.loads(get_source_range(str(tmp_path), "module.py", 1, 1))
+
+    assert result["status"] == "unavailable"
+    assert result["available"] is False
+    assert result["provenance"] == "untrusted"
+    assert "text" not in result
 
 def test_exact_path_reads_once_without_ast_or_source_tokenization(tmp_path, monkeypatch):
     record = _record(tmp_path, "module.py")

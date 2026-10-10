@@ -1363,6 +1363,87 @@ def test_live_symbol_lineage_lkg_without_resync_keeps_selected_facts():
     assert result.state_freshness["families"]["module"] == "stale"
 
 
+@pytest.mark.parametrize("query", ["pkg.mod::handler", "A17/2"])
+def test_live_lineage_rejects_untrusted_requested_or_resolved_module(query):
+    state, _backend = _fixture()
+    entry = {"state": "unknown"}
+    state.module_parse_freshness = {"pkg.mod": entry}
+
+    result = query_live_symbol_lineage(state, query, ("interface",))
+
+    assert result.resolution.status == "unavailable"
+    assert result.selected is None
+    assert result.owner_names == {}
+    assert result.state_freshness["canonical_state"] == "unavailable"
+    assert result.state_freshness["families"]["module"] == "unavailable"
+    assert result.unavailable_reason == (
+        "Canonical module parse freshness metadata is invalid or untrusted."
+    )
+    assert state.module_parse_freshness["pkg.mod"] is entry
+
+
+@pytest.mark.parametrize("untrusted_module", ["alias", "origin"])
+def test_live_lineage_rejects_untrusted_alias_or_origin(untrusted_module):
+    state = _reexport_query_fixture(
+        {"alias": "alias.py", "origin": "origin.py"},
+        {
+            "alias": {
+                "exporter": "alias",
+                "explicit_all": None,
+                "bindings": {"public": "origin.handler"},
+                "star_sources": [],
+            },
+            "origin": {
+                "exporter": "origin",
+                "explicit_all": None,
+                "bindings": {},
+                "star_sources": [],
+            },
+        },
+        {"origin": (("A30/1", "origin::handler"),)},
+    )
+    state.module_parse_freshness = {untrusted_module: {"state": "unknown"}}
+
+    result = query_live_symbol_lineage(state, "alias::public", ("interface",))
+
+    assert result.resolution.status == "unavailable"
+    assert result.selected is None
+    assert result.owner_names == {}
+    assert result.state_freshness["canonical_state"] == "unavailable"
+    assert result.state_freshness["families"]["module"] == "unavailable"
+
+
+def test_live_lineage_rejects_untrusted_package_init_alias():
+    state = _reexport_query_fixture(
+        {
+            "pkg.__init__": "pkg/__init__.py",
+            "pkg.provider": "pkg/provider.py",
+        },
+        {
+            "pkg.__init__": {
+                "exporter": "pkg",
+                "explicit_all": ["public_run"],
+                "bindings": {"public_run": "pkg.provider.run"},
+                "star_sources": [],
+            },
+            "pkg.provider": {
+                "exporter": "pkg.provider",
+                "explicit_all": None,
+                "bindings": {"run": "pkg.provider.run"},
+                "star_sources": [],
+            },
+        },
+        {"pkg.provider": (("A30/1", "pkg.provider::run"),)},
+    )
+    state.module_parse_freshness = {"pkg.__init__": {"state": "unknown"}}
+
+    result = query_live_symbol_lineage(state, "pkg::public_run", ("interface",))
+
+    assert result.resolution.status == "unavailable"
+    assert result.selected is None
+    assert result.owner_names == {}
+
+
 def test_live_lineage_state_freshness_marks_resync_required():
     state, backend = _fixture()
     state.resync_required = True

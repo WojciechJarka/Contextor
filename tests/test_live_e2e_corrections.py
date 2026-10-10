@@ -133,6 +133,95 @@ def _stale_mcp_state(tmp_path):
     )
 
 
+@pytest.mark.parametrize(
+    "raw_map",
+    [None, False, 0, [], "", "bad", 17, ["bad"]],
+    ids=repr,
+)
+def test_module_current_truth_rejects_malformed_whole_map_without_mutation(raw_map):
+    state = SimpleNamespace(module_parse_freshness=raw_map)
+
+    truth = module_current_truth(state, "provider")
+
+    assert truth == {
+        "available": False,
+        "state": "unavailable",
+        "provenance": "untrusted",
+        "reason": "Canonical module parse freshness metadata is invalid or untrusted.",
+    }
+    assert state.module_parse_freshness is raw_map
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [None, False, 17, [], "bad", {}, {"state": None}, {"state": False}, {"state": "unknown"}],
+    ids=repr,
+)
+def test_module_current_truth_rejects_malformed_entry_without_mutation(entry):
+    raw_map = {"provider": entry}
+    state = SimpleNamespace(module_parse_freshness=raw_map)
+
+    truth = module_current_truth(state, "provider")
+
+    assert truth["available"] is False
+    assert truth["state"] == "unavailable"
+    assert truth["provenance"] == "untrusted"
+    assert "parse_failure" not in truth
+    assert state.module_parse_freshness is raw_map
+    assert state.module_parse_freshness["provider"] is entry
+
+
+def test_module_current_truth_keeps_valid_and_legacy_absence_contract():
+    for state in (
+        SimpleNamespace(),
+        SimpleNamespace(module_parse_freshness={}),
+        SimpleNamespace(module_parse_freshness={"other": {"state": "stale"}}),
+        SimpleNamespace(module_parse_freshness={"provider": {"state": "fresh"}}),
+    ):
+        assert module_current_truth(state, "provider") == {
+            "available": True,
+            "state": "fresh",
+            "provenance": "current",
+        }
+
+    stale_entry = {
+        "state": "stale",
+        "error": "invalid syntax",
+        "line_number": 2,
+        "column_number": 3,
+    }
+    stale = SimpleNamespace(module_parse_freshness={"provider": stale_entry})
+    assert module_current_truth(stale, "provider") == {
+        "available": False,
+        "state": "stale",
+        "provenance": "last_known_good",
+        "reason": "Current source could not be parsed; canonical facts are last-known-good.",
+        "parse_failure": {
+            "error": "invalid syntax",
+            "line_number": 2,
+            "column_number": 3,
+        },
+    }
+    assert stale.module_parse_freshness["provider"] is stale_entry
+
+
+def test_module_truth_unavailable_distinguishes_untrusted_from_lkg():
+    state = SimpleNamespace(module_parse_freshness={"provider": {"state": "stale"}})
+    stale = query_helpers.module_truth_unavailable(state, "provider")
+    assert stale["status"] == "stale"
+    assert stale["provenance"] == "last_known_good"
+    assert stale["parse_failure"] == {}
+
+    entry = {"state": "unknown"}
+    state.module_parse_freshness = {"provider": entry}
+    untrusted = query_helpers.module_truth_unavailable(state, "provider")
+    assert untrusted["status"] == "unavailable"
+    assert untrusted["available"] is False
+    assert untrusted["provenance"] == "untrusted"
+    assert "parse_failure" not in untrusted
+    assert state.module_parse_freshness["provider"] is entry
+
+
 def test_syntax_error_marks_authoritative_last_known_good_and_recovery(tmp_path):
     source, engine = _engine_for_file(tmp_path)
 
@@ -380,6 +469,39 @@ def test_parse_freshness_survives_snapshot_hydration_and_recovers(tmp_path):
     )
     assert hydrated_engine.update_file(str(source)).status == "RECOVERED"
     assert module_current_truth(loaded, "provider")["provenance"] == "current"
+
+
+@pytest.mark.parametrize(
+    "raw_map",
+    [{"provider": {"state": "unknown"}}, ["bad"]],
+    ids=["malformed_entry", "malformed_whole_map"],
+)
+def test_malformed_parse_freshness_snapshot_roundtrip_remains_untrusted(tmp_path, raw_map):
+    _source, engine = _engine_for_file(tmp_path)
+    engine.state.module_parse_freshness = raw_map
+    original_map = engine.state.module_parse_freshness
+
+    cache = tmp_path / "cache"
+    assert save_engine_state(engine.state, str(cache), "state-malformed")
+    loaded = load_engine_state(str(cache), "state-malformed")
+
+    assert loaded is not None
+    assert loaded.module_parse_freshness == raw_map
+    assert module_current_truth(loaded, "provider")["state"] == "unavailable"
+    assert module_current_truth(loaded, "provider")["provenance"] == "untrusted"
+    assert engine.state.module_parse_freshness is original_map
+
+
+def test_reading_malformed_parse_freshness_does_not_claim_recovery(tmp_path):
+    source, engine = _engine_for_file(tmp_path)
+    entry = {"state": "unknown"}
+    engine.state.module_parse_freshness = {"provider": entry}
+
+    assert module_current_truth(engine.state, "provider")["state"] == "unavailable"
+    assert engine.state.module_parse_freshness["provider"] is entry
+    source.write_text("def helper(value: int) -> int:\n    return value + 1\n")
+    result = engine.update_file(str(source))
+    assert result.status != "RECOVERED"
 
 
 def test_global_search_and_static_context_do_not_leak_parse_stale_truth(
