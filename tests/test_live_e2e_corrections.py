@@ -99,6 +99,146 @@ def _engine_for_file(tmp_path):
     )
 
 
+def _l03_fresh_process_hydration_worker(
+    repo_path: str,
+    cache_path: str,
+    stale_state_id: str,
+    stale_revision: int,
+) -> None:
+    from pathlib import Path
+
+    from contextor.core.analysis.incremental_engine import (
+        IncrementalAnalysisEngine,
+    )
+    from contextor.core.analysis.state_manager import (
+        FileStateManager,
+        module_current_truth,
+        save_engine_state,
+    )
+    from contextor.core.live_state.store import load_snapshot
+    from contextor.core.reporting_engine.persistent_registry import (
+        PersistentIdentityRegistry,
+    )
+
+    root = Path(repo_path)
+    source = root / "provider.py"
+
+    loaded = load_snapshot(cache_path, stale_state_id)
+    assert loaded is not None
+
+    state, metadata = loaded
+
+    assert metadata.state_id == stale_state_id
+    assert metadata.revision == stale_revision
+    assert state.state_id == stale_state_id
+    assert state.revision == stale_revision
+    assert state.provenance == "snapshot"
+
+    # All three domains must coexist in ONE hydrated generation.
+    assert "helper" in state.artifacts["provider"]["own_symbols"]
+
+    assert module_current_truth(state, "provider") == {
+        "available": False,
+        "state": "stale",
+        "provenance": "last_known_good",
+        "reason": (
+            "Current source could not be parsed; "
+            "canonical facts are last-known-good."
+        ),
+        "parse_failure": {
+            "error": "'(' was never closed",
+            "line_number": 1,
+            "column_number": 11,
+        },
+    }
+
+    assert state.syntax_diagnostics_by_path["provider.py"] == {
+        "status": "checked_with_errors",
+        "errors": [
+            {
+                "message": "'(' was never closed",
+                "line_number": 1,
+                "column_number": 11,
+            }
+        ],
+    }
+
+    # Construct the engine independently in the spawned process.
+    engine = IncrementalAnalysisEngine(
+        state,
+        PersistentIdentityRegistry(str(root)),
+        FileStateManager(str(root / ".state")),
+        str(root),
+    )
+
+    # Replace invalid source with valid source containing a
+    # different canonical symbol to prove actual artifact recovery.
+    source.write_text(
+        "def replacement(value: int) -> int:\n"
+        "    return value + 2\n",
+        encoding="utf-8",
+    )
+
+    recovered = engine.update_file(str(source))
+
+    assert recovered.status == "RECOVERED"
+
+    assert module_current_truth(state, "provider") == {
+        "available": True,
+        "state": "fresh",
+        "provenance": "current",
+    }
+
+    assert "replacement" in state.artifacts["provider"]["own_symbols"]
+    assert "helper" not in state.artifacts["provider"]["own_symbols"]
+
+    assert state.syntax_diagnostics_by_path["provider.py"] == {
+        "status": "checked_and_none",
+        "errors": [],
+    }
+
+    # Persist and independently reload the recovered generation.
+    recovered_state_id = "l03-recovered"
+    recovered_metadata = save_engine_state(
+        state,
+        cache_path,
+        recovered_state_id,
+        writer="l03-regression",
+    )
+
+    assert recovered_metadata is not None
+    assert recovered_metadata.revision == stale_revision + 1
+    assert recovered_metadata.state_id == recovered_state_id
+
+    recovered_snapshot = load_snapshot(
+        cache_path,
+        recovered_state_id,
+    )
+    assert recovered_snapshot is not None
+
+    final_state, final_metadata = recovered_snapshot
+
+    assert final_metadata.revision == stale_revision + 1
+    assert final_metadata.state_id == recovered_state_id
+    assert final_state.revision == final_metadata.revision
+    assert final_state.state_id == final_metadata.state_id
+    assert final_state.provenance == "snapshot"
+
+    assert module_current_truth(final_state, "provider") == {
+        "available": True,
+        "state": "fresh",
+        "provenance": "current",
+    }
+
+    assert "replacement" in final_state.artifacts["provider"]["own_symbols"]
+    assert "helper" not in final_state.artifacts["provider"]["own_symbols"]
+
+    assert final_state.syntax_diagnostics_by_path["provider.py"] == {
+        "status": "checked_and_none",
+        "errors": [],
+    }
+
+
 def _stale_mcp_state(tmp_path):
     module = SimpleNamespace(
         module_id="1/1",
@@ -470,6 +610,89 @@ def test_parse_freshness_survives_snapshot_hydration_and_recovers(tmp_path):
     )
     assert hydrated_engine.update_file(str(source)).status == "RECOVERED"
     assert module_current_truth(loaded, "provider")["provenance"] == "current"
+
+
+def test_l03_fresh_process_lkg_parse_diagnostic_and_recovery(tmp_path):
+    import multiprocessing
+
+    from contextor.core.analysis.state_manager import save_engine_state
+    from contextor.core.live_state.store import load_snapshot
+
+    source, engine = _engine_for_file(tmp_path)
+
+    # Establish canonical last-known-good symbols.
+    assert "helper" in engine.state.artifacts["provider"]["own_symbols"]
+
+    # Create a parse failure without replacing LKG artifacts.
+    source.write_text("def helper(\n", encoding="utf-8")
+
+    failed = engine.update_file(str(source))
+
+    assert failed.status == "SYNTAX_ERROR"
+    assert failed.error == "'(' was never closed"
+    assert failed.line_number == 1
+    assert failed.column_number == 11
+
+    assert "helper" in engine.state.artifacts["provider"]["own_symbols"]
+
+    cache = tmp_path / "l03-cache"
+    stale_state_id = "l03-stale"
+
+    stale_metadata = save_engine_state(
+        engine.state,
+        str(cache),
+        stale_state_id,
+        writer="l03-regression",
+    )
+
+    assert stale_metadata is not None
+    assert stale_metadata.state_id == stale_state_id
+
+    # A genuinely new Python interpreter must read the persisted
+    # generation. It must not receive the parent engine or state.
+    ctx = multiprocessing.get_context("spawn")
+
+    worker = ctx.Process(
+        target=_l03_fresh_process_hydration_worker,
+        args=(
+            str(tmp_path),
+            str(cache),
+            stale_state_id,
+            stale_metadata.revision,
+        ),
+    )
+
+    try:
+        worker.start()
+        worker.join(timeout=45)
+
+        assert worker.exitcode == 0, (
+            "Fresh-process L03 hydration/recovery worker failed "
+            f"or timed out: exitcode={worker.exitcode}"
+        )
+    finally:
+        if worker.pid is not None and worker.is_alive():
+            worker.terminate()
+            worker.join(timeout=5)
+
+    # Verify the recovered generation from the parent process too.
+    recovered = load_snapshot(str(cache), "l03-recovered")
+
+    assert recovered is not None
+    recovered_state, recovered_metadata = recovered
+
+    assert recovered_metadata.revision == stale_metadata.revision + 1
+    assert recovered_state.revision == recovered_metadata.revision
+    assert recovered_state.state_id == recovered_metadata.state_id
+
+    assert (
+        recovered_state.syntax_diagnostics_by_path["provider.py"]["status"]
+        == "checked_and_none"
+    )
+
+    assert "replacement" in (
+        recovered_state.artifacts["provider"]["own_symbols"]
+    )
 
 
 @pytest.mark.parametrize(
