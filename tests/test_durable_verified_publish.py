@@ -31,7 +31,9 @@ def _hold_snapshot_lock(lock_path, ready, release):
         _release_lock(fd)
 
 
-def _raw_publish_without_writer_lease(repo_path, endpoint, response_queue):
+def _raw_publish_without_writer_lease(
+    repo_path, endpoint, response_queue, origin="unleased_raw_ipc"
+):
     from contextor.core.analysis.full_analysis_lease import (
         FullAnalysisBusyError,
         acquire_full_analysis,
@@ -49,10 +51,89 @@ def _raw_publish_without_writer_lease(repo_path, endpoint, response_queue):
         lease_denied = False
     response = LiveStateClient(endpoint).publish(
         SimpleNamespace(state_id="sid", revision=2),
-        origin="unleased_raw_ipc",
+        origin=origin,
         timeout=10.0,
     )
     response_queue.put((lease_denied, response))
+
+
+@pytest.mark.parametrize("claimed_origin", ["mcp_analysis", "desktop_analysis"])
+def test_raw_ipc_publish_origin_is_explicitly_unverified(
+    durable_harness, claimed_origin
+):
+    from contextor.core.analysis.full_analysis_lease import (
+        acquire_full_analysis,
+        release_full_analysis,
+    )
+    from contextor.core.analysis.state_manager import FileStateManager
+
+    durable_harness.commit(1)
+    initial = load_snapshot(
+        durable_harness.cache,
+        expected_repo_id=durable_harness.identity.repo_id,
+        expected_root_path=durable_harness.identity.root_path,
+    )
+    server = durable_harness.server(state=initial[0], revision=1)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    lease = acquire_full_analysis(
+        durable_harness.repo, owner="legitimate-full-writer", timeout=5.0
+    )
+    try:
+        _, committed = durable_harness.commit(2, value="owner-generation")
+        metadata_before = read_metadata(durable_harness.cache)
+        context = get_context("spawn")
+        response_queue = context.Queue()
+        raw = context.Process(
+            target=_raw_publish_without_writer_lease,
+            args=(
+                str(durable_harness.repo), server.endpoint, response_queue,
+                claimed_origin,
+            ),
+        )
+        raw.start()
+        try:
+            lease_denied, response = response_queue.get(timeout=12.0)
+            raw.join(5.0)
+        finally:
+            if raw.is_alive():
+                raw.terminate()
+                raw.join(5.0)
+
+        assert raw.exitcode == 0
+        assert lease_denied is True
+        assert response == {
+            "status": "ok", "revision": 2, "seq": 1,
+            "source": "committed_snapshot",
+        }
+        assert server._state.state_id == committed.state_id
+        assert server._state.revision == committed.revision == 2
+        assert server._state.value == "owner-generation"
+        assert len(server._events) == 1
+        event = server._events[0]
+        assert event["source"] == event["origin"] == claimed_origin
+        assert event["category"] == "LIVE_STATE"
+        assert event["operation"] == "publish"
+        assert event["status"] == "PUBLISHED"
+        assert event["canonical_revision"] == event["revision"] == 2
+        assert event["seq"] == 1
+        assert event["timestamp"]
+        assert event["origin_verified"] is False
+        disk = load_snapshot(
+            durable_harness.cache,
+            expected_repo_id=durable_harness.identity.repo_id,
+            expected_root_path=durable_harness.identity.root_path,
+        )
+        assert disk[1] == metadata_before
+        assert disk[0].state_id == committed.state_id
+        assert disk[0].revision == 2
+        assert FileStateManager(str(durable_harness.cache)).revision == 2
+        assert read_metadata(durable_harness.cache) == metadata_before
+    finally:
+        release_full_analysis(lease)
+        server.close()
+        thread.join(5.0)
+    assert not thread.is_alive()
 
 
 @pytest.fixture

@@ -209,6 +209,89 @@ def test_desktop_feed_formats_committed_diagnostic_delta_without_replacing_synta
     )
 
 
+@pytest.mark.parametrize("claimed_origin", ["mcp_analysis", "desktop_analysis"])
+def test_feed_does_not_attribute_unverified_committed_publish(claimed_origin):
+    feed = DesktopLiveEventFeed(
+        SimpleNamespace(), lambda *_args, **_kwargs: None, initial_seq=0
+    )
+    event = {
+        "category": "LIVE_STATE", "operation": "publish",
+        "origin": claimed_origin, "source": claimed_origin,
+        "origin_verified": False, "canonical_revision": 2,
+        "status": "PUBLISHED",
+    }
+    assert feed._message(event) == (
+        "[LIVE] Committed state installed (rev 2); publisher identity unverified"
+    )
+    historical = dict(event)
+    del historical["origin_verified"]
+    expected_historical = (
+        "MCP: analysis published shared LIVE state (rev 2)"
+        if claimed_origin == "mcp_analysis"
+        else "[LIVE] Desktop analysis published shared LIVE state (rev 2)"
+    )
+    assert feed._message(historical) == expected_historical
+
+
+def test_gui_projects_unverified_publish_and_preserves_update_attribution():
+    controller = SimpleNamespace(
+        live_status_var=_FakeVar(),
+        _live_status_queue=queue.Queue(),
+        _live_status_draining=False,
+        last_live_state=None,
+    )
+    event = {
+        "category": "LIVE_STATE", "operation": "publish",
+        "source": "mcp_analysis", "origin": "mcp_analysis",
+        "origin_verified": False, "canonical_revision": 2,
+        "status": "PUBLISHED", "timestamp": "2026-01-01T12:00:00+00:00",
+    }
+    gui.ContextorGUI._set_live_status(
+        controller, "[LIVE] Committed state installed", event=event
+    )
+    assert controller.last_live_state == {
+        "revision": 2,
+        "status": "PUBLISHED",
+        "timestamp": "2026-01-01T12:00:00+00:00",
+        "source": "unverified",
+        "claimed_source": "mcp_analysis",
+        "origin_verified": False,
+    }
+
+    historical = dict(event)
+    del historical["origin_verified"]
+    gui.ContextorGUI._set_live_status(
+        controller, "[LIVE] Historical publish", event=historical
+    )
+    assert controller.last_live_state == {
+        "revision": 2,
+        "status": "PUBLISHED",
+        "timestamp": "2026-01-01T12:00:00+00:00",
+        "source": "mcp_analysis",
+    }
+
+    update = {
+        **event, "operation": "update_file", "source": "desktop_watcher",
+        "origin": "desktop_watcher", "status": "UPDATED",
+        "canonical_revision": 3,
+    }
+    gui.ContextorGUI._set_live_status(
+        controller, "[LIVE] Watcher updated file", event=update
+    )
+    assert controller.last_live_state == {
+        "revision": 3,
+        "status": "UPDATED",
+        "timestamp": "2026-01-01T12:00:00+00:00",
+        "source": "desktop_watcher",
+    }
+    feed = DesktopLiveEventFeed(
+        SimpleNamespace(), lambda *_args, **_kwargs: None, initial_seq=0
+    )
+    assert feed._message({**update, "file_path": "pkg/change.py"}) == (
+        "[LIVE] Watcher updated change.py (rev 3)"
+    )
+
+
 def test_desktop_feed_formats_generic_diagnostic_delta_and_ignores_malformed_payload():
     feed = DesktopLiveEventFeed(SimpleNamespace(), lambda *_args, **_kwargs: None, initial_seq=0)
     event = {

@@ -1539,12 +1539,26 @@ class ContextorGUI:
         )
 
         if canonical_operation:
+            claimed_source = event.get("source") or event.get("origin")
+            unverified_publish = (
+                event.get("operation") == "publish"
+                and event.get("origin_verified") is False
+            )
+
             self.last_live_state = {
                 "revision": event.get("canonical_revision"),
                 "status": event.get("status"),
                 "timestamp": event.get("timestamp"),
-                "source": event.get("source") or event.get("origin"),
+                "source": (
+                    "unverified"
+                    if unverified_publish
+                    else claimed_source
+                ),
             }
+
+            if unverified_publish:
+                self.last_live_state["claimed_source"] = claimed_source
+                self.last_live_state["origin_verified"] = False
 
         item = {
             "formatted": formatted,

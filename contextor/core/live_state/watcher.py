@@ -1134,6 +1134,21 @@ class DesktopLiveEventFeed(_PollingLiveWorker):
                 return f"[MCP] {tool} (failed: {err})"
             return f"[MCP] {tool}"
 
+        if (
+            event.get("operation") == "publish"
+            and event.get("origin_verified") is False
+        ):
+            revision = event.get("canonical_revision")
+            suffix = (
+                f" (rev {revision})"
+                if revision is not None
+                else ""
+            )
+            return (
+                "[LIVE] Committed state installed"
+                f"{suffix}; publisher identity unverified"
+            )
+
         origin = event.get("origin") or event.get("source")
         if origin not in {"mcp", "mcp_analysis", "desktop_analysis", "desktop_watcher", "desktop"}:
             return None

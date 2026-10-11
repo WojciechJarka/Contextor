@@ -1441,6 +1441,7 @@ class CanonicalLiveServer:
                         "operation": "publish",
                         "source": source,
                         "origin": source,
+                        "origin_verified": False,
                         "canonical_revision": committed_revision,
                         "revision": committed_revision,
                         "status": "PUBLISHED",
