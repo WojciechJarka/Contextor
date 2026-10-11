@@ -256,7 +256,13 @@ def test_initial_success(tmp_path, monkeypatch):
     controller = _make_controller(repo, root)
 
     class Client:
-        def publish(self, state, *, origin="unknown"):
+        def publish(
+            self,
+            state,
+            *,
+            origin="unknown",
+            acknowledge_installed=False,
+        ):
             return {"status": "ok"}
 
     watcher_instances = []
@@ -350,7 +356,13 @@ def test_timeout_then_success(tmp_path, monkeypatch):
     controller = _make_controller(repo, root)
 
     class Client:
-        def publish(self, state, *, origin="unknown"):
+        def publish(
+            self,
+            state,
+            *,
+            origin="unknown",
+            acknowledge_installed=False,
+        ):
             return {"status": "ok"}
 
     watcher_instances = []
@@ -425,7 +437,13 @@ def test_late_service_connection(tmp_path, monkeypatch):
     connect_calls = []
 
     class Client:
-        def publish(self, state, *, origin="unknown"):
+        def publish(
+            self,
+            state,
+            *,
+            origin="unknown",
+            acknowledge_installed=False,
+        ):
             return {"status": "ok"}
 
     def mock_connect_or_start(path, *, owner_pid=None, owner_token=None):
@@ -1536,4 +1554,108 @@ def test_startup_publication_error_recovery_classification(
         ContextorGUI._drain_live_recovery_queue(controller)
         assert expected_reason in ask.call_args.args[1]
         assert next(iter(root.scheduled.values()))[0] == 100
+    controller.analyze.assert_not_called()
+
+
+def test_startup_already_installed_ack_keeps_lease_and_skips_recovery(
+    tmp_path,
+    monkeypatch,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    PersistentIdentityRegistry(str(repo))
+    root = MockTkRoot()
+    controller = _bind_recovery_prompt(_make_controller(repo, root))
+    loaded = SimpleNamespace(revision=7, state_id="loaded-generation")
+    remote = SimpleNamespace(revision=6, state_id="remote-generation")
+    events = []
+    publish_calls = []
+    lease = object()
+    response = {
+        "status": "ok",
+        "revision": 7,
+        "seq": 12,
+        "source": "committed_snapshot",
+        "already_installed": True,
+        "origin_verified": False,
+    }
+
+    class Client:
+        def snapshot(self):
+            return {"state": remote, "revision": 6}
+
+        def publish(
+            self,
+            state,
+            *,
+            origin="unknown",
+            acknowledge_installed=False,
+        ):
+            events.append("publish")
+            publish_calls.append(
+                {
+                    "state": state,
+                    "origin": origin,
+                    "acknowledge_installed": acknowledge_installed,
+                }
+            )
+            return response
+
+    class Watcher:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def start(self):
+            pass
+
+    class Feed:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def start(self):
+            pass
+
+    def acquire(*_args, **_kwargs):
+        events.append("lease_acquired")
+        return lease
+
+    def release(value):
+        assert value is lease
+        events.append("lease_released")
+
+    monkeypatch.setattr(gui, "connect_or_start", lambda *_a, **_k: Client())
+    monkeypatch.setattr(
+        gui,
+        "migrate_legacy_snapshot",
+        lambda *_a: tmp_path / "cache",
+    )
+    monkeypatch.setattr(gui, "acquire_full_analysis", acquire)
+    monkeypatch.setattr(gui, "release_full_analysis", release)
+    monkeypatch.setattr(gui, "DesktopLiveWatcher", Watcher)
+    monkeypatch.setattr(gui, "DesktopLiveEventFeed", Feed)
+    monkeypatch.setattr(
+        "contextor.core.analysis.state_manager.load_engine_state",
+        lambda *_a, **_k: loaded,
+    )
+
+    ContextorGUI._start_live_watcher_blocking(controller, str(repo))
+
+    assert events == ["lease_acquired", "publish", "lease_released"]
+    assert publish_calls == [
+        {
+            "state": loaded,
+            "origin": "desktop_analysis",
+            "acknowledge_installed": True,
+        }
+    ]
+    assert (
+        "LIVE: shared generation already installed; event origin unverified"
+        in controller._statuses
+    )
+    assert "LIVE: shared state published; watcher active" not in (
+        controller._statuses
+    )
+    assert controller._live_recovery_queue.qsize() == 0
+    assert controller._live_recovery_prompt_pending == set()
+    assert root.scheduled == {}
     controller.analyze.assert_not_called()

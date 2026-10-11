@@ -1796,6 +1796,7 @@ class ContextorGUI:
                         published = client.publish(
                             state,
                             origin="desktop_analysis",
+                            acknowledge_installed=True,
                         )
                     finally:
                         release_full_analysis(startup_lease)
@@ -1825,9 +1826,15 @@ class ContextorGUI:
                         and published.get("status") == "ok"
                     ):
                         if ContextorGUI._is_selected_live_repository(self, path):
-                            self._set_live_status(
-                                "LIVE: shared state published; watcher active"
-                            )
+                            if published.get("already_installed") is True:
+                                self._set_live_status(
+                                    "LIVE: shared generation already installed; "
+                                    "event origin unverified"
+                                )
+                            else:
+                                self._set_live_status(
+                                    "LIVE: shared state published; watcher active"
+                                )
                     else:
                         if ContextorGUI._is_selected_live_repository(self, path):
                             self._set_live_status(

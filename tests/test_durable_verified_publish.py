@@ -191,6 +191,124 @@ def test_r3_r5_r8_r9_r15_rejections_leave_live_and_event_unchanged(durable_harne
     _assert_unchanged(server, latest)
 
 
+def test_opt_in_ack_confirms_exact_installed_generation_without_mutation(
+    durable_harness,
+):
+    from contextor.core.analysis.state_manager import FileStateManager
+
+    committed_state, committed_metadata = durable_harness.commit(
+        1, value="committed"
+    )
+    server = durable_harness.server(
+        state=committed_state,
+        revision=committed_metadata.revision,
+    )
+    before_server = _unchanged(server)
+    before_disk, before_disk_metadata = load_snapshot(
+        durable_harness.cache,
+        expected_repo_id=durable_harness.identity.repo_id,
+        expected_root_path=durable_harness.identity.root_path,
+    )
+    before_metadata = read_metadata(durable_harness.cache)
+    before_file_state_revision = FileStateManager(
+        str(durable_harness.cache)
+    ).revision
+
+    response = _publish(
+        server,
+        1,
+        acknowledge_installed=True,
+    )
+
+    assert response == {
+        "status": "ok",
+        "revision": 1,
+        "seq": before_server[2],
+        "source": "committed_snapshot",
+        "already_installed": True,
+        "origin_verified": False,
+    }
+    _assert_unchanged(server, before_server)
+    assert server._state is committed_state
+
+    after_disk, after_disk_metadata = load_snapshot(
+        durable_harness.cache,
+        expected_repo_id=durable_harness.identity.repo_id,
+        expected_root_path=durable_harness.identity.root_path,
+    )
+    assert after_disk_metadata == before_disk_metadata
+    assert after_disk_metadata == before_metadata
+    assert after_disk.state_id == before_disk.state_id == "sid"
+    assert after_disk.revision == before_disk.revision == 1
+    assert read_metadata(durable_harness.cache) == before_metadata
+    assert FileStateManager(str(durable_harness.cache)).revision == (
+        before_file_state_revision
+    )
+
+
+@pytest.mark.parametrize(
+    ("case", "expected_error"),
+    [
+        ("wrong_candidate_state_id", "committed_publish_generation_mismatch"),
+        ("uncommitted_candidate_revision", "committed_publish_generation_mismatch"),
+        ("live_state_id_mismatch", "non_monotonic_canonical_revision"),
+        ("live_revision_mismatch", "non_monotonic_canonical_revision"),
+        ("older_than_live", "non_monotonic_canonical_revision"),
+        ("committed_snapshot_missing", "committed_snapshot_unavailable"),
+    ],
+)
+def test_opt_in_ack_rejects_nonmatching_or_unavailable_generation(
+    durable_harness,
+    case,
+    expected_error,
+):
+    committed_state, committed_metadata = durable_harness.commit(1)
+    if case == "committed_snapshot_missing":
+        @contextmanager
+        def unavailable_reader():
+            yield None
+
+        server = durable_harness.server(
+            state=committed_state,
+            revision=1,
+            custom_reader=unavailable_reader,
+        )
+    elif case == "older_than_live":
+        server = durable_harness.server(
+            state=SimpleNamespace(state_id="sid", revision=2),
+            revision=2,
+        )
+    else:
+        server = durable_harness.server(
+            state=committed_state,
+            revision=committed_metadata.revision,
+        )
+
+    candidate_revision = 1
+    candidate_state_id = "sid"
+    if case == "wrong_candidate_state_id":
+        candidate_state_id = "wrong"
+    elif case == "uncommitted_candidate_revision":
+        candidate_revision = 2
+    elif case == "live_state_id_mismatch":
+        server._state = SimpleNamespace(state_id="wrong", revision=1)
+    elif case == "live_revision_mismatch":
+        server._state = SimpleNamespace(state_id="sid", revision=0)
+
+    before = _unchanged(server)
+    response = _publish(
+        server,
+        candidate_revision,
+        state_id=candidate_state_id,
+        acknowledge_installed=True,
+    )
+
+    assert response["status"] == "error"
+    assert response["error"] == expected_error
+    assert response.get("already_installed") is not True
+    _assert_unchanged(server, before)
+
+
 def test_raw_ipc_publish_front_runs_lease_owner_same_committed_generation(
     durable_harness,
 ):
@@ -290,6 +408,114 @@ def test_raw_ipc_publish_front_runs_lease_owner_same_committed_generation(
         assert server._activity_seq == 1
         assert len(server._events) == 1
         assert server._events[0]["origin"] == "unleased_raw_ipc"
+    finally:
+        release_full_analysis(lease)
+        server.close()
+        thread.join(5.0)
+    assert not thread.is_alive()
+
+
+def test_raw_ipc_front_run_gets_validated_owner_already_installed_ack(
+    durable_harness,
+):
+    from contextor.core.analysis.full_analysis_lease import (
+        acquire_full_analysis,
+        release_full_analysis,
+    )
+    from contextor.core.analysis.state_manager import FileStateManager
+
+    durable_harness.commit(1)
+    initial = load_snapshot(
+        durable_harness.cache,
+        expected_repo_id=durable_harness.identity.repo_id,
+        expected_root_path=durable_harness.identity.root_path,
+    )
+    server = durable_harness.server(
+        state=initial[0],
+        revision=initial[1].revision,
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    client = LiveStateClient(server.endpoint)
+    lease = acquire_full_analysis(
+        durable_harness.repo,
+        owner="legitimate-full-writer",
+        timeout=5.0,
+    )
+    try:
+        candidate, committed = durable_harness.commit(
+            2, value="owner-generation"
+        )
+        context = get_context("spawn")
+        response_queue = context.Queue()
+        raw = context.Process(
+            target=_raw_publish_without_writer_lease,
+            args=(str(durable_harness.repo), server.endpoint, response_queue),
+        )
+        raw.start()
+        try:
+            lease_denied, raw_response = response_queue.get(timeout=12.0)
+            raw.join(5.0)
+        finally:
+            if raw.is_alive():
+                raw.terminate()
+                raw.join(5.0)
+
+        assert raw.exitcode == 0
+        assert lease_denied is True
+        assert raw_response == {
+            "status": "ok",
+            "revision": 2,
+            "seq": 1,
+            "source": "committed_snapshot",
+        }
+        before_owner_ack = _unchanged(server)
+        disk_before_ack = load_snapshot(
+            durable_harness.cache,
+            expected_repo_id=durable_harness.identity.repo_id,
+            expected_root_path=durable_harness.identity.root_path,
+        )
+        metadata_before_ack = read_metadata(durable_harness.cache)
+        file_state_revision_before_ack = FileStateManager(
+            str(durable_harness.cache)
+        ).revision
+
+        owner_response = client.publish(
+            candidate,
+            origin="legitimate_full_writer",
+            timeout=10.0,
+            acknowledge_installed=True,
+        )
+
+        assert owner_response == {
+            "status": "ok",
+            "revision": 2,
+            "seq": 1,
+            "source": "committed_snapshot",
+            "already_installed": True,
+            "origin_verified": False,
+        }
+        _assert_unchanged(server, before_owner_ack)
+        assert server._state.state_id == committed.state_id == "sid"
+        assert server._state.revision == committed.revision == 2
+        assert server._state.value == "owner-generation"
+        assert len(server._events) == 1
+        assert server._events[0]["origin"] == "unleased_raw_ipc"
+        assert server._events[0]["canonical_revision"] == 2
+
+        disk_after_ack = load_snapshot(
+            durable_harness.cache,
+            expected_repo_id=durable_harness.identity.repo_id,
+            expected_root_path=durable_harness.identity.root_path,
+        )
+        assert disk_after_ack[1] == disk_before_ack[1] == metadata_before_ack
+        assert disk_after_ack[0].state_id == server._state.state_id
+        assert disk_after_ack[0].revision == server._state.revision == 2
+        assert FileStateManager(str(durable_harness.cache)).revision == (
+            file_state_revision_before_ack
+        )
+        assert server._activity_seq == 1
+        assert len(server._events) == 1
     finally:
         release_full_analysis(lease)
         server.close()

@@ -1147,7 +1147,11 @@ class ContextorFacade:
                     if client is not None:
                         component_started = time.monotonic()
                         try:
-                            published = client.publish(state, origin=origin)
+                            published = client.publish(
+                                state,
+                                origin=origin,
+                                acknowledge_installed=True,
+                            )
                         finally:
                             publish_ms = (time.monotonic() - component_started) * 1000.0
                         component_started = time.monotonic()
@@ -1165,7 +1169,12 @@ class ContextorFacade:
                                 )
                             else:
                                 live_publish_status = "success"
-                                live_publish_warning = None
+                                live_publish_warning = (
+                                    "LIVE generation was already installed; "
+                                    "event origin is not verified."
+                                    if published.get("already_installed") is True
+                                    else None
+                                )
                         else:
                             live_publish_status = "failed"
                             live_publish_revision = None
@@ -1691,6 +1700,7 @@ class ContextorFacade:
                         analysis_state,
                         origin="scoped_analysis",
                         timeout=5.0,
+                        acknowledge_installed=True,
                     )
                     if isinstance(published, dict) and published.get("status") == "ok":
                         if published.get("resync_required") is True:
@@ -1698,7 +1708,12 @@ class ContextorFacade:
                             warning = published.get("warning") or "LIVE recovery verification required."
                         else:
                             status = "success"
-                            warning = None
+                            warning = (
+                                "LIVE generation was already installed; "
+                                "event origin is not verified."
+                                if published.get("already_installed") is True
+                                else None
+                            )
                         revision = int(published["revision"]) if published.get("revision") is not None else None
                     else:
                         status = "failed"

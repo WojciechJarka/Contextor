@@ -1404,6 +1404,23 @@ class CanonicalLiveServer:
                         }
 
                     if committed_revision <= previous_revision:
+                        if (
+                            request.get("acknowledge_installed") is True
+                            and committed_revision == previous_revision
+                            and self._state is not None
+                            and getattr(self._state, "state_id", None)
+                            == committed_state_id
+                            and getattr(self._state, "revision", None)
+                            == committed_revision
+                        ):
+                            return {
+                                "status": "ok",
+                                "revision": committed_revision,
+                                "seq": self._activity_seq,
+                                "source": "committed_snapshot",
+                                "already_installed": True,
+                                "origin_verified": False,
+                            }
                         return {
                             "status": "error",
                             "error": "non_monotonic_canonical_revision",
@@ -2559,7 +2576,16 @@ class LiveStateClient:
         *,
         origin: str = "unknown",
         timeout: float = 30.0,
+        acknowledge_installed: bool = False,
     ) -> dict[str, Any]:
+        if acknowledge_installed:
+            return self.request(
+                "publish",
+                timeout=timeout,
+                state=state,
+                origin=origin,
+                acknowledge_installed=True,
+            )
         return self.request(
             "publish", timeout=timeout, state=state, origin=origin
         )

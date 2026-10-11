@@ -645,6 +645,82 @@ def test_lease_is_held_during_publication(tmp_path: Path, monkeypatch):
     assert event_log == expected_order
 
 
+def test_full_facade_acknowledges_already_installed_under_writer_lease(
+    tmp_path: Path,
+    isolated_dirs,
+    monkeypatch,
+):
+    import contextor.core.live_state as live_state_module
+
+    from contextor.core.analysis.state_manager import AnalysisResult
+
+    repo = tmp_path / "full_ack_repo"
+    repo.mkdir()
+    (repo / "module.py").write_text("VALUE = 1\n", encoding="utf-8")
+    observed = []
+
+    class AlreadyInstalledClient:
+        def publish(
+            self,
+            state,
+            *,
+            origin="unknown",
+            acknowledge_installed=False,
+        ):
+            try:
+                probe_lease = acquire_full_analysis(
+                    repo,
+                    owner="nested-publish-probe",
+                    timeout=0.0,
+                )
+            except FullAnalysisBusyError:
+                lease_held = True
+            else:
+                release_full_analysis(probe_lease)
+                lease_held = False
+            revision = int(state.revision)
+            observed.append(
+                {
+                    "origin": origin,
+                    "acknowledge_installed": acknowledge_installed,
+                    "lease_held": lease_held,
+                    "revision": revision,
+                }
+            )
+            return {
+                "status": "ok",
+                "revision": revision,
+                "seq": 9,
+                "source": "committed_snapshot",
+                "already_installed": True,
+                "origin_verified": False,
+            }
+
+    client = AlreadyInstalledClient()
+    monkeypatch.setattr(
+        live_state_module,
+        "connect",
+        lambda _root: client,
+    )
+
+    errors, analysis_result = run_full_analysis_exclusive(
+        repo,
+        owner="mcp_analysis",
+    )
+
+    assert isinstance(errors, list)
+    assert isinstance(analysis_result, AnalysisResult)
+    assert len(observed) == 1
+    assert observed[0]["origin"] == "mcp_analysis"
+    assert observed[0]["acknowledge_installed"] is True
+    assert observed[0]["lease_held"] is True
+    assert analysis_result.live_publish_status == "success"
+    assert analysis_result.live_publish_revision == observed[0]["revision"]
+    assert analysis_result.live_publish_warning == (
+        "LIVE generation was already installed; event origin is not verified."
+    )
+
+
 def test_profile_operation_scopes_full_analysis_coordinator_evidence(tmp_path: Path):
     repo_dir = tmp_path / "repo_profile_trace"
     repo_dir.mkdir()

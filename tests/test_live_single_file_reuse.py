@@ -186,6 +186,103 @@ def test_scoped_single_file_publishes_to_real_live_server_under_writer_lease(
         server_thread.join(timeout=5)
 
 
+def test_scoped_single_file_reports_already_installed_ack_under_writer_lease(
+    sample_repo,
+    isolated_dirs,
+    monkeypatch,
+):
+    import pytest
+    import contextor.core.api.facade as facade_module
+    from contextor.core.analysis import full_analysis_coordinator as coordinator
+
+    target = sample_repo / "core" / "alpha.py"
+    ContextorFacade.analyze_project(str(sample_repo))
+    original_hydrate = facade_module.hydrate_repository_engine
+    observed = []
+
+    class AlreadyInstalledClient:
+        def publish(
+            self,
+            state,
+            *,
+            origin="unknown",
+            timeout=30.0,
+            acknowledge_installed=False,
+        ):
+            try:
+                probe_lease = coordinator.acquire_full_analysis(
+                    sample_repo,
+                    timeout=0.0,
+                    writer_kind="local_incremental",
+                )
+            except coordinator.FullAnalysisBusyError:
+                lease_held = True
+            else:
+                coordinator.release_full_analysis(probe_lease)
+                lease_held = False
+            revision = int(state.revision)
+            observed.append(
+                {
+                    "origin": origin,
+                    "timeout": timeout,
+                    "acknowledge_installed": acknowledge_installed,
+                    "lease_held": lease_held,
+                    "revision": revision,
+                }
+            )
+            return {
+                "status": "ok",
+                "revision": revision,
+                "seq": 12,
+                "source": "committed_snapshot",
+                "already_installed": True,
+                "origin_verified": False,
+            }
+
+    client = AlreadyInstalledClient()
+
+    def hydrate_with_ack_client(root, **kwargs):
+        hydrated = original_hydrate(root, **kwargs)
+        assert hydrated is not None
+        return replace(hydrated, client=client)
+
+    monkeypatch.setattr(
+        facade_module,
+        "hydrate_repository_engine",
+        hydrate_with_ack_client,
+    )
+    target.write_text(
+        target.read_text(encoding="utf-8").replace(
+            "MAX_ITEMS = 10",
+            "MAX_ITEMS = 12",
+        ),
+        encoding="utf-8",
+    )
+    publication = {}
+
+    output = ContextorFacade.analyze_single_file(
+        str(target),
+        str(sample_repo),
+        publication_result=publication,
+    )
+
+    assert output.endswith("single_core.alpha.json")
+    assert observed == [
+        {
+            "origin": "scoped_analysis",
+            "timeout": 5.0,
+            "acknowledge_installed": True,
+            "lease_held": True,
+            "revision": observed[0]["revision"],
+        }
+    ]
+    assert publication["status"] == "success"
+    assert publication["revision"] == observed[0]["revision"]
+    assert publication["warning"] == (
+        "LIVE generation was already installed; event origin is not verified."
+    )
+
+
 def test_single_file_resync_state_rejects_state_only_path(
     sample_repo, isolated_dirs, monkeypatch
 ):

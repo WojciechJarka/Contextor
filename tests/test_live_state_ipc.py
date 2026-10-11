@@ -400,6 +400,49 @@ def test_client_request_timeout_closes_connection(monkeypatch):
     assert connection.closed is True
 
 
+def test_publish_default_payload_is_unchanged_and_opt_in_adds_ack_flag(
+    monkeypatch,
+):
+    client = LiveStateClient(
+        SimpleNamespace(address=("127.0.0.1", 1), authkey=b"x")
+    )
+    state = SimpleNamespace(state_id="sid", revision=2)
+    requests = []
+
+    def capture_request(operation, **kwargs):
+        requests.append((operation, kwargs))
+        return {"status": "ok"}
+
+    monkeypatch.setattr(client, "request", capture_request)
+
+    assert client.publish(
+        state,
+        origin="owner",
+        timeout=4.0,
+    ) == {"status": "ok"}
+    assert client.publish(
+        state,
+        origin="owner",
+        timeout=4.0,
+        acknowledge_installed=True,
+    ) == {"status": "ok"}
+    assert requests == [
+        (
+            "publish",
+            {"timeout": 4.0, "state": state, "origin": "owner"},
+        ),
+        (
+            "publish",
+            {
+                "timeout": 4.0,
+                "state": state,
+                "origin": "owner",
+                "acknowledge_installed": True,
+            },
+        ),
+    ]
+
+
 def test_client_transport_failure_emits_one_bounded_trace_event(monkeypatch):
     events = []
     endpoint = SimpleNamespace(
