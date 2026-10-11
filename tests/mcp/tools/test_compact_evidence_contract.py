@@ -1,7 +1,21 @@
+import importlib
 import json
 from pathlib import Path
+from types import SimpleNamespace
 import pytest
 
+from contextor.core.analysis.incremental_engine import IncrementalAnalysisEngine
+from contextor.core.analysis.state_manager import FileStateManager, RepositoryAnalysisState
+from contextor.core.graph.graph import build_graph, build_trie, detect_package_root
+from contextor.core.live_state import read_metadata
+from contextor.core.paths import repo_cache_dir
+from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
+from contextor.core.reporting_layer.artifact_usage_report import (
+    collect_module_artifacts,
+    collect_qualified_artifact_identities,
+)
+from contextor.core.symbol_engine.indexer import index_repository
+from contextor.core.reference.shared import materialize_reexport_facts_by_module
 from contextor.mcp import query_helpers
 from contextor.mcp import runtime as mcp_runtime
 from contextor.mcp.tools.search_artifacts import search_artifacts
@@ -10,6 +24,47 @@ from contextor.mcp.tools.get_report_diff import get_report_diff
 from contextor.mcp.tools.get_layer_isolation import get_layer_isolation
 from contextor.mcp.tools.get_file_edit_context import get_file_edit_context
 from contextor.mcp.tools.update_file import update_file, _semantic_diff_view
+
+
+def _build_compact_local_engine(tmp_path, monkeypatch, source):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    provider = repo / "provider.py"
+    provider.write_text(source, encoding="utf-8")
+    index = index_repository(str(repo))
+    modules = index.modules
+    reexport_facts_by_module = materialize_reexport_facts_by_module(
+        modules,
+        index.reference_facts_by_module,
+    )
+    artifacts, failures = collect_module_artifacts(modules, str(repo))
+    assert not failures
+    trie = build_trie(modules)
+    package_root = detect_package_root(modules, trie)
+    state = RepositoryAnalysisState(
+        modules=dict(modules),
+        reexport_facts_by_module=reexport_facts_by_module,
+        artifacts=artifacts,
+        dependency_graph=build_graph(modules, trie=trie, package_root=package_root),
+        trie=trie,
+        package_root=package_root,
+        artifact_consumption={},
+    )
+    registry = PersistentIdentityRegistry(str(repo))
+    with registry.transaction():
+        registry.sync_with_workspace(
+            set(modules), collect_qualified_artifact_identities(artifacts)
+        )
+    cache_root = tmp_path / "cache"
+    monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(cache_root))
+    cache_dir = repo_cache_dir(repo)
+    state_manager = FileStateManager(str(cache_dir))
+    state_manager.update_state(str(provider))
+    engine = IncrementalAnalysisEngine(state, registry, state_manager, str(repo))
+    monkeypatch.setattr(mcp_runtime, "_live_engines", {str(repo.resolve()): engine})
+    monkeypatch.setattr(mcp_runtime, "_live_engine_revisions", {})
+    monkeypatch.setattr("contextor.core.live_state.connect", lambda _root: None)
+    return repo, provider, engine
 
 
 def _setup_mock_search_and_lookup_engine(monkeypatch):
@@ -413,64 +468,106 @@ def test_compact_evidence_contract__file_edit_context_collections_include_eviden
 
 
 def test_compact_evidence_contract__update_file_collections_include_evidence(tmp_path, monkeypatch):
+    repo, provider, original_engine = _build_compact_local_engine(
+        tmp_path,
+        monkeypatch,
+        "def original():\n    return 1\n",
+    )
+    update_file_module = importlib.import_module("contextor.mcp.tools.update_file")
+    assert update_file_module._persist_live_engine(repo, original_engine) is True
+
+    provider.write_text(
+        "def original():\n"
+        "    return 1\n"
+        "\n"
+        "def s1():\n"
+        "    return 1\n"
+        "\n"
+        "def s2():\n"
+        "    return 2\n"
+        "\n"
+        "def s3():\n"
+        "    return 3\n"
+        "\n"
+        "def s4():\n"
+        "    return 4\n",
+        encoding="utf-8",
+    )
+
+    real_update_file = IncrementalAnalysisEngine.update_file
     update_calls = []
 
-    class UpdateRes:
-        status = "UPDATED"
-        file_path = str(tmp_path / "pkg" / "a.py")
-        graph_state = "fresh"
-        dependencies_state = "fresh"
-        blast_radius_state = "fresh"
-        local_metrics_state = "fresh"
-        global_metrics_state = "fresh"
-        artifact_consumption_state = "fresh"
-        affected_modules = ["pkg.m1", "pkg.m2", "pkg.m3", "pkg.m4"]
-        delta = None
+    def observed_real_update(self, path):
+        update_calls.append((self, path))
 
-    class Engine:
-        state = type("State", (), {"artifacts": {}})()
-        def update_file(self, path):
-            update_calls.append(path)
-            return UpdateRes()
+        result = real_update_file(self, path)
+        assert result.status == "UPDATED"
 
-    engine = Engine()
-    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda root: engine)
-    monkeypatch.setattr("contextor.core.live_state.connect", lambda root: None)
-    monkeypatch.setattr("contextor.mcp.tools.update_file._persist_live_engine", lambda root, eng: True)
-    monkeypatch.setattr("contextor.mcp.tools.update_file._semantic_artifact_diff", lambda old, new: {
-        "changed_symbol_count": 4,
-        "body_change_count": 0,
-        "body_only_changes_tracked": False,
-        "symbols_added": ["s1", "s2", "s3", "s4"],
-        "symbols_removed": [],
-        "signatures_changed": {},
-        "bodies_changed": [],
-        "affected_symbols": ["s1", "s2", "s3", "s4"],
-    })
+        return SimpleNamespace(
+            status=result.status,
+            file_path=result.file_path,
+            graph_state=result.graph_state,
+            dependencies_state=result.dependencies_state,
+            blast_radius_state=result.blast_radius_state,
+            local_metrics_state=result.local_metrics_state,
+            global_metrics_state=result.global_metrics_state,
+            artifact_consumption_state=result.artifact_consumption_state,
+            affected_modules=[
+                "pkg.m1",
+                "pkg.m2",
+                "pkg.m3",
+                "pkg.m4",
+            ],
+            delta=result.delta,
+        )
 
-    file_path = tmp_path / "pkg" / "a.py"
-    file_path.parent.mkdir(parents=True, exist_ok=True)
-    file_path.write_text("x = 1\n", encoding="utf-8")
+    monkeypatch.setattr(
+        IncrementalAnalysisEngine,
+        "update_file",
+        observed_real_update,
+    )
 
-    raw = update_file(str(tmp_path), file_path="pkg/a.py", compact=True)
+    raw = update_file_module.update_file(
+        str(repo),
+        file_path=str(provider),
+        compact=True,
+    )
     res = json.loads(raw)
 
-    assert len(update_calls) == 1, "update_file MUST NOT perform extra analysis/update calls"
+    assert res["status"] == "UPDATED"
+    assert res["live_state_persisted"] is True
+    assert len(update_calls) == 1
+    assert update_calls[0][0] is not original_engine
+    current_engine = mcp_runtime._live_engines[str(repo.resolve())]
+    assert current_engine is not original_engine
+    assert current_engine is update_calls[0][0]
+    metadata = read_metadata(repo_cache_dir(repo))
+    assert metadata is not None
+    assert current_engine.revision == metadata.revision
+    assert current_engine.state.revision == metadata.revision
+    assert current_engine.state.state_id == metadata.state_id
+    assert current_engine.state_manager.revision == metadata.revision
+    assert current_engine.state_manager.state_id == metadata.state_id
+    assert mcp_runtime._live_engine_revisions[str(repo.resolve())] == metadata.revision
 
     aff = res["affected_modules"]
-    assert "evidence" in aff
     assert aff["total"] == 4
-    assert len(aff["evidence"]) == 3
+    assert aff["evidence"] == ["pkg.m1", "pkg.m2", "pkg.m3"]
     assert aff["truncated"] is True
     assert "expand" not in aff
 
-    diff = res["semantic_diff"]
-    sym_added = diff["symbols_added"]
-    assert "evidence" in sym_added
+    sym_added = res["semantic_diff"]["symbols_added"]
     assert sym_added["total"] == 4
-    assert len(sym_added["evidence"]) == 3
+    assert sym_added["evidence"] == ["s1", "s2", "s3"]
     assert sym_added["truncated"] is True
     assert "expand" not in sym_added
+    original_functions = set(
+        original_engine.state.artifacts["provider"]["symbols"]["functions"]
+    )
+    current_functions = set(
+        current_engine.state.artifacts["provider"]["symbols"]["functions"]
+    )
+    assert current_functions - original_functions == {"s1", "s2", "s3", "s4"}
 
 
 def test_compact_evidence_contract__update_file_compact_does_not_advertise_mutating_expand():
