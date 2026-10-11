@@ -194,12 +194,14 @@ def test_legacy_snapshot_hydration_recomputes_cycles_in_ram(tmp_path):
     assert hasattr(loaded_state, "cycles_state")
     assert loaded_state.cycles_state == "deferred"
 
+    registry = PersistentIdentityRegistry(str(tmp_path))
+    file_state_manager = FileStateManager(str(cache_dir))
     with patch("builtins.open", side_effect=OSError("Disk read blocked")), \
          patch("pathlib.Path.read_text", side_effect=OSError("Disk read blocked")):
         engine = IncrementalAnalysisEngine(
             loaded_state,
-            PersistentIdentityRegistry(str(tmp_path)),
-            FileStateManager(str(cache_dir)),
+            registry,
+            file_state_manager,
             str(tmp_path),
         )
 

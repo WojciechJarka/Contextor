@@ -177,11 +177,13 @@ def test_legacy_snapshot_reconstruction_with_provenance(tmp_path):
     assert hasattr(loaded_state, "topology_metrics_state")
     assert loaded_state.topology_metrics_state == "deferred"
 
+    registry = PersistentIdentityRegistry(str(tmp_path))
+    file_state_manager = FileStateManager(str(cache_dir))
     with patch("builtins.open", side_effect=OSError("Disk read blocked")):
         engine = IncrementalAnalysisEngine(
             loaded_state,
-            PersistentIdentityRegistry(str(tmp_path)),
-            FileStateManager(str(cache_dir)),
+            registry,
+            file_state_manager,
             str(tmp_path),
         )
 

@@ -334,7 +334,14 @@ def test_desktop_publishes_latest_snapshot_and_replaces_existing_watcher(
     events = []
 
     class Client:
-        def publish(self, published, *, origin="unknown"):
+        def publish(
+            self,
+            published,
+            *,
+            origin="unknown",
+            acknowledge_installed=False,
+        ):
+            assert acknowledge_installed is True
             events.append(("publish", published, origin))
             return {"status": "ok"}
 
@@ -551,7 +558,14 @@ def test_switching_repositories_keeps_previous_watcher_active(tmp_path, monkeypa
     events = []
 
     class Client:
-        def publish(self, _state, *, origin="unknown"):
+        def publish(
+            self,
+            _state,
+            *,
+            origin="unknown",
+            acknowledge_installed=False,
+        ):
+            assert acknowledge_installed is True
             events.append(("publish", origin))
             return {"status": "ok"}
 

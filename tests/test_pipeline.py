@@ -179,7 +179,7 @@ def test_per_analysis_excludes_reject_paths_outside_repository(
 def test_layer_report_writers_receive_datestamp():
     root = Path(__file__).parents[1]
     targets = {
-        root / "contextor" / "core" / "api" / "facade.py": "analyze_layer",
+        root / "contextor" / "core" / "api" / "facade.py": "_analyze_layer_uncoordinated",
         root / "contextor" / "core" / "reporting_engine" / "pipeline.py": (
             "execute_global_pipeline"
         ),
@@ -205,6 +205,39 @@ def test_layer_report_writers_receive_datestamp():
             forwarded = {keyword.arg: keyword.value for keyword in call.keywords}
             assert isinstance(forwarded["datestamp"], ast.Name)
             assert forwarded["datestamp"].id == "datestamp"
+
+    facade_tree = ast.parse(
+        (root / "contextor" / "core" / "api" / "facade.py").read_text(encoding="utf-8")
+    )
+    wrapper = next(
+        node for node in ast.walk(facade_tree)
+        if isinstance(node, ast.FunctionDef) and node.name == "analyze_layer"
+    )
+    coordinated_try = next(node for node in wrapper.body if isinstance(node, ast.Try))
+    assert any(
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "acquire_full_analysis"
+        for statement in wrapper.body
+        for node in ast.walk(statement)
+        if statement is not coordinated_try
+    )
+    assert any(
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "ContextorFacade"
+        and node.func.attr == "_analyze_layer_uncoordinated"
+        for statement in coordinated_try.body
+        for node in ast.walk(statement)
+    )
+    assert any(
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "release_full_analysis"
+        for statement in coordinated_try.finalbody
+        for node in ast.walk(statement)
+    )
 
 
 def test_extracted_layer_pipeline_builds_analytics_and_status(monkeypatch):

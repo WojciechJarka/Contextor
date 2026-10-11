@@ -36,7 +36,7 @@ def test_fresh_minimal_query_uses_one_read_transaction_and_no_discovery(tmp_path
     state.cached_analytics_state = "deferred"
     state.topology_metrics_state = "deferred"
     engine = SimpleNamespace(state=state)
-    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: engine)
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root, *, _defer_migration=False: engine)
 
     counts = {"read": 0, "write": 0, "discover": 0}
     original_read = PersistentIdentityRegistry.read_transaction
@@ -61,7 +61,7 @@ def test_incomplete_canonical_paths_fallback_runs_after_first_read_lock(tmp_path
     state = RepositoryAnalysisState(modules={"pkg.module": object()})
     state.resync_required = False
     engine = SimpleNamespace(state=state)
-    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: engine)
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root, *, _defer_migration=False: engine)
 
     active_reads = {"value": 0, "nested": False, "discover": 0}
     original_read = PersistentIdentityRegistry.read_transaction
@@ -107,7 +107,7 @@ def test_canonical_relative_path_is_resolved_from_repo_root(tmp_path, monkeypatc
     state.dependency_graph = SimpleNamespace(hard_edges={}, soft_edges={})
     state.cached_analytics_state = "deferred"
     state.topology_metrics_state = "deferred"
-    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: SimpleNamespace(state=state))
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root, *, _defer_migration=False: SimpleNamespace(state=state))
 
     result = json.loads(get_file_edit_context(str(tmp_path), target="pkg.module", mode="minimal"))
 

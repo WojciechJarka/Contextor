@@ -259,7 +259,7 @@ def test_affected_mcp_queries_fail_closed_on_parse_stale_state(
 ):
     state = _stale_mcp_state(tmp_path)
     engine = SimpleNamespace(state=state)
-    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: engine)
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root, *, _defer_migration=False: engine)
     monkeypatch.setattr(query_helpers, "read_registries",
         lambda _root: (
             {"provider": "1/1"},

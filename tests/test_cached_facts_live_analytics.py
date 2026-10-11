@@ -327,11 +327,13 @@ def test_snapshot_lifecycle_and_consumer_projection(tmp_path):
     loaded_leg, _ = load_snapshot(cache_dir, expected_state_id="legacy_snap")
     assert loaded_leg.cached_analytics_state == "deferred"
 
+    registry = PersistentIdentityRegistry(str(tmp_path))
+    file_state_manager = FileStateManager(str(cache_dir))
     with patch("builtins.open", side_effect=OSError("Disk read blocked")):
         engine = IncrementalAnalysisEngine(
             loaded_leg,
-            PersistentIdentityRegistry(str(tmp_path)),
-            FileStateManager(str(cache_dir)),
+            registry,
+            file_state_manager,
             str(tmp_path),
         )
 

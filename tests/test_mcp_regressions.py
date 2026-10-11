@@ -725,7 +725,7 @@ def test_minimal_file_context_fails_closed_without_usable_live_graph(
             recovered_artifacts={},
         ),
     )
-    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: None)
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root, *, _defer_migration=False: None)
     missing = json.loads(
         mcp_server.get_file_edit_context.fn(
             repo_path=str(tmp_path), target="1/1", mode="minimal"
@@ -734,7 +734,7 @@ def test_minimal_file_context_fails_closed_without_usable_live_graph(
 
     state = RepositoryAnalysisState(modules={"provider": object()})
     monkeypatch.setattr(
-        mcp_runtime, "get_or_init_engine", lambda _root: SimpleNamespace(state=state)
+        mcp_runtime, "get_or_init_engine", lambda _root, *, _defer_migration=False: SimpleNamespace(state=state)
     )
     missing_graph = json.loads(
         mcp_server.get_file_edit_context.fn(
@@ -959,7 +959,7 @@ def test_analysis_endpoint_returns_reusable_job_and_pollable_completion(
     engine_state = SimpleNamespace(fresh=True, revision=1)
     engine = SimpleNamespace(state=engine_state)
     monkeypatch.setattr(analysis_jobs, "_run_analysis_worker", fake_worker)
-    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: engine)
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root, *, _defer_migration=False: engine)
     analysis_jobs._analysis_tasks.clear()
     analysis_jobs._analysis_jobs_by_repo.clear()
 
@@ -4633,7 +4633,7 @@ def test_file_edit_context_minimal_mode_and_target_resolution(tmp_path, monkeypa
         )
     )
     mcp_runtime._live_engine_revisions[str(root)] = 42
-    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: engine)
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root, *, _defer_migration=False: engine)
     monkeypatch.setattr(query_helpers, "read_registries",
         lambda _root: (
             {"pkg.module": "10/1", "consumer.mod": "20/1", "tests.test_pkg": "30/1"},
@@ -5228,7 +5228,7 @@ def test_file_edit_context_layer_guard(monkeypatch, tmp_path):
             dependency_graph=empty_graph,
         )
     )
-    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: engine_fresh_clean)
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root, *, _defer_migration=False: engine_fresh_clean)
 
     res_clean_ui = json.loads(mcp_server.get_file_edit_context.fn(repo_path=str(root), target="pkg.ui_mod", mode="minimal"))
     assert res_clean_ui["layer_guard"]["available"] is True
@@ -5270,7 +5270,7 @@ def test_file_edit_context_layer_guard(monkeypatch, tmp_path):
             dependency_graph=empty_graph,
         )
     )
-    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: engine_with_v)
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root, *, _defer_migration=False: engine_with_v)
 
     # For pkg.ui_mod (source of 2 violations -> 2 outbound)
     res_ui_v = json.loads(mcp_server.get_file_edit_context.fn(repo_path=str(root), target="pkg.ui_mod", mode="minimal"))
@@ -5308,7 +5308,7 @@ def test_file_edit_context_layer_guard(monkeypatch, tmp_path):
             dependency_graph=empty_graph,
         )
     )
-    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: engine_inbound_core)
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root, *, _defer_migration=False: engine_inbound_core)
     res_inbound_core = json.loads(mcp_server.get_file_edit_context.fn(repo_path=str(root), target="pkg.core_mod", mode="minimal"))
     assert res_inbound_core["layer_guard"]["outbound_rules_defined"] is False
     assert res_inbound_core["layer_guard"]["outbound_violation_count"] == 0
@@ -5326,7 +5326,7 @@ def test_file_edit_context_layer_guard(monkeypatch, tmp_path):
             dependency_graph=empty_graph,
         )
     )
-    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: engine_deferred)
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root, *, _defer_migration=False: engine_deferred)
     res_deferred = json.loads(mcp_server.get_file_edit_context.fn(repo_path=str(root), target="pkg.ui_mod", mode="minimal"))
     assert res_deferred["layer_guard"]["available"] is False
     assert "deferred" in res_deferred["layer_guard"]["reason"]
@@ -5342,7 +5342,7 @@ def test_file_edit_context_layer_guard(monkeypatch, tmp_path):
             dependency_graph=empty_graph,
         )
     )
-    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: engine_stale)
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root, *, _defer_migration=False: engine_stale)
     res_stale = json.loads(mcp_server.get_file_edit_context.fn(repo_path=str(root), target="pkg.ui_mod", mode="minimal"))
     assert res_stale["layer_guard"]["available"] is False
     assert "stale" in res_stale["layer_guard"]["reason"]

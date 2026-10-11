@@ -405,7 +405,15 @@ def test_h3a_case_j_local_incremental_mutation_revision_sync(tmp_path):
 
     assert freshness["workspace_sync"] == "verified"
     assert freshness["canonical_revision"] > r0
-    assert engine0.state.revision == freshness["canonical_revision"]
+    current_engine = mcp_runtime.get_or_init_engine(repo)
+    assert current_engine is not engine0
+    assert current_engine is mcp_runtime._live_engines[str(repo)]
+    assert engine0.state.revision == r0
+    assert current_engine.state.revision == freshness["canonical_revision"]
+    assert (
+        mcp_runtime._live_engine_revisions[str(repo)]
+        == freshness["canonical_revision"]
+    )
 
 
 def test_h3a_case_k_real_remote_live_lifecycle_and_journal_separation(tmp_path):
@@ -1403,7 +1411,7 @@ def test_h3a_case_aa_analysis_job_revision_mismatch_fails_closed(tmp_path, monke
         }
 
     monkeypatch.setattr(analysis_jobs, "_run_analysis_worker", fake_worker)
-    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: engine)
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root, *, _defer_migration=False: engine)
     analysis_jobs._analysis_tasks.clear()
     analysis_jobs._analysis_jobs_by_repo.clear()
 
