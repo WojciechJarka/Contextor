@@ -1,10 +1,17 @@
 from contextlib import contextmanager
+from copy import deepcopy
 from importlib import import_module
+from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 
-from contextor.core.analysis.state_manager import FileDelta, RepositoryAnalysisState
+from contextor.core.analysis.state_manager import (
+    FileDelta,
+    FileState,
+    RepositoryAnalysisState,
+)
 
 
 engine_module = import_module("contextor.core.analysis.incremental.engine")
@@ -16,6 +23,12 @@ class FakeRegistry:
         self._state = {
             "artifact_registry": {"path_to_id": {}},
         }
+
+    def create_checkpoint(self):
+        return deepcopy(self._state)
+
+    def restore_checkpoint(self, checkpoint):
+        self._state = deepcopy(checkpoint)
 
     @contextmanager
     def transaction(self):
@@ -34,15 +47,29 @@ class FakeRegistry:
 class FakeStateManager:
     def __init__(self):
         self.paths = []
+        self._state = {}
 
     def update_state(self, path):
         self.paths.append(path)
+        self._state[str(Path(path).resolve())] = FileState(
+            mtime_ns=0,
+            size=0,
+            sha256="0" * 64,
+        )
+
+    def get_tracked_sha256(self, path):
+        entry = self._state.get(
+            str(Path(path).resolve())
+        )
+        return entry.sha256 if entry is not None else ""
 
 
 def _candidate():
     return SimpleNamespace(
         modules={}, reexport_facts_by_module={},
-        artifacts={}, module_parse_freshness={},
+        artifacts={},
+        layer_information={},
+        module_parse_freshness={},
         syntax_diagnostics_by_path={}, syntax_diagnostics_state="fresh",
         dependency_graph=None, metrics={}, topology_analytics={},
         cached_analytics={}, dependency_matrix={}, dependency_matrix_state="deferred",
@@ -97,11 +124,31 @@ def _capture(monkeypatch):
     return events
 
 
-def _run(engine, delta, *, extracted_lineage_facts="facts"):
+def _run(
+    engine,
+    delta,
+    *,
+    extracted_lineage_facts="facts",
+    identity_sync_required=True,
+):
+    patch_families = (
+        ("identity_registry",)
+        if identity_sync_required
+        else ()
+    )
     return engine._apply_delta_and_commit(
-        "target.py", delta, None, SimpleNamespace(), [], {}, None,
+        "target.py",
+        delta,
+        None,
+        SimpleNamespace(
+            patch_families=patch_families,
+        ),
+        [],
+        {},
+        None,
         extracted_lineage_facts=extracted_lineage_facts,
-        syntax_source_path="target.py", syntax_fact={"status": "checked_and_none"},
+        syntax_source_path="target.py",
+        syntax_fact={"status": "checked_and_none"},
         clear_parse_module="target",
     )
 
@@ -113,6 +160,8 @@ def _names(events):
 def test_identity_sync_success_emits_order_and_no_missing_owners(monkeypatch):
     events = _capture(monkeypatch)
     registry = FakeRegistry()
+    checkpoint = Mock(wraps=registry.create_checkpoint)
+    monkeypatch.setattr(registry, "create_checkpoint", checkpoint)
     engine = _engine(registry)
     candidate = _candidate()
     monkeypatch.setattr(
@@ -132,11 +181,16 @@ def test_identity_sync_success_emits_order_and_no_missing_owners(monkeypatch):
     ]
     assert events[3][1]["count"] == 0
     assert lineage_calls == [{"source_path": "target.py", "extracted_lineage_facts": "facts", "delete": False, "rematerialize_all": True}]
+    assert checkpoint.call_count == 1
+    assert engine.state_manager.paths == ["target.py"]
 
 
 def test_identity_sync_lineage_failure_propagates_without_file_state(monkeypatch):
     events = _capture(monkeypatch)
-    engine = _engine(FakeRegistry())
+    registry = FakeRegistry()
+    checkpoint = Mock(wraps=registry.create_checkpoint)
+    monkeypatch.setattr(registry, "create_checkpoint", checkpoint)
+    engine = _engine(registry)
     candidate = _candidate()
     monkeypatch.setattr(
         engine_module, "execute_refresh_plan",
@@ -158,11 +212,16 @@ def test_identity_sync_lineage_failure_propagates_without_file_state(monkeypatch
     ]
     assert events[-1][1]["error"] == "owner-failure"
     assert engine.state_manager.paths == []
+    assert checkpoint.call_count == 1
+    assert registry._state["artifact_registry"]["path_to_id"] == {}
 
 
 def test_non_identity_path_emits_skip_and_default_lineage_scope(monkeypatch):
     events = _capture(monkeypatch)
-    engine = _engine(FakeRegistry())
+    registry = FakeRegistry()
+    checkpoint = Mock(wraps=registry.create_checkpoint)
+    monkeypatch.setattr(registry, "create_checkpoint", checkpoint)
+    engine = _engine(registry)
     candidate = _candidate()
     monkeypatch.setattr(
         engine_module, "execute_refresh_plan",
@@ -171,7 +230,11 @@ def test_non_identity_path_emits_skip_and_default_lineage_scope(monkeypatch):
     lineage_calls = []
     engine._update_candidate_lineage_slice = lambda *_args, **kwargs: lineage_calls.append(kwargs)
 
-    _run(engine, FileDelta(module_path="target"))
+    _run(
+        engine,
+        FileDelta(module_path="target"),
+        identity_sync_required=False,
+    )
 
     names = _names(events)
     assert "INCREMENTAL_REGISTRY_SYNC_SKIP" in names
@@ -179,6 +242,8 @@ def test_non_identity_path_emits_skip_and_default_lineage_scope(monkeypatch):
     assert "INCREMENTAL_REGISTRY_SYNC_END" not in names
     assert lineage_calls == [{"source_path": "target.py", "extracted_lineage_facts": "facts", "delete": False}]
     assert names[-2:] == ["INCREMENTAL_FILE_STATE_START", "INCREMENTAL_FILE_STATE_END"]
+    assert checkpoint.call_count == 0
+    assert engine.state_manager.paths == ["target.py"]
 
 
 def test_registry_diagnostic_gap_is_observed_without_repair_or_raise(monkeypatch):
