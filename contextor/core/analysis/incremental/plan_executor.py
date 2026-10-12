@@ -765,6 +765,87 @@ def _prepare_candidate_state(state: RepositoryAnalysisState) -> CandidateState:
     )
 
 
+def _refresh_canonical_artifact_consumers(
+    candidate: CandidateState,
+    previous_consumption: Mapping[str, Any],
+    changed_module: str,
+) -> None:
+    """Refresh affected per-symbol consumer views from canonical RAM facts."""
+    from contextor.core.api.api_consumers import extract_api_consumers
+    from contextor.core.reference.engine import (
+        build_symbol_references_from_canonical,
+    )
+
+    current_modules = set(candidate.modules)
+    dirty_definers = {changed_module}
+
+    previous_targets = previous_consumption or {}
+    current_targets = candidate.artifact_consumption or {}
+
+    for target in set(previous_targets) | set(current_targets):
+        if "::" not in target:
+            continue
+
+        before = previous_targets.get(target, {})
+        after = current_targets.get(target, {})
+
+        if not isinstance(before, dict):
+            before = {}
+        if not isinstance(after, dict):
+            after = {}
+
+        if (
+            before != after
+            or changed_module in before.get("consumers", ())
+            or changed_module in after.get("consumers", ())
+            or changed_module in before.get("channels", {})
+            or changed_module in after.get("channels", {})
+        ):
+            dirty_definers.add(target.split("::", 1)[0])
+
+    for module_id in sorted(dirty_definers & current_modules):
+        artifact = candidate.artifacts.get(module_id)
+        if not isinstance(artifact, dict):
+            raise RuntimeError(
+                f"Missing canonical artifact record for {module_id}"
+            )
+
+        own_symbols = list(artifact.get("own_symbols", ()))
+
+        if own_symbols:
+            references = build_symbol_references_from_canonical(
+                definer_module=module_id,
+                symbols=own_symbols,
+                artifact_consumption=candidate.artifact_consumption,
+                module_usages=candidate.module_usages,
+                current_modules=current_modules,
+            )
+
+            symbols = artifact.get("symbols", {})
+            if not isinstance(symbols, dict):
+                raise RuntimeError(
+                    f"Invalid canonical symbol facts for {module_id}"
+                )
+
+            refreshed_consumers = extract_api_consumers(
+                own_symbols,
+                references,
+                signatures=symbols.get("signatures", {}),
+            )
+        else:
+            refreshed_consumers = {}
+
+        if set(refreshed_consumers) != set(own_symbols):
+            raise RuntimeError(
+                f"Incomplete consumer materialization for {module_id}"
+            )
+
+        candidate.artifacts[module_id] = {
+            **artifact,
+            "consumers": refreshed_consumers,
+        }
+
+
 def execute_refresh_plan(
     state: RepositoryAnalysisState,
     delta: FileDelta,
@@ -1083,6 +1164,25 @@ def execute_refresh_plan(
                 candidate.artifact_consumption_state = "fresh"
             else:
                 candidate.artifact_consumption_state = "stale"
+
+            if (
+                candidate.artifact_consumption_state == "fresh"
+                and not delta.is_deleted
+            ):
+                _refresh_canonical_artifact_consumers(
+                    candidate,
+                    state.artifact_consumption,
+                    delta.module_path,
+                )
+            elif (
+                candidate.artifact_consumption_state == "fresh"
+                and delta.is_deleted
+            ):
+                _refresh_canonical_artifact_consumers(
+                    candidate,
+                    state.artifact_consumption,
+                    delta.module_path,
+                )
 
             executed_patch_families.append("artifact_consumption")
 

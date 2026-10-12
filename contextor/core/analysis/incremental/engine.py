@@ -59,6 +59,38 @@ def _trace_incremental_phase(
     )
 
 
+def _updated_module_usage_manifest(
+    previous_manifest: dict,
+    module_path: str,
+    file_path: str,
+    *,
+    is_deleted: bool,
+    tracked_sha256: str,
+) -> dict:
+    from contextor.core.domain.usage_facts import (
+        MODULE_USAGE_FACTS_SEMANTIC_VERSION,
+    )
+
+    updated = dict(previous_manifest or {})
+
+    if is_deleted:
+        updated.pop(module_path, None)
+        return updated
+
+    if not tracked_sha256:
+        raise RuntimeError(
+            f"Missing trusted source SHA-256 for {module_path}"
+        )
+
+    updated[module_path] = {
+        "module_id": module_path,
+        "path": str(Path(file_path).resolve()),
+        "sha256": tracked_sha256,
+        "semantic_version": MODULE_USAGE_FACTS_SEMANTIC_VERSION,
+    }
+    return updated
+
+
 @dataclass
 class IncrementalUpdateResult:
     """Contract for what the incremental engine returns to MCP/IDE."""
@@ -640,6 +672,13 @@ class IncrementalAnalysisEngine:
                     extracted_lineage_facts=prep.extracted_lineage_facts,
                 )
                 self.state_manager.update_state(file_path)
+                self.state.module_usages_manifest = _updated_module_usage_manifest(
+                    self.state.module_usages_manifest,
+                    module_path,
+                    file_path,
+                    is_deleted=False,
+                    tracked_sha256=self.state_manager.get_tracked_sha256(file_path),
+                )
                 return IncrementalUpdateResult(
                     status="RECOVERED" if recovered_from_parse_failure else "UNCHANGED",
                     file_path=file_path,
@@ -1010,6 +1049,13 @@ class IncrementalAnalysisEngine:
             "INCREMENTAL_FILE_STATE_START",
         )
         self.state_manager.update_state(file_path)
+        self.state.module_usages_manifest = _updated_module_usage_manifest(
+            self.state.module_usages_manifest,
+            delta.module_path,
+            file_path,
+            is_deleted=delta.is_deleted,
+            tracked_sha256=self.state_manager.get_tracked_sha256(file_path),
+        )
         _trace_incremental_phase(
             "INCREMENTAL_FILE_STATE_END",
             started=file_state_started,
