@@ -1,6 +1,8 @@
 import threading
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass, field
+from functools import wraps
 from pathlib import Path
 from typing import Optional, List, Set, Dict, Iterable, Tuple, Any
 
@@ -116,6 +118,35 @@ class IncrementalUpdateResult:
     execution_trace: Optional[Dict[str, Any]] = field(default=None, repr=False)
 
 
+def _atomic_delta_commit(method):
+    """Guard the direct engine's ordinary-exception commit boundary."""
+
+    @wraps(method)
+    def guarded(self, *args, **kwargs):
+        plan = kwargs.get("plan")
+
+        if plan is None and len(args) > 3:
+            plan = args[3]
+
+        if plan is None:
+            raise TypeError(
+                "Atomic incremental commit requires RefreshPlan"
+            )
+
+        patch_families = tuple(
+            getattr(plan, "patch_families", ()) or ()
+        )
+
+        with self._failed_commit_guard(
+            may_write_registry=(
+                "identity_registry" in patch_families
+            ),
+        ):
+            return method(self, *args, **kwargs)
+
+    return guarded
+
+
 class IncrementalAnalysisEngine:
     """
     Core engine for handling real-time delta updates to the canonical repository state.
@@ -134,6 +165,54 @@ class IncrementalAnalysisEngine:
         self.root_path = Path(root_path)
         self._lock = threading.Lock()
         materialize_incremental_state(self.state)
+
+    @contextmanager
+    def _failed_commit_guard(
+        self,
+        *,
+        may_write_registry: bool = False,
+    ):
+        """Restore direct-engine ownership after a failed commit."""
+        state_object = self.state
+        state_before = vars(state_object).copy()
+
+        tracked_mapping = self.state_manager._state
+        tracked_before = tracked_mapping.copy()
+
+        registry_checkpoint = (
+            self.registry.create_checkpoint()
+            if may_write_registry
+            else None
+        )
+
+        try:
+            yield
+        except Exception:
+            rollback_error = None
+
+            try:
+                if registry_checkpoint is not None:
+                    self.registry.restore_checkpoint(
+                        registry_checkpoint
+                    )
+            except Exception as exc:
+                rollback_error = exc
+            finally:
+                current_attributes = vars(state_object)
+                current_attributes.clear()
+                current_attributes.update(state_before)
+
+                tracked_mapping.clear()
+                tracked_mapping.update(tracked_before)
+                self.state_manager._state = tracked_mapping
+
+            if rollback_error is not None:
+                raise RuntimeError(
+                    "Incremental commit failed and persistent "
+                    "registry rollback also failed"
+                ) from rollback_error
+
+            raise
 
     def _ensure_topology_analytics(self) -> None:
         """Compatibility wrapper delegating to materialization.ensure_topology_analytics."""
@@ -665,20 +744,21 @@ class IncrementalAnalysisEngine:
                 # Parsing proved the tracked source is semantically unchanged.
                 # Acknowledge its current fingerprint so restart reconciliation
                 # does not repeatedly queue the same canonical module.
-                self._commit_syntax_candidate(
-                    source_path=source_path,
-                    syntax_fact=checked_and_none,
-                    clear_parse_module=module_path,
-                    extracted_lineage_facts=prep.extracted_lineage_facts,
-                )
-                self.state_manager.update_state(file_path)
-                self.state.module_usages_manifest = _updated_module_usage_manifest(
-                    self.state.module_usages_manifest,
-                    module_path,
-                    file_path,
-                    is_deleted=False,
-                    tracked_sha256=self.state_manager.get_tracked_sha256(file_path),
-                )
+                with self._failed_commit_guard():
+                    self._commit_syntax_candidate(
+                        source_path=source_path,
+                        syntax_fact=checked_and_none,
+                        clear_parse_module=module_path,
+                        extracted_lineage_facts=prep.extracted_lineage_facts,
+                    )
+                    self.state_manager.update_state(file_path)
+                    self.state.module_usages_manifest = _updated_module_usage_manifest(
+                        self.state.module_usages_manifest,
+                        module_path,
+                        file_path,
+                        is_deleted=False,
+                        tracked_sha256=self.state_manager.get_tracked_sha256(file_path),
+                    )
                 return IncrementalUpdateResult(
                     status="RECOVERED" if recovered_from_parse_failure else "UNCHANGED",
                     file_path=file_path,
@@ -796,6 +876,7 @@ class IncrementalAnalysisEngine:
             new_artifacts_dict=new_artifacts_dict,
         )
 
+    @_atomic_delta_commit
     def _apply_delta_and_commit(
         self,
         file_path: str,
