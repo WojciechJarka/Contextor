@@ -33,8 +33,8 @@ from contextor.mcp import runtime as mcp_runtime
 _INITIAL = {
     "pkg/__init__.py": b"",
     "pkg/child.py": b"VALUE = 1\n",
-    "consumer.py": b"from pkg import child\nVALUE = child.VALUE\n",
-    "unrelated.py": b"VALUE = 2\n",
+    "consumer.py": b"from pkg import child\nCONSUMED_VALUE = child.VALUE\n",
+    "unrelated.py": b"UNRELATED_VALUE = 2\n",
 }
 _CHANGED_INIT = b"child = 123\n"
 
