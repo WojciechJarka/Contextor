@@ -12,6 +12,7 @@ from contextor.core.graph.resolver import (
     detect_package_root,
     resolve_internal,
 )
+from contextor.core.reference.shared import materialize_reexport_facts_by_module
 from contextor.core.symbol_engine.indexer import read_imports
 
 MODULES = ["core.alpha", "core.beta", "ui.app"]
@@ -157,6 +158,58 @@ def test_relative_from_import_multiple_package_targets(tmp_path):
     assert "pkg.__init__" not in hard
     assert "pkg.nonexistent" not in hard
     graph = build_graph(modules)
+    assert graph.hard_edges["pkg.__init__"] == hard
+    assert graph.soft_edges["pkg.__init__"] == soft
+
+
+def test_initializer_self_import_binding_keeps_child_package_hard_edge(tmp_path):
+    modules, _ = _package_modules(tmp_path, "from . import json as json\n")
+    facts = materialize_reexport_facts_by_module(modules)
+    assert facts["pkg.__init__"]["bindings"]["json"] == "pkg.json"
+
+    trie = build_trie(modules)
+    hard, soft = resolve_module_edges(
+        "pkg.__init__", modules["pkg.__init__"], trie, None, facts
+    )
+    graph = build_graph(modules, reexport_facts_by_module=facts)
+    assert hard == {"pkg.json.__init__"}
+    assert soft == set()
+    assert graph.hard_edges["pkg.__init__"] == hard
+    assert graph.soft_edges["pkg.__init__"] == soft
+    assert "pkg.json" not in modules
+
+
+def test_initializer_real_assignment_shadows_same_named_child(tmp_path):
+    modules, _ = _named_package_modules(
+        tmp_path, "from pkg import runtime\n", "runtime = object()\n"
+    )
+    facts = materialize_reexport_facts_by_module(modules)
+    assert facts["pkg.__init__"]["bindings"]["runtime"] == "pkg.runtime"
+
+    hard, soft = resolve_module_edges(
+        "consumer", modules["consumer"], build_trie(modules), None, facts
+    )
+    assert hard == {"pkg.__init__"}
+    assert soft == set()
+
+
+def test_initializer_real_multi_name_bindings_keep_indexed_child_edges(tmp_path):
+    modules, _ = _package_modules(tmp_path, "from . import json, app, nonexistent\n")
+    facts = materialize_reexport_facts_by_module(modules)
+    assert facts["pkg.__init__"]["bindings"] == {
+        "json": "pkg.json",
+        "app": "pkg.app",
+        "nonexistent": "pkg.nonexistent",
+    }
+
+    hard, soft = resolve_module_edges(
+        "pkg.__init__", modules["pkg.__init__"], build_trie(modules), None, facts
+    )
+    graph = build_graph(modules, reexport_facts_by_module=facts)
+    assert hard == {"pkg.json.__init__", "pkg.app"}
+    assert soft == set()
+    assert "pkg.__init__" not in hard
+    assert "pkg.nonexistent" not in hard | soft
     assert graph.hard_edges["pkg.__init__"] == hard
     assert graph.soft_edges["pkg.__init__"] == soft
 

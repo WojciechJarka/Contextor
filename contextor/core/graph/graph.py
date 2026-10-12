@@ -251,9 +251,14 @@ def resolve_module_edges(
             if not imported_name or imported_name == "*":
                 continue
 
-            # Explicit initializer bindings take precedence
-            # over a same-named indexed child module.
-            if imported_name in bindings:
+            # A package initializer may itself bind a name
+            # through "from . import child". Such a binding
+            # must not hide the initializer's own import edge.
+            # Other importers still honor initializer shadowing.
+            if (
+                imported_name in bindings
+                and package_init != module_id
+            ):
                 continue
 
             child_name = f"{package_name}.{imported_name}"
