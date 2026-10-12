@@ -12,6 +12,7 @@ import threading
 import time
 from collections.abc import Mapping
 from dataclasses import fields, is_dataclass
+from datetime import datetime
 from enum import Enum
 from pathlib import Path, PurePath
 from types import SimpleNamespace
@@ -402,13 +403,186 @@ def _capture_snapshot(
     )
 
 
-def _state_projection(state: RepositoryAnalysisState) -> dict:
+def _projected_string_member(
+    projection: dict,
+    key: str,
+    path: str,
+) -> dict:
+    assert projection.get("kind") == "mapping", (
+        f"Expected projected mapping at {path}"
+    )
+    key_projection = {
+        "kind": "primitive",
+        "type": "builtins.str",
+        "value": key,
+    }
+    matches = [
+        value
+        for candidate_key, value in projection["items"]
+        if candidate_key == key_projection
+    ]
+    assert len(matches) == 1, (
+        f"Required canonical field missing or duplicated: {path}[{key!r}]"
+    )
+    return matches[0]
+
+
+def _normalize_proved_report_timestamps(
+    projection: dict,
+) -> None:
+    layer = projection["fields"]["layer_information"]
+    summary = _projected_string_member(
+        layer,
+        "summary_data",
+        "layer_information",
+    )
+    header = _projected_string_member(
+        summary,
+        "report_header",
+        "layer_information.summary_data",
+    )
+
+    for parent, field_name, field_path in (
+        (
+            summary,
+            "generated_at",
+            "layer_information.summary_data.generated_at",
+        ),
+        (
+            header,
+            "generated_at",
+            "layer_information.summary_data.report_header.generated_at",
+        ),
+    ):
+        timestamp = _projected_string_member(
+            parent,
+            field_name,
+            field_path,
+        )
+        assert timestamp.get("kind") == "primitive"
+        assert timestamp.get("type") == "builtins.str"
+        value = timestamp.get("value")
+        assert isinstance(value, str)
+        parsed = datetime.fromisoformat(value)
+        assert parsed.isoformat() == value, (
+            f"Invalid canonical report timestamp at {field_path}"
+        )
+
+        # Normalize only the comparative projection.
+        # Never modify the captured canonical state.
+        timestamp["value"] = "<operational-report-timestamp>"
+
+
+def _state_projection(
+    state: RepositoryAnalysisState,
+    *,
+    normalize_report_timestamps: bool = False,
+) -> dict:
     assert type(state) is RepositoryAnalysisState
-    declared_fields = tuple(item.name for item in fields(RepositoryAnalysisState))
-    projection = _project(state, "RepositoryAnalysisState")
+    declared_fields = tuple(
+        item.name for item in fields(RepositoryAnalysisState)
+    )
+    projection = _project(
+        state,
+        "RepositoryAnalysisState",
+    )
     assert projection["kind"] == "dataclass"
     assert tuple(projection["fields"]) == declared_fields
+
+    if normalize_report_timestamps:
+        _normalize_proved_report_timestamps(projection)
+
     return projection
+
+
+def _report_timestamp_state(
+    summary_timestamp: object = "2026-10-12T12:09:48.838009",
+    header_timestamp: object = "2026-10-12T12:09:48.623010",
+) -> RepositoryAnalysisState:
+    return RepositoryAnalysisState(
+        layer_information={
+            "summary_data": {
+                "generated_at": summary_timestamp,
+                "report_header": {
+                    "generated_at": header_timestamp,
+                },
+            },
+        },
+    )
+
+
+def test_report_timestamp_normalization_preserves_captured_state():
+    desktop = _report_timestamp_state()
+    mcp = _report_timestamp_state(
+        "2026-10-12T12:09:50.608340",
+        "2026-10-12T12:09:50.357250",
+    )
+    desktop_before = copy.deepcopy(vars(desktop))
+    mcp_before = copy.deepcopy(vars(mcp))
+
+    assert _state_projection(desktop) != _state_projection(mcp)
+    assert _state_projection(
+        desktop, normalize_report_timestamps=True
+    ) == _state_projection(
+        mcp, normalize_report_timestamps=True
+    )
+    assert vars(desktop) == desktop_before
+    assert vars(mcp) == mcp_before
+
+
+def test_report_timestamp_normalization_has_no_wildcard_exclusion():
+    desktop = _report_timestamp_state()
+    mcp = copy.deepcopy(desktop)
+    desktop.layer_information["other"] = {"generated_at": "2026-10-12T12:00:00"}
+    mcp.layer_information["other"] = {"generated_at": "2026-10-12T12:00:01"}
+
+    assert _state_projection(
+        desktop, normalize_report_timestamps=True
+    ) != _state_projection(
+        mcp, normalize_report_timestamps=True
+    )
+
+
+@pytest.mark.parametrize("missing_from", ["summary_data", "report_header"])
+def test_report_timestamp_normalization_rejects_missing_timestamp(missing_from):
+    state = _report_timestamp_state()
+    target = state.layer_information["summary_data"]
+    if missing_from == "report_header":
+        target = target["report_header"]
+    del target["generated_at"]
+
+    with pytest.raises(AssertionError, match="missing or duplicated"):
+        _state_projection(state, normalize_report_timestamps=True)
+
+
+@pytest.mark.parametrize("field", ["summary_data", "report_header"])
+@pytest.mark.parametrize("invalid", ["not-a-timestamp", 123])
+def test_report_timestamp_normalization_rejects_invalid_timestamp(field, invalid):
+    state = _report_timestamp_state()
+    target = state.layer_information["summary_data"]
+    if field == "report_header":
+        target = target["report_header"]
+    target["generated_at"] = invalid
+
+    with pytest.raises((AssertionError, ValueError)):
+        _state_projection(state, normalize_report_timestamps=True)
+
+
+def test_report_timestamp_normalization_preserves_semantic_difference_and_fields():
+    desktop = _report_timestamp_state()
+    mcp = copy.deepcopy(desktop)
+    mcp.artifacts["pkg.module"] = {"symbols": ["changed"]}
+
+    desktop_projection = _state_projection(
+        desktop, normalize_report_timestamps=True
+    )
+    mcp_projection = _state_projection(
+        mcp, normalize_report_timestamps=True
+    )
+    declared_fields = {item.name for item in fields(RepositoryAnalysisState)}
+    assert set(desktop_projection["fields"]) == declared_fields
+    assert set(mcp_projection["fields"]) == declared_fields
+    assert desktop_projection != mcp_projection
 
 
 def _assert_file_state_parity(desktop: _SnapshotCapture, mcp: _SnapshotCapture) -> None:
@@ -603,8 +777,14 @@ def test_real_desktop_and_mcp_full_entrypoints_have_identical_canonical_state(
         )
 
     try:
-        desktop_projection = _state_projection(desktop_capture.state)
-        mcp_projection = _state_projection(mcp_capture.state)
+        desktop_projection = _state_projection(
+            desktop_capture.state,
+            normalize_report_timestamps=True,
+        )
+        mcp_projection = _state_projection(
+            mcp_capture.state,
+            normalize_report_timestamps=True,
+        )
     except _UnsupportedCanonicalValue as exc:
         evidence_dir = _preserve_mismatch_evidence(tmp_path, desktop_capture, mcp_capture)
         pytest.fail(

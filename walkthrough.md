@@ -1,127 +1,308 @@
-# CONTEXTOR_B0G2C2_COMPLETE_CANONICAL_DIFF_INVENTORY
+# CONTEXTOR_B0G2C3_EXACT_METADATA_NORMALIZATION_AND_FULL_PARITY
 
 ## FILES_CHANGED
 
-- `C:\Temp\Contextor_Repo\walkthrough.md` (report only). No production, test, snapshot or auxiliary inventory files changed.
+- C:\Temp\Contextor_Repo\tests\test_desktop_mcp_canonical_parity.py
+- C:\Temp\Contextor_Repo\walkthrough.md (report only)
 
-## ACTUAL_DIFF
+No production or other test file changed.
 
-`ACTUAL_DIFF=DIFFS=NONE` for source/test/docs. This report replaces the prior walkthrough. The complete 12-leaf inventory fits below, so no separate machine-readable inventory was needed.
+## SOURCE_PRECHECK
 
-## CURRENT_SOURCE_IDENTITY
+DIRECT_EVIDENCE: HEAD adf602f834d2f5d40392702494a0ab06e0dbcff8. Initial git status was clean. Contextor MCP was used first; complete AST implementations of _project, _state_projection, and the real parity test returned workspace_sync=verified at LIVE revision 356. The source had the exact old _state_projection implementation, both strict unnormalized capture projections, and exactly two unnormalized cross-entrypoint comparison calls. Contextor blast radius for _state_projection reported zero confirmed static consumers; literal current source showed its three call sites in the approved test. The previous B0G2C2 evidence identified only two report timestamps among all 36 canonical fields.
 
-- HEAD: `cfceaded06df8b2fbabcc5feee9b43c4e207122c`. Before report write, `git status --porcelain=v1 --untracked-files=all` was empty and `git diff --check` passed.
-- Contextor complete implementation retrieval with `workspace_sync=verified` at LIVE revision 356: `generate_summary_report` in `C:\Temp\Contextor_Repo\contextor\core\reporting_engine\summary_generator.py:128-202`; `build_report_header` in `C:\Temp\Contextor_Repo\contextor\core\reporting_engine\header.py:4-21`; `_project` and `_state_projection` in `C:\Temp\Contextor_Repo\tests\test_desktop_mcp_canonical_parity.py:99-179,405-411`.
-- Contextor exact source ranges: `C:\Temp\Contextor_Repo\contextor\core\reporting_engine\pipeline.py:180-210,635-700`; `C:\Temp\Contextor_Repo\contextor\core\api\facade.py:975-1010`; parity test capture/assertion at lines 330-433,515-620. No retrieved complete symbol was truncated. `search_source(generated_at, limit=null, allow_large_output=true)`: 26/26 matches, untruncated.
+## PROVED_TIMESTAMP_EXCEPTION_PATHS
 
-## PRESERVED_SNAPSHOT_IDENTITY
+Only RepositoryAnalysisState.layer_information["summary_data"]["generated_at"] and RepositoryAnalysisState.layer_information["summary_data"]["report_header"]["generated_at"] are normalized. _projected_string_member requires an exact projected string key and exactly one member. Both values must be projected strings in canonical datetime.fromisoformat round-trip form. No other generated_at key is normalized. No canonical state field is removed; only the independent comparative projection's two timestamp values become "<operational-report-timestamp>".
 
-| Capture | Preserved file | SHA-256 | Metadata |
-|---|---|---|---|
-| Desktop | `C:\Users\DafoO\AppData\Local\Temp\pytest-of-DafoO\pytest-550\test_real_desktop_and_mcp_full0\b0g2c_canonical_mismatch_evidence\desktop.pickle` | `4EB93D63A9C2F9E68DE5CB3B11BF04BE8857CD75AC238CD3EF3FE18128542402` | schema 1.4, writer desktop, revision 1, state_id `20261012_120948` |
-| MCP | `C:\Users\DafoO\AppData\Local\Temp\pytest-of-DafoO\pytest-550\test_real_desktop_and_mcp_full0\b0g2c_canonical_mismatch_evidence\mcp.pickle` | `B0F8F710C5D11EDC83290A3306F442637E33B76DB605FCD9E1A0B16813E58923` | schema 1.4, writer mcp, revision 2, state_id `20261012_120950` |
+## STRICT_CAPTURE_IMMUTABILITY_CHECK
 
-Both captures have repo_id `ctx_1a8534b9` and root `C:\Users\DafoO\AppData\Local\Temp\pytest-of-DafoO\pytest-550\test_real_desktop_and_mcp_full0\b0g2c_repo_b6b4c0319f054dc3920d4ab94af235a6`. Each referenced versioned state, FileState and lineage manifest file exists.
+The pre-MCP and post-MCP desktop capture projections remain _state_projection(desktop_capture.state) with normalization disabled. New regression verifies vars(desktop) and vars(mcp) remain equal to deep copies after strict and normalized projection. The real test's pre/post mutation comparison remained unchanged.
 
-## OFFLINE_COMPARISON_METHOD
+## COMPARATOR_REGRESSION_RESULTS
 
-DIRECT_EVIDENCE: Used repository `.venv` Python to load only the two preserved pickles; imported the existing parity test's lossless `_project` without invoking pytest or a test function. Applied it separately to all 36 declared `RepositoryAnalysisState` fields, FileState map, FileState JSON payload, source byte map, every snapshot metadata field, and the three extra state attributes `revision/state_id/provenance`. A one-time in-memory recursive walker compared complete tagged projections, preserved mapping keys by their full projected identity and sequence indices, and listed every unequal leaf. No field was excluded, ordered sequence sorted, comparator edited, or file written. The initial walker attempt accessed nonexistent `state.resync_required` and stopped with AttributeError before comparison; corrected read used the parity test's `getattr(..., False)` contract.
+9 passed, 1 deselected, 1 unrelated Authlib deprecation warning. Command: .venv\Scripts\python.exe -m pytest -q tests/test_desktop_mcp_canonical_parity.py -k report_timestamp_normalization. Coverage: two timestamp differences equal only when normalized; raw state unchanged; unrelated generated_at difference survives; each required timestamp missing fails; malformed string and wrong type fail for both paths; semantic artifact difference survives; complete declared field set remains.
 
-## COMPLETE_DIFF_COUNT
+## REAL_GUI_EXECUTION
 
-`12` differing projected leaves: two among the 36 canonical fields and ten in separately checked generation/identity metadata. No missing keys, fields, indices, or set elements. Every path and value is listed below.
+The real parity test invoked headless ContextorGUI analysis on an isolated five-source fixture. Output showed the full 8-step repository analysis pipeline, canonical snapshot persistence, and no error. Its assertions verified operation_name="Repository analysis" and error_count=0. No new GUI or uncontrolled LIVE daemon was started.
 
-## DIFF_COUNTS_BY_CANONICAL_FAMILY
+## REAL_MCP_EXECUTION
 
-| Family | Leaves | Result |
-|---|---:|---|
-| `state.layer_information` | 2 | PROVED_OPERATIONAL_METADATA |
-| Other 35 declared canonical fields, including modules, hard/soft graph, references, consumers, lineage, metrics, analytics, freshness, cycles, trie | 0 | EQUAL |
-| `file_states` | 0 | EQUAL |
-| `file_state_payload` | 2 | Expected generation metadata |
-| `source_bytes` | 0 | EQUAL |
-| Extra state attributes | 2 | Expected generation identity |
-| Snapshot metadata | 6 | Expected writer/generation identity |
+The same test invoked public MCP analyze_project and its real worker after Desktop capture. The job completed; test assertion checked completed["status"]=="completed". No shared analysis engine, coordinator, graph builder, or persistence was mocked.
 
-## OPERATIONAL_METADATA_DIFFERENCES
+## FULL_CANONICAL_SEMANTIC_PARITY
 
-| Exact logical path | Desktop | MCP | Classification |
-|---|---|---|---|
-| `state.layer_information['summary_data']['generated_at']` | `2026-10-12T12:09:48.838009` | `2026-10-12T12:09:50.608340` | PROVED_OPERATIONAL_METADATA |
-| `state.layer_information['summary_data']['report_header']['generated_at']` | `2026-10-12T12:09:48.623010` | `2026-10-12T12:09:50.357250` | PROVED_OPERATIONAL_METADATA |
+The approved test file returned 10 passed, 1 warning in 6.63 s under .venv\Scripts\python.exe -m pytest -q -s tests/test_desktop_mcp_canonical_parity.py. This includes 9 comparator regressions and the real two-entrypoint scenario. All 36 declared RepositoryAnalysisState fields remain in the lossless structural comparator. The only comparative normalization is the two exact timestamps; edges, consumers, reference/lineage facts, topology, artifacts, analytics, completeness/freshness markers, source positions and other report keys stayed strict. No first remaining mismatch occurred. This certifies this isolated FULL pair; it does not claim LIVE incremental transport parity.
 
-Both projected leaf paths end in `.value`; that tag is the projection representation, not a canonical field. Both values are ISO datetime strings. CODE_PATH_PROVED: `pipeline.py:190-206` builds header, then summary; `summary_generator.py:170,184-185` assigns summary timestamp and embeds header; `pipeline.py:647-648,693-697` returns them; `facade.py:993-999` stores summary in canonical `layer_information`. The timestamps are assigned after graph/metric inputs have been computed. Contextor's complete 26-match source search found timestamp use for report metadata/display and copying to layer reports (`layer_slicer.py:299,315-316`), with no observed edge, lineage, consumer, freshness, or identity decision using these exact timestamps. This supports only exact path-level nonsemantic classification, not a blanket `generated_at` exemption.
+## SNAPSHOT_GENERATION_LINKAGE
 
-## SEMANTIC_CANONICAL_DIFFERENCES
+The real test retained assertions for Desktop writer="desktop", MCP writer="mcp", exact MCP successor revision, same repo ID/root/schema, state_id/revision equality between loaded state and metadata, snapshot provenance and no resync. Post-run read-only inspection of the isolated latest generation showed repo_id ctx_ebcb4755, writer mcp, revision 2, state_id 20261012_123230; the versioned FileState _meta also held that same revision and state_id. The fixture root was C:\Users\DafoO\AppData\Local\Temp\pytest-of-DafoO\pytest-552\test_real_desktop_and_mcp_full0\b0g2c_repo_eb5d0376430848c2a6fbc11f0470e9a7. The Desktop revision 1/writer and its linkage were checked within the test before the MCP generation replaced the latest metadata.
 
-None in this preserved pair. All other declared state fields, including graph and reference details, compare equal under the lossless projection. This is an offline pairwise finding, not a claim about every future run.
+## FILE_STATE_PARITY
 
-## ORDERING_NONDETERMINISM_DIFFERENCES
+The real test's _capture_snapshot checked trusted FileState baseline, state_id/revision metadata linkage, coverage of all five immutable fixture sources, size and SHA-256. Its _assert_file_state_parity compared the complete projected FileState maps after both independent captures. Fixture bytes before/after both analyses were asserted equal. Test passed.
 
-None. Every sequence was compared by index. The earlier `direct_calls_detail` order mismatch is absent from both preserved captures.
+## FIRST_REMAINING_MISMATCH_IF_ANY
 
-## PERSISTENCE_IDENTITY_DIFFERENCES
+NONE.
 
-These ten differences are expected for independent persisted generations. They are **not** canonical-field metadata exemptions; strict per-generation linkage is required.
+## TARGETED_REGRESSION_RESULTS
 
-| Exact projected leaf path | Desktop | MCP |
-|---|---|---|
-| `file_state_payload['_meta']['revision'].value` | `1` | `2` |
-| `file_state_payload['_meta']['state_id'].value` | `20261012_120948` | `20261012_120950` |
-| `state_meta.revision.value` | `1` | `2` |
-| `state_meta.state_id.value` | `20261012_120948` | `20261012_120950` |
-| `metadata.revision.value` | `1` | `2` |
-| `metadata.state_id.value` | `20261012_120948` | `20261012_120950` |
-| `metadata.writer.value` | `desktop` | `mcp` |
-| `metadata.state_file.value` | `engine_state.r1.652c9babc5df4396a3025189b9ffa850.pkl` | `engine_state.r2.66c3c60e18e9426686def25eb8c0ec34.pkl` |
-| `metadata.file_state_file.value` | `file_state.r1.652c9babc5df4396a3025189b9ffa850.json` | `file_state.r2.66c3c60e18e9426686def25eb8c0ec34.json` |
-| `metadata.lineage_manifest_file.value` | `lineage_manifest.r1.652c9babc5df4396a3025189b9ffa850.json` | `lineage_manifest.r2.66c3c60e18e9426686def25eb8c0ec34.json` |
+After real parity passed, exactly the four approved related files plus selected coordination/canonical nodes ran: tests/test_reference_detail_determinism.py; tests/test_package_initializer_graph_refresh.py; tests/test_resolver.py; tests/test_graph_cache_bindings.py; tests/test_full_analysis_coordination.py::test_lease_is_held_during_publication; tests/test_full_analysis_coordination.py::test_serialized_desktop_and_mcp_coordination; tests/test_canonical_state_contract.py::test_dependencies_keep_hard_and_soft_records_for_the_same_pair. Result: 38 passed, 1 unrelated Authlib deprecation warning in 6.41 s. No full repository pytest or complete large parity-proof module was run.
 
-CONTRACT_PROVED on the captures: each has equal revision across state/metadata/FileState `_meta`, equal state_id across those same three, and MCP revision equals Desktop revision plus one. Repo ID, root, schema, state provenance `snapshot`, five FileState records, and all five source byte contents are equal across captures. Each FileState SHA-256 matches captured source bytes. FileState payload excluding `_meta` is equal. Both captures report `resync_required=False` through the test's `getattr` contract.
+## PY_COMPILE
 
-## UNRESOLVED_DIFFERENCES
+PASS: .venv\Scripts\python.exe -m py_compile C:\Temp\Contextor_Repo\tests\test_desktop_mcp_canonical_parity.py.
 
-None for this preserved pair. UNKNOWN: a historical two-run comparison cannot prove general future determinism. No new full analysis was allowed.
+## GIT_DIFF_CHECK
 
-## SUMMARY_GENERATED_AT_PROVENANCE
-
-`C:\Temp\Contextor_Repo\contextor\core\reporting_engine\summary_generator.py:128-202`: complete Contextor implementation, workspace sync verified. At line 170, `generate_summary_report` sets `"generated_at": datetime.now().isoformat()` independently of its inputs. It is report generation time, not source hash, canonical revision, or graph fact. `C:\Temp\Contextor_Repo\contextor\core\reporting_engine\pipeline.py:199-206` calls it; `C:\Temp\Contextor_Repo\contextor\core\api\facade.py:997` stores result in canonical state.
-
-## REPORT_HEADER_GENERATED_AT_PROVENANCE
-
-`C:\Temp\Contextor_Repo\contextor\core\reporting_engine\header.py:4-21`: complete Contextor implementation, workspace sync verified. At line 10, `build_report_header` independently sets `"generated_at": datetime.now().isoformat()` before optional Git branch/commit lookup. `pipeline.py:190-206` passes it to summary generator, which embeds it at `summary_generator.py:184-185`. This timestamp is independent of the summary timestamp.
-
-## PROPOSED_EXACT_METADATA_ALLOWLIST
-
-Evidence supports only these logical paths for the auditor's later comparator decision:
-
-1. `RepositoryAnalysisState.layer_information['summary_data']['generated_at']`
-2. `RepositoryAnalysisState.layer_information['summary_data']['report_header']['generated_at']`
-
-Retain type/format validation. No wildcard timestamp exemption, blanket layer/report exclusion, or ordered-sequence sorting is supported. This report does not modify the comparator.
-
-## REQUIRED_COMPARATOR_ASSERTIONS
-
-Retain exact structural equality for all other declared canonical fields and full mapping/sequence identity. Separately retain revision progression; state_id/revision linkage across state, metadata and FileState payload; expected writer; repository ID/root/schema; provenance; resync state; versioned generation file presence; full FileState equality; and source-byte SHA-256 linkage. Existing capture and identity code in `C:\Temp\Contextor_Repo\tests\test_desktop_mcp_canonical_parity.py:330-411,515-620` already asserts these before first-difference comparison.
+PASS: git diff --check -- tests/test_desktop_mcp_canonical_parity.py. Git emitted only its LF/CRLF normalization warning. Post-test status before writing this report showed only the approved test file modified, plus walkthrough.md as the report.
 
 ## LIVE_REVISION_BEFORE_AFTER
 
-356 before, 356 after. Contextor `get_live_events(after_revision=356)` returned `continuity=continuous`, no events and `resync_required=false` on both observations. No analysis or mutation was invoked.
+Before 356; after 358. Contextor get_live_events(after_revision=356) reported continuous history, desktop_watcher UPDATED for the approved test file at revision 357 and UNCHANGED for the same file at revision 358. No Contextor_Repo full analysis, manual update_file or publish was invoked.
 
 ## WORKSPACE_SYNC_POSTCHECK
 
-`verified` for current fetched summary, header and comparator symbols at revision 356. Exact pipeline/facade ranges came from Contextor and matched clean workspace source. `get_source_range` itself has no freshness envelope. No source used as complete symbol evidence was a preview/truncated response.
+Contextor get_symbol_implementation fetched the modified _state_projection from the serving index at canonical revision 358 with source_contract.implementation_is_complete=true and workspace_sync=verified. The fetched implementation contains the new optional normalize_report_timestamps parameter and exact conditional helper call.
 
 ## RESYNC_REQUIRED
 
-Current Contextor_Repo LIVE: false. Historical isolated captures: false via the parity test's `getattr` contract. These are distinct repositories/states.
+false after the watcher events; Contextor event continuity=continuous. The isolated parity test also retained explicit assertions that both captured states are not resync_required.
 
 ## RESTART_REQUIRED
 
-No. No production/test source changed.
+No restart is required for this test-only edit. Prior production modifications still require the user's planned manual runtime reload before final serving-process certification; pytest source execution and Contextor source indexing do not prove imported-code reload.
 
 ## FINAL_VERDICT
 
-`B0G2C2_ONLY_OPERATIONAL_METADATA_DIFFERENCES` within the 36 declared canonical fields. Ten other differences are expected and strictly linkable generation/identity metadata. Semantic canonical differences: 0. Ordering nondeterminism differences: 0. Unresolved differences in preserved pair: 0.
+B0G2C3_FULL_CANONICAL_PARITY_PASS for the real isolated Desktop/MCP FULL analysis pair and the approved targeted regressions. No incremental transport parity claim. STOP; await "proceduj".
 
-STOP. Await `proceduj`.
+## FULL_DIFFS
+
+Full actual diff for C:\Temp\Contextor_Repo\tests\test_desktop_mcp_canonical_parity.py follows. walkthrough.md is the report and is excluded from source/test changed-file diff accounting.
+
+```diff
+diff --git a/tests/test_desktop_mcp_canonical_parity.py b/tests/test_desktop_mcp_canonical_parity.py
+index f4c2bbd..5367fe8 100644
+--- a/tests/test_desktop_mcp_canonical_parity.py
++++ b/tests/test_desktop_mcp_canonical_parity.py
+@@ -12,6 +12,7 @@ import threading
+ import time
+ from collections.abc import Mapping
+ from dataclasses import fields, is_dataclass
++from datetime import datetime
+ from enum import Enum
+ from pathlib import Path, PurePath
+ from types import SimpleNamespace
+@@ -402,15 +403,188 @@ def _capture_snapshot(
+     )
+ 
+ 
+-def _state_projection(state: RepositoryAnalysisState) -> dict:
++def _projected_string_member(
++    projection: dict,
++    key: str,
++    path: str,
++) -> dict:
++    assert projection.get("kind") == "mapping", (
++        f"Expected projected mapping at {path}"
++    )
++    key_projection = {
++        "kind": "primitive",
++        "type": "builtins.str",
++        "value": key,
++    }
++    matches = [
++        value
++        for candidate_key, value in projection["items"]
++        if candidate_key == key_projection
++    ]
++    assert len(matches) == 1, (
++        f"Required canonical field missing or duplicated: {path}[{key!r}]"
++    )
++    return matches[0]
++
++
++def _normalize_proved_report_timestamps(
++    projection: dict,
++) -> None:
++    layer = projection["fields"]["layer_information"]
++    summary = _projected_string_member(
++        layer,
++        "summary_data",
++        "layer_information",
++    )
++    header = _projected_string_member(
++        summary,
++        "report_header",
++        "layer_information.summary_data",
++    )
++
++    for parent, field_name, field_path in (
++        (
++            summary,
++            "generated_at",
++            "layer_information.summary_data.generated_at",
++        ),
++        (
++            header,
++            "generated_at",
++            "layer_information.summary_data.report_header.generated_at",
++        ),
++    ):
++        timestamp = _projected_string_member(
++            parent,
++            field_name,
++            field_path,
++        )
++        assert timestamp.get("kind") == "primitive"
++        assert timestamp.get("type") == "builtins.str"
++        value = timestamp.get("value")
++        assert isinstance(value, str)
++        parsed = datetime.fromisoformat(value)
++        assert parsed.isoformat() == value, (
++            f"Invalid canonical report timestamp at {field_path}"
++        )
++
++        # Normalize only the comparative projection.
++        # Never modify the captured canonical state.
++        timestamp["value"] = "<operational-report-timestamp>"
++
++
++def _state_projection(
++    state: RepositoryAnalysisState,
++    *,
++    normalize_report_timestamps: bool = False,
++) -> dict:
+     assert type(state) is RepositoryAnalysisState
+-    declared_fields = tuple(item.name for item in fields(RepositoryAnalysisState))
+-    projection = _project(state, "RepositoryAnalysisState")
++    declared_fields = tuple(
++        item.name for item in fields(RepositoryAnalysisState)
++    )
++    projection = _project(
++        state,
++        "RepositoryAnalysisState",
++    )
+     assert projection["kind"] == "dataclass"
+     assert tuple(projection["fields"]) == declared_fields
++
++    if normalize_report_timestamps:
++        _normalize_proved_report_timestamps(projection)
++
+     return projection
+ 
+ 
++def _report_timestamp_state(
++    summary_timestamp: object = "2026-10-12T12:09:48.838009",
++    header_timestamp: object = "2026-10-12T12:09:48.623010",
++) -> RepositoryAnalysisState:
++    return RepositoryAnalysisState(
++        layer_information={
++            "summary_data": {
++                "generated_at": summary_timestamp,
++                "report_header": {
++                    "generated_at": header_timestamp,
++                },
++            },
++        },
++    )
++
++
++def test_report_timestamp_normalization_preserves_captured_state():
++    desktop = _report_timestamp_state()
++    mcp = _report_timestamp_state(
++        "2026-10-12T12:09:50.608340",
++        "2026-10-12T12:09:50.357250",
++    )
++    desktop_before = copy.deepcopy(vars(desktop))
++    mcp_before = copy.deepcopy(vars(mcp))
++
++    assert _state_projection(desktop) != _state_projection(mcp)
++    assert _state_projection(
++        desktop, normalize_report_timestamps=True
++    ) == _state_projection(
++        mcp, normalize_report_timestamps=True
++    )
++    assert vars(desktop) == desktop_before
++    assert vars(mcp) == mcp_before
++
++
++def test_report_timestamp_normalization_has_no_wildcard_exclusion():
++    desktop = _report_timestamp_state()
++    mcp = copy.deepcopy(desktop)
++    desktop.layer_information["other"] = {"generated_at": "2026-10-12T12:00:00"}
++    mcp.layer_information["other"] = {"generated_at": "2026-10-12T12:00:01"}
++
++    assert _state_projection(
++        desktop, normalize_report_timestamps=True
++    ) != _state_projection(
++        mcp, normalize_report_timestamps=True
++    )
++
++
++@pytest.mark.parametrize("missing_from", ["summary_data", "report_header"])
++def test_report_timestamp_normalization_rejects_missing_timestamp(missing_from):
++    state = _report_timestamp_state()
++    target = state.layer_information["summary_data"]
++    if missing_from == "report_header":
++        target = target["report_header"]
++    del target["generated_at"]
++
++    with pytest.raises(AssertionError, match="missing or duplicated"):
++        _state_projection(state, normalize_report_timestamps=True)
++
++
++@pytest.mark.parametrize("field", ["summary_data", "report_header"])
++@pytest.mark.parametrize("invalid", ["not-a-timestamp", 123])
++def test_report_timestamp_normalization_rejects_invalid_timestamp(field, invalid):
++    state = _report_timestamp_state()
++    target = state.layer_information["summary_data"]
++    if field == "report_header":
++        target = target["report_header"]
++    target["generated_at"] = invalid
++
++    with pytest.raises((AssertionError, ValueError)):
++        _state_projection(state, normalize_report_timestamps=True)
++
++
++def test_report_timestamp_normalization_preserves_semantic_difference_and_fields():
++    desktop = _report_timestamp_state()
++    mcp = copy.deepcopy(desktop)
++    mcp.artifacts["pkg.module"] = {"symbols": ["changed"]}
++
++    desktop_projection = _state_projection(
++        desktop, normalize_report_timestamps=True
++    )
++    mcp_projection = _state_projection(
++        mcp, normalize_report_timestamps=True
++    )
++    declared_fields = {item.name for item in fields(RepositoryAnalysisState)}
++    assert set(desktop_projection["fields"]) == declared_fields
++    assert set(mcp_projection["fields"]) == declared_fields
++    assert desktop_projection != mcp_projection
++
++
+ def _assert_file_state_parity(desktop: _SnapshotCapture, mcp: _SnapshotCapture) -> None:
+     desktop_projection = _project(desktop.file_states, "FileStateManager._state")
+     mcp_projection = _project(mcp.file_states, "FileStateManager._state")
+@@ -603,8 +777,14 @@ def test_real_desktop_and_mcp_full_entrypoints_have_identical_canonical_state(
+         )
+ 
+     try:
+-        desktop_projection = _state_projection(desktop_capture.state)
+-        mcp_projection = _state_projection(mcp_capture.state)
++        desktop_projection = _state_projection(
++            desktop_capture.state,
++            normalize_report_timestamps=True,
++        )
++        mcp_projection = _state_projection(
++            mcp_capture.state,
++            normalize_report_timestamps=True,
++        )
+     except _UnsupportedCanonicalValue as exc:
+         evidence_dir = _preserve_mismatch_evidence(tmp_path, desktop_capture, mcp_capture)
+         pytest.fail(
+```
