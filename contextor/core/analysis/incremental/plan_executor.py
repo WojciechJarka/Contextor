@@ -48,6 +48,7 @@ class CandidateState:
     modules: Dict[str, Any]
     reexport_facts_by_module: Dict[str, Dict[str, Any]]
     artifacts: Dict[str, Any]
+    layer_information: Dict[str, Any]
     module_parse_freshness: Dict[str, Dict[str, Any]]
     syntax_diagnostics_by_path: Dict[str, Dict[str, Any]]
     syntax_diagnostics_state: str
@@ -701,6 +702,9 @@ def _prepare_candidate_state(state: RepositoryAnalysisState) -> CandidateState:
             or {}
         ),
         artifacts=dict(state.artifacts),
+        layer_information=dict(
+            getattr(state, "layer_information", {}) or {}
+        ),
         module_parse_freshness=dict(raw_parse_freshness),
         syntax_diagnostics_by_path=dict(getattr(state, "syntax_diagnostics_by_path", {}) or {}),
         syntax_diagnostics_state=getattr(state, "syntax_diagnostics_state", "not_materialized"),
@@ -844,6 +848,85 @@ def _refresh_canonical_artifact_consumers(
             **artifact,
             "consumers": refreshed_consumers,
         }
+
+
+def _refresh_canonical_layer_information(
+    candidate: CandidateState,
+) -> None:
+    """Refresh FULL-compatible graph report fields from canonical RAM."""
+    from contextor.core.hotspots import detect_hotspots
+    from contextor.core.reporting_engine.debt import compute_debt
+    from contextor.core.reporting_engine.summary_generator import (
+        generate_summary_report,
+    )
+
+    previous = candidate.layer_information
+
+    if not previous:
+        return
+
+    if not isinstance(previous, dict):
+        raise RuntimeError(
+            "Canonical layer information is not a dictionary"
+        )
+
+    previous_summary = previous.get("summary_data")
+
+    if not isinstance(previous_summary, dict):
+        raise RuntimeError(
+            "Canonical summary_data is unavailable"
+        )
+
+    previous_header = previous_summary.get("report_header")
+
+    if not isinstance(previous_header, dict):
+        raise RuntimeError(
+            "Canonical report header is unavailable"
+        )
+
+    graph = candidate.dependency_graph
+
+    if (
+        graph is None
+        or not isinstance(getattr(graph, "hard_edges", None), dict)
+        or not isinstance(getattr(graph, "soft_edges", None), dict)
+        or candidate.cycles_state != "fresh"
+        or candidate.collisions_state != "fresh"
+    ):
+        raise RuntimeError(
+            "Cannot refresh layer report from untrusted canonical facts"
+        )
+
+    hotspots = detect_hotspots(graph.hard_edges)
+
+    debt = compute_debt(
+        graph.hard_edges,
+        graph.soft_edges,
+        candidate.cycles,
+        candidate.metrics,
+        collisions=candidate.collisions,
+    )
+
+    refreshed_summary = generate_summary_report(
+        candidate.metrics,
+        candidate.cycles,
+        debt,
+        collisions=candidate.collisions,
+        hotspots=hotspots,
+        report_header=dict(previous_header),
+    )
+
+    merged_summary = {
+        **previous_summary,
+        **refreshed_summary,
+    }
+
+    candidate.layer_information = {
+        **previous,
+        "hotspots": hotspots,
+        "debt": debt,
+        "summary_data": merged_summary,
+    }
 
 
 def execute_refresh_plan(
@@ -1308,6 +1391,17 @@ def execute_refresh_plan(
             candidate.cached_analytics_state = "fresh"
         if "cycles" in plan.graph_recomputations:
             candidate.cycles_state = "fresh"
+
+    if (
+        candidate.layer_information
+        and plan.refresh_completeness == "complete"
+        and not getattr(state, "resync_required", False)
+        and (
+            plan.patch_families
+            or plan.graph_recomputations
+        )
+    ):
+        _refresh_canonical_layer_information(candidate)
 
     derived_artifact_projection = None
     derived_artifact_projection_failed = False

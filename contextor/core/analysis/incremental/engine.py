@@ -996,6 +996,7 @@ class IncrementalAnalysisEngine:
             candidate.reexport_facts_by_module
         )
         self.state.artifacts = candidate.artifacts
+        self.state.layer_information = candidate.layer_information
         self.state.module_parse_freshness = candidate.module_parse_freshness
         self.state.syntax_diagnostics_by_path = candidate.syntax_diagnostics_by_path
         self.state.syntax_diagnostics_state = candidate.syntax_diagnostics_state

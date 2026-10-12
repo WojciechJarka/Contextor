@@ -1004,6 +1004,13 @@ class ContextorFacade:
 
             if getattr(analysis_result, "resync_required", False):
                 state.resync_required = True
+
+            from contextor.core.analysis.incremental.materialization import (
+                ensure_cached_analytics,
+            )
+
+            ensure_cached_analytics(state)
+
             emit_stage_component_end(
                 "canonical_materialization",
                 "state_construction",
