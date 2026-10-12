@@ -11,6 +11,8 @@ This module must NOT depend on reference.engine or reference.index.
 from __future__ import annotations
 
 import ast
+import json
+from heapq import nsmallest
 from typing import Any, Mapping
 
 from .resolution import _absolute_import_module
@@ -587,12 +589,39 @@ def _empty_reference() -> dict[str, list]:
     }
 
 
+def _detail_sort_key(detail: dict[str, Any]) -> tuple:
+    """Canonical ordering for source reference evidence."""
+    if not isinstance(detail, dict):
+        raise TypeError(
+            "Reference detail must be a dictionary"
+        )
+
+    line = detail.get("line")
+    canonical_line = (
+        line
+        if isinstance(line, int) and not isinstance(line, bool)
+        else -1
+    )
+
+    return (
+        str(detail.get("module") or ""),
+        canonical_line,
+        json.dumps(
+            detail,
+            sort_keys=True,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ),
+    )
+
+
 def _normalize_references(references: dict[str, Any]) -> dict[str, Any]:
     """
-    Deduplicates scalar consumer lists and caps detail lists.
+    Deduplicates scalar consumer lists and caps detail lists with
+    deterministic bounded ordering.
 
-    Detail records remain dictionaries and therefore are not
-    converted through set().
+    Detail records are ordered by module, line, and complete payload
+    before the cap is applied; they are not converted through set().
     """
     for data in references.values():
         for key, values in data.items():
@@ -600,7 +629,11 @@ def _normalize_references(references: dict[str, Any]) -> dict[str, Any]:
                 continue
 
             if key.endswith("_detail"):
-                data[key] = values[:MAX_USAGE_DETAILS]
+                data[key] = nsmallest(
+                    MAX_USAGE_DETAILS,
+                    values,
+                    key=_detail_sort_key,
+                )
                 continue
 
             if all(isinstance(value, str) for value in values):

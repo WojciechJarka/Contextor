@@ -1,717 +1,440 @@
-# CONTEXTOR_B0G2C_REAL_DESKTOP_MCP_FULL_CANONICAL_PARITY — IMPLEMENTATION CHECKPOINT
+# CONTEXTOR_B0G2C1_DETERMINISTIC_REFERENCE_DETAILS
 
 ## FILES_CHANGED
+- C:\Temp\Contextor_Repo\contextor\core\reference\shared.py
+- C:\Temp\Contextor_Repo\tests\test_reference_detail_determinism.py
+- C:\Temp\Contextor_Repo\walkthrough.md (report only; excluded from source/test changes)
 
-- C:\Temp\Contextor_Repo\tests\test_desktop_mcp_canonical_parity.py — created as the only source/test file.
-- C:\Temp\Contextor_Repo\walkthrough.md — current task report only.
-
-No production file changed.
+Precheck git status showed only the prior walkthrough report modified. The approved production file had no local diff; the new test file did not exist. No other source/test files changed.
 
 ## FULL_DIFFS
+Complete actual unified diffs with zero context lines for both source/test files follow. The walkthrough itself is excluded.
 
-Full actual unified diff for the new test file follows. walkthrough.md is excluded from the source/test diff by reporting convention.
-diff --git a/tests/test_desktop_mcp_canonical_parity.py b/tests/test_desktop_mcp_canonical_parity.py
+## SOURCE_PRECHECK
+- Contextor MCP was used first. Relevant tool documentation was read, including complete symbol fetch, call context, lineage, source search/range, artifact blast radius, and LIVE event semantics.
+- Contextor fetched complete pre-patch _normalize_references from C:\Temp\Contextor_Repo\contextor\core\reference\shared.py, lines 590-609; source was complete with no partial source, workspace_sync=verified, canonical revision 354.
+- The approved anchor matched exactly:
+if key.endswith("_detail"):
+    data[key] = values[:MAX_USAGE_DETAILS]
+    continue
+- MAX_USAGE_DETAILS is 15. Pre-patch imports were ast and typing.Any/Mapping.
+- Artifact A598/1 direct static consumers are contextor.core.reference.engine and contextor.core.reference.index (2). Module blast radius: 232 downstream modules (80 production, 152 tests); samples were bounded/truncated.
+- Canonical source search found two engine normalization call sites (lines 492 and 993), one index call site (line 724), and the shared definition. Intra-module call-context returned zero edges; direct consumers above come from artifact blast-radius evidence.
+- Complete extract_api_consumers was fetched from C:\Temp\Contextor_Repo\contextor\core\api\api_consumers.py, lines 66-267, workspace_sync=verified at revision 354. It receives the reference mapping and passes detail lists through _normalize_detail; it is a downstream consumer, not a direct caller of _normalize_references. Scalar consumer categories/counts remain separate.
+- Pre-edit git status showed only walkthrough.md modified from the prior task. The new regression test path did not exist; authorized source/test targets were otherwise clean.
+
+## RED_TEST_BEFORE_PATCH
+Added the first reversed-order regression before changing production, then ran only:
+C:\Temp\Contextor_Repo\.venv\Scripts\python.exe -m pytest -q tests/test_reference_detail_determinism.py::test_reversed_input_order_normalizes_identically
+
+Expected RED observed: exit 1. At index 0 the forward and reverse results differed (consumer versus other). The whitespace-only pytest context line is represented by an explanatory marker below to keep this report diff whitespace-clean. Captured output:
+
+~~~text
+F                                                                        [100%]
+================================== FAILURES ===================================
+______________ test_reversed_input_order_normalizes_identically ________________
+
+def test_reversed_input_order_normalizes_identically() -> None:
+    consumer = {"module": "consumer", "line": 4, "context": None}
+    other = {"module": "other", "line": 3, "context": None}
+
+    forward = _normalize_details(copy.deepcopy([consumer, other]))
+    reverse = _normalize_details(copy.deepcopy([other, consumer]))
+
+>       assert forward == reverse
+E       AssertionError: assert [{'module': '...ntext': None}] == [{'module': '...ntext': None}]
+E [pytest whitespace-only context line]
+E         At index 0 diff: {"module": "consumer", "line": 4, "context": None} != {"module": "other", "line": 3, "context": None}
+E         Use -v to get more diff
+
+tests\test_reference_detail_determinism.py:34: AssertionError
+1 failed in 1.01s
+~~~
+
+## NORMALIZATION_OWNER
+Canonical owner: C:\Temp\Contextor_Repo\contextor\core\reference\shared.py.
+The shared normalizer is directly consumed by reference.engine and reference.index. API consumer extraction receives normalized reference mappings. The patch remained limited to the shared canonical normalizer.
+
+## EXACT_PRODUCTION_PATCH
+Applied only the approved production changes:
+- imported json and heapq.nsmallest;
+- added the specified _detail_sort_key;
+- changed only the normalizer docstring to state deterministic bounded ordering;
+- replaced input-order slicing with nsmallest(MAX_USAGE_DETAILS, values, key=_detail_sort_key).
+
+After watcher propagation, complete Contextor fetches for _detail_sort_key (lines 592-615) and _normalize_references (lines 618-642) both reported implementation_is_complete=true, no_partial_symbol_source=true, workspace_sync=verified at canonical revision 356. The complete actual source diff is included below.
+
+## ORDERING_STABILITY
+PASS. The reversed input regression is green after patch. The key orders by module, line (missing/non-integer/bool before concrete lines), then complete JSON payload with sorted keys and compact separators.
+
+## CAP_MEMBERSHIP_STABILITY
+PASS. Twenty records (> MAX_USAGE_DETAILS=15) in ascending and reversed input order selected the same first 15 canonical modules. Both outputs contained exactly 15 entries; input lists and contained record dictionaries remained unchanged.
+
+## DUPLICATE_PRESERVATION
+PASS. Eighteen identical observations yielded 15 identical entries. Detail records were not deduplicated through a set.
+
+## DETAIL_FAMILY_PARITY
+PASS. The regression covers called_by_detail, callback_called_detail, event_bound_by_detail, qualified_refs_detail, inherited_by_detail, and called_by_ambiguous_detail. Reversed inputs yield identical per-family output; None line/context/child/reason values remain and stay in their original family.
+
+## API_CONSUMER_SEMANTICS
+PASS in targeted regression. extract_api_consumers receives normalized references in opposite detail orders and returns identical direct_calls_detail. Scalar consumers remain ["consumer", "other"]; consumer_count remains total=2 and direct_calls=2, with other categories zero. Extra JSON-compatible detail keys remain present and participate in the deterministic tie-break. A non-dictionary detail payload raises the specified TypeError.
+
+## REAL_DESKTOP_MCP_PARITY_RERUN
+The unchanged real parity test was run once after the patch. Both entrypoints completed and persisted independent snapshots for the same isolated temporary repository, repository identity, fixture sources, and effective filters:
+- Headless ContextorGUI.analyze executed the real task through a synchronous progress adapter; no analysis errors; snapshot writer=desktop.
+- Public analyze_project created a non-reused MCP project job; its real worker completed; snapshot writer=mcp.
+- Snapshot assertions passed: same root/repo_id ctx_1a8534b9/schema 1.4; Desktop revision 1/state_id 20261012_120948; MCP revision 2/state_id 20261012_120950; each state and FileState metadata matched its own state_id/revision; both provenance=snapshot and resync_required=false.
+- Preserved evidence directory: C:\Users\DafoO\AppData\Local\Temp\pytest-of-DafoO\pytest-550\test_real_desktop_and_mcp_full0\b0g2c_canonical_mismatch_evidence.
+- Preserved snapshots show direct_calls_detail equal in canonical order: consumer.py line 4, then other.py line 3.
+
+## FIRST_REMAINING_MISMATCH_IF_ANY
+The test stopped at its next first difference. Exact failure line:
+Desktop/MCP canonical state mismatch: first_field=state.layer_information[{'kind': 'primitive', 'type': 'builtins.str', 'value': 'summary_data'}][{'kind': 'primitive', 'type': 'builtins.str', 'value': 'generated_at'}]; desktop='2026-10-12T12:09:48.838009'; mcp='2026-10-12T12:09:50.608340'; evidence=C:\Users\DafoO\AppData\Local\Temp\pytest-of-DafoO\pytest-550\test_real_desktop_and_mcp_full0\b0g2c_canonical_mismatch_evidence
+
+The preserved values confirm the first difference is summary_data.generated_at. The original direct_calls_detail difference is resolved. No further mismatch was inspected. Per instruction, no second correction or comparator change was made.
+
+Complete captured parity-test output:
+
+~~~text
+[PROGRESS] Step 1/8: Initializing repository identity
+Starting directory indexing...
+[PROGRESS] Step 2/8: Indexing repository files
+Found 5 modules. Fetching graph...
+[PROGRESS] Step 3/8: Resolving dependency graph
+Graph validation (cache_hit=True)...
+[PROGRESS] Step 4/8: Validating dependency graph
+[PROGRESS] Step 5/8: Computing metrics, cycles and debt
+[PROGRESS] Step 6/8: Generating architectural reports
+Starting sequential report generation...
+Generating name collisions report...
+Generating artifact usage report...
+Generating compact version of artifacts report...
+Generating graph analytics report...
+Serializing and saving: graph structure report (C:\Users\DafoO\AppData\Local\Temp\pytest-of-DafoO\pytest-550\test_real_desktop_and_mcp_full0\output\b0g2c_repo_b6b4c0319f054dc3920d4ab94af235a6_structure.json)...
+Successfully saved: graph structure report
+Serializing and saving: graph structure snapshot (C:\Users\DafoO\AppData\Local\Temp\pytest-of-DafoO\pytest-550\test_real_desktop_and_mcp_full0\output\b0g2c_repo_b6b4c0319f054dc3920d4ab94af235a6_20261012_120950\b0g2c_repo_b6b4c0319f054dc3920d4ab94af235a6_structure.json)...
+Successfully saved: graph structure snapshot
+Serializing and saving: name collisions report (C:\Users\DafoO\AppData\Local\Temp\pytest-of-DafoO\pytest-550\test_real_desktop_and_mcp_full0\output\b0g2c_repo_b6b4c0319f054dc3920d4ab94af235a6_name_collisions.json)...
+Successfully saved: name collisions report
+Serializing and saving: name collisions snapshot (C:\Users\DafoO\AppData\Local\Temp\pytest-of-DafoO\pytest-550\test_real_desktop_and_mcp_full0\output\b0g2c_repo_b6b4c0319f054dc3920d4ab94af235a6_20261012_120950\b0g2c_repo_b6b4c0319f054dc3920d4ab94af235a6_name_collisions.json)...
+Successfully saved: name collisions snapshot
+Serializing and saving: artifact snapshot (C:\Users\DafoO\AppData\Local\Temp\pytest-of-DafoO\pytest-550\test_real_desktop_and_mcp_full0\output\b0g2c_repo_b6b4c0319f054dc3920d4ab94af235a6_20261012_120950\b0g2c_repo_b6b4c0319f054dc3920d4ab94af235a6_artifacts_compact.json)...
+Successfully saved: artifact snapshot
+Serializing and saving: graph analytics report (C:\Users\DafoO\AppData\Local\Temp\pytest-of-DafoO\pytest-550\test_real_desktop_and_mcp_full0\output\b0g2c_repo_b6b4c0319f054dc3920d4ab94af235a6_graph_analytics.json)...
+Successfully saved: graph analytics report
+Serializing and saving: graph analytics snapshot (C:\Users\DafoO\AppData\Local\Temp\pytest-of-DafoO\pytest-550\test_real_desktop_and_mcp_full0\output\b0g2c_repo_b6b4c0319f054dc3920d4ab94af235a6_20261012_120950\b0g2c_repo_b6b4c0319f054dc3920d4ab94af235a6_graph_analytics.json)...
+Successfully saved: graph analytics snapshot
+Serializing and saving: report diff (C:\Users\DafoO\AppData\Local\Temp\pytest-of-DafoO\pytest-550\test_real_desktop_and_mcp_full0\output\b0g2c_repo_b6b4c0319f054dc3920d4ab94af235a6_report_diff.json)...
+Successfully saved: report diff
+Serializing and saving: report diff snapshot (C:\Users\DafoO\AppData\Local\Temp\pytest-of-DafoO\pytest-550\test_real_desktop_and_mcp_full0\output\b0g2c_repo_b6b4c0319f054dc3920d4ab94af235a6_20261012_120950\b0g2c_repo_b6b4c0319f054dc3920d4ab94af235a6_report_diff.json)...
+Successfully saved: report diff
+Serializing and saving: summary report (C:\Users\DafoO\AppData\Local\Temp\pytest-of-DafoO\pytest-550\test_real_desktop_and_mcp_full0\output\b0g2c_repo_b6b4c0319f054dc3920d4ab94af235a6_summary.json)...
+Successfully saved: summary report
+Serializing and saving: summary snapshot (C:\Users\DafoO\AppData\Local\Temp\pytest-of-DafoO\pytest-550\test_real_desktop_and_mcp_full0\output\b0g2c_repo_b6b4c0319f054dc3920d4ab94af235a6_20261012_120950\b0g2c_repo_b6b4c0319f054dc3920d4ab94af235a6_summary.json)...
+Successfully saved: summary snapshot
+All reports have been successfully generated and saved.
+Initializing incremental cache...
+[PROGRESS] Step 7/8: Persisting canonical LIVE snapshot
+[PROGRESS] Step 8/8: Finalizing analysis
+F
+================================== FAILURES ===================================
+__ test_real_desktop_and_mcp_full_entrypoints_have_identical_canonical_state __
+Desktop/MCP canonical state mismatch: first_field=state.layer_information[{'kind': 'primitive', 'type': 'builtins.str', 'value': 'summary_data'}][{'kind': 'primitive', 'type': 'builtins.str', 'value': 'generated_at'}]; desktop='2026-10-12T12:09:48.838009'; mcp='2026-10-12T12:09:50.608340'; evidence=C:\Users\DafoO\AppData\Local\Temp\pytest-of-DafoO\pytest-550\test_real_desktop_and_mcp_full0\b0g2c_canonical_mismatch_evidence
+============================== warnings summary ==============================
+.venv\lib\site-packages\fastmcp\server\auth\providers\jwt.py:10
+  C:\Temp\Contextor_Repo\.venv\lib\site-packages\fastmcp\server\auth\providers\jwt.py:10: AuthlibDeprecationWarning: authlib.jose module is deprecated, please use joserfc instead.
+  It will be compatible before version 2.0.0.
+from authlib.jose import JsonWebKey, JsonWebToken
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_desktop_mcp_canonical_parity.py::test_real_desktop_and_mcp_full_entrypoints_have_identical_canonical_state
+1 failed, 1 warning in 9.56s
+
+## TARGETED_TEST_RESULTS
+- New deterministic detail regressions: PASS, 8 passed in 0.87s.
+- Unchanged real Desktop/MCP full parity test: FAIL, 1 failed in 9.56s at summary_data.generated_at.
+- Further reference index/engine and named B0G1/B0G2 regressions: NOT RUN, because the parity test found the next first difference and the task requires stopping.
+
+## PY_COMPILE
+PASS. The requested .venv python -m py_compile command for shared.py and the new test file exited 0.
+
+## GIT_DIFF_CHECK
+Final post-report git diff --check: PASS, exit 0. Git emitted only a working-copy LF-to-CRLF notice for shared.py. The earlier check against the prior walkthrough found whitespace there; after overwriting it, no source/test/report whitespace errors remain.
+
+## LIVE_REVISION_BEFORE_AFTER
+- Before edits: revision 354.
+- Desktop watcher event for new test: revision 355, origin=desktop_watcher, status=UPDATED, affected module tests.test_reference_detail_determinism.
+- Desktop watcher event for production source: revision 356, origin=desktop_watcher, status=UPDATED, affected_modules total 244 (event sample bounded).
+- After edits: revision 356, continuity=continuous, no further revisioned events after 356; resync_required=false and activity_resync_required=false. No manual update_file or full analysis was performed.
+
+## WORKSPACE_SYNC_POSTCHECK
+PASS. At revision 356, complete Contextor retrievals for _normalize_references and _detail_sort_key reported workspace_sync=verified and complete source with no partial symbol.
+
+## RESYNC_REQUIRED
+false at latest LIVE revision 356.
+
+## RESTART_REQUIRED
+YES before later Desktop/MCP live certification of the changed production module. No restart was performed.
+
+## FINAL_VERDICT
+B0G2C1_NEXT_MISMATCH_DISCOVERED
+
+The requested deterministic reference normalization patch and its eight targeted regressions pass. The real entrypoint parity run resolves the original direct_calls_detail order difference and stops at summary_data.generated_at, whose persisted timestamp values differ. No further correction, comparator change, or additional regression run was made.
+
+=== contextor/core/reference/shared.py ===
+diff --git a/contextor/core/reference/shared.py b/contextor/core/reference/shared.py
+index 2f578ad..75a9846 100644
+--- a/contextor/core/reference/shared.py
++++ b/contextor/core/reference/shared.py
+@@ -13,0 +14,2 @@ import ast
++import json
++from heapq import nsmallest
+@@ -589,0 +592,26 @@ def _empty_reference() -> dict[str, list]:
++def _detail_sort_key(detail: dict[str, Any]) -> tuple:
++    """Canonical ordering for source reference evidence."""
++    if not isinstance(detail, dict):
++        raise TypeError(
++            "Reference detail must be a dictionary"
++        )
++
++    line = detail.get("line")
++    canonical_line = (
++        line
++        if isinstance(line, int) and not isinstance(line, bool)
++        else -1
++    )
++
++    return (
++        str(detail.get("module") or ""),
++        canonical_line,
++        json.dumps(
++            detail,
++            sort_keys=True,
++            ensure_ascii=False,
++            separators=(",", ":"),
++        ),
++    )
++
++
+@@ -592 +620,2 @@ def _normalize_references(references: dict[str, Any]) -> dict[str, Any]:
+-    Deduplicates scalar consumer lists and caps detail lists.
++    Deduplicates scalar consumer lists and caps detail lists with
++    deterministic bounded ordering.
+@@ -594,2 +623,2 @@ def _normalize_references(references: dict[str, Any]) -> dict[str, Any]:
+-    Detail records remain dictionaries and therefore are not
+-    converted through set().
++    Detail records are ordered by module, line, and complete payload
++    before the cap is applied; they are not converted through set().
+@@ -603 +632,5 @@ def _normalize_references(references: dict[str, Any]) -> dict[str, Any]:
+-                data[key] = values[:MAX_USAGE_DETAILS]
++                data[key] = nsmallest(
++                    MAX_USAGE_DETAILS,
++                    values,
++                    key=_detail_sort_key,
++                )
+
+=== tests/test_reference_detail_determinism.py ===
+diff --git a/tests/test_reference_detail_determinism.py b/tests/test_reference_detail_determinism.py
 new file mode 100644
-index 0000000..f4c2bbd
+index 0000000..7b1fdd0
 --- /dev/null
-+++ b/tests/test_desktop_mcp_canonical_parity.py
-@@ -0,0 +1,632 @@
-+"""Real Desktop and MCP full-analysis canonical-state parity gate."""
++++ b/tests/test_reference_detail_determinism.py
+@@ -0,0 +1,197 @@
++"""Deterministic normalization of bounded reference evidence."""
 +
 +from __future__ import annotations
 +
-+import asyncio
 +import copy
-+import hashlib
-+import json
-+import os
-+import pickle
-+import threading
-+import time
-+from collections.abc import Mapping
-+from dataclasses import fields, is_dataclass
-+from enum import Enum
-+from pathlib import Path, PurePath
-+from types import SimpleNamespace
-+from uuid import uuid4
 +
 +import pytest
 +
-+from contextor import mcp_server
-+from contextor.core.analysis.state_manager import (
-+    FileState,
-+    FileStateManager,
-+    RepositoryAnalysisState,
-+    load_engine_state,
++from contextor.core.api.api_consumers import extract_api_consumers
++from contextor.core.reference.shared import (
++    MAX_USAGE_DETAILS,
++    _empty_reference,
++    _normalize_references,
 +)
-+from contextor.core.api import facade
-+from contextor.core.graph.resolver import TrieNode
-+from contextor.core.live_state import connect
-+from contextor.core.live_state.runtime import _read_endpoint
-+from contextor.core.live_state.store import read_metadata
-+from contextor.core.paths import repo_cache_dir
-+from contextor.core.repository_identity import (
-+    ensure_repository_identity,
-+    read_repository_identity,
-+)
-+from contextor.mcp import analysis_jobs
-+from contextor.ui import gui
-+from contextor.ui.gui import ContextorGUI
 +
 +
-+_FIXTURE_SOURCES = {
-+    "pkg/__init__.py": (
-+        "from .api import service as service\n"
-+        '__all__ = ["service"]\n'
-+    ),
-+    "pkg/api.py": "def service():\n    return 1\n",
-+    "pkg/runtime.py": "def run():\n    return 2\n",
-+    "consumer.py": (
-+        "from pkg import runtime as runtime_alias\n"
-+        "from pkg import service\n"
-+        "\n"
-+        "RESULT = service() + runtime_alias.run()\n"
-+    ),
-+    "other.py": (
-+        "from pkg.api import service as alias\n"
-+        "\n"
-+        "VALUE = alias()\n"
-+    ),
-+}
-+
-+
-+class _UnsupportedCanonicalValue(TypeError):
-+    def __init__(self, path: str, value: object):
-+        self.path = path
-+        self.value_type = type(value)
-+        super().__init__(
-+            f"Unsupported canonical value at {path}: "
-+            f"{type(value).__module__}.{type(value).__qualname__}"
-+        )
-+
-+
-+class _SnapshotCapture:
-+    def __init__(
-+        self,
-+        *,
-+        state: RepositoryAnalysisState,
-+        metadata: object,
-+        file_states: dict[str, FileState],
-+        file_state_payload: dict,
-+        source_bytes: dict[str, bytes],
-+        cache_dir: Path,
-+    ):
-+        self.state = state
-+        self.metadata = metadata
-+        self.file_states = file_states
-+        self.file_state_payload = file_state_payload
-+        self.source_bytes = source_bytes
-+        self.cache_dir = cache_dir
-+
-+
-+def _type_name(value: object) -> str:
-+    value_type = type(value)
-+    return f"{value_type.__module__}.{value_type.__qualname__}"
-+
-+
-+def _project(value: object, path: str) -> dict:
-+    """Return a deterministic, lossless structural projection or fail closed."""
-+
-+    if isinstance(value, Enum):
-+        return {
-+            "kind": "enum",
-+            "type": _type_name(value),
-+            "value": _project(value.value, f"{path}.value"),
++def _normalize_details(details: list[dict]) -> list[dict]:
++    references = {
++        "pkg.api::service": {
++            "called_by_detail": details,
 +        }
-+
-+    if isinstance(value, PurePath):
-+        return {"kind": "path", "type": _type_name(value), "value": str(value)}
-+
-+    if isinstance(value, TrieNode):
-+        children = value.children
-+        if not isinstance(children, Mapping):
-+            raise _UnsupportedCanonicalValue(f"{path}.children", children)
-+        if any(not isinstance(name, str) for name in children):
-+            bad_name = next(name for name in children if not isinstance(name, str))
-+            raise _UnsupportedCanonicalValue(f"{path}.children[{bad_name!r}]", bad_name)
-+        return {
-+            "kind": "trie",
-+            "type": _type_name(value),
-+            "is_module": _project(value.is_module, f"{path}.is_module"),
-+            "full_name": _project(value.full_name, f"{path}.full_name"),
-+            "children": {
-+                name: _project(children[name], f"{path}.children[{name!r}]")
-+                for name in sorted(children)
-+            },
-+        }
-+
-+    if is_dataclass(value) and not isinstance(value, type):
-+        return {
-+            "kind": "dataclass",
-+            "type": _type_name(value),
-+            "fields": {
-+                item.name: _project(getattr(value, item.name), f"{path}.{item.name}")
-+                for item in fields(value)
-+            },
-+        }
-+
-+    if isinstance(value, Mapping):
-+        items = [
-+            (
-+                _project(key, f"{path}.<key>"),
-+                _project(item, f"{path}[{key!r}]"),
-+            )
-+            for key, item in value.items()
-+        ]
-+        items.sort(key=lambda pair: repr(pair[0]))
-+        return {"kind": "mapping", "type": _type_name(value), "items": items}
-+
-+    if isinstance(value, (list, tuple)):
-+        return {
-+            "kind": "sequence",
-+            "type": _type_name(value),
-+            "items": [
-+                _project(item, f"{path}[{index}]")
-+                for index, item in enumerate(value)
-+            ],
-+        }
-+
-+    if isinstance(value, (set, frozenset)):
-+        items = [_project(item, f"{path}{{item}}") for item in value]
-+        items.sort(key=repr)
-+        return {"kind": "set", "type": _type_name(value), "items": items}
-+
-+    if value is None or isinstance(value, (bool, int, float, str, bytes)):
-+        if isinstance(value, float):
-+            primitive_value = value.hex()
-+        elif isinstance(value, bytes):
-+            primitive_value = value.hex()
-+        else:
-+            primitive_value = value
-+        return {
-+            "kind": "primitive",
-+            "type": _type_name(value),
-+            "value": primitive_value,
-+        }
-+
-+    raise _UnsupportedCanonicalValue(path, value)
-+
-+
-+def _first_difference(left: object, right: object, path: str = "state"):
-+    if type(left) is not type(right):
-+        return path, left, right
-+    if left == right:
-+        return None
-+    if not isinstance(left, dict):
-+        return path, left, right
-+
-+    left_kind = left.get("kind")
-+    right_kind = right.get("kind")
-+    if left_kind != right_kind:
-+        return f"{path}.kind", left_kind, right_kind
-+    if left.get("type") != right.get("type"):
-+        return f"{path}.<type>", left.get("type"), right.get("type")
-+
-+    if left_kind in {"dataclass", "trie"}:
-+        keys = tuple(left.keys())
-+        if keys != tuple(right.keys()):
-+            return f"{path}.<structure>", keys, tuple(right.keys())
-+        for name in left:
-+            if name in {"kind", "type"}:
-+                continue
-+            left_value = left[name]
-+            right_value = right[name]
-+            if isinstance(left_value, dict) and isinstance(right_value, dict):
-+                field_names = tuple(left_value.keys())
-+                if field_names != tuple(right_value.keys()):
-+                    return f"{path}.{name}.<fields>", field_names, tuple(right_value.keys())
-+                for field_name in left_value:
-+                    difference = _first_difference(
-+                        left_value[field_name],
-+                        right_value[field_name],
-+                        f"{path}.{field_name if name == 'fields' else name + '.' + field_name}",
-+                    )
-+                    if difference is not None:
-+                        return difference
-+            else:
-+                difference = _first_difference(
-+                    left_value, right_value, f"{path}.{name}"
-+                )
-+                if difference is not None:
-+                    return difference
-+        return None
-+
-+    if left_kind == "mapping":
-+        left_items = left["items"]
-+        right_items = right["items"]
-+        if len(left_items) != len(right_items):
-+            return f"{path}.<key-count>", len(left_items), len(right_items)
-+        for (left_key, left_value), (right_key, right_value) in zip(left_items, right_items):
-+            if left_key != right_key:
-+                return f"{path}.<keys>", left_key, right_key
-+            difference = _first_difference(
-+                left_value,
-+                right_value,
-+                f"{path}[{_short_repr(left_key, 120)}]",
-+            )
-+            if difference is not None:
-+                return difference
-+        return None
-+
-+    if left_kind in {"sequence", "set"}:
-+        left_items = left["items"]
-+        right_items = right["items"]
-+        if len(left_items) != len(right_items):
-+            return f"{path}.<length>", len(left_items), len(right_items)
-+        for index, (left_item, right_item) in enumerate(zip(left_items, right_items)):
-+            difference = _first_difference(
-+                left_item, right_item, f"{path}[{index}]"
-+            )
-+            if difference is not None:
-+                return difference
-+        return None
-+
-+    if left_kind in {"primitive", "path"}:
-+        if left.get("value") != right.get("value"):
-+            return path, left.get("value"), right.get("value")
-+        return None
-+
-+    if left_kind == "enum":
-+        return _first_difference(left["value"], right["value"], f"{path}.value")
-+
-+    return path, left, right
-+
-+
-+def _short_repr(value: object, limit: int = 500) -> str:
-+    result = repr(value)
-+    return result if len(result) <= limit else result[: limit - 3] + "..."
-+
-+
-+def _preserve_mismatch_evidence(
-+    tmp_path: Path,
-+    desktop: _SnapshotCapture,
-+    mcp: _SnapshotCapture,
-+) -> Path:
-+    evidence_dir = tmp_path / "b0g2c_canonical_mismatch_evidence"
-+    evidence_dir.mkdir(parents=True, exist_ok=True)
-+    for label, capture in (("desktop", desktop), ("mcp", mcp)):
-+        payload = {
-+            "state": capture.state,
-+            "metadata": capture.metadata,
-+            "file_states": capture.file_states,
-+            "file_state_payload": capture.file_state_payload,
-+            "source_bytes": capture.source_bytes,
-+            "cache_dir": str(capture.cache_dir),
-+        }
-+        with (evidence_dir / f"{label}.pickle").open("wb") as output:
-+            pickle.dump(payload, output, protocol=pickle.HIGHEST_PROTOCOL)
-+    return evidence_dir
-+
-+
-+def _write_fixture(root: Path) -> dict[str, bytes]:
-+    source_bytes = {}
-+    for relative, source in _FIXTURE_SOURCES.items():
-+        target = root / relative
-+        target.parent.mkdir(parents=True, exist_ok=True)
-+        encoded = source.encode("utf-8")
-+        target.write_bytes(encoded)
-+        source_bytes[relative] = encoded
-+    return source_bytes
-+
-+
-+def _assert_source_bytes(root: Path, expected: dict[str, bytes]) -> None:
-+    actual_files = {
-+        relative: (root / relative).read_bytes()
-+        for relative in expected
 +    }
-+    assert actual_files == expected, "fixture Python source bytes changed during analysis"
++    _normalize_references(references)
++    return references["pkg.api::service"]["called_by_detail"]
 +
 +
-+def _assert_no_live_endpoint(root: Path) -> None:
-+    endpoint = _read_endpoint(root, strict=True)
-+    assert endpoint is None, f"unexpected LIVE endpoint for test repository: {endpoint!r}"
-+    assert connect(root) is None, "temporary repository unexpectedly has a LIVE client"
++def test_reversed_input_order_normalizes_identically() -> None:
++    consumer = {"module": "consumer", "line": 4, "context": None}
++    other = {"module": "other", "line": 3, "context": None}
++
++    forward = _normalize_details(copy.deepcopy([consumer, other]))
++    reverse = _normalize_details(copy.deepcopy([other, consumer]))
++
++    assert forward == reverse
++    assert forward == [consumer, other]
 +
 +
-+def _generation_file(cache_dir: Path, name: str) -> Path:
-+    assert isinstance(name, str) and name, "snapshot metadata has an empty generation file link"
-+    raw = Path(name)
-+    candidate = raw if raw.is_absolute() else cache_dir / raw
-+    resolved = candidate.resolve()
-+    assert resolved.is_relative_to(cache_dir.resolve()), (
-+        f"snapshot generation file escaped isolated cache: {name!r}"
-+    )
-+    assert resolved.is_file(), f"snapshot generation file is missing: {resolved}"
-+    return resolved
++def test_cap_membership_is_stable_and_source_records_are_unchanged() -> None:
++    records = [
++        {"module": f"consumer_{index:02d}", "line": index, "context": None}
++        for index in range(MAX_USAGE_DETAILS + 5)
++    ]
++    ascending_input = copy.deepcopy(records)
++    descending_input = copy.deepcopy(list(reversed(records)))
++    ascending_before = copy.deepcopy(ascending_input)
++    descending_before = copy.deepcopy(descending_input)
++
++    ascending_output = _normalize_details(ascending_input)
++    descending_output = _normalize_details(descending_input)
++
++    expected = records[:MAX_USAGE_DETAILS]
++    assert ascending_output == expected
++    assert descending_output == expected
++    assert len(ascending_output) == MAX_USAGE_DETAILS
++    assert len(descending_output) == MAX_USAGE_DETAILS
++    assert ascending_input == ascending_before
++    assert descending_input == descending_before
 +
 +
-+def _capture_snapshot(
-+    root: Path,
-+    *,
-+    expected_writer: str,
-+    expected_repo_id: str,
-+    source_bytes: dict[str, bytes],
-+) -> _SnapshotCapture:
-+    cache_dir = repo_cache_dir(root)
-+    metadata = read_metadata(cache_dir)
-+    assert metadata is not None, "authoritative snapshot metadata is missing or invalid"
-+    assert metadata.writer == expected_writer
-+    assert metadata.repo_id == expected_repo_id
-+    assert metadata.root_path == str(root)
-+    assert metadata.state_id
-+    assert metadata.revision > 0
++def test_identical_detail_duplicates_are_preserved_up_to_cap() -> None:
++    duplicate = {"module": "consumer", "line": 7, "context": "call"}
++    output = _normalize_details(copy.deepcopy([duplicate] * (MAX_USAGE_DETAILS + 3)))
 +
-+    state_path = _generation_file(cache_dir, metadata.state_file)
-+    file_state_path = _generation_file(cache_dir, metadata.file_state_file)
-+    if metadata.lineage_manifest_file:
-+        _generation_file(cache_dir, metadata.lineage_manifest_file)
++    assert len(output) == MAX_USAGE_DETAILS
++    assert output == [duplicate] * MAX_USAGE_DETAILS
 +
-+    file_state_payload = json.loads(file_state_path.read_text(encoding="utf-8"))
-+    assert isinstance(file_state_payload, dict)
-+    assert isinstance(file_state_payload.get("_meta"), dict)
-+    assert file_state_payload["_meta"].get("state_id") == metadata.state_id
-+    assert file_state_payload["_meta"].get("revision") == metadata.revision
 +
-+    loaded = load_engine_state(
-+        str(cache_dir),
-+        metadata.state_id,
-+        expected_repo_id=expected_repo_id,
-+        expected_root_path=str(root),
-+    )
-+    assert isinstance(loaded, RepositoryAnalysisState)
-+    assert loaded.revision == metadata.revision
-+    assert loaded.state_id == metadata.state_id
-+    assert getattr(loaded, "resync_required", False) is not True
-+    assert getattr(loaded, "provenance", None) == "snapshot"
-+    assert state_path.is_file()
-+
-+    file_state_manager = FileStateManager(str(cache_dir))
-+    assert file_state_manager.baseline_status == "trusted"
-+    assert file_state_manager.state_id == metadata.state_id
-+    assert file_state_manager.revision == metadata.revision
-+    file_states = copy.deepcopy(file_state_manager._state)
-+
-+    expected_paths = {
-+        str((root / relative).resolve())
-+        for relative in source_bytes
++def test_all_detail_families_are_individually_deterministic() -> None:
++    details = {
++        "called_by_detail": [
++            {"module": "z_consumer", "line": 4, "context": None},
++            {"module": "a_consumer", "line": 8, "context": "call"},
++        ],
++        "callback_called_detail": [
++            {"module": "same_callback", "line": 3, "context": "argument"},
++            {"module": "same_callback", "line": None, "context": None, "child": None},
++        ],
++        "event_bound_by_detail": [
++            {"module": "z_event", "line": None, "context": "bind", "reason": None},
++            {"module": "a_event", "line": 2, "context": None},
++        ],
++        "qualified_refs_detail": [
++            {"module": "z_qualified", "line": 6, "context": None},
++            {"module": "a_qualified", "line": 1, "context": "attribute"},
++        ],
++        "inherited_by_detail": [
++            {"module": "z_subclass", "line": 5, "context": None, "child": "Base"},
++            {"module": "a_subclass", "line": None, "context": None, "child": None},
++        ],
++        "called_by_ambiguous_detail": [
++            {"module": "z_ambiguous", "line": None, "context": None, "reason": "dynamic"},
++            {"module": "a_ambiguous", "line": 7, "context": "call", "reason": None},
++        ],
 +    }
-+    assert set(file_states) == expected_paths, (
-+        "FileState path coverage differs from fixture source coverage: "
-+        f"expected={sorted(expected_paths)!r}, actual={sorted(file_states)!r}"
-+    )
-+    for relative, content in source_bytes.items():
-+        path = str((root / relative).resolve())
-+        file_state = file_states[path]
-+        assert isinstance(file_state, FileState)
-+        assert file_state.sha256 == hashlib.sha256(content).hexdigest()
-+        assert file_state.size == len(content)
-+
-+    state_copy = copy.deepcopy(loaded)
-+    state_copy_fields = tuple(item.name for item in fields(RepositoryAnalysisState))
-+    assert set(state_copy_fields) == set(vars(state_copy)) & set(state_copy_fields)
-+
-+    return _SnapshotCapture(
-+        state=state_copy,
-+        metadata=copy.deepcopy(metadata),
-+        file_states=file_states,
-+        file_state_payload=copy.deepcopy(file_state_payload),
-+        source_bytes=copy.deepcopy(source_bytes),
-+        cache_dir=cache_dir,
-+    )
-+
-+
-+def _state_projection(state: RepositoryAnalysisState) -> dict:
-+    assert type(state) is RepositoryAnalysisState
-+    declared_fields = tuple(item.name for item in fields(RepositoryAnalysisState))
-+    projection = _project(state, "RepositoryAnalysisState")
-+    assert projection["kind"] == "dataclass"
-+    assert tuple(projection["fields"]) == declared_fields
-+    return projection
-+
-+
-+def _assert_file_state_parity(desktop: _SnapshotCapture, mcp: _SnapshotCapture) -> None:
-+    desktop_projection = _project(desktop.file_states, "FileStateManager._state")
-+    mcp_projection = _project(mcp.file_states, "FileStateManager._state")
-+    difference = _first_difference(desktop_projection, mcp_projection, "FileStateManager._state")
-+    if difference is not None:
-+        field_path, desktop_value, mcp_value = difference
-+        evidence_dir = _preserve_mismatch_evidence(
-+            desktop.cache_dir.parents[2],
-+            desktop,
-+            mcp,
-+        )
-+        pytest.fail(
-+            "FileState mismatch: "
-+            f"field={field_path}; desktop={_short_repr(desktop_value)}; "
-+            f"mcp={_short_repr(mcp_value)}; evidence={evidence_dir}",
-+            pytrace=False,
-+        )
-+
-+
-+def _capture_gui_full_run(root: Path, monkeypatch) -> dict:
-+    execution = {"logs": []}
-+    controller = ContextorGUI.__new__(ContextorGUI)
-+    controller.root = object()
-+    controller.repo_path_var = SimpleNamespace(get=lambda: str(root))
-+    controller.progress_bar = SimpleNamespace(is_cancelled=False)
-+    controller.log_box = object()
-+    controller.cpu_indicator = object()
-+    controller.stop_btn = object()
-+    controller._live_recovery_incident = lambda _path: None
-+    controller._busy_buttons = lambda: []
-+
-+    def execute_real_task(_root, _progress_bar, task, **kwargs):
-+        execution["operation_name"] = kwargs.get("operation_name")
-+        execution["task"] = task
-+        outcome = task(
-+            log=lambda message: execution["logs"].append(str(message)),
-+            progress_callback=lambda *_args, **_kwargs: True,
-+        )
-+        execution["outcome"] = outcome
-+        return outcome
-+
-+    monkeypatch.setattr(gui, "run_with_progress", execute_real_task)
-+    ContextorGUI.analyze(controller)
-+    assert execution.get("operation_name") == "Repository analysis"
-+    assert callable(execution.get("task"))
-+    errors, analysis_result = execution["outcome"]
-+    assert not errors, f"Desktop full analysis returned errors: {errors!r}"
-+    assert analysis_result is not None
-+    assert getattr(analysis_result, "live_publish_status", None) == "not_attempted"
-+    assert controller._full_analysis_done == execution["outcome"]
-+    execution["analysis_result"] = analysis_result
-+    execution["error_count"] = len(errors)
-+    return execution
-+
-+
-+def _run_real_mcp_project_job(root: Path) -> dict:
-+    started = json.loads(asyncio.run(mcp_server.analyze_project.fn(str(root))))
-+    assert started.get("job_id")
-+    assert started.get("operation") == "project"
-+    assert started.get("repo_path") == str(root)
-+    assert started.get("reused", False) is False, "MCP returned an unexpectedly reused job"
-+    job_id = started["job_id"]
-+
-+    deadline = time.monotonic() + 120.0
-+    worker = None
-+    final_job = None
-+    while time.monotonic() < deadline:
-+        current = json.loads(mcp_server.get_analysis_status.fn(str(root), job_id))
-+        assert current.get("job_id") == job_id
-+        assert current.get("operation") == "project"
-+        with analysis_jobs._analysis_job_lock:
-+            current_worker = analysis_jobs._analysis_tasks.get(job_id)
-+        if current_worker is not None:
-+            worker = current_worker
-+        if current.get("status") not in {"queued", "running"}:
-+            final_job = current
-+            break
-+        remaining = max(0.0, deadline - time.monotonic())
-+        if worker is not None:
-+            worker.join(timeout=min(0.05, remaining))
-+        else:
-+            time.sleep(min(0.05, remaining))
-+
-+    assert final_job is not None, f"MCP analysis job exceeded bounded deadline: {job_id}"
-+    if worker is not None:
-+        worker.join(timeout=5.0)
-+        assert not worker.is_alive(), f"MCP worker thread remained alive: {job_id}"
-+    with analysis_jobs._analysis_job_lock:
-+        assert job_id not in analysis_jobs._analysis_tasks
-+        assert str(root) not in analysis_jobs._analysis_jobs_by_repo
-+
-+    assert final_job.get("status") == "completed", (
-+        f"MCP project job did not complete: {final_job!r}"
-+    )
-+    assert final_job.get("error") is None
-+    assert final_job.get("live_publish_status") == "not_attempted"
-+    assert final_job.get("live_publish_revision") is None
-+    assert final_job.get("owner_pid") in {None, os.getpid()}
-+    return {"started": started, "completed": final_job, "worker": worker}
-+
-+
-+def test_real_desktop_and_mcp_full_entrypoints_have_identical_canonical_state(
-+    tmp_path, monkeypatch, isolated_dirs
-+):
-+    root = (tmp_path / f"b0g2c_repo_{uuid4().hex}").resolve()
-+    root.mkdir()
-+    monkeypatch.setenv(
-+        "CONTEXTOR_MCP_PROCESS_REGISTRY",
-+        str(tmp_path / "mcp-process-registry"),
-+    )
-+    source_bytes = _write_fixture(root)
-+
-+    identity, _identity_directory = ensure_repository_identity(root)
-+    assert read_repository_identity(root) == identity
-+    assert identity.root_path == str(root)
-+    assert identity.repo_id.startswith("ctx_")
-+    _assert_no_live_endpoint(root)
-+
-+    effective_filters = copy.deepcopy(facade._analysis_filters(str(root), None))
-+    excluded_paths, ignored_directories = effective_filters
-+    normalized_excludes = {
-+        str(item).replace("\\", "/").strip("/")
-+        for item in excluded_paths
++    expected = {
++        "called_by_detail": [details["called_by_detail"][1], details["called_by_detail"][0]],
++        "callback_called_detail": [details["callback_called_detail"][1], details["callback_called_detail"][0]],
++        "event_bound_by_detail": [details["event_bound_by_detail"][1], details["event_bound_by_detail"][0]],
++        "qualified_refs_detail": [details["qualified_refs_detail"][1], details["qualified_refs_detail"][0]],
++        "inherited_by_detail": [details["inherited_by_detail"][1], details["inherited_by_detail"][0]],
++        "called_by_ambiguous_detail": [details["called_by_ambiguous_detail"][1], details["called_by_ambiguous_detail"][0]],
 +    }
-+    for relative in source_bytes:
-+        normalized = relative.replace("\\", "/").strip("/")
-+        assert normalized not in normalized_excludes
-+        assert not any(
-+            normalized.startswith(excluded + "/")
-+            for excluded in normalized_excludes
-+        )
-+        first_component = normalized.split("/", 1)[0]
-+        assert first_component not in ignored_directories
 +
-+    initial_source_bytes = copy.deepcopy(source_bytes)
-+    desktop_execution = _capture_gui_full_run(root, monkeypatch)
-+    _assert_source_bytes(root, initial_source_bytes)
-+    _assert_no_live_endpoint(root)
-+    desktop_capture = _capture_snapshot(
-+        root,
-+        expected_writer="desktop",
-+        expected_repo_id=identity.repo_id,
-+        source_bytes=initial_source_bytes,
-+    )
-+    desktop_projection_before_mcp = _state_projection(desktop_capture.state)
++    forward_references = _empty_reference()
++    reverse_references = _empty_reference()
++    for key, records in details.items():
++        forward_references[key] = copy.deepcopy(records)
++        reverse_references[key] = copy.deepcopy(list(reversed(records)))
++    forward = {"target": forward_references}
++    reverse = {"target": reverse_references}
 +
-+    assert facade._analysis_filters(str(root), None) == effective_filters
-+    _assert_no_live_endpoint(root)
-+    mcp_execution = _run_real_mcp_project_job(root)
-+    _assert_source_bytes(root, initial_source_bytes)
-+    _assert_no_live_endpoint(root)
-+    assert read_repository_identity(root) == identity
-+    assert facade._analysis_filters(str(root), None) == effective_filters
-+    mcp_capture = _capture_snapshot(
-+        root,
-+        expected_writer="mcp",
-+        expected_repo_id=identity.repo_id,
-+        source_bytes=initial_source_bytes,
-+    )
++    _normalize_references(forward)
++    _normalize_references(reverse)
 +
-+    assert mcp_capture.metadata.revision == desktop_capture.metadata.revision + 1
-+    assert mcp_capture.metadata.root_path == desktop_capture.metadata.root_path == str(root)
-+    assert mcp_capture.metadata.repo_id == desktop_capture.metadata.repo_id == identity.repo_id
-+    assert mcp_capture.metadata.schema_version == desktop_capture.metadata.schema_version
-+    assert mcp_capture.metadata.writer == "mcp"
-+    assert desktop_capture.metadata.writer == "desktop"
-+    assert mcp_capture.state.state_id == mcp_capture.metadata.state_id
-+    assert desktop_capture.state.state_id == desktop_capture.metadata.state_id
-+    assert mcp_capture.state.revision == mcp_capture.metadata.revision
-+    assert desktop_capture.state.revision == desktop_capture.metadata.revision
-+    assert getattr(mcp_capture.state, "provenance", None) == "snapshot"
-+    assert getattr(desktop_capture.state, "provenance", None) == "snapshot"
-+    assert getattr(mcp_capture.state, "resync_required", False) is not True
-+    assert getattr(desktop_capture.state, "resync_required", False) is not True
++    assert forward == reverse
++    assert forward["target"].keys() == _empty_reference().keys()
++    for key, expected_records in expected.items():
++        assert forward["target"][key] == expected_records
++        assert reverse["target"][key] == expected_records
 +
-+    desktop_projection_after_mcp = _state_projection(desktop_capture.state)
-+    mutation = _first_difference(
-+        desktop_projection_before_mcp,
-+        desktop_projection_after_mcp,
-+        "desktop_captured_state",
-+    )
-+    if mutation is not None:
-+        field_path, before, after = mutation
-+        evidence_dir = _preserve_mismatch_evidence(tmp_path, desktop_capture, mcp_capture)
-+        pytest.fail(
-+            "MCP run mutated the independently captured Desktop state: "
-+            f"field={field_path}; before={_short_repr(before)}; "
-+            f"after={_short_repr(after)}; evidence={evidence_dir}",
-+            pytrace=False,
-+        )
 +
-+    try:
-+        desktop_projection = _state_projection(desktop_capture.state)
-+        mcp_projection = _state_projection(mcp_capture.state)
-+    except _UnsupportedCanonicalValue as exc:
-+        evidence_dir = _preserve_mismatch_evidence(tmp_path, desktop_capture, mcp_capture)
-+        pytest.fail(
-+            f"Canonical comparator stopped at unsupported value {exc}; "
-+            f"evidence={evidence_dir}",
-+            pytrace=False,
-+        )
++def test_scalar_consumer_lists_keep_sorted_deduplicated_behavior() -> None:
++    reference = _empty_reference()
++    reference["called_by"] = ["z_consumer", "a_consumer", "z_consumer"]
++    reference["inherited_by"] = ["subclass_b", "subclass_a", "subclass_b"]
++    references = {"target": reference}
 +
-+    difference = _first_difference(desktop_projection, mcp_projection)
-+    if difference is not None:
-+        field_path, desktop_value, mcp_value = difference
-+        evidence_dir = _preserve_mismatch_evidence(tmp_path, desktop_capture, mcp_capture)
-+        pytest.fail(
-+            "Desktop/MCP canonical state mismatch: "
-+            f"first_field={field_path}; "
-+            f"desktop={_short_repr(desktop_value)}; "
-+            f"mcp={_short_repr(mcp_value)}; evidence={evidence_dir}",
-+            pytrace=False,
-+        )
++    _normalize_references(references)
 +
-+    _assert_file_state_parity(desktop_capture, mcp_capture)
-+    assert desktop_capture.source_bytes == mcp_capture.source_bytes == initial_source_bytes
-+    assert desktop_execution["operation_name"] == "Repository analysis"
-+    assert desktop_execution["error_count"] == 0
-+    assert mcp_execution["completed"]["status"] == "completed"
-## REAL_GUI_EXECUTION
-
-Not executed yet. The test calls ContextorGUI.analyze on a headless ContextorGUI instance and monkeypatches only contextor.ui.gui.run_with_progress. That seam invokes the captured real task callable with log/progress callbacks, verifies operation_name="Repository analysis", captures its actual (errors, AnalysisResult) outcome, and never invokes on_success. The task therefore reaches the unmocked run_full_analysis_exclusive(owner="desktop_analysis") and real facade analysis. No real Tk root or second GUI process is created.
-
-## REAL_MCP_JOB_EXECUTION
-
-Not executed yet. The test calls mcp_server.analyze_project.fn through asyncio.run, then polls the public get_analysis_status.fn for the exact job ID using a 120-second monotonic deadline. It requires operation=project, no job reuse, completed status, error=None, live_publish_status=not_attempted, and no surviving/registered worker thread. It does not patch analysis_jobs worker functions, facade, coordinator, engine, graph, resolver, or persistence.
-
-## DESKTOP_AND_MCP_METADATA
-
-Not captured yet. The test reads authoritative metadata separately after each real entrypoint, requires writer=desktop then writer=mcp, matching stable repository ID/root, and independently loads the generation referenced by each metadata record. It verifies each state_id/revision pair and each versioned FileState payload link, plus referenced state/FileState/lineage manifest files when present. MCP revision must equal the immediately prior Desktop revision plus one.
-
-## CANONICAL_FIELD_COVERAGE
-
-The test enumerates all fields with dataclasses.fields(RepositoryAnalysisState), asserts its projection contains the complete declared field tuple, and recursively projects dataclasses, mappings, list/tuple, set/frozenset, Enum, pathlib paths, exact primitives, and TrieNode children/is_module/full_name. Mapping keys and values are retained. Absolute paths retain the same fixture root. An unsupported nontrivial object raises a path-specific comparator error. No canonical field is allowlisted away.
-
-State dynamic metadata is checked separately: state_id, revision, provenance=snapshot, and no true resync_required. Snapshot writer/repository/root metadata and FileState baseline identity/revision are checked per generation.
-
-## FIRST_MISMATCH_IF_ANY
-
-No comparison has run; no mismatch is claimed. On canonical or FileState inequality, the test reports the first structural path and bounded values and writes both complete captured states, metadata, FileState records/payloads, source bytes, and cache path as pickle evidence in the isolated pytest temporary directory.
-
-## CANONICAL_PARITY_RESULT
-
-PENDING_TARGETED_TEST. The complete structural comparison is implemented but not executed.
-
-## TARGETED_TEST_RESULTS
-
-No test has been run in this implementation checkpoint. The next stage must first run only:
-tests/test_desktop_mcp_canonical_parity.py
-
-If it passes, run only the approved related targeted regressions: full-analysis coordination, canonical full-state parity, B0G1/B0G1A resolver, and B0G2A graph parity. Do not run the full repository pytest suite.
-
-## PY_COMPILE
-
-Not run. It is deferred to the test-execution stage.
-
-## GIT_DIFF_CHECK
-
-Not run. It is deferred to the test-execution stage.
-
-## LIVE_REVISION_BEFORE_AFTER
-
-- Before test edits: revision 350, activity epoch 6899cce3f9224c428b6ef04a542d3abf.
-- After test edits: revision 353 at the event query, latest source retrieval revision 354.
-- get_live_events(after_revision=350) reported continuous event history and exactly three automatic desktop_watcher update_file events for C:\Temp\Contextor_Repo\tests\test_desktop_mcp_canonical_parity.py:
-  - revision 351, UPDATED, blast_radius_state=fresh, affected module tests.test_desktop_mcp_canonical_parity;
-  - revision 352, UPDATED, blast_radius_state=deferred, affected module count 0;
-  - revision 353, UPDATED, blast_radius_state=deferred, affected module count 0.
-- No update_file tool was called by this task. No test fixture analysis, publish, endpoint startup, or repository mutation was initiated.
-- Event response: resync_required=false, activity_resync_required=false, activity continuity not requested. The subsequent complete coordinator source retrieval reported canonical revision 354, workspace_sync=verified, resync_required is not exposed as true.
-
-## WORKSPACE_SYNC
-
-The post-edit complete get_symbol_implementation retrieval for run_full_analysis_exclusive reported workspace_sync=verified at canonical revision 354 and source_contract implementation_is_complete=true. This verifies indexed workspace source synchronization for the retrieved owner; it is not a claim that Python services reloaded test code.
-
-## RESYNC_REQUIRED
-
-False in the post-edit LIVE events response at revision 353. The subsequent canonical source response at revision 354 reported fresh canonical state and verified workspace synchronization. No runtime mutation was performed.
-
-## RESTART_REQUIRED
-
-No production/runtime file changed. No restart was performed or requested for this test-only change.
-
-## FINAL_VERDICT
-
-Implementation checkpoint only: B0G2C test created; entrypoint parity is not yet certified because the requested targeted test has not run. Stage result: TEST_IMPLEMENTED_STOP_BEFORE_EXECUTION.
++    assert reference["called_by"] == ["a_consumer", "z_consumer"]
++    assert reference["inherited_by"] == ["subclass_a", "subclass_b"]
++
++
++def test_api_consumer_details_are_order_independent_without_count_changes() -> None:
++    consumer = {"module": "consumer", "line": 4, "context": None}
++    other = {"module": "other", "line": 3, "context": None}
++
++    def extract(records: list[dict]) -> dict:
++        reference = _empty_reference()
++        reference["called_by"] = ["other", "consumer"]
++        reference["called_by_detail"] = copy.deepcopy(records)
++        normalized = {"pkg.api::service": reference}
++        _normalize_references(normalized)
++        return extract_api_consumers(["pkg.api::service"], normalized)["pkg.api::service"]
++
++    forward = extract([consumer, other])
++    reverse = extract([other, consumer])
++
++    assert forward == reverse
++    assert forward["usage"]["direct_calls_detail"] == [consumer, other]
++    assert forward["consumers"] == ["consumer", "other"]
++    assert forward["consumer_count"] == {
++        "total": 2,
++        "direct_calls": 2,
++        "callbacks": 0,
++        "events": 0,
++        "qualified_refs": 0,
++        "api_imports": 0,
++        "inheritance": 0,
++    }
++
++
++def test_complete_payload_tie_breaker_preserves_extra_json_fields() -> None:
++    first = {
++        "module": "same_consumer",
++        "line": 4,
++        "context": None,
++        "extra": {"value": 1},
++    }
++    second = {
++        "module": "same_consumer",
++        "line": 4,
++        "context": None,
++        "extra": {"value": 2},
++    }
++
++    forward = _normalize_details(copy.deepcopy([second, first]))
++    reverse = _normalize_details(copy.deepcopy([first, second]))
++
++    assert forward == reverse
++    assert forward == [first, second]
++    assert forward[0]["extra"] == {"value": 1}
++    assert forward[1]["extra"] == {"value": 2}
++
++
++def test_non_dictionary_detail_payload_fails_explicitly() -> None:
++    references = {
++        "target": {
++            "called_by_detail": [
++                {"module": "valid", "line": 1, "context": None},
++                "unsupported",
++            ]
++        }
++    }
++
++    with pytest.raises(TypeError, match="Reference detail must be a dictionary"):
++        _normalize_references(references)
