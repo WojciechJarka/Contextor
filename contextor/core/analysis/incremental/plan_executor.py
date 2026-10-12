@@ -1016,7 +1016,12 @@ def execute_refresh_plan(
             if delta.is_deleted or delta.is_new:
                 new_trie = build_trie(candidate.modules.keys())
                 new_package_root = detect_package_root(candidate.modules, new_trie)
-                new_graph = build_graph(candidate.modules, trie=new_trie, package_root=new_package_root)
+                new_graph = build_graph(
+                    candidate.modules,
+                    trie=new_trie,
+                    package_root=new_package_root,
+                    reexport_facts_by_module=candidate.reexport_facts_by_module,
+                )
                 candidate.trie = new_trie
                 candidate.package_root = new_package_root
                 candidate.dependency_graph = new_graph
@@ -1025,7 +1030,13 @@ def execute_refresh_plan(
                 new_package_root = candidate.package_root
                 curr_graph = candidate.dependency_graph
                 if curr_graph:
-                    hard, soft = resolve_module_edges(delta.module_path, candidate.modules[delta.module_path], new_trie, new_package_root)
+                    hard, soft = resolve_module_edges(
+                        delta.module_path,
+                        candidate.modules[delta.module_path],
+                        new_trie,
+                        new_package_root,
+                        candidate.reexport_facts_by_module,
+                    )
                     candidate.dependency_graph = curr_graph.with_module_edges(delta.module_path, hard, soft)
             executed_patch_families.append("dependency_graph")
 

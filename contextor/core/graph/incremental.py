@@ -88,7 +88,10 @@ def _serialize_import(imp) -> tuple:
 # ==========================================================
 
 
-def _hash_modules(modules: dict) -> str:
+def _hash_modules(
+    modules: dict,
+    reexport_facts_by_module=None,
+) -> str:
     """
     Generates a deterministic hash of the module index.
 
@@ -119,6 +122,25 @@ def _hash_modules(modules: dict) -> str:
                 module_id,
                 module.path,
                 tuple(sorted(imports)),
+            )
+        )
+
+    for module_id in sorted(
+        (reexport_facts_by_module or {}).keys()
+    ):
+        if not module_id.endswith(".__init__"):
+            continue
+
+        facts = reexport_facts_by_module[module_id] or {}
+        bindings = facts.get("bindings") or {}
+        star_sources = facts.get("star_sources") or []
+
+        parts.append(
+            (
+                "PACKAGE_EXPORT_BINDINGS",
+                module_id,
+                tuple(sorted(bindings.items())),
+                tuple(sorted(star_sources)),
             )
         )
 
@@ -167,7 +189,12 @@ def _cache_put(key: str, graph: ProjectGraph):
 # ==========================================================
 
 
-def get_cached_graph(modules: dict, builder_fn) -> tuple[ProjectGraph, bool]:
+def get_cached_graph(
+    modules: dict,
+    builder_fn,
+    *,
+    reexport_facts_by_module=None,
+) -> tuple[ProjectGraph, bool]:
     """
     Returns a ProjectGraph and information
     whether the result came from the cache.
@@ -198,7 +225,7 @@ def get_cached_graph(modules: dict, builder_fn) -> tuple[ProjectGraph, bool]:
 
     """
 
-    cache_key = _hash_modules(modules)
+    cache_key = _hash_modules(modules, reexport_facts_by_module)
 
     cached = _cache_get(cache_key)
 

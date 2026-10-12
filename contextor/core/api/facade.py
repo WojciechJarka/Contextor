@@ -730,7 +730,9 @@ class ContextorFacade:
                 trie=trie,
                 package_root=package_root,
                 progress_callback=graph_progress,
-            )
+                reexport_facts_by_module=canonical_reexport_facts,
+            ),
+            reexport_facts_by_module=canonical_reexport_facts,
         )
 
         emit_stage_end("graph", graph_started)
@@ -1408,6 +1410,13 @@ class ContextorFacade:
                 progress_callback=index_progress,
             )
             modules = index.modules
+            from contextor.core.reference.shared import (
+                materialize_reexport_facts_by_module,
+            )
+            canonical_reexport_facts = materialize_reexport_facts_by_module(
+                modules,
+                index.reference_facts_by_module,
+            )
             trie = build_trie(modules.keys())
             package_root = detect_package_root(modules, trie)
             progress.begin("Resolving dependency graph")
@@ -1419,7 +1428,9 @@ class ContextorFacade:
                     trie=trie,
                     package_root=package_root,
                     progress_callback=graph_progress,
+                    reexport_facts_by_module=canonical_reexport_facts,
                 ),
+                reexport_facts_by_module=canonical_reexport_facts,
             )
             skipped_files = getattr(index, "skipped", [])
             reference_index = assemble_reference_index_or_fallback(
@@ -1743,10 +1754,19 @@ class ContextorFacade:
                 extra_ignored_dirs=extra_dirs,
                 progress_callback=index_progress,
             )
+            from contextor.core.reference.shared import (
+                materialize_reexport_facts_by_module,
+            )
+            canonical_reexport_facts = materialize_reexport_facts_by_module(modules)
             graph_progress = progress.begin("Resolving dependency graph")
             graph, cache_hit = get_cached_graph(
                 modules,
-                lambda m: build_graph(m, progress_callback=graph_progress),
+                lambda m: build_graph(
+                    m,
+                    progress_callback=graph_progress,
+                    reexport_facts_by_module=canonical_reexport_facts,
+                ),
+                reexport_facts_by_module=canonical_reexport_facts,
             )
 
         if log:

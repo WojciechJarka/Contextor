@@ -35,6 +35,9 @@ Does not include:
 from contextor.core.graph.graph import (
     build_graph,
 )
+from contextor.core.reference.shared import (
+    materialize_reexport_facts_by_module,
+)
 from contextor.core.symbol_engine.indexer import (
     build_index,
 )
@@ -69,12 +72,16 @@ def build_repository_context(
     # ------------------------------------------------------
 
     modules = build_index(root_path)
+    reexport_facts_by_module = materialize_reexport_facts_by_module(modules)
 
     # ------------------------------------------------------
     # DEPENDENCY GRAPH
     # ------------------------------------------------------
 
-    graph = build_graph(modules)
+    graph = build_graph(
+        modules,
+        reexport_facts_by_module=reexport_facts_by_module,
+    )
 
     # ------------------------------------------------------
     # SYMBOL INDEX

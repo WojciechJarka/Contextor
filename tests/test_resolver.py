@@ -183,3 +183,110 @@ def test_relative_package_import_preserves_nonpackage_behavior(tmp_path):
     hard, soft = resolve_module_edges("pkg.__init__", soft_module, trie, None)
     assert hard == set()
     assert soft == {"pkg.json.__init__"}
+
+
+def _named_package_modules(
+    tmp_path: Path,
+    importer_source: str,
+    init_source: str = "",
+    child_name: str = "runtime",
+):
+    package = tmp_path / "pkg"
+    package.mkdir()
+    initializer = package / "__init__.py"
+    initializer.write_text(init_source, encoding="utf-8")
+    child = package / f"{child_name}.py"
+    child.write_text("VALUE = 1\n", encoding="utf-8")
+    importer = tmp_path / "consumer.py"
+    importer.write_text(importer_source, encoding="utf-8")
+    imports, error = read_imports(importer)
+    assert error is None
+    assert imports is not None
+    modules = {
+        "pkg.__init__": Module("pkg.__init__", "pkg/__init__.py", str(initializer), []),
+        f"pkg.{child_name}": Module(
+            f"pkg.{child_name}", f"pkg/{child_name}.py", str(child), []
+        ),
+        "consumer": Module("consumer", "consumer.py", str(importer), imports),
+    }
+    return modules, imports
+
+
+def test_named_child_keeps_initializer_and_soft_child_edges(tmp_path):
+    modules, imports = _named_package_modules(
+        tmp_path, "from pkg import runtime as mcp_runtime\n"
+    )
+    assert imports[0].names == ["runtime"]
+    trie = build_trie(modules)
+    hard, soft = resolve_module_edges("consumer", modules["consumer"], trie, None)
+    assert hard == {"pkg.__init__"}
+    assert soft == {"pkg.runtime"}
+    assert hard | soft <= modules.keys()
+
+
+def test_initializer_binding_shadows_same_named_child(tmp_path):
+    modules, _ = _named_package_modules(
+        tmp_path, "from pkg import runtime\n", "runtime = object()\n"
+    )
+    facts = {"pkg.__init__": {"bindings": {"runtime": "pkg.__init__.runtime"}}}
+    hard, soft = resolve_module_edges(
+        "consumer", modules["consumer"], build_trie(modules), None, facts
+    )
+    assert hard == {"pkg.__init__"}
+    assert soft == set()
+
+
+def test_mixed_named_import_preserves_only_unbound_indexed_child(tmp_path):
+    modules, _ = _named_package_modules(
+        tmp_path,
+        "from pkg import exported_symbol, child, nonexistent\n",
+        "exported_symbol = 1\n",
+        child_name="child",
+    )
+    facts = {"pkg.__init__": {"bindings": {"exported_symbol": "pkg.__init__.exported_symbol"}}}
+    hard, soft = resolve_module_edges(
+        "consumer", modules["consumer"], build_trie(modules), None, facts
+    )
+    assert hard == {"pkg.__init__"}
+    assert soft == {"pkg.child"}
+
+
+def test_relative_named_import_shadows_indexed_child_when_bound(tmp_path):
+    modules, imports = _named_package_modules(tmp_path, "from . import runtime\n")
+    modules["pkg.consumer"] = Module(
+        "pkg.consumer", "pkg/consumer.py", modules["consumer"].absolute_path, imports
+    )
+    del modules["consumer"]
+    facts = {"pkg.__init__": {"bindings": {"runtime": "pkg.__init__.runtime"}}}
+    hard, soft = resolve_module_edges(
+        "pkg.consumer", modules["pkg.consumer"], build_trie(modules), None, facts
+    )
+    assert hard == {"pkg.__init__"}
+    assert soft == set()
+
+
+def test_type_only_named_package_dependencies_are_soft(tmp_path):
+    modules, imports = _named_package_modules(tmp_path, "from pkg import runtime\n")
+    original = imports[0]
+    modules["consumer"] = Module(
+        "consumer",
+        "consumer.py",
+        modules["consumer"].absolute_path,
+        [ImportRef(original.module, original.level, original.names, True, type_only=True)],
+    )
+    hard, soft = resolve_module_edges(
+        "consumer", modules["consumer"], build_trie(modules), None
+    )
+    assert hard == set()
+    assert soft == {"pkg.__init__", "pkg.runtime"}
+
+
+def test_full_graph_matches_direct_resolver_for_named_package(tmp_path):
+    modules, _ = _named_package_modules(tmp_path, "from pkg import runtime\n")
+    facts = {"pkg.__init__": {"bindings": {}}}
+    direct_hard, direct_soft = resolve_module_edges(
+        "consumer", modules["consumer"], build_trie(modules), None, facts
+    )
+    graph = build_graph(modules, reexport_facts_by_module=facts)
+    assert graph.hard_edges["consumer"] == direct_hard
+    assert graph.soft_edges["consumer"] == direct_soft

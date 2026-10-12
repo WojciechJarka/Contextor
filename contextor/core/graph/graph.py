@@ -113,6 +113,7 @@ def build_graph(
     trie: dict | None = None,
     package_root: str | None = None,
     progress_callback=None,
+    reexport_facts_by_module: dict | None = None,
 ) -> ProjectGraph:
     """
     Builds the dependency graph from parsed modules.
@@ -167,7 +168,9 @@ def build_graph(
         # Import order does not affect graph
         # --------------------------------------------------
 
-        hard_targets, soft_targets = resolve_module_edges(module_id, module, trie, package_root)
+        hard_targets, soft_targets = resolve_module_edges(
+            module_id, module, trie, package_root, reexport_facts_by_module
+        )
         
         for target in hard_targets:
             _add_edge(hard_edges, module_id, target)
@@ -179,7 +182,13 @@ def build_graph(
         soft_edges={key: value for key, value in sorted(soft_edges.items())},
     )
 
-def resolve_module_edges(module_id: str, module, trie, package_root: str) -> tuple[set[str], set[str]]:
+def resolve_module_edges(
+    module_id: str,
+    module,
+    trie,
+    package_root: str,
+    reexport_facts_by_module: dict | None = None,
+) -> tuple[set[str], set[str]]:
     """
     Resolves outgoing hard and soft dependencies for a single module.
     Extracted as a canonical unit of graph resolution for use in both
@@ -200,50 +209,91 @@ def resolve_module_edges(module_id: str, module, trie, package_root: str) -> tup
     )
 
     for imp in imports:
-        if (
-            imp.is_from_import
-            and imp.level > 0
-            and imp.module is None
-        ):
-            import_variants = [
-                type(imp)(
-                    module=name,
-                    level=imp.level,
-                    names=[],
-                    is_from_import=True,
-                    is_local=imp.is_local,
-                )
-                for name in sorted(set(imp.names))
-                if name != "*"
-            ]
-        else:
-            import_variants = [imp]
+        try:
+            result = resolve_internal(
+                imp,
+                trie,
+                current_module_id=module_id,
+                package_root=package_root,
+            )
+        except Exception:
+            continue
 
-        for import_variant in import_variants:
+        if result.target_module and result.kind != "UNKNOWN":
+            target = result.target_module
+            if target != module_id:
+                if _is_type_only_import(imp):
+                    _add_edge(soft, module_id, target)
+                elif result.kind == "MODULE":
+                    _add_edge(hard, module_id, target)
+                elif result.kind == "FALLBACK":
+                    _add_edge(soft, module_id, target)
+
+        if not imp.is_from_import or not imp.names:
+            continue
+
+        package_init = result.target_module
+        if (
+            result.kind != "MODULE"
+            or not package_init
+            or not package_init.endswith(".__init__")
+        ):
+            continue
+
+        package_name = package_init.removesuffix(".__init__")
+        package_facts = (
+            (reexport_facts_by_module or {}).get(package_init)
+            or {}
+        )
+        bindings = package_facts.get("bindings") or {}
+
+        for imported_name in sorted(set(imp.names)):
+            if not imported_name or imported_name == "*":
+                continue
+
+            # Explicit initializer bindings take precedence
+            # over a same-named indexed child module.
+            if imported_name in bindings:
+                continue
+
+            child_name = f"{package_name}.{imported_name}"
+            child_import = type(imp)(
+                module=child_name,
+                level=0,
+                names=[],
+                is_from_import=False,
+                is_local=imp.is_local,
+                type_only=imp.type_only,
+            )
+
             try:
-                result = resolve_internal(
-                    import_variant,
+                child_result = resolve_internal(
+                    child_import,
                     trie,
                     current_module_id=module_id,
-                    package_root=package_root,
+                    package_root=None,
                 )
             except Exception:
                 continue
 
-            if result.kind == "UNKNOWN" or not result.target_module:
+            if (
+                child_result.kind != "MODULE"
+                or not child_result.target_module
+                or child_result.target_module == module_id
+                or child_result.target_module == package_init
+            ):
                 continue
 
-            target = result.target_module
-            if target == module_id:
-                continue
+            child_target = child_result.target_module
 
             if _is_type_only_import(imp):
-                _add_edge(soft, module_id, target)
-                continue
-
-            if result.kind == "MODULE":
-                _add_edge(hard, module_id, target)
-            elif result.kind == "FALLBACK":
-                _add_edge(soft, module_id, target)
+                _add_edge(soft, module_id, child_target)
+            elif imp.module is None and imp.level > 0:
+                # Explicit relative sibling import.
+                _add_edge(hard, module_id, child_target)
+            else:
+                # Named package member: preserve possible
+                # child dependency conservatively.
+                _add_edge(soft, module_id, child_target)
 
     return hard[module_id], soft[module_id]
