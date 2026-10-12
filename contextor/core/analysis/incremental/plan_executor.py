@@ -1013,7 +1013,18 @@ def execute_refresh_plan(
             executed_patch_families.append("reexport_facts")
 
         elif family == "dependency_graph":
-            if delta.is_deleted or delta.is_new:
+            if (
+                delta.is_deleted
+                or delta.is_new
+                or (
+                    delta.module_path.endswith(".__init__")
+                    and bool(
+                        delta.metadata_changes.get(
+                            "reexport_facts_changed"
+                        )
+                    )
+                )
+            ):
                 new_trie = build_trie(candidate.modules.keys())
                 new_package_root = detect_package_root(candidate.modules, new_trie)
                 new_graph = build_graph(

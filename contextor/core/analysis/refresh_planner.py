@@ -111,6 +111,10 @@ class RefreshPlanner:
                 "reexport_facts_changed"
             )
         )
+        package_initializer_graph_change = (
+            module_path.endswith(".__init__")
+            and has_reexport_facts_change
+        )
         identity_registry_required = bool(
             delta
             and (
@@ -224,6 +228,22 @@ class RefreshPlanner:
             if has_import_changes:
                 patch_families.extend(["modules", "dependency_graph"])
                 graph_recomputations.extend(["macro_metrics", "reverse_blast_radius", "advanced_graph_metrics", "cycles"])
+            if (
+                package_initializer_graph_change
+                and "dependency_graph" not in patch_families
+            ):
+                patch_families.insert(
+                    patch_families.index("artifact_consumption"),
+                    "dependency_graph",
+                )
+                for item in (
+                    "macro_metrics",
+                    "reverse_blast_radius",
+                    "advanced_graph_metrics",
+                    "cycles",
+                ):
+                    if item not in graph_recomputations:
+                        graph_recomputations.append(item)
             patch_families.append("cached_analytics")
             if collision_facts_changed:
                 patch_families.extend(["collision_facts", "collisions"])
@@ -276,6 +296,18 @@ class RefreshPlanner:
                     patch_families.index("artifact_consumption"),
                     "reexport_facts",
                 )
+            graph_recomputations = ()
+            if package_initializer_graph_change:
+                patch_families.insert(
+                    patch_families.index("artifact_consumption"),
+                    "dependency_graph",
+                )
+                graph_recomputations = (
+                    "macro_metrics",
+                    "reverse_blast_radius",
+                    "advanced_graph_metrics",
+                    "cycles",
+                )
             if bool(delta.artifacts_added or delta.artifacts_removed) or (usage_delta and not usage_delta.is_empty):
                 patch_families.append("cached_analytics")
             if collision_facts_changed:
@@ -285,7 +317,7 @@ class RefreshPlanner:
                 reparse_modules=(),
                 recompute_modules=tuple(sorted(recompute_set)),
                 patch_families=compose_patch_families(patch_families),
-                graph_recomputations=(),
+                graph_recomputations=graph_recomputations,
                 refresh_completeness="complete",
                 semantic_certainty="statically_resolved",
                 reason=f"Artifact definitions change in '{module_path}'.",
@@ -329,6 +361,25 @@ class RefreshPlanner:
         if collision_facts_changed:
             patch_families.extend(["collision_facts", "collisions"])
 
+        graph_recomputations = ()
+        if package_initializer_graph_change:
+            if "dependency_graph" not in patch_families:
+                insert_at = (
+                    patch_families.index("artifact_consumption")
+                    if "artifact_consumption" in patch_families
+                    else len(patch_families)
+                )
+                patch_families.insert(
+                    insert_at,
+                    "dependency_graph",
+                )
+            graph_recomputations = (
+                "macro_metrics",
+                "reverse_blast_radius",
+                "advanced_graph_metrics",
+                "cycles",
+            )
+
         if has_usage:
             reason = f"Body/usage change in '{module_path}'."
         elif has_symbol_payload_change:
@@ -342,7 +393,7 @@ class RefreshPlanner:
             reparse_modules=(),
             recompute_modules=tuple(sorted(recompute_set)),
             patch_families=compose_patch_families(patch_families),
-            graph_recomputations=(),
+            graph_recomputations=graph_recomputations,
             refresh_completeness="complete",
             semantic_certainty="statically_resolved",
             reason=reason,
