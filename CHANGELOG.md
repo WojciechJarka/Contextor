@@ -30,6 +30,11 @@ Runtime-certified the warm lineage fast path on Spiral Prophet: normalize_lineag
 
 - Reworked canonical LIVE persistence into schema 1.3 with a compact core snapshot, immutable per-source lineage chunks and a revision manifest. Unchanged lineage chunks are now reused across revisions while metadata remains the sole atomic authority pointer, preserving crash safety and backward loading of older snapshot formats.
 
+Durability clarification: crash safety here refers to
+logical snapshot publication and validation, not a
+guarantee that the latest acknowledged revision
+survives sudden power loss or an operating system crash.
+
 - Reduced one-file LIVE persistence latency from roughly 4.9 seconds to about 0.5 seconds on the certified workload by eliminating repeated serialization of unchanged lineage data. Runtime certification showed one changed lineage chunk with 412 reused chunks per update and an approximately 89% persistence-time reduction.
 
 - Replaced the full `RepositoryAnalysisState` deep copy used by incremental LIVE updates with an explicit copy-on-write `clone_for_update` contract. Clone time on the production repository fell from roughly 28 seconds to about 15 ms while preserving top-level mutable-container isolation and existing incremental semantics.

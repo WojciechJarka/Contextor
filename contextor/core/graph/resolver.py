@@ -279,6 +279,20 @@ def resolve_internal(
             kind="MODULE",
         )
 
+    # Package directories are indexed through their
+    # concrete __init__.py module, not as implicit
+    # module identities.
+    if candidate:
+        package_init = _trie_lookup(
+            f"{candidate}.__init__",
+            trie,
+        )
+        if package_init:
+            return ResolutionResult(
+                target_module=package_init,
+                kind="MODULE",
+            )
+
     # ------------------------------------------------------
     # prefix fallback
     # ------------------------------------------------------

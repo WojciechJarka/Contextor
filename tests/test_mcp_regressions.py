@@ -5193,6 +5193,66 @@ def test_file_edit_context_live_revision_lifecycle(tmp_path, monkeypatch):
     assert "live_revision" not in legacy_res
 
 
+def test_file_edit_context_default_preserves_package_init_identity(tmp_path, monkeypatch):
+    from contextor.core.domain.graph import ProjectGraph
+    from contextor.core.domain.module import Module
+
+    root = tmp_path / "repo"
+    package = root / "pkg"
+    package.mkdir(parents=True)
+    init_file = package / "__init__.py"
+    ordinary_file = package / "example.py"
+    init_file.write_text("VALUE = 1\n", encoding="utf-8")
+    ordinary_file.write_text("VALUE = 2\n", encoding="utf-8")
+
+    registry = PersistentIdentityRegistry(str(root))
+    with registry.transaction():
+        registry.sync_with_workspace({"pkg.__init__", "pkg.example"}, set())
+    package_id = registry.get_module_id("pkg.__init__")
+    ordinary_id = registry.get_module_id("pkg.example")
+
+    state = RepositoryAnalysisState(
+        modules={
+            "pkg.__init__": Module("pkg.__init__", "pkg/__init__.py", str(init_file), []),
+            "pkg.example": Module("pkg.example", "pkg/example.py", str(ordinary_file), []),
+        },
+        artifacts={},
+        dependency_graph=ProjectGraph(
+            hard_edges={"pkg.__init__": set(), "pkg.example": set()},
+            soft_edges={"pkg.__init__": set(), "pkg.example": set()},
+        ),
+    )
+    engine = SimpleNamespace(state=state, state_manager=SimpleNamespace(state_id="fixture"))
+    monkeypatch.setattr(mcp_runtime, "_get_or_init_engine_snapshot", lambda _root: (engine, 1))
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: engine)
+
+    minimal = json.loads(
+        mcp_server.get_file_edit_context.fn(
+            repo_path=str(root), file_path="pkg/__init__.py", mode="minimal"
+        )
+    )
+    default = json.loads(
+        mcp_server.get_file_edit_context.fn(
+            repo_path=str(root), file_path="pkg/__init__.py", mode=None
+        )
+    )
+    ordinary = json.loads(
+        mcp_server.get_file_edit_context.fn(
+            repo_path=str(root), file_path="pkg/example.py", mode=None
+        )
+    )
+
+    assert minimal["module"] == "pkg.__init__"
+    assert minimal["module_id"] == package_id
+    assert default["status"] == "available"
+    assert default["module"] == "pkg.__init__"
+    assert default["module_id"] == minimal["module_id"]
+    assert default["state_freshness"]["canonical_state"] == "fresh"
+    assert ordinary["status"] == "available"
+    assert ordinary["module"] == "pkg.example"
+    assert ordinary["module_id"] == ordinary_id
+
+
 def test_file_edit_context_layer_guard(monkeypatch, tmp_path):
     root = tmp_path / "repo"
     root.mkdir()

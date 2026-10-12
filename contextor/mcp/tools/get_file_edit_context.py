@@ -442,8 +442,6 @@ def get_file_edit_context(
     parts = list(rel_path.parts)
     if parts and parts[-1].endswith(".py"):
         parts[-1] = parts[-1][:-3]
-        if parts[-1] == "__init__":
-            parts.pop()
 
     module_name = ".".join(parts)
     effective_file_or_target = query_input

@@ -620,3 +620,38 @@ Architectural information produced by Contextor MCP should therefore be treated 
 For commercial licensing or other inquiries:
 
 [wojciech.jarka77@gmail.com](mailto:wojciech.jarka77@gmail.com)
+
+## Snapshot durability and recovery
+
+Contextor publishes canonical snapshot generations
+through a single metadata pointer. Generation files
+are written and flushed before the pointer is replaced.
+
+This design provides logical atomic publication and
+validation of snapshot identity, revision and required
+materialized data under normal filesystem operation.
+
+It does not guarantee that the latest acknowledged
+revision will survive sudden power loss, an operating
+system crash or storage-device failure.
+
+On Windows, flushing individual files does not by
+itself establish a complete power-loss durability
+guarantee for all referenced directory entries and
+the metadata-pointer replacement.
+
+If a published snapshot or one of its required
+generation files cannot be validated, Contextor must
+treat the persisted canonical state as unavailable
+or untrusted.
+
+An older generation must not be silently substituted
+as current, because its architecture and FileState
+may not correspond to the present workspace.
+
+Recovery requires a fresh authoritative repository
+analysis and reconciliation before the reconstructed
+state can be trusted.
+
+Snapshot persistence is not a substitute for
+repository backups or storage-level durability.

@@ -200,30 +200,50 @@ def resolve_module_edges(module_id: str, module, trie, package_root: str) -> tup
     )
 
     for imp in imports:
-        try:
-            result = resolve_internal(
-                imp,
-                trie,
-                current_module_id=module_id,
-                package_root=package_root,
-            )
-        except Exception:
-            continue
+        if (
+            imp.is_from_import
+            and imp.level > 0
+            and imp.module is None
+        ):
+            import_variants = [
+                type(imp)(
+                    module=name,
+                    level=imp.level,
+                    names=[],
+                    is_from_import=True,
+                    is_local=imp.is_local,
+                )
+                for name in sorted(set(imp.names))
+                if name != "*"
+            ]
+        else:
+            import_variants = [imp]
 
-        if result.kind == "UNKNOWN" or not result.target_module:
-            continue
+        for import_variant in import_variants:
+            try:
+                result = resolve_internal(
+                    import_variant,
+                    trie,
+                    current_module_id=module_id,
+                    package_root=package_root,
+                )
+            except Exception:
+                continue
 
-        target = result.target_module
-        if target == module_id:
-            continue
+            if result.kind == "UNKNOWN" or not result.target_module:
+                continue
 
-        if _is_type_only_import(imp):
-            _add_edge(soft, module_id, target)
-            continue
+            target = result.target_module
+            if target == module_id:
+                continue
 
-        if result.kind == "MODULE":
-            _add_edge(hard, module_id, target)
-        elif result.kind == "FALLBACK":
-            _add_edge(soft, module_id, target)
+            if _is_type_only_import(imp):
+                _add_edge(soft, module_id, target)
+                continue
+
+            if result.kind == "MODULE":
+                _add_edge(hard, module_id, target)
+            elif result.kind == "FALLBACK":
+                _add_edge(soft, module_id, target)
 
     return hard[module_id], soft[module_id]
