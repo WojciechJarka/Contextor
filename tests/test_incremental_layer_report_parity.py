@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import ast
+import builtins
 from copy import deepcopy
 from pathlib import Path
 
@@ -11,6 +13,7 @@ from contextor.core.analysis.incremental.materialization import (
     ensure_cached_analytics,
 )
 from contextor.core.analysis.incremental.plan_executor import (
+    _build_canonical_layer_index,
     _prepare_candidate_state,
     _refresh_canonical_layer_information,
 )
@@ -138,18 +141,185 @@ def test_initializer_graph_report_matches_fresh_full_and_preserves_old_view(tmp_
     assert difference is None, f"layer report mismatch: {difference!r}; root={tmp_path}"
 
 
-def test_empty_and_untrusted_layer_views_do_not_fabricate_reports():
+def test_new_top_level_layer_matches_fresh_full_and_preserves_old_view(tmp_path):
+    _write_sources(
+        tmp_path,
+        {
+            "alpha/__init__.py": "",
+            "alpha/value.py": "ALPHA_VALUE = 1\n",
+            "beta/__init__.py": "",
+            "beta/value.py": "BETA_VALUE = 2\n",
+        },
+    )
+    baseline = _full_state(tmp_path)
+    assert {
+        item["layer"]
+        for item in baseline.layer_information["layer_index"]
+    } == {"alpha", "beta"}
+
+    hydrated = hydrate_repository_engine(tmp_path)
+    assert hydrated is not None
+    engine = hydrated.engine
+    previous_layer = engine.state.layer_information
+    previous_summary = previous_layer["summary_data"]
+    previous_copy = deepcopy(previous_layer)
+
+    gamma_init = tmp_path / "gamma" / "__init__.py"
+    gamma_init.parent.mkdir(parents=True, exist_ok=True)
+    gamma_init.write_text("GAMMA_VALUE = 7\n", encoding="utf-8")
+
+    result = engine.update_file(str(gamma_init))
+    assert result.status == "UPDATED"
+    assert "gamma.__init__" in engine.state.modules
+
+    incremental = deepcopy(engine.state)
+    layer_index = incremental.layer_information["layer_index"]
+    summary_index = incremental.layer_information["summary_data"]["layer_index"]
+    assert [item["layer"] for item in layer_index] == [
+        "alpha",
+        "beta",
+        "gamma",
+    ]
+    assert layer_index == summary_index
+
+    oracle = _full_state(tmp_path)
+    full_index = oracle.layer_information["layer_index"]
+    gamma_entry = next(item for item in layer_index if item["layer"] == "gamma")
+    full_gamma_entry = next(item for item in full_index if item["layer"] == "gamma")
+    assert gamma_entry == full_gamma_entry
+    assert gamma_entry["status"] == full_gamma_entry["status"]
+    assert gamma_entry["computation_mode"] == full_gamma_entry["computation_mode"]
+    assert [item["layer"] for item in full_index] == [
+        "alpha",
+        "beta",
+        "gamma",
+    ]
+    _assert_layer_parity(incremental, oracle, tmp_path)
+
+    assert previous_layer == previous_copy
+    assert previous_summary == previous_copy["summary_data"]
+
+
+def test_removing_last_layer_module_matches_fresh_full_and_clears_index(tmp_path):
+    _write_sources(
+        tmp_path,
+        {"gamma/only.py": "GAMMA_VALUE = 7\n"},
+    )
+    baseline = _full_state(tmp_path)
+    assert [
+        item["layer"]
+        for item in baseline.layer_information["layer_index"]
+    ] == ["gamma"]
+
+    hydrated = hydrate_repository_engine(tmp_path)
+    assert hydrated is not None
+    engine = hydrated.engine
+    previous_layer = engine.state.layer_information
+    previous_summary = previous_layer["summary_data"]
+    previous_copy = deepcopy(previous_layer)
+
+    source = tmp_path / "gamma" / "only.py"
+    source.unlink()
+    result = engine.update_file(str(source))
+    assert result.status == "DELETED"
+    assert "gamma.only" not in engine.state.modules
+
+    incremental = deepcopy(engine.state)
+    assert incremental.layer_information["layer_index"] == []
+    assert "layer_index" not in incremental.layer_information["summary_data"]
+
+    oracle = _full_state(tmp_path)
+    assert oracle.layer_information["layer_index"] == []
+    assert "layer_index" not in oracle.layer_information["summary_data"]
+    _assert_layer_parity(incremental, oracle, tmp_path)
+
+    assert previous_layer == previous_copy
+    assert previous_summary == previous_copy["summary_data"]
+
+
+def test_layer_index_refresh_does_not_read_or_parse_source_files(tmp_path, monkeypatch):
+    _write_sources(
+        tmp_path,
+        {
+            "alpha/__init__.py": "",
+            "alpha/value.py": "ALPHA_VALUE = 1\n",
+            "beta/__init__.py": "",
+            "beta/value.py": "BETA_VALUE = 2\n",
+        },
+    )
+    state = _full_state(tmp_path)
+    candidate = _prepare_candidate_state(state)
+    assert candidate.modules
+    assert candidate.dependency_graph is not None
+
+    repo_root = tmp_path.resolve()
+    protected_sources = {
+        path.resolve()
+        for path in tmp_path.rglob("*.py")
+    }
+    assert protected_sources
+
+    def is_protected_source(value) -> bool:
+        if isinstance(value, int):
+            return False
+        try:
+            path = Path(value).resolve()
+            path.relative_to(repo_root)
+        except (TypeError, ValueError, OSError):
+            return False
+        return path in protected_sources
+
+    original_builtin_open = builtins.open
+    original_path_open = Path.open
+
+    def guarded_builtin_open(file, *args, **kwargs):
+        if is_protected_source(file):
+            pytest.fail(f"layer refresh read unchanged Python source: {file}")
+        return original_builtin_open(file, *args, **kwargs)
+
+    def guarded_path_open(path, *args, **kwargs):
+        if is_protected_source(path):
+            pytest.fail(f"layer refresh read unchanged Python source: {path}")
+        return original_path_open(path, *args, **kwargs)
+
+    def reject_parse(*args, **kwargs):
+        pytest.fail("layer refresh parsed source instead of using canonical RAM")
+
+    monkeypatch.setattr(builtins, "open", guarded_builtin_open)
+    monkeypatch.setattr(Path, "open", guarded_path_open)
+    monkeypatch.setattr(ast, "parse", reject_parse)
+
+    index = _build_canonical_layer_index(
+        candidate,
+        root_path=tmp_path,
+        global_summary=state.layer_information["summary_data"],
+        global_hotspots=state.layer_information["hotspots"],
+    )
+
+    assert [item["layer"] for item in index] == ["alpha", "beta"]
+
+
+def test_empty_and_untrusted_layer_views_do_not_fabricate_reports(tmp_path):
     state = RepositoryAnalysisState(layer_information={})
     candidate = _prepare_candidate_state(state)
-    _refresh_canonical_layer_information(candidate)
+    _refresh_canonical_layer_information(
+        candidate,
+        root_path=tmp_path,
+    )
     assert candidate.layer_information == {}
     assert state.layer_information == {}
     candidate.layer_information = {"summary_data": None}
     with pytest.raises(RuntimeError, match="summary_data is unavailable"):
-        _refresh_canonical_layer_information(candidate)
+        _refresh_canonical_layer_information(
+            candidate,
+            root_path=tmp_path,
+        )
     candidate.layer_information = {"summary_data": {"report_header": {}}}
     with pytest.raises(RuntimeError, match="untrusted canonical facts"):
-        _refresh_canonical_layer_information(candidate)
+        _refresh_canonical_layer_information(
+            candidate,
+            root_path=tmp_path,
+        )
 
 
 @pytest.mark.parametrize("invalid_input", ["consumption", "graph"])

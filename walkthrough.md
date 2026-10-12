@@ -1,547 +1,591 @@
-# CONTEXTOR_B0G2D7A_MULTI_MUTATION_FULL_PARITY_MATRIX
+# CONTEXTOR_B0G2D7B_CANONICAL_LAYER_INDEX_REFRESH
 
 ## FILES_CHANGED
-- C:\Temp\Contextor_Repo\tests\test_incremental_multi_mutation_full_parity.py — new file with six tests A–F.
-- C:\Temp\Contextor_Repo\walkthrough.md — current report only, excluded from source/test changes.
-- No production files or existing tests were modified.
 
-## SOURCE_PRECHECK
-- HEAD: e687e1e091b109e91dd5cb59df6f1e60fcb5e90d; precheck git status was clean.
-- Contextor MCP first, with current tool documentation and deferred discovery.
-- Complete, untruncated Contextor implementations: RefreshPlanner.plan_refresh; _refresh_canonical_layer_information; _state_projection; _full_state. execute_refresh_plan fetched in contiguous ranges covering lines 932–1499. IncrementalAnalysisEngine.update_file and _apply_delta_and_commit retrieved with contiguous source ranges after confirmation_required for large symbol response; _apply_delta_and_commit spans lines 879–1146. workspace_sync=verified, canonical revision 373.
-- LIVE before test: revision 373, continuity=continuous, resync_required=false.
-- _state_projection verifies every declared RepositoryAnalysisState field. The new test compares through this helper and normalizes only the two report timestamps.
+- C:\Temp\Contextor_Repo\contextor\core\analysis\incremental\plan_executor.py
+- C:\Temp\Contextor_Repo\tests\test_incremental_layer_report_parity.py
 
-## BASELINE_AND_FIXTURE_VALIDATION
-- Real ContextorFacade.analyze_project on isolated tmp_path/repo for case A, then loaded the persisted FULL state and hydrated a real engine.
-- FULL validation succeeded. Hydrated state_id and revision matched metadata.
-- Initial FileState: 5/5 sources, no missing/extra paths or SHA-256 mismatches.
-- Exactly one mutation: created gamma/__init__.py with bytes b"GAMMA_VALUE = 7\n"; then called engine.update_file with its absolute Windows path.
-- Status UPDATED matched expected. Incremental state was copied before another FULL. A real fresh FULL on the same source bytes succeeded.
-- Baseline had 5 modules; incremental and fresh FULL both have 6, including gamma.__init__.
+walkthrough.md is the task report and is excluded from FILES_CHANGED.
 
-## STRICT_COMPARATOR_CONTRACT
-- Used existing test_desktop_mcp_canonical_parity._state_projection and _first_difference, without modifying the comparator.
-- The only normalization is layer_information.summary_data.generated_at and layer_information.summary_data.report_header.generated_at via normalize_report_timestamps=True.
-- No ordering or missing-field exclusions. Snapshot revision/state_id are retained in evidence and not treated as equal-generation parity criteria.
+## SOURCE_AND_LIVE_PRECHECK
 
-## CASE_A_NEW_LAYER
-- Real canonical difference: state.layer_information["layer_index"], incremental length 2, fresh FULL length 3.
-- Incremental layer_index contains alpha and beta. Fresh FULL contains those two entries plus:
-  {"layer": "gamma", "module_count": 1, "status": "HEALTHY", "cycles_count": 0, "hotspot_count": 0, "computation_mode": "filtered"}.
-- gamma.__init__ is present in both module sets, so the package/module was recognized; the layer report index remained stale in incremental state.
-- Expected and actual status: UPDATED.
-- Initial FULL state_id 20261012_145035, revision 1. Fresh FULL state_id 20261012_145037, revision 2. Different generation metadata was not used as a parity criterion.
+- CURRENT_HEAD before and after execution: c9b2935a465e056f8cf519a8baa8092c7a479355.
+- WORKTREE_STATUS before edits: clean; both authorized target files had no preexisting diff.
+- Final changed-path inspection contains only the two authorized files above. The B0G2D7A six-scenario test file is unchanged.
+- Contextor LIVE was canonical fresh at revision 375 before the production edit. Source retrieval returned workspace_sync=verified, provenance=live, and fresh module/graph/topology/artifact-consumption/cycle/collision/lineage families.
+- The production edit was observed at revision 376 as desktop_watcher update_file / UPDATED for contextor/core/analysis/incremental/plan_executor.py.
+- The test edit was observed at revision 377 as desktop_watcher update_file / UPDATED for tests/test_incremental_layer_report_parity.py.
+- Post-test event query from revision 376 returned revision 377, continuity=continuous, resync_required=false. The activity epoch remained 6899cce3f9224c428b6ef04a542d3abf.
+- Post-edit Contextor fetches returned complete implementations for _build_canonical_layer_index and _refresh_canonical_layer_information with workspace_sync=verified at revision 377. The execute_refresh_plan call range was also returned in full for the relevant call boundary.
+- No Contextor_Repo full analysis, manual update_file, or process restart was run.
 
-## CASE_B_MODULE_DELETION
-Not run. pytest -x stopped on the first real mismatch in A; B fixture remained untouched.
+## FULL_LAYER_INDEX_OWNER_CONTRACT
 
-## CASE_C_CONSUMER_CHANGE
-Not run. Stopped after A mismatch as required.
+Complete source was retrieved from Contextor MCP before editing. _compute_layer_health (layer_slicer.py lines 16–184), slice_report_for_layer (lines 187–402), _layer_status (layer_pipeline.py lines 78–89), and execute_layer_pipeline (lines 16–70) were complete symbol fetches with no partial source. execute_global_pipeline (pipeline.py lines 34–708) was fetched as contiguous source ranges covering the complete function and file. Source was not accepted from preview/truncated retrieval.
 
-## CASE_D_SYMBOL_ADDITION
-Not run. Stopped after A mismatch as required.
+The FULL facade caller invokes execute_global_pipeline without a layer_index argument; its optional layer_index parameter defaults to None. The normal full path therefore enters the layer derivation branch:
 
-## CASE_E_REEXPORT_RETARGET
-Not run. Stopped after A mismatch as required.
+    if not layer_index:
+        top_layers = sorted({
+            module_id.split(".")[0]
+            for module_id in modules.keys()
+        })
+        for layer in top_layers:
+            layer_path = Path(root_path) / layer
+            if not layer_path.is_dir():
+                continue
+            layer_sliced = slice_report_for_layer(...)
 
-## CASE_F_SEMANTIC_NOOP
-Not run. Stopped after A mismatch as required.
+slice_report_for_layer constructs layer_modules from graph endpoints plus index_dict.registry.list_modules(), then calls _compute_layer_health with the internal hard/soft graph, cycles, collisions, hotspots, skipped-file records, summary and report header. execute_layer_pipeline calls _layer_status for the returned index record. The global pipeline sorts layer_index_data by layer and writes summary_data["layer_index"] only when that list is nonempty; AnalysisResult receives layer_index_data as its outer layer_index.
+
+The additional FULL registry module input is reconstructable from the candidate’s module domain: build_artifact_pipeline synchronizes the registry with set(modules) before layer slicing, PersistentIdentityRegistry._sync_kind removes paths absent from that set, and list_modules returns the active path_to_id keys. The candidate builder therefore uses candidate.modules plus current graph endpoints. This source contract matches the auditor-supplied builder; no additional FULL-only layer-health fact was found.
+
+## CANONICAL_LAYER_INDEX_BUILDER
+
+Inserted the supplied builder immediately before _refresh_canonical_layer_information. It reads candidate module IDs, dependency_graph hard/soft edges, candidate cycles/collisions, refreshed global summary and hotspots. It performs only root/layer directory metadata checks through is_dir(); it does not invoke the full report pipeline, compact artifacts, IndexDictionary, or source parsing.
+
+The builder calls the existing _compute_layer_health and _layer_status owners. It sorts the resulting records by layer. It derives candidate top-level layer names from candidate.modules and skips names without physical directories.
+
+## LAYER_HEALTH_AND_STATUS_REUSE
+
+The production code calls _compute_layer_health with the same health inputs used by FULL layer slicing: per-layer modules and hard/soft edges; global hotspots, cycles, collisions and skipped files; global summary and report header. It passes the resulting status, cycle count, hotspots and computation mode to _layer_status. No alternate or hardcoded status model was introduced.
+
+## OUTER_AND_SUMMARY_INDEX_PARITY
+
+_refresh_canonical_layer_information now takes keyword-only root_path. After preserving its existing graph validation, hotspot/debt calculation and summary generation, it builds layer_index from the refreshed candidate and merged summary.
+
+For a nonempty index, the same list is installed at:
+- candidate.layer_information["layer_index"]
+- candidate.layer_information["summary_data"]["layer_index"]
+
+For an empty index, the outer field is [] and summary_data removes layer_index, matching FULL. The existing execute_refresh_plan condition and position are preserved; only root_path is passed through.
+
+## NEW_LAYER_REGRESSION
+
+PASS: test_new_top_level_layer_matches_fresh_full_and_preserves_old_view.
+
+The real FULL baseline had alpha and beta. Incremental update_file for gamma/__init__.py returned UPDATED and added gamma.__init__. The incremental outer and summary indexes were the same sorted alpha/beta/gamma list. The complete gamma index entry, including status and computation_mode, matched the independent fresh FULL entry. Complete layer_information projection matched fresh FULL. The prior outer layer_information dictionary and its summary dictionary remained unchanged.
+
+## LAST_LAYER_REMOVAL_REGRESSION
+
+PASS: test_removing_last_layer_module_matches_fresh_full_and_clears_index.
+
+The independent FULL baseline contained gamma/only.py as its sole module. Deleting it returned DELETED and removed gamma.only. Incremental outer layer_index was []; summary_data had no layer_index key; the same assertions held for independent fresh FULL. Complete layer_information projection matched fresh FULL. The prior layer and summary dictionaries remained unchanged.
+
+## COW_AND_NO_SOURCE_REPARSE
+
+PASS: test_layer_index_refresh_does_not_read_or_parse_source_files.
+
+The test prepares a candidate from a real FULL state with materialized modules and graph, then guards reads of the fixture’s unchanged Python files through builtins.open and Path.open and rejects ast.parse during builder execution. It leaves Path.is_dir and directory metadata checks available. No guarded source read or parse occurred.
+
+The existing initializer mutation regression also passed and verified old-view preservation. The added new-layer and removal tests separately assert the previous layer-information and summary dictionaries remain unchanged.
+
+## EXISTING_MULTILAYER_REGRESSIONS
+
+PASS: test_multilayer_cycle_change_checks_preserved_layer_index in the primary focused layer-report suite. It continued to compare the incremental cycle change against fresh FULL and passed.
+
+## SIX_MUTATION_MATRIX_RESULTS
+
+The required command was run unchanged:
+
+    C:\Temp\Contextor_Repo\.venv\Scripts\python.exe -m pytest -q -x -s tests/test_incremental_multi_mutation_full_parity.py
+
+Execution stopped at the first scenario A failure due to -x. Scenarios B–F were not executed.
 
 ## FIRST_MISMATCH_IF_ANY
-First and only compared mutation case was A. Comparator output:
-- path: state.layer_information[{'kind': 'primitive', 'type': 'builtins.str', 'value': 'layer_index'}].<length>
-- incremental: 2
-- fresh FULL: 3
-The complete preserved objects confirm that fresh FULL contains a gamma layer entry absent from incremental.
 
-## MISMATCH_CLASSIFICATION
-CANONICAL_STATE — confirmed difference between direct production incremental and fresh FULL. This is not a harness/setup failure: both FULL analyses succeeded, update returned expected UPDATED, gamma module is in both results, FileState covers all source files, and the strict comparator found a different canonical field. The remaining five cases were not run.
+The B0G2D7A scenario A update returned the expected UPDATED status with no update exception. FileState coverage matched: six expected/tracked paths, no missing paths, no extra paths, and no SHA-256 mismatches. Incremental and fresh FULL module IDs both included gamma.__init__.
 
-## PRESERVED_EVIDENCE_PATHS
-Evidence is outside the repository:
-C:\Users\DafoO\AppData\Local\Temp\pytest-of-DafoO\pytest-570\test_case_a_new_architectural_0\b0g2d7a_a_evidence
-- initial_full.pickle
-- incremental.pickle
-- fresh_full.pickle
-- summary.json
-Pickles contain complete RepositoryAnalysisState objects, FileState mappings, generation metadata, source bytes and repo/cache paths. JSON contains scenario, statuses, exact first difference, module IDs, freshness markers, FileState coverage, source bytes in Base64, SHA-256 and metadata.
+The first complete canonical difference is:
 
-## FILESTATE_AND_MANIFEST_PARITY
-- Case A incremental FileState coverage: 6/6; missing=[], extra=[], sha256_mismatches=[].
-- Fresh FULL FileState coverage: 6/6; missing=[], extra=[], sha256_mismatches=[].
-- module_usages_manifest is covered by the strict canonical comparer, but traversal stopped at the earlier layer_index mismatch; independent manifest parity is not claimed.
+    state.collision_facts["gamma.__init__"][0]["code"]
+    incremental: ""
+    fresh_FULL: "GAMMA_VALUE = 7"
 
-## GRAPH_AND_REFERENCE_PARITY
-The first difference is layer_index. No conclusion is drawn about fields after that first mismatch or the five unexecuted cases. For A, target module is gamma.__init__; both states contain alpha.__init__, alpha.api, beta.__init__, beta.consumer, gamma.__init__, loose.
+The layer_index was not the first differing field in this broader scenario. No further diagnosis or production/test correction was attempted.
 
-## LINEAGE_AND_PROVENANCE_PARITY
-Lineage/reexport scenarios were not reached. No parity claim is made for later canonical fields after the first difference.
+## PRESERVED_EVIDENCE
 
-## LAYER_INFORMATION_AND_CACHE_PARITY
-Parity failed: fresh FULL layer_index contains gamma and incremental does not. Other layer_information fields and fields after the first mismatch were not certified.
+The test preserved the complete scenario A bundle and it was left intact:
 
-## FRESHNESS_AND_COMPLETENESS_PARITY
-In A, all collected family freshness markers are fresh on both sides; module gamma is present on both. FileState SHA coverage is 6/6 on each side. Despite these markers, layer_index differs.
+    C:\Users\DafoO\AppData\Local\Temp\pytest-of-DafoO\pytest-572\test_case_a_new_architectural_0\b0g2d7a_a_evidence\summary.json
+    C:\Users\DafoO\AppData\Local\Temp\pytest-of-DafoO\pytest-572\test_case_a_new_architectural_0\b0g2d7a_a_evidence\initial_full.pickle
+    C:\Users\DafoO\AppData\Local\Temp\pytest-of-DafoO\pytest-572\test_case_a_new_architectural_0\b0g2d7a_a_evidence\incremental.pickle
+    C:\Users\DafoO\AppData\Local\Temp\pytest-of-DafoO\pytest-572\test_case_a_new_architectural_0\b0g2d7a_a_evidence\fresh_full.pickle
 
-## TARGETED_TEST_RESULTS
-- Required command: .venv\Scripts\python.exe -m pytest -q -x -s tests/test_incremental_multi_mutation_full_parity.py
-- Result: 1 failed, 1 warning in 8.73s, exit 1; -x stopped at test_case_a_new_architectural_layer_matches_fresh_full.
-- Failure: A CANONICAL_STATE, expected UPDATED, actual UPDATED, first difference layer_index length 2 vs 3. Test saved evidence before failing.
-- Follow-up transport and atomicity tests were not run because all six cases did not pass.
+summary.json records initial FULL state_id 20261012_151908 at revision 1 and fresh FULL state_id 20261012_151910 at revision 2 under repo_id ctx_15ee9044. It also records the first structural difference, all three module-ID sets, source bytes and hashes, and both complete FileState coverage results.
+
+## REAL_FOUR_WAY_PARITY
+
+NOT RUN. The six-scenario gate stopped at scenario A’s first canonical mismatch. The real Desktop/MCP four-way parity gate is deferred.
 
 ## ATOMICITY_RECHECK
-Not run in this task; follow-up requires all six cases to pass. The preceding B0G2D6A targeted result was 4 failure-atomicity tests passed; this task did not repeat them.
+
+NOT RUN. The six-scenario gate stopped at scenario A’s first canonical mismatch. The four unchanged failure-atomicity tests and additional layer/cached-analytics regressions are deferred.
+
+## TARGETED_TEST_RESULTS
+
+- Primary command: .venv Python with pytest -q -x -s tests/test_incremental_layer_report_parity.py — PASS, 9 passed, 1 warning, 25.54 seconds.
+- Six-scenario command: .venv Python with pytest -q -x -s tests/test_incremental_multi_mutation_full_parity.py — STOPPED at scenario A, first mismatch in state.collision_facts for gamma.__init__ as recorded above; 1 failed, 1 warning, 8.02 seconds.
+- No other test command was run after the mismatch.
 
 ## PY_COMPILE
-.venv\Scripts\python.exe -m py_compile tests\test_incremental_multi_mutation_full_parity.py: PASS, exit 0.
+
+PASS, exit code 0:
+
+    C:\Temp\Contextor_Repo\.venv\Scripts\python.exe -m py_compile contextor\core\analysis\incremental\plan_executor.py tests\test_incremental_layer_report_parity.py
 
 ## GIT_DIFF_CHECK
-- git diff --check: exit 0.
-- git diff --no-index --check -- NUL tests/test_incremental_multi_mutation_full_parity.py: no whitespace errors; exit 1 denotes new untracked file. Git warned only about potential LF/CRLF conversion.
+
+PASS, exit code 0:
+
+    git diff --check -- contextor/core/analysis/incremental/plan_executor.py tests/test_incremental_layer_report_parity.py
+
+Git emitted only its line-ending notice that the LF working copies may be converted to CRLF the next time Git touches these files. No whitespace error was reported.
 
 ## LIVE_REVISION_BEFORE_AFTER
-Before 373. After 375. Watcher recorded event 374 UPDATED and 375 UNCHANGED for the new test file. continuity=continuous; resync_required=false.
+
+375 before the production edit; 376 after the production file’s desktop_watcher event; 377 after the authorized test file’s desktop_watcher event and post-test check. The same activity epoch was observed. The post-test event cursor from revision 376 was continuous and returned resync_required=false.
 
 ## WORKSPACE_SYNC_POSTCHECK
-Contextor fetched complete implementation of test_case_a_new_architectural_layer_matches_fresh_full; workspace_sync=verified, canonical revision 375.
+
+PASS: Contextor fetched both complete updated production functions at canonical revision 377 with workspace_sync=verified. It also returned the updated execute_refresh_plan call range. The source watcher produced UPDATED events for each of the two authorized workspace files.
 
 ## RESYNC_REQUIRED
-false after test; event continuity continuous.
+
+false. Event continuity remained continuous through revision 377.
 
 ## RESTART_REQUIRED
-No. Only a test file changed. No restart or serving-process certification was performed.
+
+A manual reload of the running service that imports plan_executor.py is required before operational certification. No restart was performed. Contextor source indexing/workspace synchronization does not attest that an already-running process reloaded imported code.
 
 ## FINAL_VERDICT
-B0G2D7A_NEW_CANONICAL_MISMATCH. The first test shows direct incremental creation of a package leaves layer_information.layer_index shorter than fresh FULL. Evidence is preserved; B–F and follow-up gate were intentionally not run. STOP; await proceduj.
 
+B0G2D7B_NEXT_CANONICAL_MISMATCH
+
+The requested layer-index refresh and its focused regression suite pass. The unchanged six-scenario gate exposed a new first canonical mismatch in collision_facts during scenario A, so the remaining matrix, four-way parity, atomicity and related regression gates were not run.
 ## FULL_DIFFS
-Complete actual diff of the new test follows.
 
-<pre>
-diff --git a/tests/test_incremental_multi_mutation_full_parity.py b/tests/test_incremental_multi_mutation_full_parity.py
-new file mode 100644
-index 0000000..0141993
---- /dev/null
-+++ b/tests/test_incremental_multi_mutation_full_parity.py
-@@ -0,0 +1,419 @@
-+"""Direct incremental mutation parity against a fresh FULL analysis."""
+diff --git a/contextor/core/analysis/incremental/plan_executor.py b/contextor/core/analysis/incremental/plan_executor.py
+index ec0f52c..af962f5 100644
+--- a/contextor/core/analysis/incremental/plan_executor.py
++++ b/contextor/core/analysis/incremental/plan_executor.py
+@@ -850,8 +850,171 @@ def _refresh_canonical_artifact_consumers(
+         }
+ 
+ 
++def _build_canonical_layer_index(
++    candidate: CandidateState,
++    *,
++    root_path: str | Path,
++    global_summary: dict,
++    global_hotspots: list,
++) -> list[dict]:
++    """Build FULL-compatible layer index from current canonical RAM."""
++    from types import SimpleNamespace
 +
-+from __future__ import annotations
-+
-+import base64
-+import copy
-+import hashlib
-+import json
-+import pickle
-+from pathlib import Path
-+from typing import Any
-+
-+import pytest
-+
-+from contextor.core.analysis.state_manager import (
-+    FileStateManager,
-+    RepositoryAnalysisState,
-+    load_engine_state,
-+)
-+from contextor.core.api.facade import ContextorFacade
-+from contextor.core.live_state.hydration import hydrate_repository_engine
-+from contextor.core.live_state.store import read_metadata
-+from contextor.core.paths import repo_cache_dir
-+from test_desktop_mcp_canonical_parity import (
-+    _first_difference,
-+    _state_projection,
-+)
-+
-+
-+_COMMON_FIXTURE = {
-+    "alpha/__init__.py": b"",
-+    "alpha/api.py": b"def api_function():\n    return 1\n",
-+    "beta/__init__.py": b"",
-+    "beta/consumer.py": (
-+        b"from alpha.api import api_function\n"
-+        b"CONSUMER_RESULT = api_function()\n"
-+    ),
-+    "loose.py": b"LOOSE_VALUE = 0\n",
-+}
-+
-+_REEXPORT_FIXTURE = {
-+    "alpha/__init__.py": b"from .api import api_function\n",
-+    "alpha/api.py": b"def api_function():\n    return 1\n",
-+    "beta/__init__.py": b"",
-+    "beta/consumer.py": (
-+        b"from alpha import api_function\n"
-+        b"CONSUMER_RESULT = api_function()\n"
-+    ),
-+    "loose.py": b"LOOSE_VALUE = 0\n",
-+}
-+
-+
-+def _write_sources(root: Path, sources: dict[str, bytes]) -> None:
-+    for relative, content in sources.items():
-+        target = root / relative
-+        target.parent.mkdir(parents=True, exist_ok=True)
-+        target.write_bytes(content)
-+
-+
-+def _source_bytes(root: Path) -> dict[str, bytes]:
-+    return {
-+        path.relative_to(root).as_posix(): path.read_bytes()
-+        for path in sorted(root.rglob("*.py"))
-+    }
-+
-+
-+def _source_hashes(sources: dict[str, bytes]) -> dict[str, str]:
-+    return {
-+        relative: hashlib.sha256(content).hexdigest()
-+        for relative, content in sorted(sources.items())
-+    }
-+
-+
-+def _run_full_and_load(root: Path):
-+    errors, _result = ContextorFacade.analyze_project(str(root))
-+    assert not errors, f"FULL validation failed for isolated fixture {root}: {errors!r}"
-+
-+    cache_dir = repo_cache_dir(root)
-+    metadata = read_metadata(cache_dir)
-+    assert metadata is not None, f"FULL did not persist snapshot metadata for {root}"
-+    state = load_engine_state(
-+        str(cache_dir),
-+        metadata.state_id,
-+        expected_repo_id=metadata.repo_id,
-+        expected_root_path=str(root.resolve()),
++    from contextor.core.reporting_engine.layer_pipeline import (
++        _layer_status,
 +    )
-+    assert isinstance(state, RepositoryAnalysisState)
-+    assert state.state_id == metadata.state_id
-+    assert state.revision == metadata.revision
-+    manager = FileStateManager(str(cache_dir))
-+    return state, manager._state.copy(), metadata
++    from contextor.core.reporting_engine.layer_slicer import (
++        _compute_layer_health,
++    )
 +
++    graph = candidate.dependency_graph
++    if graph is None:
++        raise RuntimeError(
++            "Cannot build layer index without canonical graph"
++        )
 +
-+def _file_state_coverage(root: Path, file_states: dict[str, Any]) -> dict:
-+    source_paths = {
-+        str(path.resolve()): path
-+        for path in root.rglob("*.py")
-+    }
-+    tracked_paths = set(file_states)
-+    missing = sorted(set(source_paths) - tracked_paths)
-+    extra = sorted(tracked_paths - set(source_paths))
-+    digest_mismatches = []
-+    for absolute_path in sorted(set(source_paths) & tracked_paths):
-+        expected = hashlib.sha256(source_paths[absolute_path].read_bytes()).hexdigest()
-+        actual = getattr(file_states[absolute_path], "sha256", None)
-+        if actual != expected:
-+            digest_mismatches.append(
-+                {"path": absolute_path, "expected_sha256": expected, "actual_sha256": actual}
++    hard_edges = graph.hard_edges
++    soft_edges = graph.soft_edges
++
++    if not isinstance(hard_edges, dict) or not isinstance(
++        soft_edges, dict
++    ):
++        raise RuntimeError(
++            "Cannot build layer index from invalid graph"
++        )
++
++    root = Path(root_path).resolve()
++    module_ids = set(candidate.modules)
++
++    known_modules = set(module_ids)
++    known_modules.update(hard_edges)
++    for targets in hard_edges.values():
++        known_modules.update(targets)
++
++    skipped_raw = global_summary.get("skipped_files", ())
++    if not isinstance(skipped_raw, (list, tuple)):
++        raise RuntimeError(
++            "Invalid canonical skipped-file report"
++        )
++
++    skipped = []
++    for item in skipped_raw:
++        if not isinstance(item, dict):
++            raise RuntimeError(
++                "Invalid canonical skipped-file record"
 +            )
-+    return {
-+        "expected_source_count": len(source_paths),
-+        "tracked_path_count": len(tracked_paths),
-+        "missing_paths": missing,
-+        "extra_paths": extra,
-+        "sha256_mismatches": digest_mismatches,
-+    }
++        skipped.append(SimpleNamespace(**item))
 +
++    result = []
 +
-+def _freshness_markers(state: RepositoryAnalysisState) -> dict:
-+    values = vars(state)
-+    return {
-+        key: copy.deepcopy(value)
-+        for key, value in values.items()
-+        if key.endswith("_state") or key in {"module_parse_freshness", "resync_required"}
-+    }
++    top_layers = sorted({
++        module_id.split(".")[0]
++        for module_id in module_ids
++    })
 +
++    for layer in top_layers:
++        if not (root / layer).is_dir():
++            continue
 +
-+def _capture_payload(
-+    *,
-+    state: RepositoryAnalysisState,
-+    file_states: dict[str, Any],
-+    metadata: Any,
-+    source_bytes: dict[str, bytes],
-+    root: Path,
-+) -> dict:
-+    return {
-+        "state": copy.deepcopy(state),
-+        "file_states": copy.deepcopy(file_states),
-+        "metadata": copy.deepcopy(metadata),
-+        "source_bytes": dict(source_bytes),
-+        "cache_dir": str(repo_cache_dir(root)),
-+        "root": str(root.resolve()),
-+    }
++        def belongs(module_id: str) -> bool:
++            return (
++                module_id == layer
++                or module_id.startswith(layer + ".")
++            )
 +
++        layer_modules = sorted(
++            module_id
++            for module_id in known_modules
++            if belongs(module_id)
++        )
++        layer_set = set(layer_modules)
 +
-+def _preserve_mismatch(
-+    tmp_path: Path,
-+    *,
-+    scenario_id: str,
-+    expected_status: str,
-+    actual_status: str | None,
-+    update_exception: str | None,
-+    target_module_id: str,
-+    initial_payload: dict,
-+    incremental_payload: dict,
-+    full_payload: dict,
-+    state_difference: tuple | None,
-+    incremental_file_coverage: dict,
-+    full_file_coverage: dict,
-+    mismatch_kind: str,
-+) -> Path:
-+    evidence_dir = tmp_path / f"b0g2d7a_{scenario_id.lower()}_evidence"
-+    evidence_dir.mkdir(parents=True, exist_ok=True)
-+    for name, payload in (
-+        ("initial_full.pickle", initial_payload),
-+        ("incremental.pickle", incremental_payload),
-+        ("fresh_full.pickle", full_payload),
-+    ):
-+        with (evidence_dir / name).open("wb") as output:
-+            pickle.dump(payload, output, protocol=pickle.HIGHEST_PROTOCOL)
++        internal_hard = {}
++        internal_soft = {}
++        inbound_hard = []
++        outbound_hard = []
 +
-+    source_bytes = incremental_payload["source_bytes"]
-+    summary = {
-+        "scenario_id": scenario_id,
-+        "mismatch_kind": mismatch_kind,
-+        "expected_update_status": expected_status,
-+        "actual_update_status": actual_status,
-+        "update_exception": update_exception,
-+        "target_module_id": target_module_id,
-+        "initial_module_ids": sorted(initial_payload["state"].modules),
-+        "incremental_module_ids": sorted(incremental_payload["state"].modules),
-+        "fresh_full_module_ids": sorted(full_payload["state"].modules),
-+        "family_freshness_markers": {
-+            "initial": _freshness_markers(initial_payload["state"]),
-+            "incremental": _freshness_markers(incremental_payload["state"]),
-+            "fresh_full": _freshness_markers(full_payload["state"]),
-+        },
-+        "incremental_file_state_coverage": incremental_file_coverage,
-+        "fresh_full_file_state_coverage": full_file_coverage,
-+        "first_structural_difference": state_difference,
-+        "source_bytes_base64": {
-+            relative: base64.b64encode(content).decode("ascii")
-+            for relative, content in sorted(source_bytes.items())
-+        },
-+        "source_sha256": _source_hashes(source_bytes),
-+        "snapshot_metadata": {
-+            "initial_full": repr(initial_payload["metadata"]),
-+            "fresh_full": repr(full_payload["metadata"]),
-+        },
-+    }
-+    (evidence_dir / "summary.json").write_text(
-+        json.dumps(summary, indent=2, sort_keys=True, default=repr) + "\n",
-+        encoding="utf-8",
++        for src, targets in sorted(hard_edges.items()):
++            src_in = belongs(src)
++            for target in sorted(targets):
++                target_in = belongs(target)
++                if src_in and target_in:
++                    internal_hard.setdefault(src, []).append(
++                        target
++                    )
++                elif src_in and not target_in:
++                    outbound_hard.append({
++                        "source": src,
++                        "target": target,
++                    })
++                elif not src_in and target_in:
++                    inbound_hard.append({
++                        "source": src,
++                        "target": target,
++                    })
++
++        for src, targets in sorted(soft_edges.items()):
++            if not belongs(src):
++                continue
++            for target in sorted(targets):
++                if belongs(target):
++                    internal_soft.setdefault(src, []).append(
++                        target
++                    )
++
++        internal_hard = {
++            src: sorted(set(targets))
++            for src, targets in sorted(internal_hard.items())
++        }
++        internal_soft = {
++            src: sorted(set(targets))
++            for src, targets in sorted(internal_soft.items())
++        }
++
++        health = _compute_layer_health(
++            layer_set=layer_set,
++            layer_modules=layer_modules,
++            internal_hard=internal_hard,
++            internal_soft=internal_soft,
++            inbound_hard=inbound_hard,
++            outbound_hard=outbound_hard,
++            global_hotspots=global_hotspots,
++            global_cycles=candidate.cycles,
++            global_collisions=candidate.collisions,
++            global_skipped_files=skipped,
++            global_summary=global_summary,
++            report_header=global_summary.get(
++                "report_header"
++            ),
++        )
++
++        status = _layer_status(
++            layer,
++            {
++                "layer_module_count": len(layer_modules),
++                "status": health["status"],
++                "layer_cycles_count": health[
++                    "layer_cycles_count"
++                ],
++                "hotspots": health["hotspots"],
++                "computation_mode": health[
++                    "computation_mode"
++                ],
++            },
++        )
++
++        result.append(status)
++
++    return sorted(
++        result,
++        key=lambda item: item["layer"],
 +    )
-+    return evidence_dir
 +
 +
-+def _run_mutation_case(
-+    tmp_path: Path,
+ def _refresh_canonical_layer_information(
+     candidate: CandidateState,
 +    *,
-+    scenario_id: str,
-+    fixture: dict[str, bytes],
-+    mutation_path: str,
-+    mutation_bytes: bytes | None,
-+    expected_status: str,
-+) -> None:
-+    root = tmp_path / "repo"
-+    root.mkdir()
-+    _write_sources(root, fixture)
-+
-+    initial_state, initial_file_states, initial_metadata = _run_full_and_load(root)
-+    hydrated = hydrate_repository_engine(root)
-+    assert hydrated is not None, f"Could not hydrate FULL baseline for {scenario_id}: {root}"
-+    engine = hydrated.engine
-+    assert engine.state.state_id == initial_metadata.state_id
-+    assert engine.state.revision == initial_metadata.revision
-+    assert _state_projection(engine.state) == _state_projection(initial_state)
-+
-+    initial_file_states = copy.deepcopy(engine.state_manager._state)
-+    initial_state = engine.state
-+    initial_source_bytes = _source_bytes(root)
-+    initial_payload = _capture_payload(
-+        state=initial_state,
-+        file_states=initial_file_states,
-+        metadata=initial_metadata,
-+        source_bytes=initial_source_bytes,
-+        root=root,
++    root_path: str | Path,
+ ) -> None:
+     """Refresh FULL-compatible graph report fields from canonical RAM."""
+     from contextor.core.hotspots import detect_hotspots
+@@ -921,10 +1084,23 @@ def _refresh_canonical_layer_information(
+         **refreshed_summary,
+     }
+ 
++    layer_index = _build_canonical_layer_index(
++        candidate,
++        root_path=root_path,
++        global_summary=merged_summary,
++        global_hotspots=hotspots,
 +    )
-+    initial_coverage = _file_state_coverage(root, initial_file_states)
-+    assert not initial_coverage["missing_paths"]
-+    assert not initial_coverage["extra_paths"]
-+    assert not initial_coverage["sha256_mismatches"]
 +
-+    target = root / mutation_path
-+    target.parent.mkdir(parents=True, exist_ok=True)
-+    if mutation_bytes is None:
-+        target.unlink()
++    if layer_index:
++        merged_summary["layer_index"] = layer_index
 +    else:
-+        target.write_bytes(mutation_bytes)
++        merged_summary.pop("layer_index", None)
 +
-+    actual_status = None
-+    update_exception = None
-+    try:
-+        result = engine.update_file(str(target.resolve()))
-+        actual_status = result.status
-+    except Exception as exc:
-+        update_exception = f"{type(exc).__module__}.{type(exc).__qualname__}: {exc}"
-+
-+    incremental_state = copy.deepcopy(engine.state)
-+    incremental_file_states = copy.deepcopy(engine.state_manager._state)
-+    incremental_source_bytes = _source_bytes(root)
-+    incremental_payload = _capture_payload(
-+        state=incremental_state,
-+        file_states=incremental_file_states,
-+        metadata=initial_metadata,
-+        source_bytes=incremental_source_bytes,
-+        root=root,
-+    )
-+    incremental_projection = _state_projection(
-+        incremental_state,
-+        normalize_report_timestamps=True,
-+    )
-+    incremental_coverage = _file_state_coverage(root, incremental_file_states)
-+
-+    fresh_state, fresh_file_states, fresh_metadata = _run_full_and_load(root)
-+    assert _source_bytes(root) == incremental_source_bytes, (
-+        f"fixture source bytes changed during fresh FULL for {scenario_id}"
-+    )
-+    full_payload = _capture_payload(
-+        state=fresh_state,
-+        file_states=fresh_file_states,
-+        metadata=fresh_metadata,
-+        source_bytes=incremental_source_bytes,
-+        root=root,
-+    )
-+    fresh_projection = _state_projection(
-+        fresh_state,
-+        normalize_report_timestamps=True,
-+    )
-+    state_difference = _first_difference(incremental_projection, fresh_projection)
-+    full_coverage = _file_state_coverage(root, fresh_file_states)
-+
-+    mismatch_kind = None
-+    if update_exception is not None:
-+        mismatch_kind = "UPDATE_EXCEPTION"
-+    elif actual_status != expected_status:
-+        mismatch_kind = "UPDATE_STATUS"
-+    elif state_difference is not None:
-+        mismatch_kind = "CANONICAL_STATE"
-+    elif any(
-+        incremental_coverage[key]
-+        for key in ("missing_paths", "extra_paths", "sha256_mismatches")
-+    ):
-+        mismatch_kind = "INCREMENTAL_FILESTATE"
-+    elif any(
-+        full_coverage[key]
-+        for key in ("missing_paths", "extra_paths", "sha256_mismatches")
-+    ):
-+        mismatch_kind = "FULL_FILESTATE"
-+
-+    if mismatch_kind is not None:
-+        target_module_id = ".".join(Path(mutation_path).with_suffix("").parts)
-+        evidence_dir = _preserve_mismatch(
-+            tmp_path,
-+            scenario_id=scenario_id,
-+            expected_status=expected_status,
-+            actual_status=actual_status,
-+            update_exception=update_exception,
-+            target_module_id=target_module_id,
-+            initial_payload=initial_payload,
-+            incremental_payload=incremental_payload,
-+            full_payload=full_payload,
-+            state_difference=state_difference,
-+            incremental_file_coverage=incremental_coverage,
-+            full_file_coverage=full_coverage,
-+            mismatch_kind=mismatch_kind,
+     candidate.layer_information = {
+         **previous,
+         "hotspots": hotspots,
+         "debt": debt,
++        "layer_index": layer_index,
+         "summary_data": merged_summary,
+     }
+ 
+@@ -1401,7 +1577,10 @@ def execute_refresh_plan(
+             or plan.graph_recomputations
+         )
+     ):
+-        _refresh_canonical_layer_information(candidate)
++        _refresh_canonical_layer_information(
++            candidate,
++            root_path=root_path,
 +        )
-+        pytest.fail(
-+            f"{scenario_id} {mismatch_kind}: expected_status={expected_status!r}; "
-+            f"actual_status={actual_status!r}; update_exception={update_exception!r}; "
-+            f"first_difference={state_difference!r}; "
-+            f"incremental_file_coverage={incremental_coverage!r}; "
-+            f"fresh_full_file_coverage={full_coverage!r}; evidence={evidence_dir}"
+ 
+     derived_artifact_projection = None
+     derived_artifact_projection_failed = False
+diff --git a/tests/test_incremental_layer_report_parity.py b/tests/test_incremental_layer_report_parity.py
+index ce96471..713f948 100644
+--- a/tests/test_incremental_layer_report_parity.py
++++ b/tests/test_incremental_layer_report_parity.py
+@@ -2,6 +2,8 @@
+ 
+ from __future__ import annotations
+ 
++import ast
++import builtins
+ from copy import deepcopy
+ from pathlib import Path
+ 
+@@ -11,6 +13,7 @@ from contextor.core.analysis.incremental.materialization import (
+     ensure_cached_analytics,
+ )
+ from contextor.core.analysis.incremental.plan_executor import (
++    _build_canonical_layer_index,
+     _prepare_candidate_state,
+     _refresh_canonical_layer_information,
+ )
+@@ -138,18 +141,185 @@ def test_initializer_graph_report_matches_fresh_full_and_preserves_old_view(tmp_
+     assert difference is None, f"layer report mismatch: {difference!r}; root={tmp_path}"
+ 
+ 
+-def test_empty_and_untrusted_layer_views_do_not_fabricate_reports():
++def test_new_top_level_layer_matches_fresh_full_and_preserves_old_view(tmp_path):
++    _write_sources(
++        tmp_path,
++        {
++            "alpha/__init__.py": "",
++            "alpha/value.py": "ALPHA_VALUE = 1\n",
++            "beta/__init__.py": "",
++            "beta/value.py": "BETA_VALUE = 2\n",
++        },
++    )
++    baseline = _full_state(tmp_path)
++    assert {
++        item["layer"]
++        for item in baseline.layer_information["layer_index"]
++    } == {"alpha", "beta"}
++
++    hydrated = hydrate_repository_engine(tmp_path)
++    assert hydrated is not None
++    engine = hydrated.engine
++    previous_layer = engine.state.layer_information
++    previous_summary = previous_layer["summary_data"]
++    previous_copy = deepcopy(previous_layer)
++
++    gamma_init = tmp_path / "gamma" / "__init__.py"
++    gamma_init.parent.mkdir(parents=True, exist_ok=True)
++    gamma_init.write_text("GAMMA_VALUE = 7\n", encoding="utf-8")
++
++    result = engine.update_file(str(gamma_init))
++    assert result.status == "UPDATED"
++    assert "gamma.__init__" in engine.state.modules
++
++    incremental = deepcopy(engine.state)
++    layer_index = incremental.layer_information["layer_index"]
++    summary_index = incremental.layer_information["summary_data"]["layer_index"]
++    assert [item["layer"] for item in layer_index] == [
++        "alpha",
++        "beta",
++        "gamma",
++    ]
++    assert layer_index == summary_index
++
++    oracle = _full_state(tmp_path)
++    full_index = oracle.layer_information["layer_index"]
++    gamma_entry = next(item for item in layer_index if item["layer"] == "gamma")
++    full_gamma_entry = next(item for item in full_index if item["layer"] == "gamma")
++    assert gamma_entry == full_gamma_entry
++    assert gamma_entry["status"] == full_gamma_entry["status"]
++    assert gamma_entry["computation_mode"] == full_gamma_entry["computation_mode"]
++    assert [item["layer"] for item in full_index] == [
++        "alpha",
++        "beta",
++        "gamma",
++    ]
++    _assert_layer_parity(incremental, oracle, tmp_path)
++
++    assert previous_layer == previous_copy
++    assert previous_summary == previous_copy["summary_data"]
++
++
++def test_removing_last_layer_module_matches_fresh_full_and_clears_index(tmp_path):
++    _write_sources(
++        tmp_path,
++        {"gamma/only.py": "GAMMA_VALUE = 7\n"},
++    )
++    baseline = _full_state(tmp_path)
++    assert [
++        item["layer"]
++        for item in baseline.layer_information["layer_index"]
++    ] == ["gamma"]
++
++    hydrated = hydrate_repository_engine(tmp_path)
++    assert hydrated is not None
++    engine = hydrated.engine
++    previous_layer = engine.state.layer_information
++    previous_summary = previous_layer["summary_data"]
++    previous_copy = deepcopy(previous_layer)
++
++    source = tmp_path / "gamma" / "only.py"
++    source.unlink()
++    result = engine.update_file(str(source))
++    assert result.status == "DELETED"
++    assert "gamma.only" not in engine.state.modules
++
++    incremental = deepcopy(engine.state)
++    assert incremental.layer_information["layer_index"] == []
++    assert "layer_index" not in incremental.layer_information["summary_data"]
++
++    oracle = _full_state(tmp_path)
++    assert oracle.layer_information["layer_index"] == []
++    assert "layer_index" not in oracle.layer_information["summary_data"]
++    _assert_layer_parity(incremental, oracle, tmp_path)
++
++    assert previous_layer == previous_copy
++    assert previous_summary == previous_copy["summary_data"]
++
++
++def test_layer_index_refresh_does_not_read_or_parse_source_files(tmp_path, monkeypatch):
++    _write_sources(
++        tmp_path,
++        {
++            "alpha/__init__.py": "",
++            "alpha/value.py": "ALPHA_VALUE = 1\n",
++            "beta/__init__.py": "",
++            "beta/value.py": "BETA_VALUE = 2\n",
++        },
++    )
++    state = _full_state(tmp_path)
++    candidate = _prepare_candidate_state(state)
++    assert candidate.modules
++    assert candidate.dependency_graph is not None
++
++    repo_root = tmp_path.resolve()
++    protected_sources = {
++        path.resolve()
++        for path in tmp_path.rglob("*.py")
++    }
++    assert protected_sources
++
++    def is_protected_source(value) -> bool:
++        if isinstance(value, int):
++            return False
++        try:
++            path = Path(value).resolve()
++            path.relative_to(repo_root)
++        except (TypeError, ValueError, OSError):
++            return False
++        return path in protected_sources
++
++    original_builtin_open = builtins.open
++    original_path_open = Path.open
++
++    def guarded_builtin_open(file, *args, **kwargs):
++        if is_protected_source(file):
++            pytest.fail(f"layer refresh read unchanged Python source: {file}")
++        return original_builtin_open(file, *args, **kwargs)
++
++    def guarded_path_open(path, *args, **kwargs):
++        if is_protected_source(path):
++            pytest.fail(f"layer refresh read unchanged Python source: {path}")
++        return original_path_open(path, *args, **kwargs)
++
++    def reject_parse(*args, **kwargs):
++        pytest.fail("layer refresh parsed source instead of using canonical RAM")
++
++    monkeypatch.setattr(builtins, "open", guarded_builtin_open)
++    monkeypatch.setattr(Path, "open", guarded_path_open)
++    monkeypatch.setattr(ast, "parse", reject_parse)
++
++    index = _build_canonical_layer_index(
++        candidate,
++        root_path=tmp_path,
++        global_summary=state.layer_information["summary_data"],
++        global_hotspots=state.layer_information["hotspots"],
++    )
++
++    assert [item["layer"] for item in index] == ["alpha", "beta"]
++
++
++def test_empty_and_untrusted_layer_views_do_not_fabricate_reports(tmp_path):
+     state = RepositoryAnalysisState(layer_information={})
+     candidate = _prepare_candidate_state(state)
+-    _refresh_canonical_layer_information(candidate)
++    _refresh_canonical_layer_information(
++        candidate,
++        root_path=tmp_path,
++    )
+     assert candidate.layer_information == {}
+     assert state.layer_information == {}
+     candidate.layer_information = {"summary_data": None}
+     with pytest.raises(RuntimeError, match="summary_data is unavailable"):
+-        _refresh_canonical_layer_information(candidate)
++        _refresh_canonical_layer_information(
++            candidate,
++            root_path=tmp_path,
 +        )
-+
-+    if scenario_id == "F":
-+        source_sha = hashlib.sha256(incremental_source_bytes["loose.py"]).hexdigest()
-+        tracked_path = str((root / "loose.py").resolve())
-+        assert incremental_file_states[tracked_path].sha256 == source_sha
-+        assert incremental_state.module_usages_manifest["loose"]["sha256"] == source_sha
-+
-+
-+def test_case_a_new_architectural_layer_matches_fresh_full(tmp_path):
-+    _run_mutation_case(
-+        tmp_path,
-+        scenario_id="A",
-+        fixture=_COMMON_FIXTURE,
-+        mutation_path="gamma/__init__.py",
-+        mutation_bytes=b"GAMMA_VALUE = 7\n",
-+        expected_status="UPDATED",
-+    )
-+
-+
-+def test_case_b_module_deletion_matches_fresh_full(tmp_path):
-+    _run_mutation_case(
-+        tmp_path,
-+        scenario_id="B",
-+        fixture=_COMMON_FIXTURE,
-+        mutation_path="beta/consumer.py",
-+        mutation_bytes=None,
-+        expected_status="DELETED",
-+    )
-+
-+
-+def test_case_c_consumer_usage_change_matches_fresh_full(tmp_path):
-+    _run_mutation_case(
-+        tmp_path,
-+        scenario_id="C",
-+        fixture=_COMMON_FIXTURE,
-+        mutation_path="beta/consumer.py",
-+        mutation_bytes=(
-+            b"from alpha.api import api_function\n"
-+            b"CONSUMER_RESULT = api_function()\n"
-+            b"SECOND_RESULT = api_function()\n"
-+        ),
-+        expected_status="UPDATED",
-+    )
-+
-+
-+def test_case_d_symbol_addition_matches_fresh_full(tmp_path):
-+    _run_mutation_case(
-+        tmp_path,
-+        scenario_id="D",
-+        fixture=_COMMON_FIXTURE,
-+        mutation_path="alpha/api.py",
-+        mutation_bytes=(
-+            b"def api_function():\n"
-+            b"    return 1\n"
-+            b"\n"
-+            b"def added_function():\n"
-+            b"    return 2\n"
-+        ),
-+        expected_status="UPDATED",
-+    )
-+
-+
-+def test_case_e_reexport_retarget_matches_fresh_full(tmp_path):
-+    _run_mutation_case(
-+        tmp_path,
-+        scenario_id="E",
-+        fixture=_REEXPORT_FIXTURE,
-+        mutation_path="alpha/__init__.py",
-+        mutation_bytes=b"api_function = 7\n",
-+        expected_status="UPDATED",
-+    )
-+
-+
-+def test_case_f_semantic_noop_matches_fresh_full(tmp_path):
-+    _run_mutation_case(
-+        tmp_path,
-+        scenario_id="F",
-+        fixture=_COMMON_FIXTURE,
-+        mutation_path="loose.py",
-+        mutation_bytes=(
-+            b"LOOSE_VALUE = 0\n"
-+            b"# appended nonsemantic comment\n"
-+        ),
-+        expected_status="UNCHANGED",
-+    )
-</pre>
+     candidate.layer_information = {"summary_data": {"report_header": {}}}
+     with pytest.raises(RuntimeError, match="untrusted canonical facts"):
+-        _refresh_canonical_layer_information(candidate)
++        _refresh_canonical_layer_information(
++            candidate,
++            root_path=tmp_path,
++        )
+ 
+ 
+ @pytest.mark.parametrize("invalid_input", ["consumption", "graph"])

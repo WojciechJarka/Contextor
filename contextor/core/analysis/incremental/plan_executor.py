@@ -850,8 +850,171 @@ def _refresh_canonical_artifact_consumers(
         }
 
 
+def _build_canonical_layer_index(
+    candidate: CandidateState,
+    *,
+    root_path: str | Path,
+    global_summary: dict,
+    global_hotspots: list,
+) -> list[dict]:
+    """Build FULL-compatible layer index from current canonical RAM."""
+    from types import SimpleNamespace
+
+    from contextor.core.reporting_engine.layer_pipeline import (
+        _layer_status,
+    )
+    from contextor.core.reporting_engine.layer_slicer import (
+        _compute_layer_health,
+    )
+
+    graph = candidate.dependency_graph
+    if graph is None:
+        raise RuntimeError(
+            "Cannot build layer index without canonical graph"
+        )
+
+    hard_edges = graph.hard_edges
+    soft_edges = graph.soft_edges
+
+    if not isinstance(hard_edges, dict) or not isinstance(
+        soft_edges, dict
+    ):
+        raise RuntimeError(
+            "Cannot build layer index from invalid graph"
+        )
+
+    root = Path(root_path).resolve()
+    module_ids = set(candidate.modules)
+
+    known_modules = set(module_ids)
+    known_modules.update(hard_edges)
+    for targets in hard_edges.values():
+        known_modules.update(targets)
+
+    skipped_raw = global_summary.get("skipped_files", ())
+    if not isinstance(skipped_raw, (list, tuple)):
+        raise RuntimeError(
+            "Invalid canonical skipped-file report"
+        )
+
+    skipped = []
+    for item in skipped_raw:
+        if not isinstance(item, dict):
+            raise RuntimeError(
+                "Invalid canonical skipped-file record"
+            )
+        skipped.append(SimpleNamespace(**item))
+
+    result = []
+
+    top_layers = sorted({
+        module_id.split(".")[0]
+        for module_id in module_ids
+    })
+
+    for layer in top_layers:
+        if not (root / layer).is_dir():
+            continue
+
+        def belongs(module_id: str) -> bool:
+            return (
+                module_id == layer
+                or module_id.startswith(layer + ".")
+            )
+
+        layer_modules = sorted(
+            module_id
+            for module_id in known_modules
+            if belongs(module_id)
+        )
+        layer_set = set(layer_modules)
+
+        internal_hard = {}
+        internal_soft = {}
+        inbound_hard = []
+        outbound_hard = []
+
+        for src, targets in sorted(hard_edges.items()):
+            src_in = belongs(src)
+            for target in sorted(targets):
+                target_in = belongs(target)
+                if src_in and target_in:
+                    internal_hard.setdefault(src, []).append(
+                        target
+                    )
+                elif src_in and not target_in:
+                    outbound_hard.append({
+                        "source": src,
+                        "target": target,
+                    })
+                elif not src_in and target_in:
+                    inbound_hard.append({
+                        "source": src,
+                        "target": target,
+                    })
+
+        for src, targets in sorted(soft_edges.items()):
+            if not belongs(src):
+                continue
+            for target in sorted(targets):
+                if belongs(target):
+                    internal_soft.setdefault(src, []).append(
+                        target
+                    )
+
+        internal_hard = {
+            src: sorted(set(targets))
+            for src, targets in sorted(internal_hard.items())
+        }
+        internal_soft = {
+            src: sorted(set(targets))
+            for src, targets in sorted(internal_soft.items())
+        }
+
+        health = _compute_layer_health(
+            layer_set=layer_set,
+            layer_modules=layer_modules,
+            internal_hard=internal_hard,
+            internal_soft=internal_soft,
+            inbound_hard=inbound_hard,
+            outbound_hard=outbound_hard,
+            global_hotspots=global_hotspots,
+            global_cycles=candidate.cycles,
+            global_collisions=candidate.collisions,
+            global_skipped_files=skipped,
+            global_summary=global_summary,
+            report_header=global_summary.get(
+                "report_header"
+            ),
+        )
+
+        status = _layer_status(
+            layer,
+            {
+                "layer_module_count": len(layer_modules),
+                "status": health["status"],
+                "layer_cycles_count": health[
+                    "layer_cycles_count"
+                ],
+                "hotspots": health["hotspots"],
+                "computation_mode": health[
+                    "computation_mode"
+                ],
+            },
+        )
+
+        result.append(status)
+
+    return sorted(
+        result,
+        key=lambda item: item["layer"],
+    )
+
+
 def _refresh_canonical_layer_information(
     candidate: CandidateState,
+    *,
+    root_path: str | Path,
 ) -> None:
     """Refresh FULL-compatible graph report fields from canonical RAM."""
     from contextor.core.hotspots import detect_hotspots
@@ -921,10 +1084,23 @@ def _refresh_canonical_layer_information(
         **refreshed_summary,
     }
 
+    layer_index = _build_canonical_layer_index(
+        candidate,
+        root_path=root_path,
+        global_summary=merged_summary,
+        global_hotspots=hotspots,
+    )
+
+    if layer_index:
+        merged_summary["layer_index"] = layer_index
+    else:
+        merged_summary.pop("layer_index", None)
+
     candidate.layer_information = {
         **previous,
         "hotspots": hotspots,
         "debt": debt,
+        "layer_index": layer_index,
         "summary_data": merged_summary,
     }
 
@@ -1401,7 +1577,10 @@ def execute_refresh_plan(
             or plan.graph_recomputations
         )
     ):
-        _refresh_canonical_layer_information(candidate)
+        _refresh_canonical_layer_information(
+            candidate,
+            root_path=root_path,
+        )
 
     derived_artifact_projection = None
     derived_artifact_projection_failed = False
