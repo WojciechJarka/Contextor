@@ -90,6 +90,33 @@ def _legacy_eager_extract(tree: ast.AST, module_path: str, file_path: str = "") 
     return symbols
 
 
+def _h2c_materialized_usage_baseline(
+    source_by_module: dict[str, str],
+) -> dict:
+    """Build real reference evidence for synthetic H2C fixtures."""
+    from contextor.core.reference.engine import (
+        extract_module_usage_facts,
+    )
+
+    baseline = {
+        module_id: extract_module_usage_facts(
+            module_id,
+            ast.parse(source),
+            imports=[],
+        )
+        for module_id, source in source_by_module.items()
+    }
+
+    assert set(baseline) == set(source_by_module)
+    assert all(
+        facts.symbol_calls_materialized
+        and facts.reference_evidence_materialized
+        for facts in baseline.values()
+    )
+
+    return baseline
+
+
 def test_collision_fact_dict_contract_and_schema():
     """Verify CollisionFact satisfies exact dict schema and lazy evaluation."""
     src = "class User:\n    id: int\n\nMAX_COUNT = 100\n"
@@ -690,6 +717,10 @@ def test_e2e_hydrated_clean_and_edit_b_identical_foo():
         state = RepositoryAnalysisState(
             modules=modules,
             reexport_facts_by_module=materialize_reexport_facts_by_module(modules),
+            module_usages=_h2c_materialized_usage_baseline({
+                "mod_a": src_a,
+                "mod_b": "",
+            }),
             collision_facts={"mod_a": facts_a, "mod_b": facts_b_old},
             collisions_state="fresh",
             collisions=[],
@@ -765,6 +796,10 @@ def test_e2e_hydrated_clean_and_edit_b_conflicting_foo():
         state = RepositoryAnalysisState(
             modules=modules,
             reexport_facts_by_module=materialize_reexport_facts_by_module(modules),
+            module_usages=_h2c_materialized_usage_baseline({
+                "mod_a": src_a,
+                "mod_b": "",
+            }),
             collision_facts={"mod_a": facts_a, "mod_b": facts_b_old},
             collisions_state="fresh",
             collisions=[],
@@ -839,6 +874,13 @@ def test_e2e_missing_source_fails_closed_no_blank_code_collision():
 
         state = RepositoryAnalysisState(
             modules=modules,
+            module_usages=_h2c_materialized_usage_baseline({
+                "mod_a": (
+                    "def missing_partner():\n"
+                    "    return 'a'\n"
+                ),
+                "mod_b": "",
+            }),
             reexport_facts_by_module={
                 "mod_a": {
                     "exporter": "mod_a",
