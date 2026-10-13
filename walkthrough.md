@@ -1,220 +1,79 @@
-# CONTEXTOR_B0G2D7C4A_PACKAGE_DETAIL_FIXTURE_CORRECTION
+# CONTEXTOR_B0G2D7D_OPERATIONAL_CERTIFICATION_READINESS
 
-FINAL_VERDICT=B0G2D7C4A_ALL_TARGETED_GATES_PASS
-GLOBAL_CONTEXTOR_FINAL_PASS=NOT_CLAIMED
-
-## FILES_CHANGED
-FILES_CHANGED=
-- tests/test_package_reference_detail_parity.py
-
-walkthrough.md is the requested report artifact and is excluded from FILES_CHANGED. No production file or other test file was modified by this task.
+FILES_CHANGED=NONE
+FULL_DIFFS=NONE
 
 ## SOURCE_PRECHECK
-DIRECT_EVIDENCE:
-- HEAD before edit: b3bc87d6a8bc07210225fa3019f97e2436502437.
-- Working tree before edit was clean.
-- Contextor MCP returned the complete IncrementalAnalysisEngine._apply_delta_and_commit implementation at lines 879-1146, canonical revision 390, workspace_sync=verified.
-- Its successful commit assigns candidate.modules, candidate.artifacts, candidate.module_usages, candidate.artifact_consumption, and other candidate fields onto self.state. It does not replace the RepositoryAnalysisState instance in that commit span.
-- Contextor file contexts reported workspace_sync=verified for the target test and production incremental engine at revision 390.
-- Direct read of the isolated failed fixture's initial FULL snapshot showed alpha.__init__ consumer keys=[] and api_function absent.
-- LIVE before edit: revision 390, continuity=continuous, resync_required=false.
-- Contextor name-collision diagnostics before edit were fresh and showed exactly one NAME_COLLISION for public SOURCES between tests.test_full_file_state_domain_reconciliation and tests.test_package_reference_detail_parity.
+DIRECT_EVIDENCE: HEAD=2d524054178aa673d5f97c885949945f25a3d5e3. Pre-report `git status --short --untracked-files=all` was empty. All seven requested paths resolve as Contextor canonical modules. No source/test changes, tests, analyze_project, update_file, process actions, Git mutations, FULL analysis, or Flask benchmark occurred.
 
-CONTRACT_PROVED: All three specified source precheck conditions matched the auditor's patch anchors. No production source was changed.
+## TARGETED_TEST_EVIDENCE
+DIRECT_EVIDENCE: Prior B0G2D7C4A report records package-reference focused 6/6 PASS, six-mutation matrix 6/6 PASS, H2C 8/8 PASS, other targeted regressions 41/41 PASS; py_compile and git diff --check PASS. These were not rerun and do not prove loaded runtime code.
 
-## ORIGINAL_CONSUMER_ABSENCE
-DIRECT_EVIDENCE: The initial FULL snapshot in the prior isolated fixture had no alpha.__init__ consumer keys. The prior C4 KeyError came from assuming api_function existed before reexport retarget. The corrected fixture asserts api_function is absent before mutation.
+## LIVE_REVISION
+DIRECT_EVIDENCE: Contextor get_live_events(after_revision=391): latest_revision=391, activity_epoch=2d530224597f44e49ca532f195a0c754, earliest_retained_revision=378, events=[], latest_seq=209. Later bounded activity query: latest_revision=391, latest_seq=225. No newer canonical event returned.
 
-## PREUPDATE_SNAPSHOT_CAPTURE
-The fixture now deep-copies original_state before engine.update_file, retains the original nested consumer-map reference, and separately deep-copies that map's contents. The returned original value is the deep snapshot. The initial FULL, hydration, source mutation, update_file, status assertion, and independent fresh FULL remain in their prior order.
+## EVENT_CONTINUITY
+DIRECT_EVIDENCE: continuity=continuous for after_revision=391; resync_reason=null. Bounded activity response has activity_continuity=not_requested, so complete activity continuity is not established. Trace records FS_CHANGE_DETECTED/WATCH_UPDATE_START at 2026-10-13T10:22:07Z with no newer canonical revision observed; completion is UNKNOWN.
 
-## NESTED_COW_IDENTITY
-FOCUSED_TEST_PASS: The COW test checks prior snapshot contents, prior nested map contents, distinct nested mapping identity after update, absence of api_function in both old views, presence in the updated canonical consumer view, and distinct new consumer record identity. Both CanonicalReferenceEvidenceUnavailable assertions remain unchanged and passed.
-
-## PUBLIC_SOURCES_COLLISION_REMOVAL
-The target test's top-level SOURCES was renamed to _PACKAGE_REFERENCE_DETAIL_SOURCES and its sole use was updated. Exact source search found no public SOURCES assignment in that module. Contextor LIVE revision 391 recorded the matching NAME_COLLISION diagnostic as RESOLVED.
-
-## FOCUSED_TEST_RESULTS
-COMMAND=.venv\Scripts\python.exe -m pytest -q -x -s tests/test_package_reference_detail_parity.py
-RESULT=6 passed in 7.34s; exit code 0. All six existing C4 test functions passed.
-
-## SIX_MUTATION_MATRIX_RESULTS
-COMMAND=.venv\Scripts\python.exe -m pytest -q -x -s tests/test_incremental_multi_mutation_full_parity.py
-RESULT=6 passed, 1 warning in 30.23s; exit code 0.
-The matrix and comparator were unchanged. The six scenarios compare the canonical projection and FileState against independent fresh FULL runs; no normalization or ignored usage-detail array was added in this task.
-
-## CASE_A_TO_F_STATUS
-A=PASS
-B=PASS
-C=PASS
-D=PASS
-E=PASS
-F=PASS
-
-## FIRST_MISMATCH_IF_ANY
-NONE in the focused gate, six-mutation matrix, H2C gate, or other targeted regressions.
-
-## PRESERVED_EVIDENCE
-No new failure snapshot bundle was created because all required gates passed. Tests used isolated temporary repositories. No prior evidence was intentionally modified, deleted, or rewritten by the agent.
-
-## FOUR_WAY_PARITY_IF_EXECUTED
-PASS: test_real_desktop_watcher_and_public_mcp_incremental_match_fresh_full exercised isolated Desktop watcher and public MCP incremental flows against independent fresh FULL captures. PASS: test_real_desktop_and_mcp_full_entrypoints_have_identical_canonical_state checked real Desktop and MCP FULL entrypoints.
-
-## ATOMICITY_RECHECK_IF_EXECUTED
-PASS: all four tests in tests/test_incremental_failed_commit_atomicity.py ran in the targeted regression command. Their printed evidence for Cases A-D reported no canonical state, FileState, manifest, registry, or persisted-generation difference after failed commits.
-
-## H2C_REGRESSIONS_IF_EXECUTED
-COMMAND=.venv\Scripts\python.exe -m pytest -q -x -s with the eight explicit H2C nodes from B0G2D7C1:
-- test_clean_repo_zero_unparse_end_to_end_through_hydration
-- test_e2e_noop_equality_avoids_unparse_on_unique_symbol
-- test_e2e_hydrated_clean_and_edit_b_identical_foo
-- test_e2e_hydrated_clean_and_edit_b_conflicting_foo
-- test_e2e_missing_source_fails_closed_no_blank_code_collision
-- test_e2e_unrelated_unique_symbols_remain_empty_code
-- test_resolver_renders_only_candidate_facts_and_zero_unrelated_collision_facts
-- test_resolver_zero_candidates_zero_unparse_and_returns_same_mapping
-All nodes are in tests/test_h2c_collision_equivalence.py.
-RESULT=8 passed in 3.09s; exit code 0.
-
-## OTHER_TARGETED_REGRESSIONS
-One -x targeted command selected:
-- Desktop/MCP canonical FULL parity: one named real entrypoint test.
-- Desktop/MCP LIVE incremental parity: one named real watcher/public MCP test.
-- All tests in incremental_failed_commit_atomicity.py, incremental_layer_report_parity.py, canonical_collision_code_parity.py, full_file_state_domain_reconciliation.py, and channel_parity_and_cow.py.
-- Five named canonical reference projection tests covering golden parity, zero source I/O, missing consumer facts, incremental evidence materialization, and ambiguous completeness.
-RESULT=41 passed, 1 warning in 71.43s; exit code 0.
-The warnings in the matrix and this targeted command were the AuthlibDeprecationWarning from the installed fastmcp JWT dependency. No full repository suite was run.
-
-## LIVE_REVISION_BEFORE_AFTER
-BEFORE=390
-AFTER=391
-REVISION_391=desktop_watcher UPDATED tests/test_package_reference_detail_parity.py
-EVENT_CONTINUITY=continuous
-
-## WORKSPACE_SYNC_POSTCHECK
-At canonical revision 391, Contextor reported canonical_state=fresh and workspace_sync=verified for the edited test and contextor/core/reference/engine.py. Both had fresh syntax diagnostics checked with no errors.
-
-## NAME_COLLISION_DIAGNOSTICS
-BEFORE=1, fresh: the public SOURCES collision between the two named test modules.
-AFTER=0, fresh: get_name_collisions returned no remaining collisions. LIVE revision 391 recorded RESOLVED for exactly that SOURCES collision.
-UNRELATED_PREEXISTING_COLLISIONS_REMAINING=0.
-The current diagnostics summary still reports 16 cycles; those are not name collisions and were not part of this task.
+## WORKSPACE_SYNC
+DIRECT_EVIDENCE: For each requested file, Contextor returned canonical_state=fresh, provenance=live, canonical_revision=391, workspace_sync=verified, warnings=[]: reference/engine.py; validator/collisions.py; api/facade.py; analysis/incremental/plan_executor.py; analysis/incremental/engine.py; analysis/state_manager.py; reporting_engine/pipeline.py. This is disk-to-canonical verification only.
 
 ## RESYNC_REQUIRED
-false at LIVE revision 391.
+DIRECT_EVIDENCE: false in current Contextor LIVE response.
 
-## RESTART_REQUIRED
-YES for serving-process operational certification of the previously edited production module reference/engine.py. This C4A task modified only a test. No MCP, LIVE, or Desktop restart was performed by the agent.
+## DESKTOP_PID
+DIRECT_EVIDENCE: 18968 runs C:\Temp\Contextor_Repo\main.py --gui, OS start 2026-10-13T10:06:06.893019+02:00. PID 18944 is its live Python launcher parent.
 
-## PY_COMPILE
-PASS, exit code 0:
-.venv\Scripts\python.exe -m py_compile tests/test_package_reference_detail_parity.py
+## WATCHER_PID
+DIRECT_EVIDENCE: 18968. Active trace has FS_CHANGE_DETECTED and WATCH_UPDATE_START for this repo with pid=18968, tid=17428, domain LIVE. Watcher event producer is observed within GUI process; no distinct watcher OS process identified. Present thread health is UNKNOWN.
 
-## GIT_DIFF_CHECK
-PASS: git diff --check exit code 0. Git emitted only its LF-to-CRLF working-copy advisory.
+## MCP_LISTENER_PID
+DIRECT_EVIDENCE: 17808 owns 127.0.0.1:8765 LISTEN socket (Get-NetTCPConnection).
 
-## SAFETY
-PRODUCTION_FILES_MODIFIED_BY_THIS_TASK=NONE
-MANUAL_UPDATE_FILE=NO
-MCP_LIVE_DESKTOP_RESTART=NO
-PROCESS_TERMINATION=NO
-FULL_CONTEXTOR_REPO_ANALYSIS=NO
-FLASK_BENCHMARK=NO
-COMMIT_RESET_CHECKOUT=NO
-FULL_REPOSITORY_PYTEST_SUITE=NO
+## MCP_SERVER_PID
+DIRECT_EVIDENCE: 17808 runs -u -m contextor.mcp_main and owns HTTP listener. PID 17760 is Python launcher parent with same module command.
 
-## FULL_DIFFS
-ACTUAL_DIFF=Complete git diff for the sole changed file follows.
+## PROCESS_PARENT_CHILD_RELATIONSHIPS
+DIRECT_EVIDENCE: 3916 (run_contextor.bat cmd) -> 18944 (venv GUI launcher) -> 18968 (GUI child). 18968 -> 18392 (venv runtime launcher with --repo C:\Temp\Contextor_Repo --owner-pid 18968) -> 17572 (runtime Python child, same runtime command). 17492 -> 17760 (venv MCP launcher) -> 17808 (MCP serving child and listener owner). PID 18968 also parents multiprocessing spawn PIDs 6012,17544,5488,17852; their specific roles are UNKNOWN. Trace records canonical writer admission under 17572 for origin=desktop_watcher.
 
-~~~~diff
-diff --git a/tests/test_package_reference_detail_parity.py b/tests/test_package_reference_detail_parity.py
-index 84deea7..21db0c0 100644
---- a/tests/test_package_reference_detail_parity.py
-+++ b/tests/test_package_reference_detail_parity.py
-@@ -27,7 +27,7 @@ from contextor.core.reference.engine import (
- from contextor.core.reference.shared import _canonicalize_package_reference_target
- 
- 
--SOURCES = {
-+_PACKAGE_REFERENCE_DETAIL_SOURCES = {
-     "alpha/__init__.py": b"from .api import api_function\n",
-     "alpha/api.py": b"def api_function():\n    return 1\n",
-     "beta/__init__.py": b"",
-@@ -62,7 +62,7 @@ def retargeted_states(tmp_path_factory):
-     parent = tmp_path_factory.mktemp("package_reference_detail")
-     root = parent / "repo"
-     root.mkdir()
--    for relative, content in SOURCES.items():
-+    for relative, content in _PACKAGE_REFERENCE_DETAIL_SOURCES.items():
-         path = root / relative
-         path.parent.mkdir(parents=True, exist_ok=True)
-         path.write_bytes(content)
-@@ -75,10 +75,15 @@ def retargeted_states(tmp_path_factory):
-         engine = hydrated.engine
-         assert engine.state.state_id == baseline_state.state_id
-         original_state = engine.state
--        original_consumers = copy.deepcopy(
-+        original_snapshot = copy.deepcopy(original_state)
-+        original_consumers_view = (
-             original_state.artifacts["alpha.__init__"]["consumers"]
-         )
--        original_record = original_state.artifacts["alpha.__init__"]["consumers"]["api_function"]
-+        original_consumers = copy.deepcopy(
-+            original_consumers_view
-+        )
-+
-+        assert "api_function" not in original_consumers
- 
-         target = root / "alpha" / "__init__.py"
-         target.write_bytes(b"api_function = 7\n")
-@@ -88,9 +93,9 @@ def retargeted_states(tmp_path_factory):
-         full_state = _run_full(root)
- 
-     return {
--        "original": original_state,
-+        "original": original_snapshot,
-+        "original_consumers_view": original_consumers_view,
-         "original_consumers": original_consumers,
--        "original_record": original_record,
-         "incremental": incremental_state,
-         "full": full_state,
-         "update_status": result.status,
-@@ -197,13 +202,34 @@ def test_reexport_retarget_matches_full_consumer_detail(retargeted_states):
- def test_cow_and_missing_reference_evidence_fail_closed(retargeted_states):
-     original = retargeted_states["original"]
-     incremental = retargeted_states["incremental"]
--    old_record = retargeted_states["original_record"]
-+    old_consumers_view = (
-+        retargeted_states["original_consumers_view"]
-+    )
-     assert original is not incremental
-     assert original.artifacts["alpha.__init__"]["consumers"] == (
-         retargeted_states["original_consumers"]
-     )
--    assert original.artifacts["alpha.__init__"]["consumers"]["api_function"] is old_record
--    assert incremental.artifacts["alpha.__init__"]["consumers"]["api_function"] is not old_record
-+    assert old_consumers_view == (
-+        retargeted_states["original_consumers"]
-+    )
-+
-+    assert old_consumers_view is not (
-+        incremental.artifacts["alpha.__init__"]["consumers"]
-+    )
-+
-+    assert "api_function" not in old_consumers_view
-+
-+    assert "api_function" not in (
-+        original.artifacts["alpha.__init__"]["consumers"]
-+    )
-+
-+    assert "api_function" in (
-+        incremental.artifacts["alpha.__init__"]["consumers"]
-+    )
-+
-+    assert incremental.artifacts["alpha.__init__"]["consumers"][
-+        "api_function"
-+    ] is not old_consumers_view.get("api_function")
- 
-     modules = set(incremental.modules)
-     usages = dict(incremental.module_usages)
-~~~~
+## ACTIVE_POINTER_STATUS
+DIRECT_EVIDENCE: %APPDATA%\Contextor\logs\contextor_runtime_active.json contains desktop_pid=9860, SID=d-9860-20261012_084734_461, file=contextor_runtime_20261012_084734_461_9860.jsonl, started_at=2026-10-12T08:47:34.461+00:00. PID 9860 is absent from current process inventory. Pointed JSONL exists and includes current PID 18968 and 17572 events. Pointer desktop PID is stale; it is not ownership proof.
+
+## PRODUCTION_SOURCE_MODIFICATION_TIMES
+DIRECT_EVIDENCE: Current filesystem LastWriteTimeUtc:
+
+| File | UTC |
+|---|---|
+| contextor/core/reference/engine.py | 2026-10-13T09:56:07.6407049Z |
+| contextor/core/validator/collisions.py | 2026-10-13T08:28:04.3797120Z |
+| contextor/core/api/facade.py | 2026-10-13T08:28:04.3880326Z |
+| contextor/core/analysis/incremental/plan_executor.py | 2026-10-13T08:28:04.3910296Z |
+| contextor/core/analysis/incremental/engine.py | 2026-10-12T12:24:48.7220886Z |
+| contextor/core/analysis/state_manager.py | 2026-10-13T09:29:35.2810061Z |
+| contextor/core/reporting_engine/pipeline.py | 2026-10-13T09:29:35.2830058Z |
+
+## PROCESS_START_TIMES
+DIRECT_EVIDENCE: OS CreationDate, 2026-10-13 local +02:00: MCP launcher 17760=10:05:56.526333; MCP server 17808=10:05:56.614111; GUI launcher 18944=10:06:06.866069; GUI/watcher producer 18968=10:06:06.893019; runtime launcher 18392=10:08:21.519293; runtime child 17572=10:08:21.582496.
+
+## LOADED_CODE_FRESHNESS
+DIRECT_EVIDENCE: GUI, MCP, runtime all started before the present mtime of six requested files, and after incremental/engine.py mtime. No trustworthy loaded-module hash, version, or per-module fingerprint was observed. LOADED_CODE_FRESHNESS=UNKNOWN for all three process families. Start chronology cannot prove import timing or dynamic reload. workspace_sync=verified does not prove imported-code identity.
+
+## MANUAL_RELOAD_INVENTORY
+| Component | PID / owner | Loaded code | Manual reload before certification | LIVE continuity risk |
+|---|---|---|---|---|
+| Desktop GUI and in-process watcher | 18968 / 18944 | UNKNOWN; process predates six file mtimes | Required to establish new process after modifications; then check identity | Activity epoch, watcher delivery, and authority may change; recheck revision/continuity |
+| MCP serving HTTP | 17808 / 17760 | UNKNOWN; predates six mtimes | Required to establish new serving process and verify new listener owner | In-flight requests/cursor may be interrupted; recheck MCP LIVE state |
+| LIVE runtime authority/worker | 18392,17572 / 18968 | UNKNOWN; predates six mtimes | Required to establish new runtime child and authority identity | Authority handoff/service continuity need post-reload evidence |
+
+INFERENCE: This is a factual certification-readiness inventory, not a claim that a specific loaded module is stale or a restart procedure.
+
+## RUNTIME_OWNERSHIP_UNCERTAINTIES
+UNKNOWN: loaded-module fingerprint/version in all relevant processes; health/completion of last watcher operation; roles of GUI multiprocessing spawn children. Main GUI-watcher, MCP listener/server, and runtime parent-child chain have direct OS/log evidence. Stale pointer cannot attest current owner.
+
+## USER_GLOBAL_REGRESSION_GATE_STATUS
+PENDING_USER. The next full pytest checkpoint belongs exclusively to the user. Earlier global suite is not proof for current HEAD. No tests run now.
+
+## FINAL_VERDICT
+B0G2D7D_RUNTIME_OWNERSHIP_UNRESOLVED
+
+Current primary processes are identified, but loaded-code identity/freshness and stale-pointer reconciliation remain unproved. Operational FINAL PASS is not claimed. Await `proceduj`.
