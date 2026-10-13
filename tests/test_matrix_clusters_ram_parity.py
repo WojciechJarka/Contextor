@@ -487,7 +487,15 @@ def test_multi_identity_execution_projects_all_exact_targets_and_stays_fresh(
             }
         }
     }
+    original_a_b_artifact = engine.state.artifacts["a.b"]
+
+    assert "c" in original_a_b_artifact.get(
+        "own_symbols",
+        (),
+    )
+
     engine.state.artifacts["a.b"] = {
+        **original_a_b_artifact,
         "consumers": {
             "c": {
                 "consumers": [],
@@ -637,16 +645,28 @@ def test_multi_identity_recompute_stays_fresh_across_clean_later_patch(
         "channels": {},
     }
 
-    from contextor.core.domain.usage_facts import (
-        ModuleUsageFacts,
+    from contextor.core.reference.engine import (
+        extract_module_usage_facts,
     )
+    other_consumer_facts = extract_module_usage_facts(
+        "other_consumer",
+        "import a.b\na.b.c()\n",
+        imports=[],
+    )
+
+    assert other_consumer_facts.symbol_calls_materialized is True
+    assert other_consumer_facts.reference_evidence_materialized is True
+    assert "a.b.c" in other_consumer_facts.direct_calls
+    assert (
+        "a.b.c",
+        "direct_calls",
+        "",
+        2,
+    ) in other_consumer_facts.reference_evidence
+
     engine.state.module_usages[
         "other_consumer"
-    ] = ModuleUsageFacts(
-        direct_calls=[
-            "a.b.c",
-        ]
-    )
+    ] = other_consumer_facts
     engine.state.modules[
         "other_consumer"
     ] = Module(

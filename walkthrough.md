@@ -1,159 +1,132 @@
-# CONTEXTOR_B0G2D8A_LINEAGE_ATOMIC_COMMIT_FIXTURE_REPAIR
+# CONTEXTOR_B0G2D8B_MATRIX_CLUSTERS_CANONICAL_FIXTURE_REPAIR
 
 ## FILES_CHANGED
-FILES_CHANGED=tests/test_lineage_state_lifecycle.py
-`walkthrough.md` is the requested report artifact and is excluded from FILES_CHANGED.
+FILES_CHANGED=tests/test_matrix_clusters_ram_parity.py
+`walkthrough.md` is the report artifact and is excluded from FILES_CHANGED. Git status after checks showed only `M tests/test_matrix_clusters_ram_parity.py`.
 
 ## SOURCE_PRECHECK
-DIRECT_EVIDENCE: HEAD before edit=49a0d278ee25ae6eab6bc031bd1b711c5f8ea576; Git status before edit was clean. Contextor MCP was absent from the available deferred tools at precheck time; its documentation and current LIVE/file context were consulted as soon as it became available, after the approved test-only patch. Source inspection found `_atomic_delta_commit`, `_failed_commit_guard`, `_apply_delta_and_commit`, `_updated_module_usage_manifest`, `_lineage_engine`, `_LineageRegistry`, and `_LifecycleRegistry` at their expected anchors. Contextor later reported incremental/engine.py and the edited test canonical_state=fresh, workspace_sync=verified at revision 393. It reported seven direct consumers for the production incremental engine and zero for the test module in the bounded file context. No production contract mismatch was observed.
-CONTRACT_PROVED: `_failed_commit_guard` reads `state_manager._state`; successful commit invokes `update_state` and then `get_tracked_sha256`; `_updated_module_usage_manifest` rejects an empty tracked hash for nondeleted updates; commit accesses `delta.module_path` and `delta.is_deleted`. The fake registry transaction retains its existing in-transaction rollback behavior. The pre-edit Contextor architecture/lineage precheck could not be completed because the tools were unavailable then; this limitation is explicit.
+DIRECT_EVIDENCE: HEAD before edit=09c697f97aa16ceb01f912c9fd086efff4de3ff1; working tree clean before edit. Contextor MCP pre-edit canonical revision=393, activity_epoch=c091cb70c2634898aadd407860e4d5c0, continuity=continuous after_revision=393, resync_required=false. The target test, state_manager.py, plan_executor.py, and reference/engine.py each had canonical_state=fresh and workspace_sync=verified at revision 393. Contextor fact lineage for artifact_consumption identified full producer in state_manager, incremental consumer-slice producer in plan_executor, and canonical installation in IncrementalAnalysisEngine._apply_delta_and_commit. Bounded Contextor direct consumers: state_manager.py=95, plan_executor.py=12, reference/engine.py=20, target test=0. Exact source inspection then confirmed both patch anchors and the specified production contracts; no source drift or contract mismatch.
+CONTRACT_PROVED: canonical_artifact_consumption_targets uses nonempty own_symbols first, then modern symbols dict (including empty), then structurally available empty own_symbols; consumers-only is a legacy fallback. _refresh_canonical_artifact_consumers reads artifact.own_symbols. build_symbol_references_from_canonical requires materialized reference evidence for each current module. extract_module_usage_facts parses valid source and sets both symbol_calls_materialized and reference_evidence_materialized to True.
 
-## FAILED_GLOBAL_GATE_BASELINE
-USER_PROVIDED: 3441 passed, 8 failed, 1 skipped, 1 warning, 986.85 seconds. Six failures are in the lineage file; two matrix failures remain separate. This global run was not rerun here.
+## GLOBAL_FAILURE_BASELINE
+USER_PROVIDED: 3441 passed, 8 failed, 1 skipped, 1 warning. B0G2D8A repaired the six lineage failures (six nodes and 40-file tests PASS). Two named matrix failures were the only scope here. The global suite was not rerun.
 
-## ATOMIC_COMMIT_FIXTURE_CONTRACT
-The `_lineage_engine` fake now has `_state={}` per invocation, preserves `update_state=acknowledged.append`, and supplies `get_tracked_sha256`. The standalone commit test's local manager has the same three members and retains its no-op acknowledgement. The standalone delta now carries `module_path="pkg", is_deleted=False`. All mocked outcomes and assertions remain unchanged.
+## MODERN_ARTIFACT_DOMAIN_PRESERVATION
+In the first test, the existing FULL-produced a.b artifact is retained in original_a_b_artifact. The fixture asserts `c` exists in its actual own_symbols, then merges that original record while replacing only its synthetic consumers mapping. No own_symbols were invented. Other synthetic assignments and assertions remain unchanged.
 
-## FAKE_FILESTATE_DOMAIN
-`_state` is a new empty dict for each synthetic manager instance. It supports the production rollback guard's tracked mapping snapshot without changing production FileStateManager.
+## SYNTHETIC_MULTI_IDENTITY_CONTRACT
+The fixture retains its deliberately injected a::b.c identity and plural exact-target assertions. The manually injected artifact domain is a synthetic ambiguity fixture; it is not claimed to have emerged unchanged from FULL analysis.
 
-## TRUSTED_HASH_UNIT_TEST_BOUNDARY
-The synthetic hash is `hashlib.sha256(b"lineage-lifecycle-test-fixture").hexdigest()`, a stable nonempty 64-character hexadecimal unit-test value. It is not evidence of source-backed FileState fidelity. Dedicated failed-commit and FileState tests retain that responsibility.
+## MATERIALIZED_REFERENCE_FIXTURE
+In the second test, `extract_module_usage_facts("other_consumer", "import a.b\na.b.c()\n", imports=[])` produces real AST-derived facts for the synthetic current module. The test asserts both materialization flags, direct_calls membership for a.b.c, and the exact reference-evidence tuple at line 2 before installing the facts. No physical other.py is required.
 
-## DELTA_MODULE_PATH_CORRECTIONS
-Added module_path="pkg" to both success/failure deltas in `test_identity_sync_materializes_against_new_ids_and_rolls_back_on_failure`; added module_path="provider" to owner deletion, owner introduction, generation change, and revalidation failure deltas. Existing is_deleted values, expected owner identities, generation/rollback assertions and re-extraction prohibitions were untouched.
+## NO_FORGED_MATERIALIZATION_FLAGS
+No flag is set manually. The production reference builder's validation and error behavior are unchanged. No exception suppression, xfail, skip, test removal, or assertion weakening was introduced.
 
-## SIX_FAILED_LINEAGE_NODES
-COMMAND=`.venv\Scripts\python.exe -m pytest -q -x -s` with the six explicit test nodes named in the task: standalone commit plus five identity-sync scenarios. RESULT=6 passed in 3.67s; exit code 0. No first failure.
+## TWO_FAILED_NODES_RECHECK
+COMMAND=`.venv\Scripts\python.exe -m pytest -q -x -s` with exactly the two originally failed matrix test nodes. RESULT=2 passed in 18.01s; exit code 0.
 
-## LINEAGE_FILE_REGRESSION
-COMMAND=`.venv\Scripts\python.exe -m pytest -q -x -s tests/test_lineage_state_lifecycle.py`. RESULT=40 passed in 7.98s; exit code 0.
+## MATRIX_FILE_REGRESSION
+COMMAND=`.venv\Scripts\python.exe -m pytest -q -x -s tests/test_matrix_clusters_ram_parity.py`. RESULT=34 passed in 24.34s; exit code 0.
 
-## REGISTRY_ROLLBACK_PRESERVATION
-CODE_PATH_PROVED: The existing fake transaction and its assertions were not changed. The two failure scenarios in the six-node gate passed, including original registry owner IDs and no acknowledgement assertions. No exceptions were suppressed.
+## LINEAGE_REGRESSION_RECHECK
+Included unchanged `tests/test_lineage_state_lifecycle.py` in the five-file targeted -x command. Combined command RESULT=60 passed, 1 warning in 58.83s; exit code 0. The previously verified lineage file has 40 tests.
 
-## CANONICAL_COW_PRESERVATION
-CODE_PATH_PROVED: Production `_failed_commit_guard` and `_apply_delta_and_commit` were not modified. Existing failed-state and lineage assertions remained; all 40 file tests passed. This is targeted test evidence, not a global production certification.
+## SIX_MUTATION_PARITY_RECHECK
+Included unchanged `tests/test_incremental_multi_mutation_full_parity.py` in the same targeted -x command. Its six scenarios completed within the 60/60 passing combined result; no failure or diff was reported.
 
-## OUTSTANDING_MATRIX_FAILURES
-A: `test_multi_identity_execution_projects_all_exact_targets_and_stays_fresh` — outstanding, not tested or changed here.
-B: `test_multi_identity_recompute_stays_fresh_across_clean_later_patch` — outstanding, not tested or changed here.
-USER_PROVIDED prior inspection cited overwritten modern artifact domain and incomplete reference evidence for a synthetic current module. Neither is classified fixed or preexisting by this task.
+## ATOMICITY_REGRESSION_RECHECK
+Included unchanged `tests/test_incremental_failed_commit_atomicity.py` in the same targeted command. Printed Cases A-D each reported canonical_state_first_difference=None, file_state_first_difference=None, manifest_first_difference=None, registry_first_difference=None, and persisted_generation_first_difference=None. Combined command PASS.
+
+## OTHER_TARGETED_REGRESSIONS
+The same targeted command included unchanged `tests/test_channel_parity_and_cow.py` and `tests/test_package_reference_detail_parity.py`. Combined RESULT=60 passed, 1 warning in 58.83s. Warning was AuthlibDeprecationWarning from installed FastMCP/Authlib dependency. No full repository pytest suite was run.
 
 ## PY_COMPILE
-PASS: `.venv\Scripts\python.exe -m py_compile tests/test_lineage_state_lifecycle.py`; exit code 0.
+PASS: `.venv\Scripts\python.exe -m py_compile tests/test_matrix_clusters_ram_parity.py`; exit code 0.
 
 ## GIT_DIFF_CHECK
-PASS: `git diff --check`; exit code 0. Git reported only an LF-to-CRLF future-working-copy warning, not a diff-check failure. Post-edit `git status --short --untracked-files=all` showed only `M tests/test_lineage_state_lifecycle.py` before report writing.
+PASS: `git diff --check`; exit code 0. Git emitted only an LF-to-CRLF future-working-copy warning.
 
 ## LIVE_REVISION_BEFORE_AFTER
-Pre-edit current-turn LIVE revision was unavailable while Contextor tools were absent. Prior task's observed revision was 391, but a new activity epoch exists and it is not an unbroken pre-edit cursor. Contextor current revision=393, activity_epoch=c091cb70c2634898aadd407860e4d5c0. Revision 393 is `desktop_watcher UPDATED` for `tests/test_lineage_state_lifecycle.py`. A query after_revision=391 yielded event_retention_gap due the new retained window; it cannot establish 391-to-393 continuity. A current-window query after_revision=393 returned continuity=continuous, no newer events, and resync_required=false.
+BEFORE=393, AFTER=394. Contextor event revision 394: operation=update_file, origin=desktop_watcher, status=UPDATED, file_path=C:\Temp\Contextor_Repo\tests\test_matrix_clusters_ram_parity.py, affected_modules=[tests.test_matrix_clusters_ram_parity]. No manual update_file was called.
+
+## ACTIVITY_EPOCH
+BEFORE=c091cb70c2634898aadd407860e4d5c0
+AFTER=c091cb70c2634898aadd407860e4d5c0
+
+## EVENT_CONTINUITY
+Contextor query after_revision=393 returned continuity=continuous, earliest_retained_revision=393, latest_revision=394, resync_reason=null. The prior 391-to-393 epoch gap is not treated as continuous.
 
 ## WORKSPACE_SYNC_POSTCHECK
-DIRECT_EVIDENCE: Contextor returned workspace_sync=verified, canonical_state=fresh, provenance=live at revision 393 for the edited test and production incremental/engine.py. `get_name_collisions(module="tests.test_lineage_state_lifecycle", representation="summary")` returned matched=0, availability=fresh; global diagnostic summary showed name_collisions=0, fresh. No collision is observed from the edit.
+Contextor returned canonical_state=fresh, workspace_sync=verified, provenance=live, canonical_revision=394 for the edited test, with warnings=[] and fresh materialized syntax diagnostics showing zero errors.
 
 ## RESYNC_REQUIRED
-CURRENT_WINDOW=false. The old cursor 391 returned resync_required=true with reason=event_retention_gap across an activity-epoch change; it must not be used as a continuous propagation proof.
+false in current LIVE response after_revision=393.
 
 ## RESTART_REQUIRED
-NO production code changed. No restart was performed. Runtime loaded-code identity remains outside this test-only gate.
+NO. Test-only change; no production runtime file was edited. No service was restarted by the agent.
 
 ## FINAL_VERDICT
-B0G2D8A_LINEAGE_REGRESSIONS_PASS
-Six original failed nodes and all 40 tests in the lineage file pass. This is not global FINAL PASS; the two matrix failures and user-owned global gate remain outstanding.
+B0G2D8B_ALL_TARGETED_GATES_PASS
+All required targeted gates passed. Global Contextor FINAL PASS is not claimed; the next global checkpoint belongs to the user.
 
 ## FULL_DIFFS
-### tests/test_lineage_state_lifecycle.py
+### tests/test_matrix_clusters_ram_parity.py
 ```diff
-diff --git a/tests/test_lineage_state_lifecycle.py b/tests/test_lineage_state_lifecycle.py
-index 33e8500..b1391e7 100644
---- a/tests/test_lineage_state_lifecycle.py
-+++ b/tests/test_lineage_state_lifecycle.py
-@@ -537,12 +537,16 @@ def test_incremental_commit_publishes_lineage_candidate_fields(
-     engine.root_path = Path(tmp_path)
-     engine.registry = SimpleNamespace()
-     engine.state_manager = SimpleNamespace(
-+        _state={},
-         update_state=lambda _path: None,
-+        get_tracked_sha256=lambda _path: hashlib.sha256(
-+            b"lineage-lifecycle-test-fixture"
-+        ).hexdigest(),
-     )
- 
-     engine._apply_delta_and_commit(
-         str(tmp_path / "pkg.py"),
--        SimpleNamespace(),
-+        SimpleNamespace(module_path="pkg", is_deleted=False),
-         None,
-         SimpleNamespace(),
-         [],
-@@ -694,7 +698,13 @@ def _lineage_engine(state, registry, tmp_path):
-     engine.state = state
-     engine.registry = registry
-     engine.root_path = Path(tmp_path)
--    engine.state_manager = SimpleNamespace(update_state=acknowledged.append)
-+    engine.state_manager = SimpleNamespace(
-+        _state={},
-+        update_state=acknowledged.append,
-+        get_tracked_sha256=lambda _path: hashlib.sha256(
-+            b"lineage-lifecycle-test-fixture"
-+        ).hexdigest(),
+diff --git a/tests/test_matrix_clusters_ram_parity.py b/tests/test_matrix_clusters_ram_parity.py
+index 835f9b3..3e6d58e 100644
+--- a/tests/test_matrix_clusters_ram_parity.py
++++ b/tests/test_matrix_clusters_ram_parity.py
+@@ -487,7 +487,15 @@ def test_multi_identity_execution_projects_all_exact_targets_and_stays_fresh(
+             }
+         }
+     }
++    original_a_b_artifact = engine.state.artifacts["a.b"]
++
++    assert "c" in original_a_b_artifact.get(
++        "own_symbols",
++        (),
 +    )
-     return engine, acknowledged
++
+     engine.state.artifacts["a.b"] = {
++        **original_a_b_artifact,
+         "consumers": {
+             "c": {
+                 "consumers": [],
+@@ -637,16 +645,28 @@ def test_multi_identity_recompute_stays_fresh_across_clean_later_patch(
+         "channels": {},
+     }
  
- 
-@@ -1048,7 +1058,7 @@ def test_identity_sync_materializes_against_new_ids_and_rolls_back_on_failure(
- 
-     engine._apply_delta_and_commit(
-         str(tmp_path / "pkg.py"),
--        SimpleNamespace(is_deleted=False),
-+        SimpleNamespace(module_path="pkg", is_deleted=False),
-         None,
-         SimpleNamespace(),
-         [],
-@@ -1094,7 +1104,7 @@ def test_identity_sync_materializes_against_new_ids_and_rolls_back_on_failure(
-     with pytest.raises(ValueError, match="materialize failed"):
-         failing_engine._apply_delta_and_commit(
-             str(tmp_path / "pkg.py"),
--            SimpleNamespace(is_deleted=False),
-+            SimpleNamespace(module_path="pkg", is_deleted=False),
-             None,
-             SimpleNamespace(),
-             [],
-@@ -1149,7 +1159,7 @@ def test_identity_sync_owner_deletion_matches_fresh_full_materialization_without
- 
-     engine._apply_delta_and_commit(
-         str(tmp_path / "provider.py"),
--        SimpleNamespace(is_deleted=True),
-+        SimpleNamespace(module_path="provider", is_deleted=True),
-         None,
-         SimpleNamespace(),
-         [],
-@@ -1237,7 +1247,7 @@ def test_identity_sync_owner_introduction_promotes_retained_untouched_consumer_t
- 
-     engine._apply_delta_and_commit(
-         str(tmp_path / "provider.py"),
--        SimpleNamespace(is_deleted=False),
-+        SimpleNamespace(module_path="provider", is_deleted=False),
-         None,
-         SimpleNamespace(),
-         [],
-@@ -1305,7 +1315,7 @@ def test_identity_sync_generation_change_rematerializes_against_current_owner_id
- 
-     engine._apply_delta_and_commit(
-         str(tmp_path / "provider.py"),
--        SimpleNamespace(is_deleted=False),
-+        SimpleNamespace(module_path="provider", is_deleted=False),
-         None,
-         SimpleNamespace(),
-         [],
-@@ -1372,7 +1382,7 @@ def test_identity_sync_revalidation_failure_rolls_back_registry_and_canonical_st
-     with pytest.raises(ValueError, match="consumer rematerialization failed"):
-         engine._apply_delta_and_commit(
-             str(tmp_path / "provider.py"),
--            SimpleNamespace(is_deleted=True),
-+            SimpleNamespace(module_path="provider", is_deleted=True),
-             None,
-             SimpleNamespace(),
-             [],
+-    from contextor.core.domain.usage_facts import (
+-        ModuleUsageFacts,
++    from contextor.core.reference.engine import (
++        extract_module_usage_facts,
+     )
++    other_consumer_facts = extract_module_usage_facts(
++        "other_consumer",
++        "import a.b\na.b.c()\n",
++        imports=[],
++    )
++
++    assert other_consumer_facts.symbol_calls_materialized is True
++    assert other_consumer_facts.reference_evidence_materialized is True
++    assert "a.b.c" in other_consumer_facts.direct_calls
++    assert (
++        "a.b.c",
++        "direct_calls",
++        "",
++        2,
++    ) in other_consumer_facts.reference_evidence
++
+     engine.state.module_usages[
+         "other_consumer"
+-    ] = ModuleUsageFacts(
+-        direct_calls=[
+-            "a.b.c",
+-        ]
+-    )
++    ] = other_consumer_facts
+     engine.state.modules[
+         "other_consumer"
+     ] = Module(
 ```
