@@ -24,6 +24,7 @@ from .shared import (
     MAX_USAGE_DETAILS,
     _REEXPORT_CACHE,
     _build_reexport_map,
+    _canonicalize_package_reference_target,
     _empty_reference,
     _export_module_name,
     _normalize_references,
@@ -795,8 +796,31 @@ def _usage_fact_contains_target(
     definer_module: str,
     symbol: str,
     aliases: tuple[tuple[str, str], ...] = (),
+    *,
+    current_modules: set[str] | None = None,
 ) -> bool:
     """Check whether an outbound usage fact target matches the requested definer::symbol."""
+    if (
+        current_modules is not None
+        and definer_module.endswith(".__init__")
+    ):
+        fact_target = (
+            _canonicalize_package_reference_target(
+                fact_target,
+                current_modules,
+            )
+        )
+        aliases = tuple(
+            (
+                local_alias,
+                _canonicalize_package_reference_target(
+                    target,
+                    current_modules,
+                ),
+            )
+            for local_alias, target in aliases
+        )
+
     canonical_identity = f"{definer_module}.{symbol}"
 
     if fact_target == canonical_identity or fact_target == symbol:
@@ -903,7 +927,8 @@ def build_symbol_references_from_canonical(
                     result[symbol]["called_by"].append(consumer)
                     for item in reference_evidence:
                         if item[1] == "direct_calls" and _usage_fact_contains_target(
-                            item[0], definer_module, symbol, aliases
+                            item[0], definer_module, symbol, aliases,
+                            current_modules=candidate_modules,
                         ):
                             result[symbol]["called_by_detail"].append(
                                 {
@@ -917,7 +942,8 @@ def build_symbol_references_from_canonical(
                     result[symbol]["callback_called"].append(consumer)
                     for item in reference_evidence:
                         if item[1] == "callback_calls" and _usage_fact_contains_target(
-                            item[0], definer_module, symbol, aliases
+                            item[0], definer_module, symbol, aliases,
+                            current_modules=candidate_modules,
                         ):
                             result[symbol]["callback_called_detail"].append(
                                 {
@@ -931,7 +957,8 @@ def build_symbol_references_from_canonical(
                     result[symbol]["event_bound_by"].append(consumer)
                     for item in reference_evidence:
                         if item[1] == "event_bindings" and _usage_fact_contains_target(
-                            item[0], definer_module, symbol, aliases
+                            item[0], definer_module, symbol, aliases,
+                            current_modules=candidate_modules,
                         ):
                             result[symbol]["event_bound_by_detail"].append(
                                 {
@@ -945,7 +972,8 @@ def build_symbol_references_from_canonical(
                     result[symbol]["qualified_refs"].append(consumer)
                     for item in reference_evidence:
                         if item[1] == "qualified_refs" and _usage_fact_contains_target(
-                            item[0], definer_module, symbol, aliases
+                            item[0], definer_module, symbol, aliases,
+                            current_modules=candidate_modules,
                         ):
                             result[symbol]["qualified_refs_detail"].append(
                                 {
@@ -959,7 +987,8 @@ def build_symbol_references_from_canonical(
                     result[symbol]["inherited_by"].append(consumer)
                     for item in reference_evidence:
                         if item[1] == "inheritance" and _usage_fact_contains_target(
-                            item[0], definer_module, symbol, aliases
+                            item[0], definer_module, symbol, aliases,
+                            current_modules=candidate_modules,
                         ):
                             result[symbol]["inherited_by_detail"].append(
                                 {

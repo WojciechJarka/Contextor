@@ -1,252 +1,298 @@
-# CONTEXTOR_B0G2D7C3_IMPLEMENTATION_AFTER_APPROVED_PRECHECK
+# CONTEXTOR_B0G2D7C4_PACKAGE_REFERENCE_DETAIL_PARITY
 
-FINAL_VERDICT=B0G2D7C3_NEXT_FILESTATE_OR_CANONICAL_MISMATCH
+FINAL_VERDICT=B0G2D7C4_REGRESSION_BLOCKED
+STOP_REASON=The first focused test run stopped at a test-fixture setup error under pytest -x. No matrix or follow-up test was run.
 
 ## FILES_CHANGED
 FILES_CHANGED=
-- contextor/core/analysis/state_manager.py
-- contextor/core/reporting_engine/pipeline.py
-- tests/test_full_file_state_domain_reconciliation.py
+- contextor/core/reference/engine.py
+- tests/test_package_reference_detail_parity.py
 
 walkthrough.md is the requested report artifact and is excluded from FILES_CHANGED. No other source, test, or documentation file was modified.
 
 ## SOURCE_PRECHECK
-SOURCE_PRECHECK=PASS (approved in prior stage).
-CURRENT_HEAD_BEFORE_EDIT=07b975a824b6cb8c492fea1faf92de5cea80b69a
-WORKING_TREE_BEFORE_EDIT=CLEAN
-The approved source anchors were present at this HEAD. The diff from the prior precheck HEAD to the current HEAD contained no changes to state_manager.py, pipeline.py, facade.py, or indexer.py. Current Contextor LIVE revision before edit was 384, continuity=continuous, resync_required=false.
+DIRECT_EVIDENCE:
+- HEAD before edit: c7483ac6cbd689c5e1066d8c2efb8c5048b4bd4d.
+- Working tree was clean before edit.
+- Contextor MCP returned current complete implementations at canonical revision 387 with workspace_sync=verified for _usage_fact_contains_target, build_symbol_references_from_canonical, RepositoryReferenceIndex.from_compact_facts, _canonicalize_package_reference_target, and _refresh_canonical_artifact_consumers.
+- The exact import, matcher signature, and five confirmed-channel call-site anchors were present in reference/engine.py. The called_ambiguous call is separate and was left unchanged.
+- Contextor artifact_consumption fact lineage identified the canonical RepositoryAnalysisState.artifact_consumption owner, FULL producer, incremental consumer-slice rebuild, persistence, hydration, and public projections.
+- Contextor module blast radius at revision 387: reference.engine 20 direct / 219 downstream consumer modules; reference.index 9 / 231; reference.shared 37 / 213; incremental.plan_executor 12 / 222. This tool reported workspace_sync=unverified; the exact engine file edit context reported verified.
+- LIVE before edit: revision 387, continuity=continuous, resync_required=false.
 
-## FULL_FILESTATE_ROOT_CAUSE
-CODE_PATH_PROVED: FileStateManager loads the previous persisted file domain. FULL execute_global_pipeline updated current module paths but did not remove obsolete tracked paths before save. Facade then built the canonical snapshot FileState payload from that manager. The prior supplied Case B evidence identified beta/consumer.py as the extra tracked path.
+CODE_PATH_PROVED:
+- FULL RepositoryReferenceIndex.from_compact_facts applies _resolve_reexport and then _canonicalize_package_reference_target to resolved call targets.
+- _canonicalize_package_reference_target gives a real indexed module the longest-prefix precedence, otherwise maps external package references through the package initializer.
+- Incremental _refresh_canonical_artifact_consumers calls build_symbol_references_from_canonical with current_modules=set(candidate.modules).
+- Before the edit, _usage_fact_contains_target compared the raw source-local target with alpha.__init__.api_function and returned false. The existing FULL normalizer maps alpha.api_function to alpha.__init__.api_function for the current module set, after which the same matcher returns true.
+- With a real alpha.api_function module added to the module set, the normalizer preserves alpha.api_function unchanged.
 
-## RETAIN_TRACKED_PATHS_IMPLEMENTATION
-The exact approved retain_tracked_paths(current_paths: set[str]) method was inserted immediately after tracked_paths. It validates the complete domain before deleting absent keys from the existing _state mapping. It performs no I/O and does not persist implicitly.
+CONTRACT_PROVED: The preserved E evidence and the inspected source support the specified normalization difference. No SOURCE_CONTRACT_MISMATCH was found.
 
-## AUTHORITATIVE_MODULE_DOMAIN
-execute_global_pipeline now collects str(absolute_path) for the same current modules passed to update_state, then calls retain_tracked_paths before the existing state_mgr.save. The current indexer worker paths are str(path.resolve()), matching update_state's key representation. Snapshot publication order was unchanged.
+## CASE_E_PRESERVED_EVIDENCE
+READ_ONLY_SOURCE=C:\Users\DafoO\AppData\Local\Temp\pytest-of-DafoO\pytest-580\test_case_e_reexport_retarget_0\b0g2d7a_e_evidence
+Read incremental.pickle, fresh_full.pickle, and summary.json without modifying them. Both states contain modules alpha.__init__, alpha.api, beta.__init__, beta.consumer, and loose. Both have materialized beta.consumer reference evidence and the same alias. The prior first canonical difference is alpha.__init__ / consumers / api_function / usage / direct_calls_detail length: incremental 0, fresh FULL 1.
 
-## OLD_GENERATION_IMMUTABILITY
-FOCUSED_TEST_PASS: After a second FULL with beta/consumer.py removed, the test checked bytes and mtime_ns of every old referenced engine, FileState, lineage manifest, and lineage chunk file. All were unchanged.
+## RAW_REFERENCE_EVIDENCE
+Both preserved E states have beta.consumer.reference_evidence:
+- ('alpha.api_function', 'api_imports', '', 1)
+- ('alpha.api_function', 'direct_calls', '', 2)
+Both have beta.consumer.aliases=(('api_function', 'alpha.api_function'),).
+reference_evidence_materialized=true in both.
 
-## FULL_DELETION_RECONCILIATION
-FOCUSED_TEST_PASS: The second real FULL on the same isolated repository/cache advanced snapshot revision, removed beta/consumer.py from canonical modules and persisted FileState, retained exactly four current source paths, matched every current disk SHA-256, and hydrated FileStateManager with baseline_status=trusted. No phantom tracked path remained.
+## CONFIRMED_CONSUMPTION_CHANNELS
+Both preserved E states have artifact_consumption['alpha.__init__::api_function']={'consumers': ['beta.consumer'], 'channels': {'beta.consumer': ['api_imports', 'direct_calls']}}.
+Both consumer records contain direct_calls=['beta.consumer'], api_imports=['beta.consumer'], and consumer_count total=1/direct_calls=1/api_imports=1. The incremental direct_calls_detail is []; fresh FULL has [{'module': 'beta.consumer', 'line': 2, 'context': None}]. No other usage field differed in the inspected record.
 
-## NOOP_FULL_REANALYSIS
-FOCUSED_TEST_PASS: Two FULL analyses of an unchanged isolated fixture retained the exact five-file domain and the same SHA-256 values, with an advancing revision.
+## FULL_PACKAGE_CANONICALIZATION_CONTRACT
+For current_modules={alpha.__init__, alpha.api, beta.consumer}, the existing helper returns alpha.__init__.api_function for alpha.api_function. The raw matcher returned false; matching after this existing normalization returned true. With a real alpha.api_function module identity present, the helper returns alpha.api_function unchanged.
 
-## STALE_TRACKED_ENTRY_CASE
-FOCUSED_TEST_PASS: A controlled, metadata-consistent FileState generation in an isolated cache contained an obsolete nonexistent path. The next FULL removed that entry and persisted the exact current indexed domain.
+## EXACT_MATCHER_PATCH
+Added the exact approved _canonicalize_package_reference_target import. Added keyword-only current_modules: set[str] | None = None. For a package-initializer definer with supplied current_modules, the matcher now canonicalizes fact_target and each alias target before its unchanged canonical_identity comparison. No source read, parse, or new resolver was added.
+
+## DETAIL_PROJECTION_CALL_SITES
+Added current_modules=candidate_modules to the five approved matcher calls: direct_calls, callback_calls, event_bindings, qualified_refs, inheritance. The called_ambiguous call, channel gates, reference_evidence storage, normalization, and detail ordering were unchanged.
+
+## REAL_SUBMODULE_PRECEDENCE
+SOURCE CONTRACT AND READ-ONLY HELPER CHECK PASS: alpha.api_function stays alpha.api_function when it is an indexed module, so the matcher does not attribute that target to alpha.__init__::api_function. The new targeted test for this condition was not reached because pytest stopped earlier.
+
+## REEXPORT_RETARGET_REGRESSION
+NOT REACHED. The module-scoped isolated fixture completed its initial real FULL and hydration but failed while reading a presumed pre-retarget consumer record, before changing alpha/__init__.py or calling engine.update_file. The new test therefore did not compare incremental and fresh FULL records.
+
+## COW_AND_FAIL_CLOSED
+NOT RUN because focused pytest stopped at fixture setup.
+
+## NO_SOURCE_REPARSE
+The changed matcher and canonical projection path only use supplied in-memory values by source inspection. The new no-I/O regression was not run because focused pytest stopped at fixture setup.
 
 ## FOCUSED_TEST_RESULTS
-COMMAND=.venv\Scripts\python.exe -m pytest -q -x -s tests/test_full_file_state_domain_reconciliation.py
-RESULT=9 passed in 13.59s; exit code 0.
-The tests cover RAM-only retention, invalid-domain fail-closed validation, real deletion FULL, unchanged FULL, and a controlled stale baseline. No FULL analysis of Contextor_Repo was performed.
+COMMAND=.venv\Scripts\python.exe -m pytest -q -x -s tests/test_package_reference_detail_parity.py
+RESULT=1 passed, 1 error in 6.12s; exit code 1; stopped under -x.
+PASSED=test_package_initializer_match_uses_current_module_domain
+FIRST_ERROR=ERROR at setup of test_real_import_alias_is_canonicalized
+TRACEBACK_LOCATION=tests/test_package_reference_detail_parity.py:81 in retargeted_states
+TRACEBACK_EXPRESSION=original_state.artifacts["alpha.__init__"]["consumers"]["api_function"]
+EXCEPTION=KeyError: 'api_function'
+DIRECT_EVIDENCE: The initial pre-retarget FULL state had no api_function key in that initializer consumer mapping. This is a test fixture assumption; it is not a new canonical parity comparison or a production exception. No test/code repair was attempted after the first failure.
 
 ## SIX_MUTATION_MATRIX_RESULTS
-COMMAND=.venv\Scripts\python.exe -m pytest -q -x -s tests/test_incremental_multi_mutation_full_parity.py
-RESULT=4 passed, 1 failed, 1 warning in 26.56s; exit code 1; stopped by -x at Case E.
-The matrix source and comparator were unchanged.
+NOT RUN: focused gate failed first. The unchanged six-mutation matrix was not modified.
 
-## CASE_A_STATUS
-PASS.
-
-## CASE_B_STATUS
-PASS. The unchanged matrix checks the deleted-path status and exact canonical/FileState coverage; after deletion, incremental FileState and fresh FULL FileState each have four current paths, no missing or extra path, and no SHA mismatch. The 36-field canonical projection matched.
-
-## CASES_C_TO_F_STATUS
-C=PASS
-D=PASS
-E=FAIL at CANONICAL_STATE
-F=NOT RUN because -x stopped at E.
+## CASE_A_TO_F_STATUS
+CURRENT_TASK_MATRIX_A=NOT RUN
+CURRENT_TASK_MATRIX_B=NOT RUN
+CURRENT_TASK_MATRIX_C=NOT RUN
+CURRENT_TASK_MATRIX_D=NOT RUN
+CURRENT_TASK_MATRIX_E=NOT RUN
+CURRENT_TASK_MATRIX_F=NOT RUN
+Historical B0G2D7C3 matrix evidence remains A-D PASS, E CANONICAL_STATE mismatch, F NOT RUN; it was not reclassified by this task.
 
 ## FIRST_MISMATCH_IF_ANY
-SCENARIO=E, reexport retarget of alpha/__init__.py.
-EXPECTED_UPDATE_STATUS=UPDATED
-ACTUAL_UPDATE_STATUS=UPDATED
-UPDATE_EXCEPTION=None
-MISMATCH_KIND=CANONICAL_STATE
-FIRST_DIFFERENCE_PATH=state.artifacts[{'kind': 'primitive', 'type': 'builtins.str', 'value': 'alpha.__init__'}][{'kind': 'primitive', 'type': 'builtins.str', 'value': 'consumers'}][{'kind': 'primitive', 'type': 'builtins.str', 'value': 'api_function'}][{'kind': 'primitive', 'type': 'builtins.str', 'value': 'usage'}][{'kind': 'primitive', 'type': 'builtins.str', 'value': 'direct_calls_detail'}].<length>
-INCREMENTAL_VALUE=0
-FRESH_FULL_VALUE=1
-INCREMENTAL_FILESTATE=5 expected / 5 tracked; missing=[], extra=[], sha256_mismatches=[].
-FRESH_FULL_FILESTATE=5 expected / 5 tracked; missing=[], extra=[], sha256_mismatches=[].
-No cause interpretation or next repair was attempted.
+NO NEW PARITY MISMATCH MEASURED. The first current-task failure is the focused fixture KeyError above.
 
 ## PRESERVED_EVIDENCE
-EVIDENCE_DIRECTORY=C:\Users\DafoO\AppData\Local\Temp\pytest-of-DafoO\pytest-580\test_case_e_reexport_retarget_0\b0g2d7a_e_evidence
-- initial_full.pickle: 20192 bytes
-- incremental.pickle: 21426 bytes
-- fresh_full.pickle: 21533 bytes
-- summary.json: 4860 bytes
-The evidence directory and its four files were inspected read-only and left in place. summary.json records the exact first structural difference and both FileState coverage results. No further mutation scenario or regression suite was executed.
+- Prior E evidence directory and its initial_full.pickle, incremental.pickle, fresh_full.pickle, and summary.json remain in place.
+- Current focused fixture root and cache remain at C:\Users\DafoO\AppData\Local\Temp\pytest-of-DafoO\pytest-581\package_reference_detail0. Their existence was checked read-only.
+- Pytest traceback and the exact failing expression are recorded above. No snapshot was rewritten or deleted after the failure.
 
 ## FOUR_WAY_PARITY_IF_EXECUTED
-NOT EXECUTED: Case E stopped the six-mutation gate.
+NOT EXECUTED.
 
 ## ATOMICITY_RECHECK_IF_EXECUTED
-NOT EXECUTED: Case E stopped the six-mutation gate.
+NOT EXECUTED.
 
 ## OTHER_TARGETED_REGRESSIONS
-NOT EXECUTED: Desktop/MCP canonical parity, LIVE incremental parity, failure atomicity, layer report parity, collision code parity, and further FileState persistence tests require all six matrix scenarios to pass. Case F and these follow-up tests were not run.
+NOT EXECUTED. The focused gate failed before the six-mutation matrix and conditional Desktop/MCP, atomicity, layer, collision, FileState, canonical-reference, and channel-parity regressions.
 
 ## PY_COMPILE
 PASS, exit code 0:
-.venv\Scripts\python.exe -m py_compile contextor/core/analysis/state_manager.py contextor/core/reporting_engine/pipeline.py tests/test_full_file_state_domain_reconciliation.py
+.venv\Scripts\python.exe -m py_compile contextor/core/reference/engine.py tests/test_package_reference_detail_parity.py
 
 ## GIT_DIFF_CHECK
-PASS: git diff --check exit code 0 for tracked source files.
-PASS: explicit trailing-space/tab check found 0 affected lines among all 229 lines of the new untracked test file.
-Git emitted only its LF-to-CRLF working-copy conversion advisory.
+PASS: git diff --check exit code 0 for the tracked production file.
+PASS: explicit trailing whitespace check found no affected lines among all 258 lines of the new untracked test file.
+Git emitted an LF-to-CRLF working-copy advisory only.
 
 ## LIVE_REVISION_BEFORE_AFTER
-BEFORE=384
-AFTER=387
-REVISION_385=desktop_watcher UPDATED contextor/core/analysis/state_manager.py
-REVISION_386=desktop_watcher UPDATED contextor/core/reporting_engine/pipeline.py
-REVISION_387=desktop_watcher UPDATED tests/test_full_file_state_domain_reconciliation.py
+BEFORE=387
+AFTER=390
+REVISION_388=desktop_watcher UPDATED contextor/core/reference/engine.py
+REVISION_389=desktop_watcher UPDATED tests/test_package_reference_detail_parity.py
+REVISION_390=desktop_watcher UNCHANGED tests/test_package_reference_detail_parity.py
 CONTINUITY=continuous
 
+The revision 389 event also added one NAME_COLLISION diagnostic for top-level SOURCES between tests.test_full_file_state_domain_reconciliation and tests.test_package_reference_detail_parity. This observed diagnostic was not modified after the first focused failure.
+
 ## WORKSPACE_SYNC_POSTCHECK
-workspace_sync=verified, canonical_state=fresh, canonical_revision=387 for both edited production files and the new test file, from Contextor get_file_edit_context. Syntax diagnostics checked and none for all three.
+workspace_sync=verified, canonical_state=fresh, canonical_revision=390 for edited engine.py and the new test file. Contextor syntax diagnostics were checked and none for both.
 
 ## RESYNC_REQUIRED
-false at LIVE revision 387.
+false at LIVE revision 390.
 
 ## RESTART_REQUIRED
-YES for serving-process operational runtime certification after the production source change. No service restart was performed by the agent. Source freshness and focused pytest do not attest serving-process reload.
+YES before operational serving-process certification after the production source edit. No MCP, LIVE, or Desktop restart was performed by the agent. LIVE indexing does not prove serving-process reload.
 
 ## SAFETY_AND_STOP
-ANALYZE_PROJECT_ON_CONTEXTOR_REPO=NO
+FULL_CONTEXTOR_REPO_ANALYSIS=NO
+FLASK_BENCHMARK=NO
 MANUAL_UPDATE_FILE=NO
 SERVICE_RESTART=NO
 COMMIT_RESET_CHECKOUT=NO
 FULL_PYTEST_SUITE=NO
-FURTHER_FIX_DESIGNED_BY_AGENT=NO
-STOP_REASON=First next mismatch in unchanged matrix at Case E. Await command proceduj.
+INDEPENDENT_REDESIGN_AFTER_FAILURE=NO
+Await command proceduj.
 
 ## FULL_DIFFS
-ACTUAL_DIFF=Full git-style diffs for all three FILES_CHANGED follow.
+ACTUAL_DIFF=Full git-style diffs for both FILES_CHANGED follow.
 
 ~~~~diff
-diff --git a/contextor/core/analysis/state_manager.py b/contextor/core/analysis/state_manager.py
-index 241902b..ab19d9f 100644
---- a/contextor/core/analysis/state_manager.py
-+++ b/contextor/core/analysis/state_manager.py
-@@ -472,6 +472,23 @@ class FileStateManager:
-         """Return the persisted file domain used by incremental analysis."""
-         return set(self._state)
- 
-+    def retain_tracked_paths(
-+        self,
-+        current_paths: set[str],
-+    ) -> None:
-+        """Keep only paths in the authoritative current indexed domain."""
-+        if not isinstance(current_paths, set) or any(
-+            not isinstance(path, str) or not path
-+            for path in current_paths
-+        ):
-+            raise ValueError(
-+                "Current indexed file domain must be a set "
-+                "of nonempty absolute path strings"
+diff --git a/contextor/core/reference/engine.py b/contextor/core/reference/engine.py
+index 0d9b1e3..6ff95c1 100644
+--- a/contextor/core/reference/engine.py
++++ b/contextor/core/reference/engine.py
+@@ -24,6 +24,7 @@ from .shared import (
+     MAX_USAGE_DETAILS,
+     _REEXPORT_CACHE,
+     _build_reexport_map,
++    _canonicalize_package_reference_target,
+     _empty_reference,
+     _export_module_name,
+     _normalize_references,
+@@ -795,8 +796,31 @@ def _usage_fact_contains_target(
+     definer_module: str,
+     symbol: str,
+     aliases: tuple[tuple[str, str], ...] = (),
++    *,
++    current_modules: set[str] | None = None,
+ ) -> bool:
+     """Check whether an outbound usage fact target matches the requested definer::symbol."""
++    if (
++        current_modules is not None
++        and definer_module.endswith(".__init__")
++    ):
++        fact_target = (
++            _canonicalize_package_reference_target(
++                fact_target,
++                current_modules,
 +            )
-+
-+        for obsolete_path in set(self._state) - current_paths:
-+            del self._state[obsolete_path]
-+
-     def update_state(self, file_path: str):
-         """
-         Updates the tracked state for a given file in RAM.
-diff --git a/contextor/core/reporting_engine/pipeline.py b/contextor/core/reporting_engine/pipeline.py
-index af166f0..2cc105e 100644
---- a/contextor/core/reporting_engine/pipeline.py
-+++ b/contextor/core/reporting_engine/pipeline.py
-@@ -547,6 +547,7 @@ def execute_global_pipeline(
-             )
-         )
-     )
-+    current_module_file_paths: set[str] = set()
- 
-     for completed, (module_id, module) in enumerate(modules.items()):
-         checkpoint(
-@@ -565,7 +566,13 @@ def execute_global_pipeline(
-             state_mgr.update_state(
-                 absolute_path
-             )
-+            current_module_file_paths.add(
-+                str(absolute_path)
++        )
++        aliases = tuple(
++            (
++                local_alias,
++                _canonicalize_package_reference_target(
++                    target,
++                    current_modules,
++                ),
 +            )
++            for local_alias, target in aliases
++        )
++
+     canonical_identity = f"{definer_module}.{symbol}"
  
-+    state_mgr.retain_tracked_paths(
-+        current_module_file_paths
-+    )
-     # datestamp keeps engine_state and file_state
-     # synchronized.
-     state_mgr.save(
-diff --git a/tests/test_full_file_state_domain_reconciliation.py b/tests/test_full_file_state_domain_reconciliation.py
+     if fact_target == canonical_identity or fact_target == symbol:
+@@ -903,7 +927,8 @@ def build_symbol_references_from_canonical(
+                     result[symbol]["called_by"].append(consumer)
+                     for item in reference_evidence:
+                         if item[1] == "direct_calls" and _usage_fact_contains_target(
+-                            item[0], definer_module, symbol, aliases
++                            item[0], definer_module, symbol, aliases,
++                            current_modules=candidate_modules,
+                         ):
+                             result[symbol]["called_by_detail"].append(
+                                 {
+@@ -917,7 +942,8 @@ def build_symbol_references_from_canonical(
+                     result[symbol]["callback_called"].append(consumer)
+                     for item in reference_evidence:
+                         if item[1] == "callback_calls" and _usage_fact_contains_target(
+-                            item[0], definer_module, symbol, aliases
++                            item[0], definer_module, symbol, aliases,
++                            current_modules=candidate_modules,
+                         ):
+                             result[symbol]["callback_called_detail"].append(
+                                 {
+@@ -931,7 +957,8 @@ def build_symbol_references_from_canonical(
+                     result[symbol]["event_bound_by"].append(consumer)
+                     for item in reference_evidence:
+                         if item[1] == "event_bindings" and _usage_fact_contains_target(
+-                            item[0], definer_module, symbol, aliases
++                            item[0], definer_module, symbol, aliases,
++                            current_modules=candidate_modules,
+                         ):
+                             result[symbol]["event_bound_by_detail"].append(
+                                 {
+@@ -945,7 +972,8 @@ def build_symbol_references_from_canonical(
+                     result[symbol]["qualified_refs"].append(consumer)
+                     for item in reference_evidence:
+                         if item[1] == "qualified_refs" and _usage_fact_contains_target(
+-                            item[0], definer_module, symbol, aliases
++                            item[0], definer_module, symbol, aliases,
++                            current_modules=candidate_modules,
+                         ):
+                             result[symbol]["qualified_refs_detail"].append(
+                                 {
+@@ -959,7 +987,8 @@ def build_symbol_references_from_canonical(
+                     result[symbol]["inherited_by"].append(consumer)
+                     for item in reference_evidence:
+                         if item[1] == "inheritance" and _usage_fact_contains_target(
+-                            item[0], definer_module, symbol, aliases
++                            item[0], definer_module, symbol, aliases,
++                            current_modules=candidate_modules,
+                         ):
+                             result[symbol]["inherited_by_detail"].append(
+                                 {
+diff --git a/tests/test_package_reference_detail_parity.py b/tests/test_package_reference_detail_parity.py
 new file mode 100644
-index 0000000..721d62d
+index 0000000..84deea7
 --- /dev/null
-+++ b/tests/test_full_file_state_domain_reconciliation.py
-@@ -0,0 +1,229 @@
-+"""FULL FileState must describe exactly the currently indexed source domain."""
++++ b/tests/test_package_reference_detail_parity.py
+@@ -0,0 +1,258 @@
++"""Package initializer usage details follow the canonical FULL reference target."""
 +
 +from __future__ import annotations
 +
++import ast
 +import builtins
-+import hashlib
-+import json
-+import os
++import copy
++from dataclasses import replace
 +from pathlib import Path
 +
 +import pytest
 +
 +from contextor.core.analysis.state_manager import (
-+    FileState,
-+    FileStateManager,
 +    RepositoryAnalysisState,
 +    load_engine_state,
 +)
 +from contextor.core.api.facade import ContextorFacade
++from contextor.core.live_state.hydration import hydrate_repository_engine
 +from contextor.core.live_state.store import read_metadata
 +from contextor.core.paths import repo_cache_dir
++from contextor.core.reference import engine as reference_engine
++from contextor.core.reference.engine import (
++    CanonicalReferenceEvidenceUnavailable,
++    _usage_fact_contains_target,
++    build_symbol_references_from_canonical,
++)
++from contextor.core.reference.shared import _canonicalize_package_reference_target
 +
 +
 +SOURCES = {
-+    "alpha/__init__.py": b"",
++    "alpha/__init__.py": b"from .api import api_function\n",
 +    "alpha/api.py": b"def api_function():\n    return 1\n",
 +    "beta/__init__.py": b"",
 +    "beta/consumer.py": (
-+        b"from alpha.api import api_function\n"
++        b"from alpha import api_function\n"
 +        b"CONSUMER_RESULT = api_function()\n"
 +    ),
 +    "loose.py": b"LOOSE_VALUE = 0\n",
 +}
 +
 +
-+def _write_repo(root: Path) -> None:
-+    root.mkdir()
-+    for relative, content in SOURCES.items():
-+        path = root / relative
-+        path.parent.mkdir(parents=True, exist_ok=True)
-+        path.write_bytes(content)
-+
-+
-+def _source_hashes(root: Path) -> dict[str, str]:
-+    return {
-+        str(path.resolve()): hashlib.sha256(path.read_bytes()).hexdigest()
-+        for path in root.rglob("*.py")
-+    }
-+
-+
-+def _run_full(root: Path):
++def _run_full(root: Path) -> RepositoryAnalysisState:
 +    errors, _ = ContextorFacade.analyze_project(str(root))
-+    assert not errors, f"FULL analysis failed for {root}: {errors!r}"
-+
++    assert not errors, f"FULL analysis failed for isolated fixture {root}: {errors!r}"
 +    cache = repo_cache_dir(root)
 +    metadata = read_metadata(cache)
 +    assert metadata is not None
-+    assert metadata.state_file and metadata.file_state_file
-+
 +    state = load_engine_state(
 +        str(cache),
 +        metadata.state_id,
@@ -256,165 +302,206 @@ index 0000000..721d62d
 +    assert isinstance(state, RepositoryAnalysisState)
 +    assert state.state_id == metadata.state_id
 +    assert state.revision == metadata.revision
-+
-+    manager = FileStateManager(str(cache))
-+    assert manager.baseline_status == "trusted"
-+    assert manager.state_id == metadata.state_id
-+    assert manager.revision == metadata.revision
-+    return state, manager, metadata
++    return state
 +
 +
-+def _assert_exact_file_state(root: Path, state, manager) -> None:
-+    expected = _source_hashes(root)
-+    canonical_paths = {
-+        module.absolute_path
-+        for module in state.modules.values()
-+        if module.absolute_path
++@pytest.fixture(scope="module")
++def retargeted_states(tmp_path_factory):
++    parent = tmp_path_factory.mktemp("package_reference_detail")
++    root = parent / "repo"
++    root.mkdir()
++    for relative, content in SOURCES.items():
++        path = root / relative
++        path.parent.mkdir(parents=True, exist_ok=True)
++        path.write_bytes(content)
++
++    with pytest.MonkeyPatch.context() as patch:
++        patch.setenv("CONTEXTOR_CACHE_DIR", str(parent / "cache"))
++        baseline_state = _run_full(root)
++        hydrated = hydrate_repository_engine(root)
++        assert hydrated is not None
++        engine = hydrated.engine
++        assert engine.state.state_id == baseline_state.state_id
++        original_state = engine.state
++        original_consumers = copy.deepcopy(
++            original_state.artifacts["alpha.__init__"]["consumers"]
++        )
++        original_record = original_state.artifacts["alpha.__init__"]["consumers"]["api_function"]
++
++        target = root / "alpha" / "__init__.py"
++        target.write_bytes(b"api_function = 7\n")
++        result = engine.update_file(str(target.resolve()))
++        assert result.status == "UPDATED"
++        incremental_state = engine.state
++        full_state = _run_full(root)
++
++    return {
++        "original": original_state,
++        "original_consumers": original_consumers,
++        "original_record": original_record,
++        "incremental": incremental_state,
++        "full": full_state,
++        "update_status": result.status,
 +    }
-+    assert canonical_paths == set(expected)
-+    assert manager.tracked_paths() == canonical_paths
-+    assert {
-+        path: file_state.sha256
-+        for path, file_state in manager._state.items()
-+    } == expected
 +
 +
-+def test_retain_tracked_paths_restricts_ram_domain_without_io(tmp_path, monkeypatch):
-+    manager = FileStateManager(str(tmp_path / "cache"))
-+    first, second, obsolete = (str(tmp_path / name) for name in ("a.py", "b.py", "old.py"))
-+    first_state = FileState(1, 2, "a" * 64)
-+    second_state = FileState(3, 4, "b" * 64)
-+    manager._state.update(
-+        {first: first_state, second: second_state, obsolete: FileState(5, 6, "c" * 64)}
++def test_package_initializer_match_uses_current_module_domain():
++    modules = {"alpha.__init__", "alpha.api", "beta.consumer"}
++    assert not _usage_fact_contains_target(
++        "alpha.api_function", "alpha.__init__", "api_function"
 +    )
-+    mapping = manager._state
++    assert _usage_fact_contains_target(
++        "alpha.api_function",
++        "alpha.__init__",
++        "api_function",
++        current_modules=modules,
++    )
++
++
++def test_real_import_alias_is_canonicalized(retargeted_states, monkeypatch):
++    state = retargeted_states["incremental"]
++    facts = state.module_usages["beta.consumer"]
++    assert facts.reference_evidence_materialized
++    assert ("api_function", "alpha.api_function") in facts.aliases
++    direct_call = next(
++        item for item in facts.reference_evidence if item[1] == "direct_calls"
++    )
++    assert direct_call == ("alpha.api_function", "direct_calls", "", 2)
++
++    observed = []
++    canonicalize = reference_engine._canonicalize_package_reference_target
++
++    def record_canonicalization(target, modules):
++        observed.append(target)
++        return canonicalize(target, modules)
++
++    with monkeypatch.context() as patch:
++        patch.setattr(
++            reference_engine,
++            "_canonicalize_package_reference_target",
++            record_canonicalization,
++        )
++        assert _usage_fact_contains_target(
++            direct_call[0],
++            "alpha.__init__",
++            "api_function",
++            facts.aliases,
++            current_modules=set(state.modules),
++        )
++
++    assert observed == ["alpha.api_function", "alpha.api_function"]
++    assert _canonicalize_package_reference_target(
++        dict(facts.aliases)["api_function"], set(state.modules)
++    ) == "alpha.__init__.api_function"
++
++
++def test_real_submodule_identity_takes_longest_prefix_precedence():
++    modules = {
++        "alpha.__init__",
++        "alpha.api",
++        "alpha.api_function",
++        "beta.consumer",
++    }
++    assert _canonicalize_package_reference_target(
++        "alpha.api_function", modules
++    ) == "alpha.api_function"
++    assert not _usage_fact_contains_target(
++        "alpha.api_function",
++        "alpha.__init__",
++        "api_function",
++        current_modules=modules,
++    )
++
++
++def test_reexport_retarget_matches_full_consumer_detail(retargeted_states):
++    incremental = retargeted_states["incremental"]
++    full = retargeted_states["full"]
++    target = "alpha.__init__::api_function"
++    for state in (incremental, full):
++        assert state.artifact_consumption[target] == {
++            "consumers": ["beta.consumer"],
++            "channels": {"beta.consumer": ["api_imports", "direct_calls"]},
++        }
++
++    incremental_record = incremental.artifacts["alpha.__init__"]["consumers"]["api_function"]
++    full_record = full.artifacts["alpha.__init__"]["consumers"]["api_function"]
++    assert incremental_record == full_record
++    assert incremental_record["consumers"] == ["beta.consumer"]
++    assert incremental_record["usage"]["direct_calls"] == ["beta.consumer"]
++    assert incremental_record["usage"]["direct_calls_detail"] == [
++        {"module": "beta.consumer", "line": 2, "context": None}
++    ]
++    assert incremental_record["consumer_count"] == {
++        "total": 1,
++        "direct_calls": 1,
++        "callbacks": 0,
++        "events": 0,
++        "qualified_refs": 0,
++        "api_imports": 1,
++        "inheritance": 0,
++    }
++
++
++def test_cow_and_missing_reference_evidence_fail_closed(retargeted_states):
++    original = retargeted_states["original"]
++    incremental = retargeted_states["incremental"]
++    old_record = retargeted_states["original_record"]
++    assert original is not incremental
++    assert original.artifacts["alpha.__init__"]["consumers"] == (
++        retargeted_states["original_consumers"]
++    )
++    assert original.artifacts["alpha.__init__"]["consumers"]["api_function"] is old_record
++    assert incremental.artifacts["alpha.__init__"]["consumers"]["api_function"] is not old_record
++
++    modules = set(incremental.modules)
++    usages = dict(incremental.module_usages)
++    usages.pop("beta.consumer")
++    with pytest.raises(CanonicalReferenceEvidenceUnavailable):
++        build_symbol_references_from_canonical(
++            definer_module="alpha.__init__",
++            symbols=["api_function"],
++            artifact_consumption=incremental.artifact_consumption,
++            module_usages=usages,
++            current_modules=modules,
++        )
++
++    usages = dict(incremental.module_usages)
++    usages["beta.consumer"] = replace(
++        usages["beta.consumer"], reference_evidence_materialized=False
++    )
++    with pytest.raises(CanonicalReferenceEvidenceUnavailable):
++        build_symbol_references_from_canonical(
++            definer_module="alpha.__init__",
++            symbols=["api_function"],
++            artifact_consumption=incremental.artifact_consumption,
++            module_usages=usages,
++            current_modules=modules,
++        )
++
++
++def test_canonical_detail_projection_reads_only_materialized_ram_facts(
++    retargeted_states, monkeypatch
++):
++    state = retargeted_states["incremental"]
 +
 +    def unexpected_io(*_args, **_kwargs):
-+        pytest.fail("retain_tracked_paths attempted filesystem I/O or persistence")
++        pytest.fail("canonical RAM projection performed source I/O or parsing")
 +
 +    with monkeypatch.context() as patch:
 +        patch.setattr(builtins, "open", unexpected_io)
-+        patch.setattr(os, "stat", unexpected_io)
-+        patch.setattr(manager, "save", unexpected_io)
-+        manager.retain_tracked_paths({first, second})
-+
-+    assert manager._state is mapping
-+    assert manager.tracked_paths() == {first, second}
-+    assert manager._state[first] is first_state
-+    assert manager._state[second] is second_state
-+    assert list((tmp_path / "cache").iterdir()) == []
-+
-+
-+@pytest.mark.parametrize(
-+    "invalid_domain",
-+    [None, [], {""}, {42}, {Path("relative.py")}],
-+)
-+def test_retain_tracked_paths_rejects_invalid_domain_before_mutation(
-+    tmp_path, invalid_domain
-+):
-+    manager = FileStateManager(str(tmp_path / "cache"))
-+    manager._state.update(
-+        {"first.py": FileState(1, 2, "a" * 64), "second.py": FileState(3, 4, "b" * 64)}
-+    )
-+    mapping = manager._state
-+    original = manager._state.copy()
-+
-+    with pytest.raises(ValueError, match="Current indexed file domain"):
-+        manager.retain_tracked_paths(invalid_domain)
-+
-+    assert manager._state is mapping
-+    assert manager._state == original
-+
-+
-+def test_full_after_module_deletion_reconciles_domain_and_keeps_old_generation(
-+    tmp_path, monkeypatch
-+):
-+    monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(tmp_path / "cache"))
-+    root = tmp_path / "repo"
-+    _write_repo(root)
-+    first_state, first_manager, first_metadata = _run_full(root)
-+    _assert_exact_file_state(root, first_state, first_manager)
-+    assert len(first_manager._state) == 5
-+
-+    cache = repo_cache_dir(root)
-+    old_files = [cache / first_metadata.state_file, cache / first_metadata.file_state_file]
-+    if first_metadata.lineage_manifest_file:
-+        manifest = cache / first_metadata.lineage_manifest_file
-+        old_files.append(manifest)
-+        manifest_payload = json.loads(manifest.read_text(encoding="utf-8"))
-+        old_files.extend(
-+            cache / entry["file"] for entry in manifest_payload["sources"].values()
++        patch.setattr(Path, "read_text", unexpected_io)
++        patch.setattr(Path, "read_bytes", unexpected_io)
++        patch.setattr(ast, "parse", unexpected_io)
++        patch.setattr(reference_engine, "read_source", unexpected_io)
++        references = build_symbol_references_from_canonical(
++            definer_module="alpha.__init__",
++            symbols=["api_function"],
++            artifact_consumption=state.artifact_consumption,
++            module_usages=state.module_usages,
++            current_modules=set(state.modules),
 +        )
-+    old_generation = {
-+        path: (path.read_bytes(), path.stat().st_mtime_ns)
-+        for path in set(old_files)
-+    }
 +
-+    removed = (root / "beta" / "consumer.py").resolve()
-+    removed.unlink()
-+    second_state, second_manager, second_metadata = _run_full(root)
-+
-+    assert second_metadata.revision > first_metadata.revision
-+    assert str(removed) not in {
-+        module.absolute_path for module in second_state.modules.values()
-+    }
-+    assert str(removed) not in second_manager.tracked_paths()
-+    assert len(second_manager._state) == 4
-+    _assert_exact_file_state(root, second_state, second_manager)
-+
-+    persisted = json.loads(
-+        (cache / second_metadata.file_state_file).read_text(encoding="utf-8")
-+    )
-+    assert set(persisted["files"]) == second_manager.tracked_paths()
-+    assert {
-+        path: entry["sha256"] for path, entry in persisted["files"].items()
-+    } == _source_hashes(root)
-+    assert all(
-+        path.read_bytes() == content and path.stat().st_mtime_ns == mtime_ns
-+        for path, (content, mtime_ns) in old_generation.items()
-+    )
-+
-+
-+def test_unchanged_full_reanalysis_preserves_exact_domain_and_hashes(tmp_path, monkeypatch):
-+    monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(tmp_path / "cache"))
-+    root = tmp_path / "repo"
-+    _write_repo(root)
-+    first_state, first_manager, first_metadata = _run_full(root)
-+    _assert_exact_file_state(root, first_state, first_manager)
-+    first_hashes = {
-+        path: item.sha256 for path, item in first_manager._state.items()
-+    }
-+
-+    second_state, second_manager, second_metadata = _run_full(root)
-+    assert second_metadata.revision > first_metadata.revision
-+    _assert_exact_file_state(root, second_state, second_manager)
-+    assert second_manager.tracked_paths() == first_manager.tracked_paths()
-+    assert {
-+        path: item.sha256 for path, item in second_manager._state.items()
-+    } == first_hashes
-+
-+
-+def test_full_discards_controlled_stale_tracked_entry(tmp_path, monkeypatch):
-+    monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(tmp_path / "cache"))
-+    root = tmp_path / "repo"
-+    _write_repo(root)
-+    first_state, first_manager, first_metadata = _run_full(root)
-+    _assert_exact_file_state(root, first_state, first_manager)
-+
-+    cache = repo_cache_dir(root)
-+    generation = cache / first_metadata.file_state_file
-+    payload = json.loads(generation.read_text(encoding="utf-8"))
-+    stale_path = str((root / "deleted.py").resolve())
-+    assert not (root / "deleted.py").exists()
-+    payload["files"][stale_path] = FileState(1, 1, "f" * 64).to_dict()
-+    generation.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-+
-+    controlled_baseline = FileStateManager(str(cache))
-+    assert controlled_baseline.baseline_status == "trusted"
-+    assert controlled_baseline.tracked_paths() == first_manager.tracked_paths() | {stale_path}
-+
-+    second_state, second_manager, second_metadata = _run_full(root)
-+    assert second_metadata.revision > first_metadata.revision
-+    assert stale_path not in second_manager.tracked_paths()
-+    _assert_exact_file_state(root, second_state, second_manager)
++    assert references["api_function"]["called_by_detail"] == [
++        {"module": "beta.consumer", "line": 2, "context": None}
++    ]
 ~~~~
