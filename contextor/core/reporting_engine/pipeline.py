@@ -547,6 +547,7 @@ def execute_global_pipeline(
             )
         )
     )
+    current_module_file_paths: set[str] = set()
 
     for completed, (module_id, module) in enumerate(modules.items()):
         checkpoint(
@@ -565,7 +566,13 @@ def execute_global_pipeline(
             state_mgr.update_state(
                 absolute_path
             )
+            current_module_file_paths.add(
+                str(absolute_path)
+            )
 
+    state_mgr.retain_tracked_paths(
+        current_module_file_paths
+    )
     # datestamp keeps engine_state and file_state
     # synchronized.
     state_mgr.save(

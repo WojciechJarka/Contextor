@@ -472,6 +472,23 @@ class FileStateManager:
         """Return the persisted file domain used by incremental analysis."""
         return set(self._state)
 
+    def retain_tracked_paths(
+        self,
+        current_paths: set[str],
+    ) -> None:
+        """Keep only paths in the authoritative current indexed domain."""
+        if not isinstance(current_paths, set) or any(
+            not isinstance(path, str) or not path
+            for path in current_paths
+        ):
+            raise ValueError(
+                "Current indexed file domain must be a set "
+                "of nonempty absolute path strings"
+            )
+
+        for obsolete_path in set(self._state) - current_paths:
+            del self._state[obsolete_path]
+
     def update_state(self, file_path: str):
         """
         Updates the tracked state for a given file in RAM.
