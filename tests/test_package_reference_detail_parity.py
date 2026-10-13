@@ -27,7 +27,7 @@ from contextor.core.reference.engine import (
 from contextor.core.reference.shared import _canonicalize_package_reference_target
 
 
-SOURCES = {
+_PACKAGE_REFERENCE_DETAIL_SOURCES = {
     "alpha/__init__.py": b"from .api import api_function\n",
     "alpha/api.py": b"def api_function():\n    return 1\n",
     "beta/__init__.py": b"",
@@ -62,7 +62,7 @@ def retargeted_states(tmp_path_factory):
     parent = tmp_path_factory.mktemp("package_reference_detail")
     root = parent / "repo"
     root.mkdir()
-    for relative, content in SOURCES.items():
+    for relative, content in _PACKAGE_REFERENCE_DETAIL_SOURCES.items():
         path = root / relative
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(content)
@@ -75,10 +75,15 @@ def retargeted_states(tmp_path_factory):
         engine = hydrated.engine
         assert engine.state.state_id == baseline_state.state_id
         original_state = engine.state
-        original_consumers = copy.deepcopy(
+        original_snapshot = copy.deepcopy(original_state)
+        original_consumers_view = (
             original_state.artifacts["alpha.__init__"]["consumers"]
         )
-        original_record = original_state.artifacts["alpha.__init__"]["consumers"]["api_function"]
+        original_consumers = copy.deepcopy(
+            original_consumers_view
+        )
+
+        assert "api_function" not in original_consumers
 
         target = root / "alpha" / "__init__.py"
         target.write_bytes(b"api_function = 7\n")
@@ -88,9 +93,9 @@ def retargeted_states(tmp_path_factory):
         full_state = _run_full(root)
 
     return {
-        "original": original_state,
+        "original": original_snapshot,
+        "original_consumers_view": original_consumers_view,
         "original_consumers": original_consumers,
-        "original_record": original_record,
         "incremental": incremental_state,
         "full": full_state,
         "update_status": result.status,
@@ -197,13 +202,34 @@ def test_reexport_retarget_matches_full_consumer_detail(retargeted_states):
 def test_cow_and_missing_reference_evidence_fail_closed(retargeted_states):
     original = retargeted_states["original"]
     incremental = retargeted_states["incremental"]
-    old_record = retargeted_states["original_record"]
+    old_consumers_view = (
+        retargeted_states["original_consumers_view"]
+    )
     assert original is not incremental
     assert original.artifacts["alpha.__init__"]["consumers"] == (
         retargeted_states["original_consumers"]
     )
-    assert original.artifacts["alpha.__init__"]["consumers"]["api_function"] is old_record
-    assert incremental.artifacts["alpha.__init__"]["consumers"]["api_function"] is not old_record
+    assert old_consumers_view == (
+        retargeted_states["original_consumers"]
+    )
+
+    assert old_consumers_view is not (
+        incremental.artifacts["alpha.__init__"]["consumers"]
+    )
+
+    assert "api_function" not in old_consumers_view
+
+    assert "api_function" not in (
+        original.artifacts["alpha.__init__"]["consumers"]
+    )
+
+    assert "api_function" in (
+        incremental.artifacts["alpha.__init__"]["consumers"]
+    )
+
+    assert incremental.artifacts["alpha.__init__"]["consumers"][
+        "api_function"
+    ] is not old_consumers_view.get("api_function")
 
     modules = set(incremental.modules)
     usages = dict(incremental.module_usages)
