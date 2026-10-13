@@ -302,6 +302,11 @@ def test_incremental_invalid_collision_candidate_is_not_fresh(
     state = _run_full_and_load(tmp_path)
     assert state.collisions_state == "fresh"
     previous_facts = deepcopy(state.collision_facts)
+    from test_desktop_mcp_canonical_parity import (
+        _state_projection,
+    )
+
+    original_projection = _state_projection(state)
 
     beta_path = tmp_path / "beta.py"
     beta_path.write_text(
@@ -355,20 +360,24 @@ def test_incremental_invalid_collision_candidate_is_not_fresh(
             blank_candidate_codes,
         )
 
-    outcome = execute_refresh_plan(
-        state=state,
-        delta=prepared.delta,
-        usage_delta=prepared.usage_delta,
-        plan=plan,
-        new_imports=prepared.new_imports,
-        new_artifacts=prepared.new_artifacts,
-        new_usage=prepared.new_usage,
-        root_path=tmp_path.resolve(),
-        file_path=str(beta_path.resolve()),
-        new_collision_facts=prepared.new_collision_facts,
-        new_reexport_facts=prepared.new_reexport_facts,
-    )
+    with pytest.raises(
+        RuntimeError,
+        match="Cannot refresh layer report from untrusted canonical facts",
+    ):
+        execute_refresh_plan(
+            state=state,
+            delta=prepared.delta,
+            usage_delta=prepared.usage_delta,
+            plan=plan,
+            new_imports=prepared.new_imports,
+            new_artifacts=prepared.new_artifacts,
+            new_usage=prepared.new_usage,
+            root_path=tmp_path.resolve(),
+            file_path=str(beta_path.resolve()),
+            new_collision_facts=prepared.new_collision_facts,
+            new_reexport_facts=prepared.new_reexport_facts,
+        )
 
+    assert _state_projection(state) == original_projection
     assert state.collisions_state == "fresh"
     assert state.collision_facts == previous_facts
-    assert outcome.candidate_state.collisions_state == "deferred"
