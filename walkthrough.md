@@ -1,79 +1,159 @@
-# CONTEXTOR_B0G2D7D_OPERATIONAL_CERTIFICATION_READINESS
+# CONTEXTOR_B0G2D8A_LINEAGE_ATOMIC_COMMIT_FIXTURE_REPAIR
 
-FILES_CHANGED=NONE
-FULL_DIFFS=NONE
+## FILES_CHANGED
+FILES_CHANGED=tests/test_lineage_state_lifecycle.py
+`walkthrough.md` is the requested report artifact and is excluded from FILES_CHANGED.
 
 ## SOURCE_PRECHECK
-DIRECT_EVIDENCE: HEAD=2d524054178aa673d5f97c885949945f25a3d5e3. Pre-report `git status --short --untracked-files=all` was empty. All seven requested paths resolve as Contextor canonical modules. No source/test changes, tests, analyze_project, update_file, process actions, Git mutations, FULL analysis, or Flask benchmark occurred.
+DIRECT_EVIDENCE: HEAD before edit=49a0d278ee25ae6eab6bc031bd1b711c5f8ea576; Git status before edit was clean. Contextor MCP was absent from the available deferred tools at precheck time; its documentation and current LIVE/file context were consulted as soon as it became available, after the approved test-only patch. Source inspection found `_atomic_delta_commit`, `_failed_commit_guard`, `_apply_delta_and_commit`, `_updated_module_usage_manifest`, `_lineage_engine`, `_LineageRegistry`, and `_LifecycleRegistry` at their expected anchors. Contextor later reported incremental/engine.py and the edited test canonical_state=fresh, workspace_sync=verified at revision 393. It reported seven direct consumers for the production incremental engine and zero for the test module in the bounded file context. No production contract mismatch was observed.
+CONTRACT_PROVED: `_failed_commit_guard` reads `state_manager._state`; successful commit invokes `update_state` and then `get_tracked_sha256`; `_updated_module_usage_manifest` rejects an empty tracked hash for nondeleted updates; commit accesses `delta.module_path` and `delta.is_deleted`. The fake registry transaction retains its existing in-transaction rollback behavior. The pre-edit Contextor architecture/lineage precheck could not be completed because the tools were unavailable then; this limitation is explicit.
 
-## TARGETED_TEST_EVIDENCE
-DIRECT_EVIDENCE: Prior B0G2D7C4A report records package-reference focused 6/6 PASS, six-mutation matrix 6/6 PASS, H2C 8/8 PASS, other targeted regressions 41/41 PASS; py_compile and git diff --check PASS. These were not rerun and do not prove loaded runtime code.
+## FAILED_GLOBAL_GATE_BASELINE
+USER_PROVIDED: 3441 passed, 8 failed, 1 skipped, 1 warning, 986.85 seconds. Six failures are in the lineage file; two matrix failures remain separate. This global run was not rerun here.
 
-## LIVE_REVISION
-DIRECT_EVIDENCE: Contextor get_live_events(after_revision=391): latest_revision=391, activity_epoch=2d530224597f44e49ca532f195a0c754, earliest_retained_revision=378, events=[], latest_seq=209. Later bounded activity query: latest_revision=391, latest_seq=225. No newer canonical event returned.
+## ATOMIC_COMMIT_FIXTURE_CONTRACT
+The `_lineage_engine` fake now has `_state={}` per invocation, preserves `update_state=acknowledged.append`, and supplies `get_tracked_sha256`. The standalone commit test's local manager has the same three members and retains its no-op acknowledgement. The standalone delta now carries `module_path="pkg", is_deleted=False`. All mocked outcomes and assertions remain unchanged.
 
-## EVENT_CONTINUITY
-DIRECT_EVIDENCE: continuity=continuous for after_revision=391; resync_reason=null. Bounded activity response has activity_continuity=not_requested, so complete activity continuity is not established. Trace records FS_CHANGE_DETECTED/WATCH_UPDATE_START at 2026-10-13T10:22:07Z with no newer canonical revision observed; completion is UNKNOWN.
+## FAKE_FILESTATE_DOMAIN
+`_state` is a new empty dict for each synthetic manager instance. It supports the production rollback guard's tracked mapping snapshot without changing production FileStateManager.
 
-## WORKSPACE_SYNC
-DIRECT_EVIDENCE: For each requested file, Contextor returned canonical_state=fresh, provenance=live, canonical_revision=391, workspace_sync=verified, warnings=[]: reference/engine.py; validator/collisions.py; api/facade.py; analysis/incremental/plan_executor.py; analysis/incremental/engine.py; analysis/state_manager.py; reporting_engine/pipeline.py. This is disk-to-canonical verification only.
+## TRUSTED_HASH_UNIT_TEST_BOUNDARY
+The synthetic hash is `hashlib.sha256(b"lineage-lifecycle-test-fixture").hexdigest()`, a stable nonempty 64-character hexadecimal unit-test value. It is not evidence of source-backed FileState fidelity. Dedicated failed-commit and FileState tests retain that responsibility.
+
+## DELTA_MODULE_PATH_CORRECTIONS
+Added module_path="pkg" to both success/failure deltas in `test_identity_sync_materializes_against_new_ids_and_rolls_back_on_failure`; added module_path="provider" to owner deletion, owner introduction, generation change, and revalidation failure deltas. Existing is_deleted values, expected owner identities, generation/rollback assertions and re-extraction prohibitions were untouched.
+
+## SIX_FAILED_LINEAGE_NODES
+COMMAND=`.venv\Scripts\python.exe -m pytest -q -x -s` with the six explicit test nodes named in the task: standalone commit plus five identity-sync scenarios. RESULT=6 passed in 3.67s; exit code 0. No first failure.
+
+## LINEAGE_FILE_REGRESSION
+COMMAND=`.venv\Scripts\python.exe -m pytest -q -x -s tests/test_lineage_state_lifecycle.py`. RESULT=40 passed in 7.98s; exit code 0.
+
+## REGISTRY_ROLLBACK_PRESERVATION
+CODE_PATH_PROVED: The existing fake transaction and its assertions were not changed. The two failure scenarios in the six-node gate passed, including original registry owner IDs and no acknowledgement assertions. No exceptions were suppressed.
+
+## CANONICAL_COW_PRESERVATION
+CODE_PATH_PROVED: Production `_failed_commit_guard` and `_apply_delta_and_commit` were not modified. Existing failed-state and lineage assertions remained; all 40 file tests passed. This is targeted test evidence, not a global production certification.
+
+## OUTSTANDING_MATRIX_FAILURES
+A: `test_multi_identity_execution_projects_all_exact_targets_and_stays_fresh` — outstanding, not tested or changed here.
+B: `test_multi_identity_recompute_stays_fresh_across_clean_later_patch` — outstanding, not tested or changed here.
+USER_PROVIDED prior inspection cited overwritten modern artifact domain and incomplete reference evidence for a synthetic current module. Neither is classified fixed or preexisting by this task.
+
+## PY_COMPILE
+PASS: `.venv\Scripts\python.exe -m py_compile tests/test_lineage_state_lifecycle.py`; exit code 0.
+
+## GIT_DIFF_CHECK
+PASS: `git diff --check`; exit code 0. Git reported only an LF-to-CRLF future-working-copy warning, not a diff-check failure. Post-edit `git status --short --untracked-files=all` showed only `M tests/test_lineage_state_lifecycle.py` before report writing.
+
+## LIVE_REVISION_BEFORE_AFTER
+Pre-edit current-turn LIVE revision was unavailable while Contextor tools were absent. Prior task's observed revision was 391, but a new activity epoch exists and it is not an unbroken pre-edit cursor. Contextor current revision=393, activity_epoch=c091cb70c2634898aadd407860e4d5c0. Revision 393 is `desktop_watcher UPDATED` for `tests/test_lineage_state_lifecycle.py`. A query after_revision=391 yielded event_retention_gap due the new retained window; it cannot establish 391-to-393 continuity. A current-window query after_revision=393 returned continuity=continuous, no newer events, and resync_required=false.
+
+## WORKSPACE_SYNC_POSTCHECK
+DIRECT_EVIDENCE: Contextor returned workspace_sync=verified, canonical_state=fresh, provenance=live at revision 393 for the edited test and production incremental/engine.py. `get_name_collisions(module="tests.test_lineage_state_lifecycle", representation="summary")` returned matched=0, availability=fresh; global diagnostic summary showed name_collisions=0, fresh. No collision is observed from the edit.
 
 ## RESYNC_REQUIRED
-DIRECT_EVIDENCE: false in current Contextor LIVE response.
+CURRENT_WINDOW=false. The old cursor 391 returned resync_required=true with reason=event_retention_gap across an activity-epoch change; it must not be used as a continuous propagation proof.
 
-## DESKTOP_PID
-DIRECT_EVIDENCE: 18968 runs C:\Temp\Contextor_Repo\main.py --gui, OS start 2026-10-13T10:06:06.893019+02:00. PID 18944 is its live Python launcher parent.
-
-## WATCHER_PID
-DIRECT_EVIDENCE: 18968. Active trace has FS_CHANGE_DETECTED and WATCH_UPDATE_START for this repo with pid=18968, tid=17428, domain LIVE. Watcher event producer is observed within GUI process; no distinct watcher OS process identified. Present thread health is UNKNOWN.
-
-## MCP_LISTENER_PID
-DIRECT_EVIDENCE: 17808 owns 127.0.0.1:8765 LISTEN socket (Get-NetTCPConnection).
-
-## MCP_SERVER_PID
-DIRECT_EVIDENCE: 17808 runs -u -m contextor.mcp_main and owns HTTP listener. PID 17760 is Python launcher parent with same module command.
-
-## PROCESS_PARENT_CHILD_RELATIONSHIPS
-DIRECT_EVIDENCE: 3916 (run_contextor.bat cmd) -> 18944 (venv GUI launcher) -> 18968 (GUI child). 18968 -> 18392 (venv runtime launcher with --repo C:\Temp\Contextor_Repo --owner-pid 18968) -> 17572 (runtime Python child, same runtime command). 17492 -> 17760 (venv MCP launcher) -> 17808 (MCP serving child and listener owner). PID 18968 also parents multiprocessing spawn PIDs 6012,17544,5488,17852; their specific roles are UNKNOWN. Trace records canonical writer admission under 17572 for origin=desktop_watcher.
-
-## ACTIVE_POINTER_STATUS
-DIRECT_EVIDENCE: %APPDATA%\Contextor\logs\contextor_runtime_active.json contains desktop_pid=9860, SID=d-9860-20261012_084734_461, file=contextor_runtime_20261012_084734_461_9860.jsonl, started_at=2026-10-12T08:47:34.461+00:00. PID 9860 is absent from current process inventory. Pointed JSONL exists and includes current PID 18968 and 17572 events. Pointer desktop PID is stale; it is not ownership proof.
-
-## PRODUCTION_SOURCE_MODIFICATION_TIMES
-DIRECT_EVIDENCE: Current filesystem LastWriteTimeUtc:
-
-| File | UTC |
-|---|---|
-| contextor/core/reference/engine.py | 2026-10-13T09:56:07.6407049Z |
-| contextor/core/validator/collisions.py | 2026-10-13T08:28:04.3797120Z |
-| contextor/core/api/facade.py | 2026-10-13T08:28:04.3880326Z |
-| contextor/core/analysis/incremental/plan_executor.py | 2026-10-13T08:28:04.3910296Z |
-| contextor/core/analysis/incremental/engine.py | 2026-10-12T12:24:48.7220886Z |
-| contextor/core/analysis/state_manager.py | 2026-10-13T09:29:35.2810061Z |
-| contextor/core/reporting_engine/pipeline.py | 2026-10-13T09:29:35.2830058Z |
-
-## PROCESS_START_TIMES
-DIRECT_EVIDENCE: OS CreationDate, 2026-10-13 local +02:00: MCP launcher 17760=10:05:56.526333; MCP server 17808=10:05:56.614111; GUI launcher 18944=10:06:06.866069; GUI/watcher producer 18968=10:06:06.893019; runtime launcher 18392=10:08:21.519293; runtime child 17572=10:08:21.582496.
-
-## LOADED_CODE_FRESHNESS
-DIRECT_EVIDENCE: GUI, MCP, runtime all started before the present mtime of six requested files, and after incremental/engine.py mtime. No trustworthy loaded-module hash, version, or per-module fingerprint was observed. LOADED_CODE_FRESHNESS=UNKNOWN for all three process families. Start chronology cannot prove import timing or dynamic reload. workspace_sync=verified does not prove imported-code identity.
-
-## MANUAL_RELOAD_INVENTORY
-| Component | PID / owner | Loaded code | Manual reload before certification | LIVE continuity risk |
-|---|---|---|---|---|
-| Desktop GUI and in-process watcher | 18968 / 18944 | UNKNOWN; process predates six file mtimes | Required to establish new process after modifications; then check identity | Activity epoch, watcher delivery, and authority may change; recheck revision/continuity |
-| MCP serving HTTP | 17808 / 17760 | UNKNOWN; predates six mtimes | Required to establish new serving process and verify new listener owner | In-flight requests/cursor may be interrupted; recheck MCP LIVE state |
-| LIVE runtime authority/worker | 18392,17572 / 18968 | UNKNOWN; predates six mtimes | Required to establish new runtime child and authority identity | Authority handoff/service continuity need post-reload evidence |
-
-INFERENCE: This is a factual certification-readiness inventory, not a claim that a specific loaded module is stale or a restart procedure.
-
-## RUNTIME_OWNERSHIP_UNCERTAINTIES
-UNKNOWN: loaded-module fingerprint/version in all relevant processes; health/completion of last watcher operation; roles of GUI multiprocessing spawn children. Main GUI-watcher, MCP listener/server, and runtime parent-child chain have direct OS/log evidence. Stale pointer cannot attest current owner.
-
-## USER_GLOBAL_REGRESSION_GATE_STATUS
-PENDING_USER. The next full pytest checkpoint belongs exclusively to the user. Earlier global suite is not proof for current HEAD. No tests run now.
+## RESTART_REQUIRED
+NO production code changed. No restart was performed. Runtime loaded-code identity remains outside this test-only gate.
 
 ## FINAL_VERDICT
-B0G2D7D_RUNTIME_OWNERSHIP_UNRESOLVED
+B0G2D8A_LINEAGE_REGRESSIONS_PASS
+Six original failed nodes and all 40 tests in the lineage file pass. This is not global FINAL PASS; the two matrix failures and user-owned global gate remain outstanding.
 
-Current primary processes are identified, but loaded-code identity/freshness and stale-pointer reconciliation remain unproved. Operational FINAL PASS is not claimed. Await `proceduj`.
+## FULL_DIFFS
+### tests/test_lineage_state_lifecycle.py
+```diff
+diff --git a/tests/test_lineage_state_lifecycle.py b/tests/test_lineage_state_lifecycle.py
+index 33e8500..b1391e7 100644
+--- a/tests/test_lineage_state_lifecycle.py
++++ b/tests/test_lineage_state_lifecycle.py
+@@ -537,12 +537,16 @@ def test_incremental_commit_publishes_lineage_candidate_fields(
+     engine.root_path = Path(tmp_path)
+     engine.registry = SimpleNamespace()
+     engine.state_manager = SimpleNamespace(
++        _state={},
+         update_state=lambda _path: None,
++        get_tracked_sha256=lambda _path: hashlib.sha256(
++            b"lineage-lifecycle-test-fixture"
++        ).hexdigest(),
+     )
+ 
+     engine._apply_delta_and_commit(
+         str(tmp_path / "pkg.py"),
+-        SimpleNamespace(),
++        SimpleNamespace(module_path="pkg", is_deleted=False),
+         None,
+         SimpleNamespace(),
+         [],
+@@ -694,7 +698,13 @@ def _lineage_engine(state, registry, tmp_path):
+     engine.state = state
+     engine.registry = registry
+     engine.root_path = Path(tmp_path)
+-    engine.state_manager = SimpleNamespace(update_state=acknowledged.append)
++    engine.state_manager = SimpleNamespace(
++        _state={},
++        update_state=acknowledged.append,
++        get_tracked_sha256=lambda _path: hashlib.sha256(
++            b"lineage-lifecycle-test-fixture"
++        ).hexdigest(),
++    )
+     return engine, acknowledged
+ 
+ 
+@@ -1048,7 +1058,7 @@ def test_identity_sync_materializes_against_new_ids_and_rolls_back_on_failure(
+ 
+     engine._apply_delta_and_commit(
+         str(tmp_path / "pkg.py"),
+-        SimpleNamespace(is_deleted=False),
++        SimpleNamespace(module_path="pkg", is_deleted=False),
+         None,
+         SimpleNamespace(),
+         [],
+@@ -1094,7 +1104,7 @@ def test_identity_sync_materializes_against_new_ids_and_rolls_back_on_failure(
+     with pytest.raises(ValueError, match="materialize failed"):
+         failing_engine._apply_delta_and_commit(
+             str(tmp_path / "pkg.py"),
+-            SimpleNamespace(is_deleted=False),
++            SimpleNamespace(module_path="pkg", is_deleted=False),
+             None,
+             SimpleNamespace(),
+             [],
+@@ -1149,7 +1159,7 @@ def test_identity_sync_owner_deletion_matches_fresh_full_materialization_without
+ 
+     engine._apply_delta_and_commit(
+         str(tmp_path / "provider.py"),
+-        SimpleNamespace(is_deleted=True),
++        SimpleNamespace(module_path="provider", is_deleted=True),
+         None,
+         SimpleNamespace(),
+         [],
+@@ -1237,7 +1247,7 @@ def test_identity_sync_owner_introduction_promotes_retained_untouched_consumer_t
+ 
+     engine._apply_delta_and_commit(
+         str(tmp_path / "provider.py"),
+-        SimpleNamespace(is_deleted=False),
++        SimpleNamespace(module_path="provider", is_deleted=False),
+         None,
+         SimpleNamespace(),
+         [],
+@@ -1305,7 +1315,7 @@ def test_identity_sync_generation_change_rematerializes_against_current_owner_id
+ 
+     engine._apply_delta_and_commit(
+         str(tmp_path / "provider.py"),
+-        SimpleNamespace(is_deleted=False),
++        SimpleNamespace(module_path="provider", is_deleted=False),
+         None,
+         SimpleNamespace(),
+         [],
+@@ -1372,7 +1382,7 @@ def test_identity_sync_revalidation_failure_rolls_back_registry_and_canonical_st
+     with pytest.raises(ValueError, match="consumer rematerialization failed"):
+         engine._apply_delta_and_commit(
+             str(tmp_path / "provider.py"),
+-            SimpleNamespace(is_deleted=True),
++            SimpleNamespace(module_path="provider", is_deleted=True),
+             None,
+             SimpleNamespace(),
+             [],
+```

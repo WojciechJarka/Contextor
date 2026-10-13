@@ -537,12 +537,16 @@ def test_incremental_commit_publishes_lineage_candidate_fields(
     engine.root_path = Path(tmp_path)
     engine.registry = SimpleNamespace()
     engine.state_manager = SimpleNamespace(
+        _state={},
         update_state=lambda _path: None,
+        get_tracked_sha256=lambda _path: hashlib.sha256(
+            b"lineage-lifecycle-test-fixture"
+        ).hexdigest(),
     )
 
     engine._apply_delta_and_commit(
         str(tmp_path / "pkg.py"),
-        SimpleNamespace(),
+        SimpleNamespace(module_path="pkg", is_deleted=False),
         None,
         SimpleNamespace(),
         [],
@@ -694,7 +698,13 @@ def _lineage_engine(state, registry, tmp_path):
     engine.state = state
     engine.registry = registry
     engine.root_path = Path(tmp_path)
-    engine.state_manager = SimpleNamespace(update_state=acknowledged.append)
+    engine.state_manager = SimpleNamespace(
+        _state={},
+        update_state=acknowledged.append,
+        get_tracked_sha256=lambda _path: hashlib.sha256(
+            b"lineage-lifecycle-test-fixture"
+        ).hexdigest(),
+    )
     return engine, acknowledged
 
 
@@ -1048,7 +1058,7 @@ def test_identity_sync_materializes_against_new_ids_and_rolls_back_on_failure(
 
     engine._apply_delta_and_commit(
         str(tmp_path / "pkg.py"),
-        SimpleNamespace(is_deleted=False),
+        SimpleNamespace(module_path="pkg", is_deleted=False),
         None,
         SimpleNamespace(),
         [],
@@ -1094,7 +1104,7 @@ def test_identity_sync_materializes_against_new_ids_and_rolls_back_on_failure(
     with pytest.raises(ValueError, match="materialize failed"):
         failing_engine._apply_delta_and_commit(
             str(tmp_path / "pkg.py"),
-            SimpleNamespace(is_deleted=False),
+            SimpleNamespace(module_path="pkg", is_deleted=False),
             None,
             SimpleNamespace(),
             [],
@@ -1149,7 +1159,7 @@ def test_identity_sync_owner_deletion_matches_fresh_full_materialization_without
 
     engine._apply_delta_and_commit(
         str(tmp_path / "provider.py"),
-        SimpleNamespace(is_deleted=True),
+        SimpleNamespace(module_path="provider", is_deleted=True),
         None,
         SimpleNamespace(),
         [],
@@ -1237,7 +1247,7 @@ def test_identity_sync_owner_introduction_promotes_retained_untouched_consumer_t
 
     engine._apply_delta_and_commit(
         str(tmp_path / "provider.py"),
-        SimpleNamespace(is_deleted=False),
+        SimpleNamespace(module_path="provider", is_deleted=False),
         None,
         SimpleNamespace(),
         [],
@@ -1305,7 +1315,7 @@ def test_identity_sync_generation_change_rematerializes_against_current_owner_id
 
     engine._apply_delta_and_commit(
         str(tmp_path / "provider.py"),
-        SimpleNamespace(is_deleted=False),
+        SimpleNamespace(module_path="provider", is_deleted=False),
         None,
         SimpleNamespace(),
         [],
@@ -1372,7 +1382,7 @@ def test_identity_sync_revalidation_failure_rolls_back_registry_and_canonical_st
     with pytest.raises(ValueError, match="consumer rematerialization failed"):
         engine._apply_delta_and_commit(
             str(tmp_path / "provider.py"),
-            SimpleNamespace(is_deleted=True),
+            SimpleNamespace(module_path="provider", is_deleted=True),
             None,
             SimpleNamespace(),
             [],
