@@ -1475,6 +1475,7 @@ def execute_refresh_plan(
             from contextor.core.analysis.incremental.materialization import _validate_collision_facts_dict
             from contextor.core.validator.collisions import (
                 compute_collisions_from_facts,
+                materialize_canonical_collision_facts,
                 resolve_collision_candidate_codes,
             )
 
@@ -1488,6 +1489,11 @@ def execute_refresh_plan(
                     )
                     candidate.collision_facts = resolved_facts
                     computed = compute_collisions_from_facts(candidate.collision_facts)
+                    candidate.collision_facts = (
+                        materialize_canonical_collision_facts(
+                            candidate.collision_facts
+                        )
+                    )
                     candidate.collisions = computed
                     candidate.collisions_state = "fresh"
                 except Exception:

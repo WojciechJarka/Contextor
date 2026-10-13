@@ -55,6 +55,7 @@ from contextor.core.symbol_engine.indexer import (
 from contextor.core.validator import validate
 from contextor.core.validator.collisions import (
     compute_collisions_from_facts,
+    materialize_canonical_collision_facts,
     validate_name_collisions,
 )
 from contextor.core.live_state import (
@@ -853,6 +854,7 @@ class ContextorFacade:
 
             if is_collision_complete:
                 canonical_collisions = compute_collisions_from_facts(cf)
+                cf = materialize_canonical_collision_facts(cf)
                 collisions_state = "fresh"
             else:
                 canonical_collisions = []

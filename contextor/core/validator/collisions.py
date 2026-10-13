@@ -223,6 +223,87 @@ class CollisionFact(dict):
         return (dict, (self._to_plain_dict(render_code=False),))
 
 
+def materialize_canonical_collision_facts(
+    collision_facts: dict[str, list[dict]],
+) -> dict[str, list[dict]]:
+    """Freeze collision facts into one canonical AST-free representation."""
+    if not isinstance(collision_facts, dict):
+        raise TypeError(
+            "Canonical collision facts must be a mapping"
+        )
+
+    owners: dict[tuple[str, str], set[str]] = {}
+
+    for module_id, facts in collision_facts.items():
+        if not isinstance(module_id, str) or not isinstance(
+            facts, list
+        ):
+            raise TypeError(
+                "Invalid canonical collision-fact module domain"
+            )
+
+        for fact in facts:
+            if not isinstance(fact, dict):
+                raise TypeError(
+                    "Canonical collision fact must be a mapping"
+                )
+
+            if fact.get("file") != module_id:
+                raise ValueError(
+                    "Canonical collision-fact owner mismatch"
+                )
+
+            key = (
+                fact["name"],
+                fact["type"],
+            )
+            owners.setdefault(key, set()).add(module_id)
+
+    result: dict[str, list[dict]] = {}
+
+    for module_id, facts in collision_facts.items():
+        materialized = []
+
+        for fact in facts:
+            if isinstance(fact, CollisionFact):
+                entry = fact._to_plain_dict(
+                    render_code=False
+                )
+            else:
+                entry = dict(fact)
+
+            key = (
+                entry["name"],
+                entry["type"],
+            )
+
+            if len(owners[key]) > 1:
+                code = fact["code"]
+
+                if (
+                    not isinstance(code, str)
+                    or not code.strip()
+                ):
+                    raise ValueError(
+                        "Missing code for canonical collision candidate"
+                    )
+
+                entry["code"] = code
+            else:
+                entry["code"] = ""
+
+            if set(entry) != set(COLLISION_FACT_KEYS):
+                raise ValueError(
+                    "Invalid canonical collision-fact schema"
+                )
+
+            materialized.append(entry)
+
+        result[module_id] = materialized
+
+    return result
+
+
 class PublicSymbolCollector(ast.NodeVisitor):
     """
     Collect only public module-level API symbols.
