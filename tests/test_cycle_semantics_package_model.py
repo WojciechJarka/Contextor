@@ -287,3 +287,68 @@ def test_determinism_invalid_no_ast_mutation():
         ).outcome
         == "UNKNOWN"
     )
+
+
+def test_explicit_alias_equal_root_binds_submodule(tmp_path):
+    source = {
+        "pkg.__init__": "pass",
+        "pkg.sub": "value=2",
+        "entry": "import pkg.sub as pkg\nx=pkg.value",
+    }
+
+    result = _model(source, "entry")
+
+    assert result.outcome == "MODEL_PASS"
+    assert any(
+        event.operation == "ATTR"
+        and event.target == "pkg.sub"
+        and event.symbol == "value"
+        for event in result.events
+    )
+    assert _actual(tmp_path, source, "entry")
+
+
+def test_explicit_alias_equal_root_prevents_false_model_pass(tmp_path):
+    source = {
+        "pkg.__init__": "value=2",
+        "pkg.sub": "pass",
+        "entry": "import pkg.sub as pkg\nx=pkg.value",
+    }
+
+    result = _model(source, "entry")
+
+    assert result.outcome == "MISSING_ATTRIBUTE"
+    assert result.target_module == "pkg.sub"
+    assert result.symbol == "value"
+    assert not _actual(tmp_path, source, "entry")
+
+
+def test_explicit_alias_equal_root_inside_package_initializer(tmp_path):
+    source = {
+        "pkg.__init__": "import pkg.sub as pkg\nx=pkg.value",
+        "pkg.sub": "value=2",
+    }
+
+    result = _model(source, "pkg")
+
+    assert result.outcome == "MODEL_PASS"
+    assert any(
+        event.operation == "ATTR"
+        and event.target == "pkg.sub"
+        for event in result.events
+    )
+    assert _actual(tmp_path, source, "pkg")
+
+
+def test_plain_dotted_import_still_binds_root_package(tmp_path):
+    source = {
+        "pkg.__init__": "pass",
+        "pkg.sub": "value=2",
+        "entry": "import pkg.sub\nx=pkg.value",
+    }
+
+    result = _model(source, "entry")
+
+    assert result.outcome == "MISSING_ATTRIBUTE"
+    assert result.target_module == "pkg"
+    assert not _actual(tmp_path, source, "entry")

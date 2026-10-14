@@ -37,6 +37,7 @@ class _Step:
     target: str | None = None
     symbol: str | None = None
     binding: str | None = None
+    explicit_alias: bool = False
 
 
 def _compile(
@@ -66,6 +67,7 @@ def _compile(
                         "IMPORT",
                         alias.name,
                         binding=alias.asname or alias.name.split(".")[0],
+                        explicit_alias=alias.asname is not None,
                     )
                 )
 
@@ -388,10 +390,7 @@ def evaluate_package_import_order(
 
             if step.op == "IMPORT":
                 if module != bootstrap:
-                    if (
-                        step.binding != target.split(".")[0]
-                        and "." in target
-                    ):
+                    if step.explicit_alias and "." in target:
                         parent, child = target.rsplit(".", 1)
 
                         if namespaces[parent].get(child) != target:
@@ -399,7 +398,7 @@ def evaluate_package_import_order(
 
                     binding_target = (
                         target
-                        if step.binding != target.split(".")[0]
+                        if step.explicit_alias
                         else target.split(".")[0]
                     )
 
