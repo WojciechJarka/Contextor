@@ -1,484 +1,698 @@
-# CONTEXTOR_B0G4C9_SCC02_SOURCE_ANCHORED_ENTRY_ORDER_REGRESSIONS
+# CONTEXTOR_B0G4C10_IMPORT_ACTIVATION_CANDIDATE_VIEW
 
 ## HEAD_BEFORE
-4a73254c2622da89b1a7244aebff8b7863d2b544
+b6bcfb118c54c0f6d85cb9969c80dba381d49f86
 
 ## HEAD_AFTER
-4a73254c2622da89b1a7244aebff8b7863d2b544
+b6bcfb118c54c0f6d85cb9969c80dba381d49f86
 
 ## GIT_STATUS
-Before: clean. After: M walkthrough.md and ?? tests/test_cycle_semantics_scc02_entry_order.py. walkthrough.md is the requested report artifact.
+Before: clean. After writing report: M walkthrough.md and the two untracked files in FILES_CHANGED.
 
 ## LIVE_REVISION_BEFORE
-434; activity_epoch=1beab26da2ff4932852caa7db6ff4242; resync_required=false. Canonical graph, cycles and collisions fresh. Collisions=0; reported structural cycle paths=16.
+435; activity_epoch=1beab26da2ff4932852caa7db6ff4242; resync_required=false; graph/cycles/collisions fresh. Structural cycle paths 16; name collisions 0.
 
 ## LIVE_REVISION_AFTER
-435; same activity_epoch; resync_required=false; continuous event feed. DIRECT_EVIDENCE: desktop_watcher UPDATED tests/test_cycle_semantics_scc02_entry_order.py at revision 435. Contextor module context: canonical_state=fresh, workspace_sync=verified, graph/cycles/collisions fresh; one hard dependency to contextor.core.cycle_semantics.package_model.
+437; same activity_epoch; continuous event feed, resync_required=false. DIRECT_EVIDENCE: desktop_watcher UPDATED activation_view.py at 436 and test_cycle_semantics_activation_view.py at 437. Both module contexts report workspace_sync=verified, canonical_state=fresh, graph/cycles/collisions fresh.
 
 ## FILES_CHANGED
-- tests/test_cycle_semantics_scc02_entry_order.py (new)
-walkthrough.md is the report artifact. No production source or existing test changed.
+- contextor/core/cycle_semantics/activation_view.py (new)
+- tests/test_cycle_semantics_activation_view.py (new)
+walkthrough.md is the requested report artifact.
 
-## SOURCE_CHAIN_ANCHORS
-DIRECT_EVIDENCE from Contextor source ranges, all at revision 434 and workspace_sync=verified:
-- contextor/repo_generator/__init__.py:1 imports run_repo_generator from main; line 3 exports it in __all__.
-- contextor/repo_generator/main.py:8 imports FilterWindow from filters; run_repo_generator definition begins at line 522.
-- contextor/repo_generator/filters.py:5 imports theme from contextor.ui; FilterWindow class begins at line 10.
-- contextor/ui/__init__.py:5 imports run from .gui; line 7 exports it in __all__.
-- contextor/ui/gui.py:43 imports run_repo_generator from contextor.repo_generator; run definition begins at line 2283.
-The new test's AST source anchors and ordering assertions passed. No source drift was found.
-
-## REEXPORT_BINDING_ORDER_EVIDENCE
-CODE_PATH_PROVED: The real package initializers use from-import reexports. Their requested members are defined later in the nested main/gui modules. The new tests assert import statements precede run_repo_generator, FilterWindow and run definitions. This establishes the lexical ordering condition; actual real-GUI import execution was not tested.
-
-## SYNTHETIC_PROJECTION_SCOPE
-The test uses a seven-module restricted source map with the same five import-chain anchors, a synthetic contextor root and theme module. The model receives only parsed synthetic ASTs. Fresh CPython subprocesses use -I -B with a temporary synthetic package tree; they do not import real Contextor GUI/repo-generator modules. The fixture is a restricted semantic projection, not a full production import simulator.
-
-## REPO_GENERATOR_FIRST_RESULT
-DIRECT_EVIDENCE: The restricted model returned EARLY_BINDING_HAZARD targeting contextor.repo_generator.run_repo_generator before its main-module DEFINE_FUNCTION event. The corresponding fresh CPython synthetic import had a nonzero exit status, as asserted by the passing parameterized test. No production traceback is claimed.
-
-## UI_FIRST_RESULT
-DIRECT_EVIDENCE: The restricted model returned MODEL_PASS and READY events ordered main -> repo_generator package -> ui.gui. The corresponding fresh CPython synthetic import exited zero, as asserted by the passing parameterized test.
-
-## FRESH_PROCESS_CPYTHON_COMPARISON
-Two isolated synthetic entry cases ran via sys.executable -I -B -c. The tests compare only returncode success/failure, not a manufactured traceback or actual GUI outcome. Both cases passed.
-
-## SAME_GRAPH_DIFFERENT_BINDING_OUTCOME
-CODE_PATH_PROVED: The prebinding fixture prepends an early run_repo_generator definition to the synthetic package initializer. The test asserts AST import declarations are unchanged, then observes EARLY_BINDING_HAZARD -> MODEL_PASS and a successful synthetic CPython process. No production source was changed.
+## IMPLEMENTATION_CONTRACT
+CONTRACT_PROVED: Both files exactly match the auditor-supplied CONTENT blocks after newline normalization. Existing CyclicImportSiteReport, SCCImportSiteEvidence, HardEdgeSiteEvidence, LexicalEdgeSite, ImportCycleTopology and analyze_import_cycle_topology contracts matched current Contextor source at revision 435. The new pure view consumes existing evidence and creates separate per-SCC candidate topology without changing the input graph or any existing module. Canonical owners were workspace_sync=verified. Static direct consumer of analyze_cyclic_import_sites before change was its test module; SCC topology analyzer had three confirmed direct consumers.
 
 ## TEST_COMMAND
 Baseline:
-.\.venv\Scripts\python.exe -B -m pytest -p no:cacheprovider -q tests/test_cycle_semantics_edge_sites.py tests/test_cycle_semantics_package_model.py tests/test_cycle_semantics_package_layout.py tests/test_cycle_semantics_evidence.py tests/test_cycle_semantics_scenarios.py tests/test_cycle_semantics_scc.py tests/test_cycle_semantics_initialization_model.py tests/test_cycle_semantics_binding_order.py tests/test_cycle_semantics_guards.py tests/test_cycle_semantics_execution_context.py tests/test_cycle_semantics_provenance.py
-
-Post-change:
 .\.venv\Scripts\python.exe -B -m pytest -p no:cacheprovider -q tests/test_cycle_semantics_scc02_entry_order.py tests/test_cycle_semantics_edge_sites.py tests/test_cycle_semantics_package_model.py tests/test_cycle_semantics_package_layout.py tests/test_cycle_semantics_evidence.py tests/test_cycle_semantics_scenarios.py tests/test_cycle_semantics_scc.py tests/test_cycle_semantics_initialization_model.py tests/test_cycle_semantics_binding_order.py tests/test_cycle_semantics_guards.py tests/test_cycle_semantics_execution_context.py tests/test_cycle_semantics_provenance.py
 
-## TEST_RESULTS
-DIRECT_EVIDENCE: baseline 204 passed in 13.58s; post-change 212 passed in 13.77s. Eight new test cases passed. Full pytest suite was not run.
+Post-change:
+.\.venv\Scripts\python.exe -B -m pytest -p no:cacheprovider -q tests/test_cycle_semantics_activation_view.py tests/test_cycle_semantics_scc02_entry_order.py tests/test_cycle_semantics_edge_sites.py tests/test_cycle_semantics_package_model.py tests/test_cycle_semantics_package_layout.py tests/test_cycle_semantics_evidence.py tests/test_cycle_semantics_scenarios.py tests/test_cycle_semantics_scc.py tests/test_cycle_semantics_initialization_model.py tests/test_cycle_semantics_binding_order.py tests/test_cycle_semantics_guards.py tests/test_cycle_semantics_execution_context.py tests/test_cycle_semantics_provenance.py
 
-## CANONICAL_FRESHNESS
-Before and after canonical graph, topology, cycles, collisions and lineage were fresh; source files for the SCC02 chain and package_model were workspace_sync=verified before change. New test file was workspace_sync=verified after watcher update. No forced resync or direct publication occurred.
+## TEST_RESULTS
+DIRECT_EVIDENCE: baseline 212 passed in 13.24s; post-change 226 passed in 13.66s. Fourteen new test cases passed. Full suite was not run.
+
+## STRUCTURAL_EDGE_PRESERVATION
+CODE_PATH_PROVED: Every component retains every input internal HardEdgeSiteEvidence as an EdgeActivationView. The original structural_topology is the input topology. The separate selected mapping contains only candidate direct edges. Tests cover direct cycles, missing/unmatched sites, multiple SCCs, self-loop, input immutability and deterministic serialization.
+
+## UNGUARDED_DIRECT_PROJECTION
+CODE_PATH_PROVED: Only MODULE_TOP_LEVEL sites with DIRECT_MODULE or FROM_BASE increment unguarded_direct_count and select an edge. A deterministic adjacency mapping includes every member, including those with no selected outgoing edge. The derived topology is computed independently for each SCC. The tests cover cyclic and acyclic candidate subgraphs.
+
+## CALL_DEPENDENT_EVIDENCE
+CODE_PATH_PROVED: FUNCTION_SCOPED sites contribute to function_scoped_count and, absent a higher-priority candidate, classify the edge CALL_DEPENDENT_CANDIDATE. A mixed top-level/function edge retains both counts. Function scope does not certify late activation.
+
+## GUARDED_AND_INDIRECT_EVIDENCE
+CODE_PATH_PROVED: GUARDED_TOP_LEVEL is counted but never promoted to an unguarded direct edge. OPTIONAL_FROM_CHILD and PARENT_INITIALIZER are counted as indirect candidates and remain outside the direct subset unless another direct site exists. Tests cover both categories.
+
+## OTHER_SCOPE_FAIL_CLOSED
+CODE_PATH_PROVED: OTHER_SCOPED sites classify as OTHER_SCOPE_CANDIDATE unless a higher-priority site is present. Class-body imports may execute during definition; no deferral is inferred.
+
+## MULTI_SCC_AND_SELF_LOOP_REGRESSIONS
+DIRECT_EVIDENCE: Tests passed for two independent structural SCCs with distinct candidate topologies and for a self-loop candidate. Empty acyclic input returns no components.
+
+## DETERMINISM_AND_IMMUTABILITY
+DIRECT_EVIDENCE: Repeated calls yield equal frozen dataclasses; asdict serializes to JSON; attempted mutation raises FrozenInstanceError; source graph and evidence stay equal to their original values in tests.
 
 ## COLLISION_COUNT_BEFORE_AFTER
-0 -> 0, fresh.
+0 -> 0; canonical diagnostics fresh.
 
 ## STRUCTURAL_CYCLE_COUNT_BEFORE_AFTER
-16 -> 16 reported paths, fresh.
+16 -> 16 reported paths; canonical diagnostics fresh.
 
-## NO_REAL_GUI_EXECUTION
-The test parses actual source but imports only package_model in the parent test process; subprocesses import only generated synthetic package files. No real Tkinter GUI or repo_generator module is imported by the new test.
-
-## NO_RUNTIME_SAFETY_CERTIFICATION
-No safety, failure or resolution verdict for the production SCC02 import cycle. Only the restricted model and synthetic CPython fixture were executed.
+## NO_SAFETY_CERTIFICATION
+The result evidence_scope is ACTIVATION_CANDIDATES_NOT_RUNTIME_SAFETY. Even an acyclic direct-candidate projection does not classify the original SCC as SAFE, FALSE_POSITIVE or RESOLVED.
 
 ## NO_WARNING_SUPPRESSION
-No warnings, import diagnostics or graph policies were suppressed or modified.
+No diagnostic policy, warning suppression, resolver or cycle detection change.
 
 ## UNRESOLVED_LIMITATIONS
-UNKNOWN: Actual Contextor GUI/repo-generator import outcome across real environment, sys.modules states and third-party/transitive imports. The synthetic source omits most production statements. The tests compare success status only and cannot certify full production startup behavior.
+UNKNOWN: Runtime activation and actual Python import resolution remain outside this view. Guard truth, call timing and class-body execution are not determined. The view was verified by focused tests; it was not run over the current 72-edge real SCC snapshot in this stage.
 
 ## FINAL_VERDICT
-B0G4C9_PASS
+B0G4C10_PASS
 
 ## FULL_DIFFS
 
 ```diff
-diff --git a/tests/test_cycle_semantics_scc02_entry_order.py b/tests/test_cycle_semantics_scc02_entry_order.py
+diff --git a/contextor/core/cycle_semantics/activation_view.py b/contextor/core/cycle_semantics/activation_view.py
 new file mode 100644
 --- /dev/null
-+++ b/tests/test_cycle_semantics_scc02_entry_order.py
-@@ -0,0 +1,393 @@
-+"""Restricted SCC02 import-order projection.
++++ b/contextor/core/cycle_semantics/activation_view.py
+@@ -0,0 +1,165 @@
++"""Candidate import activation topology for source-attributed cyclic SCCs.
 +
-+Read actual Contextor source only to verify lexical anchors.
-+Execute ONLY synthesized minimal modules in isolated processes.
-+No result here certifies the behavior of the production GUI.
++Retains every canonical hard edge. Top-level lexical sites can only support
++candidate import activation, never runtime reachability or safety decisions.
 +"""
 +
-+import ast
++from __future__ import annotations
++
++from dataclasses import dataclass
++
++from .edge_sites import CyclicImportSiteReport
++from .scc import ImportCycleTopology, analyze_import_cycle_topology
++
++_DIRECT = frozenset({"DIRECT_MODULE", "FROM_BASE"})
++_INDIRECT = frozenset({"OPTIONAL_FROM_CHILD", "PARENT_INITIALIZER"})
++
++
++@dataclass(frozen=True)
++class EdgeActivationView:
++    source: str
++    target: str
++    source_status: str
++    classification: str
++    site_count: int
++    unguarded_direct_count: int
++    function_scoped_count: int
++    guarded_top_level_count: int
++    other_scoped_count: int
++    indirect_candidate_count: int
++
++
++@dataclass(frozen=True)
++class SCCActivationView:
++    members: tuple[str, ...]
++    edges: tuple[EdgeActivationView, ...]
++    unguarded_direct_edges: tuple[tuple[str, str], ...]
++    unguarded_direct_topology: ImportCycleTopology
++    unresolved_edges: int
++    evidence_scope: str = "INTERNAL_UNGUARDED_LEXICAL_SUBGRAPH_ONLY"
++
++
++@dataclass(frozen=True)
++class CycleActivationViewReport:
++    structural_topology: ImportCycleTopology
++    components: tuple[SCCActivationView, ...]
++    evidence_scope: str = "ACTIVATION_CANDIDATES_NOT_RUNTIME_SAFETY"
++
++
++def analyze_cycle_activation_view(
++    import_sites: CyclicImportSiteReport,
++) -> CycleActivationViewReport:
++    """Project each retained internal edge onto candidate activation classes.
++
++    Even a cycle-free unguarded subset cannot certify the original SCC as safe:
++    a function-scoped import may execute during module initialization.
++    """
++    if not isinstance(import_sites, CyclicImportSiteReport):
++        raise TypeError("import_sites must be CyclicImportSiteReport")
++
++    views: list[SCCActivationView] = []
++
++    for component in import_sites.components:
++        edge_views: list[EdgeActivationView] = []
++        selected: dict[str, set[str]] = {
++            member: set() for member in component.members
++        }
++
++        for edge in component.internal_edges:
++            sites = edge.sites
++
++            direct = sum(
++                site.activation_scope == "MODULE_TOP_LEVEL"
++                and site.match_kind in _DIRECT
++                for site in sites
++            )
++
++            functions = sum(
++                site.activation_scope == "FUNCTION_SCOPED"
++                for site in sites
++            )
++
++            guarded = sum(
++                site.activation_scope == "GUARDED_TOP_LEVEL"
++                for site in sites
++            )
++
++            other = sum(
++                site.activation_scope == "OTHER_SCOPED"
++                for site in sites
++            )
++
++            indirect = sum(
++                site.match_kind in _INDIRECT
++                for site in sites
++            )
++
++            unguarded_indirect = any(
++                site.activation_scope == "MODULE_TOP_LEVEL"
++                and site.match_kind in _INDIRECT
++                for site in sites
++            )
++
++            if edge.status != "LEXICAL_CANDIDATES" or not sites:
++                classification = "UNRESOLVED_SOURCE_SITE"
++
++            elif direct:
++                classification = "UNGUARDED_DIRECT_CANDIDATE"
++                selected[edge.source].add(edge.target)
++
++            elif unguarded_indirect:
++                classification = "INDIRECT_TOP_LEVEL_CANDIDATE"
++
++            elif guarded:
++                classification = "GUARDED_TOP_LEVEL_CANDIDATE"
++
++            elif other:
++                classification = "OTHER_SCOPE_CANDIDATE"
++
++            elif functions:
++                classification = "CALL_DEPENDENT_CANDIDATE"
++
++            else:
++                classification = "UNRECOGNIZED_SITE_SEMANTICS"
++
++            edge_views.append(
++                EdgeActivationView(
++                    edge.source,
++                    edge.target,
++                    edge.status,
++                    classification,
++                    len(sites),
++                    direct,
++                    functions,
++                    guarded,
++                    other,
++                    indirect,
++                )
++            )
++
++        direct_edges = tuple(
++            (source, target)
++            for source in sorted(selected)
++            for target in sorted(selected[source])
++        )
++
++        views.append(
++            SCCActivationView(
++                component.members,
++                tuple(edge_views),
++                direct_edges,
++                analyze_import_cycle_topology(selected),
++                sum(
++                    edge.classification in {
++                        "UNRESOLVED_SOURCE_SITE",
++                        "UNRECOGNIZED_SITE_SEMANTICS",
++                    }
++                    for edge in edge_views
++                ),
++            )
++        )
++
++    return CycleActivationViewReport(
++        structural_topology=import_sites.topology,
++        components=tuple(views),
++    )
+
+diff --git a/tests/test_cycle_semantics_activation_view.py b/tests/test_cycle_semantics_activation_view.py
+new file mode 100644
+--- /dev/null
++++ b/tests/test_cycle_semantics_activation_view.py
+@@ -0,0 +1,444 @@
++from dataclasses import asdict, FrozenInstanceError
 +import json
-+import subprocess
-+import sys
-+from dataclasses import asdict
-+from pathlib import Path
 +
 +import pytest
 +
-+from contextor.core.cycle_semantics.package_model import (
-+    evaluate_package_import_order,
++from contextor.core.cycle_semantics.scc import (
++    analyze_import_cycle_topology,
++)
++from contextor.core.cycle_semantics.edge_sites import (
++    CyclicImportSiteReport,
++    SCCImportSiteEvidence,
++    HardEdgeSiteEvidence,
++    LexicalEdgeSite,
++)
++from contextor.core.cycle_semantics.activation_view import (
++    analyze_cycle_activation_view as analyze,
 +)
 +
 +
-+_ROOT = Path(__file__).resolve().parents[1]
-+
-+
-+def _real_tree(relative_path):
-+    path = _ROOT.joinpath(*relative_path.split("/"))
-+    return ast.parse(
-+        path.read_text(encoding="utf-8"),
-+        filename=str(path),
-+    )
-+
-+
-+def _from(tree, module, member, level=0):
-+    found = [
-+        stmt
-+        for stmt in tree.body
-+        if isinstance(stmt, ast.ImportFrom)
-+        and stmt.module == module
-+        and stmt.level == level
-+        and any(
-+            alias.name == member
-+            for alias in stmt.names
-+        )
-+    ]
-+    assert len(found) == 1
-+    return found[0]
-+
-+
-+def _definition(tree, name):
-+    found = [
-+        stmt
-+        for stmt in tree.body
-+        if isinstance(
-+            stmt,
-+            (ast.FunctionDef, ast.ClassDef),
-+        )
-+        and stmt.name == name
-+    ]
-+    assert len(found) == 1
-+    return found[0]
-+
-+
-+def _projection():
-+    return {
-+        "contextor.__init__": "pass",
-+        "contextor.repo_generator.__init__": (
-+            "from contextor.repo_generator.main "
-+            "import run_repo_generator"
-+        ),
-+        "contextor.repo_generator.main": (
-+            "from contextor.repo_generator.filters "
-+            "import FilterWindow\n"
-+            "def run_repo_generator():\n"
-+            "    pass"
-+        ),
-+        "contextor.repo_generator.filters": (
-+            "from contextor.ui import theme\n"
-+            "def FilterWindow():\n"
-+            "    pass"
-+        ),
-+        "contextor.ui.__init__": (
-+            "from contextor.ui.gui import run"
-+        ),
-+        "contextor.ui.gui": (
-+            "from contextor.repo_generator "
-+            "import run_repo_generator\n"
-+            "def run():\n"
-+            "    pass"
-+        ),
-+        "contextor.ui.theme": "pass",
-+    }
-+
-+
-+def _model(source, entry):
-+    return evaluate_package_import_order(
-+        {
-+            name: ast.parse(code)
-+            for name, code in source.items()
-+        },
-+        entry,
-+    )
-+
-+
-+def _runtime(tmp_path, source, entry):
-+    for module, code in source.items():
-+        parts = module.split(".")
-+
-+        if parts[-1] == "__init__":
-+            path = tmp_path.joinpath(
-+                *parts[:-1],
-+                "__init__.py",
-+            )
-+        else:
-+            path = tmp_path.joinpath(
-+                *parts[:-1],
-+                parts[-1] + ".py",
-+            )
-+
-+        path.parent.mkdir(
-+            parents=True,
-+            exist_ok=True,
-+        )
-+        path.write_text(
-+            code + "\n",
-+            encoding="utf-8",
-+        )
-+
-+    process = subprocess.run(
-+        [
-+            sys.executable,
-+            "-I",
-+            "-B",
-+            "-c",
-+            (
-+                "import importlib,sys;"
-+                "sys.path.insert(0,sys.argv[1]);"
-+                "importlib.import_module(sys.argv[2])"
-+            ),
-+            str(tmp_path),
-+            entry,
-+        ],
-+        capture_output=True,
-+        text=True,
-+        timeout=10,
-+        check=False,
-+    )
-+
-+    return process
-+
-+
-+def test_scc02_source_chain_still_exists():
-+    repo = _real_tree(
-+        "contextor/repo_generator/__init__.py"
-+    )
-+    main = _real_tree(
-+        "contextor/repo_generator/main.py"
-+    )
-+    filters = _real_tree(
-+        "contextor/repo_generator/filters.py"
-+    )
-+    ui = _real_tree(
-+        "contextor/ui/__init__.py"
-+    )
-+    gui = _real_tree(
-+        "contextor/ui/gui.py"
-+    )
-+
-+    _from(
-+        repo,
-+        "contextor.repo_generator.main",
-+        "run_repo_generator",
-+    )
-+    _from(
-+        main,
-+        "contextor.repo_generator.filters",
-+        "FilterWindow",
-+    )
-+    _from(
-+        filters,
-+        "contextor.ui",
-+        "theme",
-+    )
-+    _from(
-+        ui,
-+        "gui",
-+        "run",
-+        level=1,
-+    )
-+    _from(
-+        gui,
-+        "contextor.repo_generator",
-+        "run_repo_generator",
-+    )
-+
-+
-+def test_scc02_reexport_bindings_follow_imports():
-+    main = _real_tree(
-+        "contextor/repo_generator/main.py"
-+    )
-+    filters = _real_tree(
-+        "contextor/repo_generator/filters.py"
-+    )
-+    gui = _real_tree(
-+        "contextor/ui/gui.py"
-+    )
-+
-+    assert _from(
-+        main,
-+        "contextor.repo_generator.filters",
-+        "FilterWindow",
-+    ).lineno < _definition(
-+        main,
-+        "run_repo_generator",
-+    ).lineno
-+
-+    assert _from(
-+        filters,
-+        "contextor.ui",
-+        "theme",
-+    ).lineno < _definition(
-+        filters,
-+        "FilterWindow",
-+    ).lineno
-+
-+    assert _from(
-+        gui,
-+        "contextor.repo_generator",
-+        "run_repo_generator",
-+    ).lineno < _definition(
-+        gui,
-+        "run",
-+    ).lineno
-+
-+
-+def test_scc02_projection_repo_generator_first_hazard():
-+    result = _model(
-+        _projection(),
-+        "contextor.repo_generator",
-+    )
-+
-+    assert result.outcome == "EARLY_BINDING_HAZARD"
-+    assert (
-+        result.target_module
-+        == "contextor.repo_generator"
-+    )
-+    assert result.symbol == "run_repo_generator"
-+
-+    assert not any(
-+        event.operation == "DEFINE_FUNCTION"
-+        and event.module == "contextor.repo_generator.main"
-+        and event.symbol == "run_repo_generator"
-+        for event in result.events
-+    )
-+
-+
-+def test_scc02_projection_ui_first_passes():
-+    result = _model(
-+        _projection(),
-+        "contextor.ui",
-+    )
-+
-+    assert result.outcome == "MODEL_PASS"
-+
-+    ready = [
-+        event.module
-+        for event in result.events
-+        if event.operation == "READY"
-+    ]
-+
-+    assert (
-+        ready.index("contextor.repo_generator.main")
-+        < ready.index("contextor.repo_generator")
-+    )
-+
-+    assert (
-+        ready.index("contextor.repo_generator")
-+        < ready.index("contextor.ui.gui")
-+    )
-+
-+
-+@pytest.mark.parametrize(
-+    "entry,expected_success",
-+    [
-+        ("contextor.repo_generator", False),
-+        ("contextor.ui", True),
-+    ],
-+)
-+def test_scc02_projection_matches_fresh_cpython(
-+    tmp_path,
-+    entry,
-+    expected_success,
++def _site(
++    activation="MODULE_TOP_LEVEL",
++    kind="FROM_BASE",
++    ordinal=0,
 +):
-+    process = _runtime(
-+        tmp_path,
-+        _projection(),
-+        entry,
++    return LexicalEdgeSite(
++        ordinal,
++        ordinal + 1,
++        0,
++        "IMPORT_FROM",
++        kind,
++        "b",
++        None,
++        (),
++        (),
++        activation,
++    )
++
++
++def _report(graph, data):
++    topology = analyze_import_cycle_topology(graph)
++    components = []
++
++    for scc in topology.cyclic_components:
++        edges = []
++
++        for src, dst in scc.internal_edges:
++            specs = data.get((src, dst))
++
++            if specs is None:
++                edges.append(
++                    HardEdgeSiteEvidence(
++                        src,
++                        dst,
++                        "SOURCE_MISSING_OR_INVALID",
++                        (),
++                    )
++                )
++
++            elif specs:
++                sites = tuple(
++                    _site(*item)
++                    for item in specs
++                )
++
++                edges.append(
++                    HardEdgeSiteEvidence(
++                        src,
++                        dst,
++                        "LEXICAL_CANDIDATES",
++                        sites,
++                    )
++                )
++
++            else:
++                edges.append(
++                    HardEdgeSiteEvidence(
++                        src,
++                        dst,
++                        "NO_MATCHING_LEXICAL_SITE",
++                        (),
++                    )
++                )
++
++        components.append(
++            SCCImportSiteEvidence(
++                scc.members,
++                tuple(edges),
++                sum(
++                    x.status == "LEXICAL_CANDIDATES"
++                    for x in edges
++                ),
++                sum(
++                    x.status != "LEXICAL_CANDIDATES"
++                    for x in edges
++                ),
++            )
++        )
++
++    return CyclicImportSiteReport(
++        topology,
++        tuple(components),
++    )
++
++
++def test_direct_two_node_cycle_remains_candidate():
++    result = analyze(
++        _report(
++            {"a": {"b"}, "b": {"a"}},
++            {
++                ("a", "b"): [()],
++                ("b", "a"): [()],
++            },
++        )
++    )
++
++    component = result.components[0]
++
++    assert len(
++        component.unguarded_direct_topology.cyclic_components
++    ) == 1
++
++    assert component.unguarded_direct_edges == (
++        ("a", "b"),
++        ("b", "a"),
++    )
++
++    assert all(
++        edge.classification == "UNGUARDED_DIRECT_CANDIDATE"
++        for edge in component.edges
++    )
++
++
++def test_function_scoped_reverse_does_not_enter_direct_subgraph():
++    result = analyze(
++        _report(
++            {"a": {"b"}, "b": {"a"}},
++            {
++                ("a", "b"): [
++                    ("FUNCTION_SCOPED", "FROM_BASE", 0)
++                ],
++                ("b", "a"): [()],
++            },
++        )
++    )
++
++    component = result.components[0]
++
++    assert len(result.structural_topology.cyclic_components) == 1
++
++    assert len(
++        component.unguarded_direct_topology.cyclic_components
++    ) == 0
++
++    assert (
++        component.edges[0].classification
++        == "CALL_DEPENDENT_CANDIDATE"
++    )
++
++    assert result.evidence_scope.endswith(
++        "NOT_RUNTIME_SAFETY"
++    )
++
++
++def test_call_dependent_cycle_not_certified_safe():
++    result = analyze(
++        _report(
++            {"a": {"b"}, "b": {"a"}},
++            {
++                ("a", "b"): [
++                    ("FUNCTION_SCOPED", "FROM_BASE", 0)
++                ],
++                ("b", "a"): [()],
++            },
++        )
++    )
++
++    assert "SAFE" not in [
++        edge.classification
++        for edge in result.components[0].edges
++    ]
++
++    assert len(result.components[0].edges) == 2
++
++
++def test_indirect_parent_candidate_is_not_unguarded_direct():
++    result = analyze(
++        _report(
++            {"p": {"c"}, "c": {"p"}},
++            {
++                ("p", "c"): [
++                    ("MODULE_TOP_LEVEL", "OPTIONAL_FROM_CHILD", 0)
++                ],
++                ("c", "p"): [
++                    ("MODULE_TOP_LEVEL", "PARENT_INITIALIZER", 0)
++                ],
++            },
++        )
++    )
++
++    component = result.components[0]
++
++    assert all(
++        edge.classification == "INDIRECT_TOP_LEVEL_CANDIDATE"
++        for edge in component.edges
++    )
++
++    assert not component.unguarded_direct_edges
++
++    assert all(
++        edge.indirect_candidate_count == 1
++        for edge in component.edges
++    )
++
++
++def test_guarded_top_level_not_promoted():
++    result = analyze(
++        _report(
++            {"a": {"b"}, "b": {"a"}},
++            {
++                ("a", "b"): [
++                    ("GUARDED_TOP_LEVEL", "FROM_BASE", 0)
++                ],
++                ("b", "a"): [()],
++            },
++        )
 +    )
 +
 +    assert (
-+        process.returncode == 0
-+    ) is expected_success
-+
-+
-+def test_scc02_prebinding_changes_result_without_import_changes(
-+    tmp_path,
-+):
-+    original = _projection()
-+    prebound = dict(original)
-+
-+    prebound["contextor.repo_generator.__init__"] = (
-+        "def run_repo_generator():\n"
-+        "    pass\n"
-+        + original["contextor.repo_generator.__init__"]
++        result.components[0].edges[0].classification
++        == "GUARDED_TOP_LEVEL_CANDIDATE"
 +    )
 +
-+    original_imports = {
-+        module: tuple(
-+            ast.dump(node, include_attributes=False)
-+            for node in ast.walk(ast.parse(code))
-+            if isinstance(
-+                node,
-+                (ast.Import, ast.ImportFrom),
-+            )
++    assert len(
++        result.components[0]
++        .unguarded_direct_topology.cyclic_components
++    ) == 0
++
++
++def test_other_scoped_class_body_not_mistaken_for_deferral():
++    result = analyze(
++        _report(
++            {"a": {"b"}, "b": {"a"}},
++            {
++                ("a", "b"): [
++                    ("OTHER_SCOPED", "FROM_BASE", 0)
++                ],
++                ("b", "a"): [()],
++            },
 +        )
-+        for module, code in original.items()
-+    }
-+
-+    prebound_imports = {
-+        module: tuple(
-+            ast.dump(node, include_attributes=False)
-+            for node in ast.walk(ast.parse(code))
-+            if isinstance(
-+                node,
-+                (ast.Import, ast.ImportFrom),
-+            )
-+        )
-+        for module, code in prebound.items()
-+    }
-+
-+    assert original_imports == prebound_imports
-+
-+    original_result = _model(
-+        original,
-+        "contextor.repo_generator",
-+    )
-+    changed_result = _model(
-+        prebound,
-+        "contextor.repo_generator",
 +    )
 +
 +    assert (
-+        original_result.outcome
-+        == "EARLY_BINDING_HAZARD"
-+    )
-+    assert changed_result.outcome == "MODEL_PASS"
-+
-+    process = _runtime(
-+        tmp_path,
-+        prebound,
-+        "contextor.repo_generator",
-+    )
-+    assert process.returncode == 0
-+
-+
-+def test_scc02_projection_determinism_and_no_ast_mutation():
-+    sources = {
-+        name: ast.parse(code)
-+        for name, code in _projection().items()
-+    }
-+
-+    before = {
-+        name: ast.dump(tree, include_attributes=True)
-+        for name, tree in sources.items()
-+    }
-+
-+    first = evaluate_package_import_order(
-+        sources,
-+        "contextor.repo_generator",
-+    )
-+    second = evaluate_package_import_order(
-+        sources,
-+        "contextor.repo_generator",
++        result.components[0].edges[0].classification
++        == "OTHER_SCOPE_CANDIDATE"
 +    )
 +
-+    assert first == second
-+    assert first.outcome == "EARLY_BINDING_HAZARD"
++
++def test_mixed_eager_and_function_sites_preserved():
++    result = analyze(
++        _report(
++            {"a": {"b"}, "b": {"a"}},
++            {
++                ("a", "b"): [
++                    (),
++                    ("FUNCTION_SCOPED", "FROM_BASE", 1),
++                ],
++                ("b", "a"): [()],
++            },
++        )
++    )
++
++    component = result.components[0]
++    edge = component.edges[0]
++
++    assert (
++        edge.site_count,
++        edge.unguarded_direct_count,
++        edge.function_scoped_count,
++    ) == (2, 1, 1)
++
++    assert (
++        edge.classification
++        == "UNGUARDED_DIRECT_CANDIDATE"
++    )
++
++    assert len(
++        component.unguarded_direct_topology.cyclic_components
++    ) == 1
++
++
++def test_missing_source_and_unmatched_remain_explicit():
++    result = analyze(
++        _report(
++            {"a": {"b"}, "b": {"a"}},
++            {
++                ("a", "b"): [],
++                ("b", "a"): None,
++            },
++        )
++    )
++
++    component = result.components[0]
++
++    assert len(component.edges) == 2
++    assert component.unresolved_edges == 2
 +
 +    assert {
-+        name: ast.dump(tree, include_attributes=True)
-+        for name, tree in sources.items()
-+    } == before
++        edge.source_status
++        for edge in component.edges
++    } == {
++        "NO_MATCHING_LEXICAL_SITE",
++        "SOURCE_MISSING_OR_INVALID",
++    }
++
++
++def test_indirect_function_counts_as_call_dependent():
++    result = analyze(
++        _report(
++            {"a": {"b"}, "b": {"a"}},
++            {
++                ("a", "b"): [
++                    ("FUNCTION_SCOPED", "PARENT_INITIALIZER", 0)
++                ],
++                ("b", "a"): [()],
++            },
++        )
++    )
++
++    edge = result.components[0].edges[0]
++
++    assert (
++        edge.function_scoped_count,
++        edge.indirect_candidate_count,
++    ) == (1, 1)
++
++    assert (
++        edge.classification
++        == "CALL_DEPENDENT_CANDIDATE"
++    )
++
++
++def test_multiple_sccs_preserved_separately():
++    graph = {
++        "a": {"b"},
++        "b": {"a"},
++        "x": {"y"},
++        "y": {"x"},
++    }
++
++    data = {
++        ("a", "b"): [()],
++        ("b", "a"): [
++            ("FUNCTION_SCOPED", "FROM_BASE", 0)
++        ],
++        ("x", "y"): [()],
++        ("y", "x"): [()],
++    }
++
++    result = analyze(_report(graph, data))
++
++    assert len(result.components) == 2
++
++    assert tuple(
++        component.members
++        for component in result.components
++    ) == (
++        ("a", "b"),
++        ("x", "y"),
++    )
++
++    assert [
++        len(
++            component.unguarded_direct_topology.cyclic_components
++        )
++        for component in result.components
++    ] == [0, 1]
++
++
++def test_self_loop_supported():
++    result = analyze(
++        _report(
++            {"a": {"a"}},
++            {("a", "a"): [()]},
++        )
++    )
++
++    assert len(
++        result.components[0]
++        .unguarded_direct_topology.cyclic_components
++    ) == 1
++
++
++def test_empty_no_cycles():
++    result = analyze(
++        _report(
++            {"a": {"b"}, "b": set()},
++            {},
++        )
++    )
++
++    assert result.components == ()
++
++
++def test_deterministic_serializable_immutable_input_unchanged():
++    graph = {
++        "a": {"b"},
++        "b": {"a"},
++    }
++
++    projection = _report(
++        graph,
++        {
++            ("a", "b"): [()],
++            ("b", "a"): [()],
++        },
++    )
++
++    first = analyze(projection)
++    second = analyze(projection)
++
++    assert first == second
 +
 +    json.dumps(asdict(first))
++
++    with pytest.raises(FrozenInstanceError):
++        first.components[0].unresolved_edges = 99
++
++    assert graph == {
++        "a": {"b"},
++        "b": {"a"},
++    }
++
++    assert projection == _report(
++        graph,
++        {
++            ("a", "b"): [()],
++            ("b", "a"): [()],
++        },
++    )
++
++
++def test_invalid_input():
++    with pytest.raises(TypeError):
++        analyze(None)
 ```
