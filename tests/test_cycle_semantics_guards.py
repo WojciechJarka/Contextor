@@ -8,7 +8,7 @@ from contextor.core.cycle_semantics.provenance import extract_import_provenance
 from contextor.core.cycle_semantics.guards import project_import_guards
 
 
-def project(code):
+def _project_guard_evidence(code):
     tree = ast.parse(code)
     p = extract_import_provenance(
         tree, module_id="p.a", source_key="p/a.py",
@@ -18,7 +18,7 @@ def project(code):
 
 
 def test_literal_false_body_and_else():
-    result = project("if False:\n    import a\nelse:\n    import b\n")
+    result = _project_guard_evidence("if False:\n    import a\nelse:\n    import b\n")
     assert [a.gate for a in result.assessments] == [
         "BLOCKED_BY_LITERAL", "NO_KNOWN_GUARD_BLOCKER"]
     assert [f.branch_gate for a in result.assessments for f in a.frames] == [
@@ -27,13 +27,13 @@ def test_literal_false_body_and_else():
 
 
 def test_literal_true_else_blocked():
-    result = project("if True:\n    import a\nelse:\n    import b\n")
+    result = _project_guard_evidence("if True:\n    import a\nelse:\n    import b\n")
     assert [a.gate for a in result.assessments] == [
         "NO_KNOWN_GUARD_BLOCKER", "BLOCKED_BY_LITERAL"]
 
 
 def test_nested_condition_false_overrides_dynamic_unknown():
-    result = project("if condition:\n    if False:\n        import a\n")
+    result = _project_guard_evidence("if condition:\n    if False:\n        import a\n")
     assert result.assessments[0].gate == "BLOCKED_BY_LITERAL"
     assert [f.branch_gate for f in result.assessments[0].frames] == [
         "UNKNOWN", "BLOCKED"
@@ -41,7 +41,7 @@ def test_nested_condition_false_overrides_dynamic_unknown():
 
 
 def test_boolean_literals_not_and():
-    result = project(
+    result = _project_guard_evidence(
         "if not False and True:\n    import a\n"
         "if True and False:\n    import b\n"
     )
@@ -50,13 +50,13 @@ def test_boolean_literals_not_and():
 
 
 def test_dynamic_predicate_stays_unknown():
-    result = project("if arbitrary_function():\n    import a\n")
+    result = _project_guard_evidence("if arbitrary_function():\n    import a\n")
     assert result.assessments[0].gate == "GUARDED_UNKNOWN"
     assert result.assessments[0].frames[0].predicate_kind == "UNKNOWN_EXPRESSION"
 
 
 def test_type_checking_direct_alias_candidate_not_proof():
-    result = project(
+    result = _project_guard_evidence(
         "from typing import TYPE_CHECKING as TC\n"
         "if TC:\n    import a\n"
     )
@@ -67,7 +67,7 @@ def test_type_checking_direct_alias_candidate_not_proof():
 
 
 def test_typing_module_alias_candidate():
-    result = project("import typing as t\nif t.TYPE_CHECKING:\n    import a\n")
+    result = _project_guard_evidence("import typing as t\nif t.TYPE_CHECKING:\n    import a\n")
     assert result.assessments[1].frames[0].predicate_kind == (
         "TYPE_CHECKING_CANDIDATE"
     )
@@ -75,9 +75,9 @@ def test_typing_module_alias_candidate():
 
 
 def test_unbound_and_shadowed_typechecking_unresolved():
-    p = project("if TC:\n    import a\n")
+    p = _project_guard_evidence("if TC:\n    import a\n")
     assert p.assessments[0].frames[0].predicate_kind == "UNKNOWN_EXPRESSION"
-    p = project(
+    p = _project_guard_evidence(
         "from typing import TYPE_CHECKING as TC\n"
         "TC = True\nif TC:\n    import a\n"
     )
@@ -85,7 +85,7 @@ def test_unbound_and_shadowed_typechecking_unresolved():
 
 
 def test_future_alias_import_does_not_count():
-    p = project(
+    p = _project_guard_evidence(
         "if TC:\n    import a\n"
         "from typing import TYPE_CHECKING as TC\n"
     )
@@ -93,13 +93,13 @@ def test_future_alias_import_does_not_count():
 
 
 def test_main_guard_candidate_is_not_runtime_proof():
-    p = project('if __name__ == "__main__":\n    import a\n')
+    p = _project_guard_evidence('if __name__ == "__main__":\n    import a\n')
     assert p.assessments[0].frames[0].predicate_kind == "MAIN_GUARD_CANDIDATE"
     assert p.assessments[0].gate == "GUARDED_UNKNOWN"
 
 
 def test_try_and_for_controls_unknown():
-    p = project(
+    p = _project_guard_evidence(
         "try:\n    import a\n"
         "except ImportError:\n    import b\n"
         "for x in seq:\n    import c\n"
@@ -112,14 +112,14 @@ def test_try_and_for_controls_unknown():
 
 
 def test_absence_of_guard_is_not_reachability_proof():
-    p = project("def later():\n    import a\n")
+    p = _project_guard_evidence("def later():\n    import a\n")
     a = p.assessments[0]
     assert a.gate == "NO_KNOWN_GUARD_BLOCKER"
     assert a.initialization_reachability == "UNKNOWN"
 
 
 def test_nested_if_in_function_preserves_lexical_blocker():
-    p = project("def later():\n    if False:\n        import a\n")
+    p = _project_guard_evidence("def later():\n    if False:\n        import a\n")
     assert p.assessments[0].gate == "BLOCKED_BY_LITERAL"
     assert p.assessments[0].initialization_reachability == "UNKNOWN"
 

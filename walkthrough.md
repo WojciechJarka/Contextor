@@ -1,253 +1,242 @@
-# CONTEXTOR_B0G4B2_GUARD_LEXICAL_EVIDENCE
-
-STATUS: Controlled implementation completed. Stop at this stage and await `proceduj`.
+# CONTEXTOR_B0G4B3_MODULE_BINDING_ORDER_EVIDENCE
 
 ## HEAD_BEFORE
-
-27a8426f0e4a05ee4489df96f8d1e1767a45bcd9. Expected e15f597842e81ef978e316ffb908755029b4f31d is an ancestor (`git merge-base --is-ancestor` exit 0). Pre-edit Git status was clean. B0G4B0 provenance and B0G4B1 execution_context existed; both B0G4B2 target paths were absent.
+5638c1b2c649889d15d66eec467053739730bdb4. Pre-edit Git status had pre-existing `M tests/test_cycle_semantics_guards.py` (B0G4B2F rename) and `M walkthrough.md`; both were preserved. B0G4B0 provenance, B0G4B1 execution_context, and B0G4B2 guards existed. Both B0G4B3 target files were absent.
 
 ## HEAD_AFTER
-
-27a8426f0e4a05ee4489df96f8d1e1767a45bcd9. No commit made. Git status shows only the two new task files as untracked; this report file is ignored by Git.
+5638c1b2c649889d15d66eec467053739730bdb4. No commit. Git status adds only the two new task files; pre-existing test-helper edit remains untouched.
 
 ## LIVE_REVISION_BEFORE
-
-405, activity_epoch=1beab26da2ff4932852caa7db6ff4242, continuity=continuous, resync_required=false, canonical_state=fresh, global workspace_sync=unverified, cycles=16, name_collisions=0. Contextor pre-edit ownership: provenance is the canonical ImportProvenance/extract_import_provenance owner; execution_context is separate and has only its targeted test as direct consumer. Provenance blast radius was fresh.
+408; activity_epoch=1beab26da2ff4932852caa7db6ff4242; continuity=continuous; resync_required=false; canonical_state=fresh; collision family fresh with count=0; cycles=16. Global workspace_sync=unverified. Contextor provenance module is the canonical source of ImportProvenance and extract_import_provenance; its blast radius was fresh. The B0G4B2F helper rename was verified in source and the previous collision was absent in fresh canonical diagnostics.
 
 ## LIVE_REVISION_AFTER
-
-407, same activity_epoch, continuity=continuous, resync_required=false, canonical_state=fresh, no parse-stale modules, all displayed canonical families fresh, cycles=16, name_collisions=1. Desktop watcher events: revision 406 UPDATED production guards.py; revision 407 UPDATED test guards.py; both blast_radius_state=fresh. Full get_file_edit_context verified guards.py workspace_sync=verified against disk at revision 407. Global overlay workspace_sync remains unverified because it does not hash repository files. No MCP update_file call.
+410; same activity_epoch; continuity=continuous; resync_required=false; canonical_state=fresh; graph, topology, collisions and cycles families fresh; no parse-stale modules. Desktop watcher revision 409 UPDATED binding_order.py and revision 410 UPDATED test_cycle_semantics_binding_order.py; both report blast_radius_state=fresh. The new production file workspace_sync=verified by full get_file_edit_context at revision 410; global overlay remains unverified.
 
 ## FILES_CHANGED
+- contextor/core/cycle_semantics/binding_order.py (new)
+- tests/test_cycle_semantics_binding_order.py (new)
 
-- contextor/core/cycle_semantics/guards.py (new)
-- tests/test_cycle_semantics_guards.py (new)
-
-No existing production or test file changed. `walkthrough.md` is the report, excluded from source/test diff accounting.
+The pre-existing edit to tests/test_cycle_semantics_guards.py was not changed in this task. No existing production/test file or __init__.py was edited. walkthrough.md is this report and is excluded from source/test diff accounting.
 
 ## IMPLEMENTATION_CONTRACT
-
-CONTRACT_PROVED: Supplied implementation and tests were written verbatim, with a single final newline. Input requires ast.Module and matching ImportProvenance. The function replays provenance extraction and rejects AST/provenance mismatch. Results are frozen dataclasses with tuple collections, preserve ordinal, line and source order, and set initialization_reachability=UNKNOWN for every assessment. No existing API or package export changed.
-CODE_PATH_PROVED: Projection traverses the supplied AST and provenance, classifies literal boolean predicates, syntactic typing.TYPE_CHECKING and __main__ candidates, unresolved IF, and non-IF controls. It does not read source files, run analyzed source, spawn services or subprocesses, mutate the supplied AST/provenance, graph, or canonical state, or publish warnings. Determinism, JSON compatibility and AST nonmutation are covered by focused tests. Provenance dataclasses are frozen. Contextor reports guards.py has only tests.test_cycle_semantics_guards as direct consumer, with zero downstream consumers.
+CONTRACT_PROVED: The supplied literal design was implemented as a standalone projection of an existing ast.Module and matching ImportProvenance. It validates input types and replay equality, then matches each import occurrence by exact lexical key. It records top-level statement ordinal, source positions, kind, contained import ordinals and limited binding/deletion candidates. Duplicate/ambiguous or unmatched import positions fail closed. Results are frozen dataclasses with tuple collections and preserve module_id/source_fingerprint. Every statement execution_proven and timeline initialization_reachability is UNKNOWN.
+CODE_PATH_PROVED: The new module traverses supplied AST/provenance and returns data. It has no analyzed-source execution, filesystem read, graph or canonical mutation, service/subprocess dependency, or warning publication call. Contextor reports the new module has only its targeted test as a direct consumer and zero downstream consumers; no other production consumer exists.
 
 ## TEST_COMMAND
-
-`& .\.venv\Scripts\python.exe -m pytest -q tests/test_cycle_semantics_guards.py tests/test_cycle_semantics_execution_context.py tests/test_cycle_semantics_provenance.py`
+Pre-edit: `& .\.venv\Scripts\python.exe -m pytest -q tests/test_cycle_semantics_guards.py tests/test_cycle_semantics_execution_context.py tests/test_cycle_semantics_provenance.py`
+Post-edit: `& .\.venv\Scripts\python.exe -m pytest -q tests/test_cycle_semantics_binding_order.py tests/test_cycle_semantics_guards.py tests/test_cycle_semantics_execution_context.py tests/test_cycle_semantics_provenance.py`
 
 ## TEST_RESULTS
+Repository Python 3.10.9. Pre-edit exit 0: 39 passed in 1.18s. Post-edit exit 0: 51 passed in 1.52s (12 new plus 39 existing). No other tests or full suite run. New production syntax diagnostics are fresh and empty at revision 410.
 
-Repository Python 3.10.9. Exit code 0: 39 passed in 14.94s. No other test files or full suite run. Contextor syntax diagnostics are fresh and error-free for both new files.
+## BINDING_ORDER_EVIDENCE
+CONTRACT_PROVED: Targeted tests cover assignment/import order, same-line imports, nested imports in function/class/if, alias candidates, deletion and augmented assignment, nonbinding annotation, star import, no imports, AST mismatch, wrong types, and deterministic JSON serialization. Binding completion points are lexical candidates only. A function definition containing an import is not treated as execution of its body; class name binding is recorded after definition; assignments may evaluate arbitrary expressions first. Source order is not represented as unconditional runtime execution.
 
-## GUARD_CLASSIFICATION_EVIDENCE
-
-CONTRACT_PROVED: Literal True/False, unary not and simple all-literal And/Or produce TRUE/FALSE evidence and can block the opposite branch. Nested false branch evidence overrides an outer unknown guard in the overall gate. Alias detection is limited to unshadowed, preceding, top-level syntactic imports from typing. typing.TYPE_CHECKING and __main__ patterns remain UNKNOWN truth and produce only candidate kinds. Dynamic predicates, ambiguous IF matches, and non-IF controls remain unknown. Tests cover each of these cases, including ELSE and nested IF. Occurrence ordinals are passed through unchanged in source order.
-
-## NO_SAFETY_CERTIFICATION
-
-CODE_PATH_PROVED: Every ImportGuardAssessment has initialization_reachability=UNKNOWN. The component emits no SAFE, NO_INITIALIZATION_HAZARD, or RUNTIME_CONFIRMED state. BLOCKED_BY_LITERAL is lexical branch evidence, not a cycle-safety or runtime-outcome assertion.
-
-## NO_WARNING_SUPPRESSION
-
-CODE_PATH_PROVED: No ArchitectureCycle warning or publication code was changed. guards.py has no warning-suppression path. LIVE cycle count remains 16 before and after. A new Contextor name collision was added by the exact auditor-provided test helper `project`, shared with tests.test_cycle_semantics_execution_context. The revision 407 watcher event identifies a NAME_COLLISION between those two test modules; this is not a cycle diagnostic and was not suppressed.
+## COLLISION_COUNT_BEFORE_AFTER
+0 -> 0 from fresh Contextor get_name_collisions at revisions 408 and 410. The new test helper `_binding_order_for` does not duplicate the previous public helper name. The B0G4B2F rename was preserved.
 
 ## GRAPH_CONTRACT_UNCHANGED
+CODE_PATH_PROVED: No graph implementation, hard_edges, soft_edges, graph schema, or warning policy was edited. The new files may add ordinary indexed import edges; the whole-repository graph is not claimed byte-identical. Contextor graph/topology families are fresh and structural cycles remain 16 after indexing.
 
-CODE_PATH_PROVED: guards.py receives AST/provenance and returns lexical evidence, with no graph-edge mutation API. Existing graph modules and schemas were untouched. Watcher indexing of two new modules may add ordinary dependency edges; the whole-repository graph is therefore not claimed byte-identical. Contextor graph/topology families are fresh at revision 407 and cycles remain 16.
+## NO_SAFETY_CERTIFICATION
+CODE_PATH_PROVED: Every statement has execution_proven=UNKNOWN and ModuleBindingOrder has initialization_reachability=UNKNOWN. No SAFE or runtime success state is emitted. Binding candidates do not prove availability or execution.
+
+## NO_WARNING_SUPPRESSION
+CODE_PATH_PROVED: ArchitectureCycle/warning publication code was not edited or called. Fresh canonical cycle count remains 16. No Contextor-specific exception was added.
 
 ## NO_DIRECT_LIVE_PUBLICATION
-
-CODE_PATH_PROVED: guards.py is imported only by its targeted test and is not exported by cycle_semantics.__init__. No FULL/incremental, LIVE, MCP, snapshot, or warning-publication integration was added. Watcher indexing is external observation of file changes. No Desktop/MCP restart or FULL analysis was performed or needed for this disconnected stage.
+CODE_PATH_PROVED: The new module is imported only by its test, is not exported from __init__.py, and is not integrated with FULL/incremental, MCP, LIVE or snapshot publication. Desktop watcher indexing is external observation. No direct update_file, FULL analysis, restart or commit.
 
 ## UNRESOLVED_LIMITATIONS
-
-UNKNOWN: Syntactic TYPE_CHECKING candidate does not establish runtime binding; syntactic __main__ candidate does not establish that __name__ was not reassigned. Lexical evidence does not establish runtime reachability, cycle safety, or cycle failure. Global workspace synchronization remains unverified in the project overlay, while target guards.py was verified. DIRECT_EVIDENCE: revision 407 added one test-only helper-name collision. It remains because the auditor supplied an exact test file and prohibited redesign; resolving it requires a later authorized design decision. No runtime execution of analyzed sources or full-suite certification was requested.
+UNKNOWN: Lexical ordering alone cannot establish whether a statement executes, whether a binding is available during import recursion, or whether a cycle succeeds/fails at runtime. Global project workspace_sync is unverified even though target production file synchronization was verified. No runtime execution of analyzed sources or full-suite certification was requested.
 
 ## FINAL_VERDICT
-
-B0G4B2_PASS — exact two-file implementation and 39 targeted tests pass, both files are indexed in fresh LIVE state, and architectural scope is contained. The new test-helper name collision is recorded as an unresolved diagnostic, not hidden. Await `proceduj`.
+B0G4B3_PASS — exact isolated two-file implementation, 51 targeted tests passed, both watcher events observed, fresh canonical state, zero collisions, and no production consumers outside the new isolated test path. Await `proceduj`.
 
 ## FULL_DIFFS
 
-### FULL_DIFF: contextor/core/cycle_semantics/guards.py
+### FULL_DIFF: contextor/core/cycle_semantics/binding_order.py
 
-diff --git a/contextor/core/cycle_semantics/guards.py b/contextor/core/cycle_semantics/guards.py
+diff --git a/contextor/core/cycle_semantics/binding_order.py b/contextor/core/cycle_semantics/binding_order.py
 new file mode 100644
-index 0000000..10fef1e
+index 0000000..1094789
 --- /dev/null
-+++ b/contextor/core/cycle_semantics/guards.py
-@@ -0,0 +1,244 @@
-+"""Conservative AST guard evidence for explicit import occurrences.
-+
-+Only literal boolean conditions can block a branch here. Named guards are
-+recognition candidates, never verified runtime values or safety proofs.
-+"""
++++ b/contextor/core/cycle_semantics/binding_order.py
+@@ -0,0 +1,258 @@
++"""Lexical module-level binding order evidence, never runtime proof."""
 +
 +from __future__ import annotations
 +
 +import ast
 +from dataclasses import dataclass
 +
-+from .provenance import ImportProvenance, extract_import_provenance
++from .provenance import (
++    ImportOccurrence,
++    ImportProvenance,
++    extract_import_provenance,
++)
 +
 +
 +@dataclass(frozen=True)
-+class GuardFrameEvidence:
-+    kind: str
-+    branch: str
-+    line: int
-+    predicate_kind: str
-+    predicate_truth: str
-+    branch_gate: str
++class CycleBindingCandidate:
++    name: str
++    operation: str
++    completion_point: str
 +
 +
 +@dataclass(frozen=True)
-+class ImportGuardAssessment:
++class ModuleStatementEvidence:
 +    ordinal: int
 +    line: int
-+    gate: str
-+    frames: tuple[GuardFrameEvidence, ...]
++    column: int
++    end_line: int | None
++    end_column: int | None
++    kind: str
++    contained_import_ordinals: tuple[int, ...]
++    binding_candidates: tuple[CycleBindingCandidate, ...]
++    execution_proven: str = "UNKNOWN"
++
++
++@dataclass(frozen=True)
++class ModuleBindingOrder:
++    module_id: str
++    source_fingerprint: str
++    statements: tuple[ModuleStatementEvidence, ...]
 +    initialization_reachability: str = "UNKNOWN"
 +
 +
-+@dataclass(frozen=True)
-+class GuardProjection:
-+    module_id: str
-+    source_fingerprint: str
-+    assessments: tuple[ImportGuardAssessment, ...]
-+
-+
-+def _literal_truth(node: ast.AST) -> bool | None:
-+    if isinstance(node, ast.Constant) and type(node.value) is bool:
-+        return node.value
-+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
-+        inner = _literal_truth(node.operand)
-+        return None if inner is None else not inner
-+    if isinstance(node, ast.BoolOp) and isinstance(node.op, (ast.And, ast.Or)):
-+        values = [_literal_truth(child) for child in node.values]
-+        if any(value is None for value in values):
-+            return None
-+        return all(values) if isinstance(node.op, ast.And) else any(values)
-+    return None
-+
-+
-+def _binding_occurrences(tree: ast.Module) -> dict[str, list[ast.AST]]:
-+    """Gather potential lexical writes, conservatively across all scopes."""
-+    owners: dict[str, list[ast.AST]] = {}
-+
-+    def add(name: str, node: ast.AST) -> None:
-+        owners.setdefault(name, []).append(node)
-+
-+    class Visitor(ast.NodeVisitor):
-+        def visit_Import(self, node: ast.Import) -> None:
-+            for item in node.names:
-+                add(item.asname or item.name.split(".")[0], node)
-+
-+        def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
-+            for item in node.names:
-+                if item.name != "*":
-+                    add(item.asname or item.name, node)
-+
-+        def visit_Name(self, node: ast.Name) -> None:
-+            if isinstance(node.ctx, (ast.Store, ast.Del)):
-+                add(node.id, node)
-+
-+        def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
-+            add(node.name, node)
-+            self.generic_visit(node)
-+
-+        def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
-+            add(node.name, node)
-+            self.generic_visit(node)
-+
-+        def visit_ClassDef(self, node: ast.ClassDef) -> None:
-+            add(node.name, node)
-+            self.generic_visit(node)
-+
-+        def visit_ExceptHandler(self, node: ast.ExceptHandler) -> None:
-+            if node.name:
-+                add(node.name, node)
-+            self.generic_visit(node)
-+
-+        def visit_arg(self, node: ast.arg) -> None:
-+            add(node.arg, node)
-+            self.generic_visit(node)
-+
-+    Visitor().visit(tree)
-+    return owners
-+
-+
-+def _known_typing_aliases(
-+    tree: ast.Module,
-+    before_line: int,
-+    bindings: dict[str, list[ast.AST]],
-+) -> tuple[set[str], set[str]]:
-+    """Identify unshadowed top-level syntactic origins only, not runtime truth."""
-+    module_names: set[str] = set()
-+    constant_names: set[str] = set()
-+    for statement in tree.body:
-+        if getattr(statement, "lineno", 0) >= before_line:
-+            continue
-+        if isinstance(statement, ast.Import):
-+            for alias in statement.names:
-+                bound = alias.asname or alias.name.split(".")[0]
-+                if alias.name == "typing" and bindings.get(bound) == [statement]:
-+                    module_names.add(bound)
-+        elif isinstance(statement, ast.ImportFrom):
-+            if statement.level != 0 or statement.module != "typing":
-+                continue
-+            for alias in statement.names:
-+                bound = alias.asname or alias.name
-+                if alias.name == "TYPE_CHECKING" and bindings.get(bound) == [statement]:
-+                    constant_names.add(bound)
-+    return module_names, constant_names
-+
-+
-+def _is_main_pattern(node: ast.AST) -> bool:
-+    if not isinstance(node, ast.Compare) or len(node.ops) != 1 or len(node.comparators) != 1:
-+        return False
-+    if not isinstance(node.ops[0], (ast.Eq, ast.NotEq)):
-+        return False
-+    left, right = node.left, node.comparators[0]
++def _import_key(node: ast.Import | ast.ImportFrom) -> tuple:
 +    return (
-+        isinstance(left, ast.Name) and left.id == "__name__"
-+        and isinstance(right, ast.Constant) and right.value == "__main__"
-+    ) or (
-+        isinstance(right, ast.Name) and right.id == "__name__"
-+        and isinstance(left, ast.Constant) and left.value == "__main__"
++        node.lineno,
++        node.col_offset,
++        getattr(node, "end_lineno", None),
++        getattr(node, "end_col_offset", None),
++        "IMPORT" if isinstance(node, ast.Import) else "IMPORT_FROM",
++        None if isinstance(node, ast.Import) else node.module,
++        0 if isinstance(node, ast.Import) else node.level,
++        tuple((alias.name, alias.asname) for alias in node.names),
 +    )
 +
 +
-+def _predicate_evidence(
-+    node: ast.AST,
-+    tree: ast.Module,
-+    bindings: dict[str, list[ast.AST]],
-+    before_line: int,
-+) -> tuple[str, str]:
-+    truth = _literal_truth(node)
-+    if truth is not None:
-+        return "LITERAL_BOOLEAN", "TRUE" if truth else "FALSE"
-+    if _is_main_pattern(node):
-+        return "MAIN_GUARD_CANDIDATE", "UNKNOWN"
-+    modules, names = _known_typing_aliases(tree, before_line, bindings)
-+    if isinstance(node, ast.Name) and node.id in names:
-+        return "TYPE_CHECKING_CANDIDATE", "UNKNOWN"
-+    if (
-+        isinstance(node, ast.Attribute)
-+        and node.attr == "TYPE_CHECKING"
-+        and isinstance(node.value, ast.Name)
-+        and node.value.id in modules
++def _occurrence_key(occurrence: ImportOccurrence) -> tuple:
++    return (
++        occurrence.line,
++        occurrence.column,
++        occurrence.end_line,
++        occurrence.end_column,
++        occurrence.form,
++        occurrence.module,
++        occurrence.level,
++        occurrence.aliases,
++    )
++
++
++def _binding_candidates(
++    stmt: ast.stmt,
++) -> tuple[CycleBindingCandidate, ...]:
++    found: list[CycleBindingCandidate] = []
++
++    def record(
++        name: str,
++        operation: str,
++        completion: str,
++    ) -> None:
++        found.append(
++            CycleBindingCandidate(
++                name,
++                operation,
++                completion,
++            )
++        )
++
++    if isinstance(stmt, ast.Import):
++        for alias in stmt.names:
++            record(
++                alias.asname or alias.name.split(".")[0],
++                "BIND",
++                "AFTER_IMPORT",
++            )
++
++    elif isinstance(stmt, ast.ImportFrom):
++        for alias in stmt.names:
++            if alias.name != "*":
++                record(
++                    alias.asname or alias.name,
++                    "BIND",
++                    "AFTER_IMPORT",
++                )
++
++    elif isinstance(
++        stmt,
++        (ast.FunctionDef, ast.AsyncFunctionDef),
 +    ):
-+        return "TYPE_CHECKING_CANDIDATE", "UNKNOWN"
-+    return "UNKNOWN_EXPRESSION", "UNKNOWN"
++        record(
++            stmt.name,
++            "BIND",
++            "AFTER_FUNCTION_DEFINITION",
++        )
++
++    elif isinstance(stmt, ast.ClassDef):
++        record(
++            stmt.name,
++            "BIND",
++            "AFTER_CLASS_DEFINITION",
++        )
++
++    elif isinstance(stmt, ast.Assign):
++        if (
++            len(stmt.targets) == 1
++            and isinstance(stmt.targets[0], ast.Name)
++        ):
++            record(
++                stmt.targets[0].id,
++                "BIND",
++                "AFTER_ASSIGNMENT",
++            )
++
++    elif isinstance(stmt, ast.AnnAssign):
++        if (
++            stmt.value is not None
++            and isinstance(stmt.target, ast.Name)
++        ):
++            record(
++                stmt.target.id,
++                "BIND",
++                "AFTER_ANNOTATED_ASSIGNMENT",
++            )
++
++    elif isinstance(stmt, ast.AugAssign):
++        if isinstance(stmt.target, ast.Name):
++            record(
++                stmt.target.id,
++                "BIND",
++                "AFTER_AUGMENTED_ASSIGNMENT",
++            )
++
++    elif isinstance(stmt, ast.Delete):
++        for target in stmt.targets:
++            if isinstance(target, ast.Name):
++                record(
++                    target.id,
++                    "DELETE",
++                    "AFTER_DELETE",
++                )
++
++    return tuple(found)
 +
 +
-+def project_import_guards(
++def extract_cycle_module_binding_order(
 +    tree: ast.AST,
 +    provenance: ImportProvenance,
-+) -> GuardProjection:
-+    """Map each lexical import to guard evidence; never certify cycle safety."""
++) -> ModuleBindingOrder:
++    """Record lexical top-level steps and candidate binding points.
++
++    A preceding candidate is not necessarily an available binding.
++    This function cannot certify runtime safety or import-order safety.
++    """
 +    if not isinstance(tree, ast.Module):
 +        raise TypeError("tree must be an ast.Module")
++
 +    if not isinstance(provenance, ImportProvenance):
 +        raise TypeError("provenance must be ImportProvenance")
 +
@@ -258,234 +247,303 @@ index 0000000..10fef1e
 +        source_path=provenance.source_path,
 +        source_fingerprint=provenance.source_fingerprint,
 +    )
++
 +    if replay != provenance:
-+        raise ValueError("AST import occurrences differ from provenance")
++        raise ValueError(
++            "AST import occurrences differ from provenance"
++        )
 +
-+    # Multiple matching If statements are treated as ambiguous, not guessed.
-+    lookup: dict[tuple[int, str], list[ast.AST]] = {}
-+    for node in ast.walk(tree):
-+        if isinstance(node, ast.If):
-+            lookup.setdefault(
-+                (node.lineno, ast.dump(node.test, include_attributes=False)), []
-+            ).append(node.test)
++    lookup: dict[tuple, int] = {}
 +
-+    bindings = _binding_occurrences(tree)
-+    assessments: list[ImportGuardAssessment] = []
 +    for occurrence in provenance.occurrences:
-+        frame_evidence: list[GuardFrameEvidence] = []
-+        for frame in occurrence.controls:
-+            if frame.kind != "IF":
-+                predicate_kind, truth = "NON_IF_CONTROL", "UNKNOWN"
-+            else:
-+                matches = lookup.get((frame.line, frame.expression or ""), [])
-+                if len(matches) != 1:
-+                    predicate_kind, truth = "UNRESOLVED_IF", "UNKNOWN"
-+                else:
-+                    predicate_kind, truth = _predicate_evidence(
-+                        matches[0], tree, bindings, frame.line
-+                    )
-+            if truth == "UNKNOWN":
-+                gate = "UNKNOWN"
-+            else:
-+                taken = (truth == "TRUE") == (frame.branch == "BODY")
-+                gate = "POSSIBLE" if taken else "BLOCKED"
-+            frame_evidence.append(
-+                GuardFrameEvidence(
-+                    kind=frame.kind,
-+                    branch=frame.branch,
-+                    line=frame.line,
-+                    predicate_kind=predicate_kind,
-+                    predicate_truth=truth,
-+                    branch_gate=gate,
-+                )
++        key = _occurrence_key(occurrence)
++
++        if key in lookup:
++            raise ValueError(
++                "ambiguous import occurrence position"
 +            )
 +
-+        if any(frame.branch_gate == "BLOCKED" for frame in frame_evidence):
-+            overall = "BLOCKED_BY_LITERAL"
-+        elif any(frame.branch_gate == "UNKNOWN" for frame in frame_evidence):
-+            overall = "GUARDED_UNKNOWN"
-+        else:
-+            overall = "NO_KNOWN_GUARD_BLOCKER"
-+        assessments.append(
-+            ImportGuardAssessment(
-+                ordinal=occurrence.ordinal,
-+                line=occurrence.line,
-+                gate=overall,
-+                frames=tuple(frame_evidence),
++        lookup[key] = occurrence.ordinal
++
++    seen: set[int] = set()
++    statements: list[ModuleStatementEvidence] = []
++
++    for index, statement in enumerate(tree.body):
++        contained: list[int] = []
++
++        for node in ast.walk(statement):
++            if not isinstance(
++                node,
++                (ast.Import, ast.ImportFrom),
++            ):
++                continue
++
++            key = _import_key(node)
++            ordinal = lookup.get(key)
++
++            if ordinal is None or ordinal in seen:
++                raise ValueError(
++                    "unmatched or duplicated AST import occurrence"
++                )
++
++            seen.add(ordinal)
++            contained.append(ordinal)
++
++        statements.append(
++            ModuleStatementEvidence(
++                ordinal=index,
++                line=statement.lineno,
++                column=statement.col_offset,
++                end_line=getattr(
++                    statement, "end_lineno", None
++                ),
++                end_column=getattr(
++                    statement, "end_col_offset", None
++                ),
++                kind=type(statement).__name__,
++                contained_import_ordinals=tuple(
++                    sorted(contained)
++                ),
++                binding_candidates=_binding_candidates(
++                    statement
++                ),
 +            )
 +        )
 +
-+    return GuardProjection(
++    if seen != set(lookup.values()):
++        raise ValueError(
++            "not all import occurrences belong to "
++            "top-level statements"
++        )
++
++    return ModuleBindingOrder(
 +        module_id=provenance.module_id,
 +        source_fingerprint=provenance.source_fingerprint,
-+        assessments=tuple(assessments),
++        statements=tuple(statements),
 +    )
 
-### FULL_DIFF: tests/test_cycle_semantics_guards.py
+### FULL_DIFF: tests/test_cycle_semantics_binding_order.py
 
-diff --git a/tests/test_cycle_semantics_guards.py b/tests/test_cycle_semantics_guards.py
+diff --git a/tests/test_cycle_semantics_binding_order.py b/tests/test_cycle_semantics_binding_order.py
 new file mode 100644
-index 0000000..178378e
+index 0000000..2e077b4
 --- /dev/null
-+++ b/tests/test_cycle_semantics_guards.py
-@@ -0,0 +1,160 @@
++++ b/tests/test_cycle_semantics_binding_order.py
+@@ -0,0 +1,217 @@
 +import ast
 +import json
 +from dataclasses import asdict
 +
 +import pytest
 +
-+from contextor.core.cycle_semantics.provenance import extract_import_provenance
-+from contextor.core.cycle_semantics.guards import project_import_guards
++from contextor.core.cycle_semantics.provenance import (
++    extract_import_provenance,
++)
++from contextor.core.cycle_semantics.binding_order import (
++    extract_cycle_module_binding_order,
++)
 +
 +
-+def project(code):
++def _binding_order_for(code):
 +    tree = ast.parse(code)
-+    p = extract_import_provenance(
-+        tree, module_id="p.a", source_key="p/a.py",
-+        source_path="C:/fixture/p/a.py", source_fingerprint="fingerprint",
++    facts = extract_import_provenance(
++        tree,
++        module_id="pkg.a",
++        source_key="pkg/a.py",
++        source_path="C:/fixture/pkg/a.py",
++        source_fingerprint="fingerprint",
 +    )
-+    return project_import_guards(tree, p)
++    return extract_cycle_module_binding_order(tree, facts)
 +
 +
-+def test_literal_false_body_and_else():
-+    result = project("if False:\n    import a\nelse:\n    import b\n")
-+    assert [a.gate for a in result.assessments] == [
-+        "BLOCKED_BY_LITERAL", "NO_KNOWN_GUARD_BLOCKER"]
-+    assert [f.branch_gate for a in result.assessments for f in a.frames] == [
-+        "BLOCKED", "POSSIBLE"
++def test_binding_order_switch_same_import_graph():
++    before = _binding_order_for(
++        "value = 1\nimport b\n"
++    )
++    after = _binding_order_for(
++        "import b\nvalue = 1\n"
++    )
++
++    assert (
++        before.statements[0].binding_candidates[0].name
++        == "value"
++    )
++    assert (
++        before.statements[1].contained_import_ordinals
++        == (0,)
++    )
++
++    assert (
++        after.statements[0].contained_import_ordinals
++        == (0,)
++    )
++    assert (
++        after.statements[1].binding_candidates[0].name
++        == "value"
++    )
++
++    assert before.initialization_reachability == "UNKNOWN"
++    assert after.initialization_reachability == "UNKNOWN"
++
++
++def test_same_line_separate_import_statements():
++    result = _binding_order_for(
++        "import a; import b\n"
++    )
++
++    assert [
++        item.contained_import_ordinals
++        for item in result.statements
++    ] == [(0,), (1,)]
++
++
++def test_function_and_class_imports_are_contained():
++    result = _binding_order_for(
++        "def f():\n"
++        "    import a\n"
++        "class K:\n"
++        "    import b\n"
++    )
++
++    assert [
++        item.contained_import_ordinals
++        for item in result.statements
++    ] == [(0,), (1,)]
++
++    assert [
++        item.binding_candidates[0].completion_point
++        for item in result.statements
++    ] == [
++        "AFTER_FUNCTION_DEFINITION",
++        "AFTER_CLASS_DEFINITION",
 +    ]
 +
 +
-+def test_literal_true_else_blocked():
-+    result = project("if True:\n    import a\nelse:\n    import b\n")
-+    assert [a.gate for a in result.assessments] == [
-+        "NO_KNOWN_GUARD_BLOCKER", "BLOCKED_BY_LITERAL"]
-+
-+
-+def test_nested_condition_false_overrides_dynamic_unknown():
-+    result = project("if condition:\n    if False:\n        import a\n")
-+    assert result.assessments[0].gate == "BLOCKED_BY_LITERAL"
-+    assert [f.branch_gate for f in result.assessments[0].frames] == [
-+        "UNKNOWN", "BLOCKED"
-+    ]
-+
-+
-+def test_boolean_literals_not_and():
-+    result = project(
-+        "if not False and True:\n    import a\n"
-+        "if True and False:\n    import b\n"
++def test_conditional_imports_share_top_level_owner():
++    result = _binding_order_for(
++        "if flag:\n"
++        "    import a\n"
++        "else:\n"
++        "    import b\n"
 +    )
-+    assert [a.gate for a in result.assessments] == [
-+        "NO_KNOWN_GUARD_BLOCKER", "BLOCKED_BY_LITERAL"]
 +
-+
-+def test_dynamic_predicate_stays_unknown():
-+    result = project("if arbitrary_function():\n    import a\n")
-+    assert result.assessments[0].gate == "GUARDED_UNKNOWN"
-+    assert result.assessments[0].frames[0].predicate_kind == "UNKNOWN_EXPRESSION"
-+
-+
-+def test_type_checking_direct_alias_candidate_not_proof():
-+    result = project(
-+        "from typing import TYPE_CHECKING as TC\n"
-+        "if TC:\n    import a\n"
++    assert (
++        result.statements[0].contained_import_ordinals
++        == (0, 1)
 +    )
-+    assert result.assessments[1].frames[0].predicate_kind == (
-+        "TYPE_CHECKING_CANDIDATE"
++    assert result.statements[0].binding_candidates == ()
++
++
++def test_import_alias_binding_candidates():
++    result = _binding_order_for(
++        "import os.path, sys as ss\n"
++        "from . import child as c\n"
 +    )
-+    assert result.assessments[1].gate == "GUARDED_UNKNOWN"
 +
++    assert [
++        candidate.name
++        for candidate in result.statements[0].binding_candidates
++    ] == ["os", "ss"]
 +
-+def test_typing_module_alias_candidate():
-+    result = project("import typing as t\nif t.TYPE_CHECKING:\n    import a\n")
-+    assert result.assessments[1].frames[0].predicate_kind == (
-+        "TYPE_CHECKING_CANDIDATE"
-+    )
-+    assert result.assessments[1].gate == "GUARDED_UNKNOWN"
-+
-+
-+def test_unbound_and_shadowed_typechecking_unresolved():
-+    p = project("if TC:\n    import a\n")
-+    assert p.assessments[0].frames[0].predicate_kind == "UNKNOWN_EXPRESSION"
-+    p = project(
-+        "from typing import TYPE_CHECKING as TC\n"
-+        "TC = True\nif TC:\n    import a\n"
-+    )
-+    assert p.assessments[1].frames[0].predicate_kind == "UNKNOWN_EXPRESSION"
-+
-+
-+def test_future_alias_import_does_not_count():
-+    p = project(
-+        "if TC:\n    import a\n"
-+        "from typing import TYPE_CHECKING as TC\n"
-+    )
-+    assert p.assessments[0].frames[0].predicate_kind == "UNKNOWN_EXPRESSION"
-+
-+
-+def test_main_guard_candidate_is_not_runtime_proof():
-+    p = project('if __name__ == "__main__":\n    import a\n')
-+    assert p.assessments[0].frames[0].predicate_kind == "MAIN_GUARD_CANDIDATE"
-+    assert p.assessments[0].gate == "GUARDED_UNKNOWN"
-+
-+
-+def test_try_and_for_controls_unknown():
-+    p = project(
-+        "try:\n    import a\n"
-+        "except ImportError:\n    import b\n"
-+        "for x in seq:\n    import c\n"
-+    )
-+    assert [a.gate for a in p.assessments] == ["GUARDED_UNKNOWN"] * 3
-+    assert all(
-+        a.frames[0].predicate_kind == "NON_IF_CONTROL"
-+        for a in p.assessments
++    assert (
++        result.statements[1].binding_candidates[0].name
++        == "c"
 +    )
 +
 +
-+def test_absence_of_guard_is_not_reachability_proof():
-+    p = project("def later():\n    import a\n")
-+    a = p.assessments[0]
-+    assert a.gate == "NO_KNOWN_GUARD_BLOCKER"
-+    assert a.initialization_reachability == "UNKNOWN"
-+
-+
-+def test_nested_if_in_function_preserves_lexical_blocker():
-+    p = project("def later():\n    if False:\n        import a\n")
-+    assert p.assessments[0].gate == "BLOCKED_BY_LITERAL"
-+    assert p.assessments[0].initialization_reachability == "UNKNOWN"
-+
-+
-+def test_ast_mismatch_rejected():
-+    tree = ast.parse("import a")
-+    p = extract_import_provenance(
-+        tree, module_id="m", source_key="m.py", source_path="C:/m.py",
-+        source_fingerprint="fingerprint"
++def test_delete_and_augmented_assignment():
++    result = _binding_order_for(
++        "x = 1\n"
++        "x += 1\n"
++        "del x\n"
 +    )
++
++    assert [
++        statement.binding_candidates[0].operation
++        for statement in result.statements
++    ] == ["BIND", "BIND", "DELETE"]
++
++
++def test_annotation_without_value_not_binding_candidate():
++    result = _binding_order_for(
++        "x: int\n"
++        "y: int = 1\n"
++        "a, b = (1, 2)\n"
++    )
++
++    assert result.statements[0].binding_candidates == ()
++    assert (
++        result.statements[1].binding_candidates[0].name
++        == "y"
++    )
++    assert result.statements[2].binding_candidates == ()
++
++
++def test_star_import_not_guessed():
++    result = _binding_order_for(
++        "from pkg import *\n"
++    )
++
++    assert result.statements[0].binding_candidates == ()
++    assert (
++        result.statements[0].contained_import_ordinals
++        == (0,)
++    )
++
++
++def test_no_imports_remains_valid():
++    result = _binding_order_for("x = 1\n")
++
++    assert result.statements[0].contained_import_ordinals == ()
++    assert result.initialization_reachability == "UNKNOWN"
++
++
++def test_ast_provenance_mismatch_rejected():
++    tree = ast.parse("import a\n")
++    facts = extract_import_provenance(
++        tree,
++        module_id="m",
++        source_key="m.py",
++        source_path="C:/m.py",
++        source_fingerprint="fingerprint",
++    )
++
 +    with pytest.raises(ValueError, match="differ"):
-+        project_import_guards(ast.parse("import b"), p)
++        extract_cycle_module_binding_order(
++            ast.parse("import b\n"),
++            facts,
++        )
 +
 +
-+def test_invalid_inputs_rejected():
-+    tree = ast.parse("import a")
-+    p = extract_import_provenance(
-+        tree, module_id="m", source_key="m.py", source_path="C:/m.py",
-+        source_fingerprint="fingerprint"
++def test_wrong_input_types_rejected():
++    tree = ast.parse("import a\n")
++    facts = extract_import_provenance(
++        tree,
++        module_id="m",
++        source_key="m.py",
++        source_path="C:/m.py",
++        source_fingerprint="fingerprint",
 +    )
++
 +    with pytest.raises(TypeError):
-+        project_import_guards(None, p)
++        extract_cycle_module_binding_order(None, facts)
++
 +    with pytest.raises(TypeError):
-+        project_import_guards(tree, None)
++        extract_cycle_module_binding_order(tree, None)
 +
 +
-+def test_deterministic_json_compatible_and_nonmutating():
-+    code = "if False:\n    import a\n"
-+    tree = ast.parse(code)
-+    p = extract_import_provenance(
-+        tree, module_id="m", source_key="m.py", source_path="C:/m.py",
-+        source_fingerprint="fingerprint"
++def test_deterministic_json_compatible():
++    first = _binding_order_for(
++        "if True:\n    import a\n"
 +    )
-+    before = ast.dump(tree, include_attributes=True)
-+    first = project_import_guards(tree, p)
-+    assert first == project_import_guards(tree, p)
++    second = _binding_order_for(
++        "if True:\n    import a\n"
++    )
++
++    assert first == second
 +    json.dumps(asdict(first))
-+    assert ast.dump(tree, include_attributes=True) == before
++
++    assert all(
++        statement.execution_proven == "UNKNOWN"
++        for statement in first.statements
++    )
