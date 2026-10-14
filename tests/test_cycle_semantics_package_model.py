@@ -744,3 +744,204 @@ def test_b0g4c4_namespace_layout_remains_unknown():
         "entry": "from pkg import a,b",
     }
     assert _model(source, "entry").outcome == "UNKNOWN"
+
+
+def test_b0g4c5_deferred_function_import_not_executed(tmp_path):
+    source = {
+        "pkg.__init__": (
+            "def load():\n"
+            "    import pkg.child\n"
+            "value=7"
+        ),
+        "pkg.child": "import pkg\nx=pkg.missing",
+    }
+    result = _model(source, "pkg")
+    assert result.outcome == "MODEL_PASS"
+    assert not any(
+        e.operation == "START_IMPORT"
+        and e.target == "pkg.child"
+        for e in result.events
+    )
+    assert _actual(tmp_path, source, "pkg")
+
+
+def test_b0g4c5_call_activates_early_binding_hazard(tmp_path):
+    source = {
+        "pkg.__init__": (
+            "def load():\n"
+            "    import pkg.child\n"
+            "load()\n"
+            "value=7"
+        ),
+        "pkg.child": "import pkg\nx=pkg.value",
+    }
+    result = _model(source, "pkg")
+    assert result.outcome == "EARLY_BINDING_HAZARD"
+    assert result.target_module == "pkg"
+    assert result.symbol == "value"
+    assert not _actual(tmp_path, source, "pkg")
+
+
+def test_b0g4c5_binding_before_call_passes(tmp_path):
+    source = {
+        "pkg.__init__": (
+            "def load():\n"
+            "    import pkg.child\n"
+            "value=7\n"
+            "load()"
+        ),
+        "pkg.child": "import pkg\nx=pkg.value",
+    }
+    result = _model(source, "pkg")
+    assert result.outcome == "MODEL_PASS"
+    assert _actual(tmp_path, source, "pkg")
+
+
+def test_b0g4c5_function_local_import_not_exported(tmp_path):
+    source = {
+        "pkg.__init__": (
+            "def activate():\n"
+            "    import pkg.child as local_only\n"
+            "activate()"
+        ),
+        "pkg.child": "from pkg import local_only",
+    }
+    result = _model(source, "pkg")
+    assert result.outcome == "EARLY_BINDING_HAZARD"
+    assert result.target_module == "pkg"
+    assert result.symbol == "local_only"
+    assert not _actual(tmp_path, source, "pkg")
+
+
+def test_b0g4c5_repeated_calls_import_child_once(tmp_path):
+    source = {
+        "pkg.__init__": (
+            "def activate():\n"
+            "    import pkg.child\n"
+            "activate()\n"
+            "activate()"
+        ),
+        "pkg.child": "value=7",
+    }
+    result = _model(source, "pkg")
+    assert result.outcome == "MODEL_PASS"
+    assert sum(
+        e.operation == "START_IMPORT"
+        and e.target == "pkg.child"
+        for e in result.events
+    ) == 1
+    assert sum(
+        e.operation == "CALL_FUNCTION"
+        for e in result.events
+    ) == 2
+    assert _actual(tmp_path, source, "pkg")
+
+
+def test_b0g4c5_plain_flat_module_function_call(tmp_path):
+    source = {
+        "a": (
+            "def load():\n"
+            "    import b\n"
+            "load()\n"
+            "value=7"
+        ),
+        "b": "import a\nx=a.value",
+    }
+    result = _model(source, "a")
+    assert result.outcome == "EARLY_BINDING_HAZARD"
+    assert not _actual(tmp_path, source, "a")
+
+
+def test_b0g4c5_exported_definition_is_available(tmp_path):
+    source = {
+        "pkg.__init__": (
+            "def load():\n"
+            "    pass"
+        ),
+        "pkg.user": "from pkg import load",
+    }
+    result = _model(source, "pkg.user")
+    assert result.outcome == "MODEL_PASS"
+    assert _actual(tmp_path, source, "pkg.user")
+
+
+def test_b0g4c5_foreign_function_call_unknown():
+    source = {
+        "pkg.__init__": (
+            "def load():\n"
+            "    import pkg.child"
+        ),
+        "pkg.child": "pass",
+        "pkg.user": (
+            "from pkg import load\n"
+            "load()"
+        ),
+    }
+    assert _model(source, "pkg.user").outcome == "UNKNOWN"
+
+
+def test_b0g4c5_call_without_local_definition_unknown():
+    source = {
+        "pkg.__init__": "missing()",
+    }
+    assert _model(source, "pkg").outcome == "UNKNOWN"
+
+
+def test_b0g4c5_shadowed_function_call_unknown(tmp_path):
+    source = {
+        "pkg.__init__": (
+            "def load():\n"
+            "    pass\n"
+            "load=3\n"
+            "load()"
+        ),
+    }
+    assert _model(source, "pkg").outcome == "UNKNOWN"
+    assert not _actual(tmp_path, source, "pkg")
+
+
+def test_b0g4c5_unsupported_definition_effects_unknown():
+    samples = [
+        "def f(x=1):\n    import pkg.child",
+        "def f(x):\n    import pkg.child",
+        "@decorator\ndef f():\n    import pkg.child",
+        "def f() -> int:\n    import pkg.child",
+        "def f():\n    from pkg import child",
+        "def f():\n    helper()",
+        "async def f():\n    import pkg.child",
+        "def f():\n    return 1",
+    ]
+    for code in samples:
+        assert _model(
+            {"pkg.__init__": code, "pkg.child": "pass"},
+            "pkg",
+        ).outcome == "UNKNOWN"
+
+
+def test_b0g4c5_deterministic_ast_unchanged():
+    source = {
+        "pkg.__init__": ast.parse(
+            "def activate():\n"
+            "    import pkg.child\n"
+            "activate()"
+        ),
+        "pkg.child": ast.parse("pass"),
+    }
+
+    before = {
+        key: ast.dump(tree, include_attributes=True)
+        for key, tree in source.items()
+    }
+
+    first = evaluate_package_import_order(source, "pkg")
+    second = evaluate_package_import_order(source, "pkg")
+
+    assert first == second
+    assert first.outcome == "MODEL_PASS"
+
+    assert {
+        key: ast.dump(tree, include_attributes=True)
+        for key, tree in source.items()
+    } == before
+
+    json.dumps(asdict(first))

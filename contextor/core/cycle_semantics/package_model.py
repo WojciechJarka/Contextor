@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import ast
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from contextor.core.cycle_semantics.package_layout import build_package_layout
 
@@ -38,6 +38,8 @@ class _Step:
     symbol: str | None = None
     binding: str | None = None
     explicit_alias: bool = False
+    function_body: tuple[_Step, ...] = ()
+    function_local: bool = False
 
 
 def _compile(
@@ -197,6 +199,83 @@ def _compile(
             else:
                 return None
 
+        elif isinstance(stmt, ast.FunctionDef):
+            args = stmt.args
+
+            if (
+                not stmt.name.isidentifier()
+                or stmt.name.startswith("__")
+                or stmt.decorator_list
+                or stmt.returns is not None
+                or stmt.type_comment is not None
+                or args.posonlyargs
+                or args.args
+                or args.vararg is not None
+                or args.kwonlyargs
+                or args.kwarg is not None
+                or args.defaults
+                or args.kw_defaults
+            ):
+                return None
+
+            function_steps: list[_Step] = []
+
+            for body_statement in stmt.body:
+                if isinstance(body_statement, ast.Pass):
+                    continue
+
+                if not isinstance(body_statement, ast.Import):
+                    return None
+
+                fragment = ast.Module(
+                    body=[body_statement],
+                    type_ignores=[],
+                )
+
+                compiled = _compile(
+                    fragment,
+                    logical,
+                    package,
+                )
+
+                if (
+                    compiled is None
+                    or any(item.op != "IMPORT" for item in compiled)
+                ):
+                    return None
+
+                function_steps.extend(
+                    replace(item, function_local=True)
+                    for item in compiled
+                )
+
+            steps.append(
+                _Step(
+                    "DEFINE_FUNCTION",
+                    binding=stmt.name,
+                    function_body=tuple(function_steps),
+                )
+            )
+
+        elif isinstance(stmt, ast.Expr):
+            expression = stmt.value
+
+            if (
+                not isinstance(expression, ast.Call)
+                or not isinstance(expression.func, ast.Name)
+                or expression.func.id.startswith("__")
+                or expression.args
+                or expression.keywords
+            ):
+                return None
+
+            steps.append(
+                _Step(
+                    "CALL_FUNCTION",
+                    target=expression.func.id,
+                )
+            )
+
         elif isinstance(stmt, ast.Pass):
             continue
 
@@ -286,7 +365,7 @@ def evaluate_package_import_order(
     if not valid_chain(entry_module):
         return result("UNKNOWN", entry_module)
 
-    programs: dict[str, tuple[_Step, ...]] = {}
+    programs: dict[str, list[_Step]] = {}
 
     for name, tree in logical_sources.items():
         if not valid_chain(name):
@@ -297,7 +376,7 @@ def evaluate_package_import_order(
         if program is None:
             return result("UNKNOWN", name)
 
-        programs[name] = program
+        programs[name] = list(program)
 
     # A package may prebind a same-named attribute before a later
     # from-import; the attribute takes priority. Keep more complex
@@ -308,6 +387,16 @@ def evaluate_package_import_order(
             for name in programs
             if "." in name and name.rsplit(".", 1)[0] == package
         }
+        # A function and a direct indexed child with the
+        # same package attribute name need richer shadowing
+        # and import-binding semantics.
+        if any(
+            step.op == "DEFINE_FUNCTION"
+            and step.binding in children
+            for step in programs[package]
+        ):
+            return result("UNKNOWN", package)
+
         writes_child = any(
             step.binding in children
             and (
@@ -317,7 +406,7 @@ def evaluate_package_import_order(
             for step in programs[package]
         )
         if writes_child and any(
-            step.op in {"IMPORT", "FROM"}
+            step.op in {"IMPORT", "FROM", "CALL_FUNCTION"}
             for step in programs[package]
         ):
             return result("UNKNOWN", package)
@@ -328,6 +417,14 @@ def evaluate_package_import_order(
     }
 
     namespaces: dict[str, dict[str, str | None]] = {
+        name: {}
+        for name in programs
+    }
+
+    function_definitions: dict[
+        str,
+        dict[str, tuple[_Step, ...]],
+    ] = {
         name: {}
         for name in programs
     }
@@ -484,12 +581,17 @@ def evaluate_package_import_order(
                         else target.split(".")[0]
                     )
 
-                    namespaces[module][step.binding] = binding_target
+                    if not step.function_local:
+                        namespaces[module][step.binding] = binding_target
 
                     events.append(
                         PackageModelEvent(
                             module,
-                            "IMPORT",
+                            (
+                                "FUNCTION_LOCAL_IMPORT"
+                                if step.function_local
+                                else "IMPORT"
+                            ),
                             target,
                             step.binding,
                         )
@@ -578,6 +680,58 @@ def evaluate_package_import_order(
                         member,
                     )
                 )
+
+        elif step.op == "DEFINE_FUNCTION":
+            function_definitions[module][step.binding] = (
+                step.function_body
+            )
+
+            namespaces[module][step.binding] = (
+                "\x00FUNCTION:" + module + ":" + step.binding
+            )
+
+            events.append(
+                PackageModelEvent(
+                    module,
+                    "DEFINE_FUNCTION",
+                    symbol=step.binding,
+                )
+            )
+
+        elif step.op == "CALL_FUNCTION":
+            expected_binding = (
+                "\x00FUNCTION:" + module + ":" + step.target
+            )
+
+            if (
+                namespaces[module].get(step.target)
+                != expected_binding
+                or step.target
+                not in function_definitions[module]
+            ):
+                return result(
+                    "UNKNOWN",
+                    module,
+                    step.target,
+                )
+
+            # Expand the function's restricted import-only body
+            # at its actual call site. This changes only the
+            # in-memory compiled execution sequence, never
+            # caller AST or source bytes.
+            body_steps = function_definitions[module][step.target]
+
+            programs[module][
+                index + 1:index + 1
+            ] = list(body_steps)
+
+            events.append(
+                PackageModelEvent(
+                    module,
+                    "CALL_FUNCTION",
+                    symbol=step.target,
+                )
+            )
 
         elif step.op == "BIND":
             namespaces[module][step.binding] = None
