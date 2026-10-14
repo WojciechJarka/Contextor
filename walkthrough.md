@@ -1,132 +1,766 @@
-# CONTEXTOR_B0G2D8B_MATRIX_CLUSTERS_CANONICAL_FIXTURE_REPAIR
+# CONTEXTOR_B0G4B0_IMPORT_PROVENANCE_KERNEL
+
+MODE=CONTROLLED IMPLEMENTATION
+FINAL_VERDICT=B0G4B0_PASS
+
+## HEAD_BEFORE
+c7d68154b5a7b180a86b1591f590247504cec745
+
+## HEAD_AFTER
+c7d68154b5a7b180a86b1591f590247504cec745
+No commit or Git mutation. Initial Git status had only the already-modified walkthrough.md; final task changes are the three new files below plus this report.
+
+## LIVE_REVISION_BEFORE
+397; activity_epoch=1beab26da2ff4932852caa7db6ff4242; canonical_state=fresh; resync_required=false; current LIVE cycle count=16/fresh; project-wide workspace_sync=unverified.
+
+## LIVE_REVISION_AFTER
+403; same activity_epoch; canonical_state=fresh; resync_required=false; current LIVE cycle count=16/fresh. get_live_events(after_revision=397): continuity=continuous, six desktop_watcher update_file events: revisions 398-400 UPDATED for the three new files, 401-403 UNCHANGED for the final newline normalization; no diagnostic_changes. No MCP update_file, FULL publish, analysis, restart or forced resync was invoked.
 
 ## FILES_CHANGED
-FILES_CHANGED=tests/test_matrix_clusters_ram_parity.py
-`walkthrough.md` is the report artifact and is excluded from FILES_CHANGED. Git status after checks showed only `M tests/test_matrix_clusters_ram_parity.py`.
+- C:\Temp\Contextor_Repo\contextor\core\cycle_semantics\__init__.py
+- C:\Temp\Contextor_Repo\contextor\core\cycle_semantics\provenance.py
+- C:\Temp\Contextor_Repo\tests\test_cycle_semantics_provenance.py
 
-## SOURCE_PRECHECK
-DIRECT_EVIDENCE: HEAD before edit=09c697f97aa16ceb01f912c9fd086efff4de3ff1; working tree clean before edit. Contextor MCP pre-edit canonical revision=393, activity_epoch=c091cb70c2634898aadd407860e4d5c0, continuity=continuous after_revision=393, resync_required=false. The target test, state_manager.py, plan_executor.py, and reference/engine.py each had canonical_state=fresh and workspace_sync=verified at revision 393. Contextor fact lineage for artifact_consumption identified full producer in state_manager, incremental consumer-slice producer in plan_executor, and canonical installation in IncrementalAnalysisEngine._apply_delta_and_commit. Bounded Contextor direct consumers: state_manager.py=95, plan_executor.py=12, reference/engine.py=20, target test=0. Exact source inspection then confirmed both patch anchors and the specified production contracts; no source drift or contract mismatch.
-CONTRACT_PROVED: canonical_artifact_consumption_targets uses nonempty own_symbols first, then modern symbols dict (including empty), then structurally available empty own_symbols; consumers-only is a legacy fallback. _refresh_canonical_artifact_consumers reads artifact.own_symbols. build_symbol_references_from_canonical requires materialized reference evidence for each current module. extract_module_usage_facts parses valid source and sets both symbol_calls_materialized and reference_evidence_materialized to True.
+## IMPLEMENTATION_CONTRACT
+Auditor-provided content was copied literally into exactly the three new files. Normalized line-by-line comparison against the attachment returned EXACT_NORMALIZED=True for each file. A trailing blank line introduced by Set-Content was removed; no code contract changed. The package exports only the five specified names. The extractor accepts an already parsed ast.Module, records one immutable ImportOccurrence per explicit AST import statement with ordinal, coordinates, form, relative level, aliases, lexical scopes, raw control frames, source identity/fingerprint, and deterministic ordering. It does not evaluate controls, import analyzed source, execute analyzed code, resolve dependencies or classify safety. Code path reads only the supplied AST, arguments and stdlib ast/dataclasses; it contains no source-file read/write, filesystem API, subprocess or service call. Python 3.10.9 imported and ran the package in the targeted test. Existing frozen production modules were not edited.
+Contextor discovery before edit found the target module absent; indexer and graph ownership/consumers remained in the established modules. After watcher indexing, get_file_edit_context found provenance.py as a new module with one direct production consumer (__init__.py), and get_module_blast_radius listed direct consumers __init__.py and the targeted test. No existing production consumer was connected.
 
-## GLOBAL_FAILURE_BASELINE
-USER_PROVIDED: 3441 passed, 8 failed, 1 skipped, 1 warning. B0G2D8A repaired the six lineage failures (six nodes and 40-file tests PASS). Two named matrix failures were the only scope here. The global suite was not rerun.
+## TEST_COMMAND
+& .\.venv\Scripts\python.exe -m pytest -q tests/test_cycle_semantics_provenance.py
 
-## MODERN_ARTIFACT_DOMAIN_PRESERVATION
-In the first test, the existing FULL-produced a.b artifact is retained in original_a_b_artifact. The fixture asserts `c` exists in its actual own_symbols, then merges that original record while replacing only its synthetic consumers mapping. No own_symbols were invented. Other synthetic assignments and assertions remain unchanged.
+## TEST_RESULTS
+11 passed in 2.01s (Python 3.10.9). Assertions cover separate statements/aliases, relative imports, function/class/async scopes, IF/TRY/FOR/MATCH/main guards, dynamic-call exclusion, multiple origins, deterministic immutable-equivalent output, AST nonmutation, JSON serialization and invalid-tree rejection. No full suite or other pytest subset ran. git diff --no-index --check for each new file found no remaining whitespace/EOF warning after the trailing-blank correction; Git returns 1 for ordinary new-file differences.
 
-## SYNTHETIC_MULTI_IDENTITY_CONTRACT
-The fixture retains its deliberately injected a::b.c identity and plural exact-target assertions. The manually injected artifact domain is a synthetic ambiguity fixture; it is not claimed to have emerged unchanged from FULL analysis.
+## CANONICAL_GRAPH_UNCHANGED
+Existing-source canonical hard edges are exactly unchanged: before=1746; after querying all 440 prior module identities=1746; set difference added=0, removed=0. Current total hard edges=1748 because the three newly indexed files introduce exactly two edges: package __init__ -> provenance and test -> package __init__. Soft edges remain 278. Structural cycle count stays 16/fresh. Therefore the graph *state* grew by the expected new-file edges, while every pre-existing graph edge and the graph contracts remained unchanged.
 
-## MATERIALIZED_REFERENCE_FIXTURE
-In the second test, `extract_module_usage_facts("other_consumer", "import a.b\na.b.c()\n", imports=[])` produces real AST-derived facts for the synthetic current module. The test asserts both materialization flags, direct_calls membership for a.b.c, and the exact reference-evidence tuple at line 2 before installing the facts. No physical other.py is required.
+## EXISTING_CONTRACTS_UNCHANGED
+No edit to ImportRef, AdvancedImportVisitor, read_imports, resolve_internal, resolve_module_edges, build_graph, detect_cycles, ArchitectureCycle, canonical snapshot schema, LIVE/MCP publication code or report schema. No semantic classifier or FULL/incremental hookup was added. Contextor after-change module context: provenance.py indexed, no syntax diagnostic, and only package/test direct consumers.
 
-## NO_FORGED_MATERIALIZATION_FLAGS
-No flag is set manually. The production reference builder's validation and error behavior are unchanged. No exception suppression, xfail, skip, test removal, or assertion weakening was introduced.
+## NO_LIVE_PUBLICATION
+No full-analysis publish was requested or performed. Desktop LIVE watcher independently indexed the three new files through six incremental update_file events; this is a canonical revision change caused by the active watcher, not a call from the extractor. Direct invocation of extract_import_provenance in tests has no canonical-state API and no observed publication. The current LIVE state is fresh at revision 403 with resync_required=false.
 
-## TWO_FAILED_NODES_RECHECK
-COMMAND=`.venv\Scripts\python.exe -m pytest -q -x -s` with exactly the two originally failed matrix test nodes. RESULT=2 passed in 18.01s; exit code 0.
-
-## MATRIX_FILE_REGRESSION
-COMMAND=`.venv\Scripts\python.exe -m pytest -q -x -s tests/test_matrix_clusters_ram_parity.py`. RESULT=34 passed in 24.34s; exit code 0.
-
-## LINEAGE_REGRESSION_RECHECK
-Included unchanged `tests/test_lineage_state_lifecycle.py` in the five-file targeted -x command. Combined command RESULT=60 passed, 1 warning in 58.83s; exit code 0. The previously verified lineage file has 40 tests.
-
-## SIX_MUTATION_PARITY_RECHECK
-Included unchanged `tests/test_incremental_multi_mutation_full_parity.py` in the same targeted -x command. Its six scenarios completed within the 60/60 passing combined result; no failure or diff was reported.
-
-## ATOMICITY_REGRESSION_RECHECK
-Included unchanged `tests/test_incremental_failed_commit_atomicity.py` in the same targeted command. Printed Cases A-D each reported canonical_state_first_difference=None, file_state_first_difference=None, manifest_first_difference=None, registry_first_difference=None, and persisted_generation_first_difference=None. Combined command PASS.
-
-## OTHER_TARGETED_REGRESSIONS
-The same targeted command included unchanged `tests/test_channel_parity_and_cow.py` and `tests/test_package_reference_detail_parity.py`. Combined RESULT=60 passed, 1 warning in 58.83s. Warning was AuthlibDeprecationWarning from installed FastMCP/Authlib dependency. No full repository pytest suite was run.
-
-## PY_COMPILE
-PASS: `.venv\Scripts\python.exe -m py_compile tests/test_matrix_clusters_ram_parity.py`; exit code 0.
-
-## GIT_DIFF_CHECK
-PASS: `git diff --check`; exit code 0. Git emitted only an LF-to-CRLF future-working-copy warning.
-
-## LIVE_REVISION_BEFORE_AFTER
-BEFORE=393, AFTER=394. Contextor event revision 394: operation=update_file, origin=desktop_watcher, status=UPDATED, file_path=C:\Temp\Contextor_Repo\tests\test_matrix_clusters_ram_parity.py, affected_modules=[tests.test_matrix_clusters_ram_parity]. No manual update_file was called.
-
-## ACTIVITY_EPOCH
-BEFORE=c091cb70c2634898aadd407860e4d5c0
-AFTER=c091cb70c2634898aadd407860e4d5c0
-
-## EVENT_CONTINUITY
-Contextor query after_revision=393 returned continuity=continuous, earliest_retained_revision=393, latest_revision=394, resync_reason=null. The prior 391-to-393 epoch gap is not treated as continuous.
-
-## WORKSPACE_SYNC_POSTCHECK
-Contextor returned canonical_state=fresh, workspace_sync=verified, provenance=live, canonical_revision=394 for the edited test, with warnings=[] and fresh materialized syntax diagnostics showing zero errors.
-
-## RESYNC_REQUIRED
-false in current LIVE response after_revision=393.
-
-## RESTART_REQUIRED
-NO. Test-only change; no production runtime file was edited. No service was restarted by the agent.
-
-## FINAL_VERDICT
-B0G2D8B_ALL_TARGETED_GATES_PASS
-All required targeted gates passed. Global Contextor FINAL PASS is not claimed; the next global checkpoint belongs to the user.
+## UNRESOLVED_LIMITATIONS
+The kernel records lexical AST evidence only. TYPE_CHECKING, false guards and function-local imports are not certified safe; dynamic import calls are not represented as explicit imports. Runtime reachability, binding hazards and package initialization timing remain outside this task. Project-wide workspace_sync remained unverified by the global overlay; target file was accepted by watcher as UPDATED. No runtime restart was requested or needed for this disconnected package; no loaded-service behavior is claimed from the passing pytest result.
 
 ## FULL_DIFFS
-### tests/test_matrix_clusters_ram_parity.py
-```diff
-diff --git a/tests/test_matrix_clusters_ram_parity.py b/tests/test_matrix_clusters_ram_parity.py
-index 835f9b3..3e6d58e 100644
---- a/tests/test_matrix_clusters_ram_parity.py
-+++ b/tests/test_matrix_clusters_ram_parity.py
-@@ -487,7 +487,15 @@ def test_multi_identity_execution_projects_all_exact_targets_and_stays_fresh(
-             }
-         }
-     }
-+    original_a_b_artifact = engine.state.artifacts["a.b"]
+Complete raw new-file diffs follow. walkthrough.md is excluded from its own diff.
+
+
+### FULL_DIFF: contextor/core/cycle_semantics/__init__.py
+diff --git a/contextor/core/cycle_semantics/__init__.py b/contextor/core/cycle_semantics/__init__.py
+new file mode 100644
+index 0000000..a3d653c
+--- /dev/null
++++ b/contextor/core/cycle_semantics/__init__.py
+@@ -0,0 +1,17 @@
++"""Independent Python cycle-semantics analysis."""
 +
-+    assert "c" in original_a_b_artifact.get(
-+        "own_symbols",
-+        (),
++from .provenance import (
++    ControlFrame,
++    ImportOccurrence,
++    ImportProvenance,
++    ScopeFrame,
++    extract_import_provenance,
++)
++
++__all__ = [
++    "ControlFrame",
++    "ImportOccurrence",
++    "ImportProvenance",
++    "ScopeFrame",
++    "extract_import_provenance",
++]
+
+### FULL_DIFF: contextor/core/cycle_semantics/provenance.py
+diff --git a/contextor/core/cycle_semantics/provenance.py b/contextor/core/cycle_semantics/provenance.py
+new file mode 100644
+index 0000000..9307b6d
+--- /dev/null
++++ b/contextor/core/cycle_semantics/provenance.py
+@@ -0,0 +1,421 @@
++"""Lossless lexical provenance of explicit Python imports.
++
++No import resolution, graph mutation, reachability proof
++or runtime execution.
++"""
++
++from __future__ import annotations
++
++import ast
++from dataclasses import dataclass
++
++
++@dataclass(frozen=True)
++class ScopeFrame:
++    kind: str
++    name: str
++    line: int
++
++
++@dataclass(frozen=True)
++class ControlFrame:
++    kind: str
++    branch: str
++    line: int
++    expression: str | None = None
++
++
++@dataclass(frozen=True)
++class ImportOccurrence:
++    ordinal: int
++    line: int
++    column: int
++    end_line: int | None
++    end_column: int | None
++    form: str
++    module: str | None
++    level: int
++    aliases: tuple[tuple[str, str | None], ...]
++    scopes: tuple[ScopeFrame, ...]
++    controls: tuple[ControlFrame, ...]
++
++
++@dataclass(frozen=True)
++class ImportProvenance:
++    module_id: str
++    source_key: str
++    source_path: str
++    source_fingerprint: str
++    occurrences: tuple[ImportOccurrence, ...]
++
++
++class _ImportOccurrenceVisitor(ast.NodeVisitor):
++
++    def __init__(self) -> None:
++        self.scopes: list[ScopeFrame] = []
++        self.controls: list[ControlFrame] = []
++        self.raw: list[
++            tuple[
++                ast.Import | ast.ImportFrom,
++                tuple[ScopeFrame, ...],
++                tuple[ControlFrame, ...],
++            ]
++        ] = []
++
++    def _record(
++        self,
++        node: ast.Import | ast.ImportFrom,
++    ) -> None:
++        self.raw.append(
++            (
++                node,
++                tuple(self.scopes),
++                tuple(self.controls),
++            )
++        )
++
++    def visit_Import(self, node: ast.Import) -> None:
++        self._record(node)
++
++    def visit_ImportFrom(
++        self,
++        node: ast.ImportFrom,
++    ) -> None:
++        self._record(node)
++
++    def _visit_body_with_scope(
++        self,
++        node: ast.AST,
++        kind: str,
++        name: str,
++    ) -> None:
++        self.scopes.append(
++            ScopeFrame(kind, name, node.lineno)
++        )
++        try:
++            for statement in node.body:
++                self.visit(statement)
++        finally:
++            self.scopes.pop()
++
++    def visit_FunctionDef(
++        self,
++        node: ast.FunctionDef,
++    ) -> None:
++        # Definition-time expressions have no import
++        # statements. Their calls require later analysis.
++        self._visit_body_with_scope(
++            node, "FUNCTION", node.name
++        )
++
++    def visit_AsyncFunctionDef(
++        self,
++        node: ast.AsyncFunctionDef,
++    ) -> None:
++        self._visit_body_with_scope(
++            node, "ASYNC_FUNCTION", node.name
++        )
++
++    def visit_ClassDef(
++        self,
++        node: ast.ClassDef,
++    ) -> None:
++        self._visit_body_with_scope(
++            node, "CLASS", node.name
++        )
++
++    def _visit_control_body(
++        self,
++        statements: list[ast.stmt],
++        *,
++        kind: str,
++        branch: str,
++        line: int,
++        expression: str | None = None,
++    ) -> None:
++        self.controls.append(
++            ControlFrame(
++                kind,
++                branch,
++                line,
++                expression,
++            )
++        )
++        try:
++            for statement in statements:
++                self.visit(statement)
++        finally:
++            self.controls.pop()
++
++    @staticmethod
++    def _expression(
++        node: ast.AST | None,
++    ) -> str | None:
++        if node is None:
++            return None
++        return ast.dump(
++            node,
++            include_attributes=False,
++        )
++
++    def visit_If(self, node: ast.If) -> None:
++        expression = self._expression(node.test)
++
++        self._visit_control_body(
++            node.body,
++            kind="IF",
++            branch="BODY",
++            line=node.lineno,
++            expression=expression,
++        )
++
++        self._visit_control_body(
++            node.orelse,
++            kind="IF",
++            branch="ELSE",
++            line=node.lineno,
++            expression=expression,
++        )
++
++    def visit_Try(self, node: ast.Try) -> None:
++        self._visit_control_body(
++            node.body,
++            kind="TRY",
++            branch="BODY",
++            line=node.lineno,
++        )
++
++        for index, handler in enumerate(
++            node.handlers
++        ):
++            self._visit_control_body(
++                handler.body,
++                kind="EXCEPT",
++                branch=str(index),
++                line=handler.lineno,
++                expression=self._expression(
++                    handler.type
++                ),
++            )
++
++        self._visit_control_body(
++            node.orelse,
++            kind="TRY_ELSE",
++            branch="ELSE",
++            line=node.lineno,
++        )
++
++        self._visit_control_body(
++            node.finalbody,
++            kind="FINALLY",
++            branch="FINAL",
++            line=node.lineno,
++        )
++
++    def visit_For(self, node: ast.For) -> None:
++        self._visit_control_body(
++            node.body,
++            kind="FOR",
++            branch="BODY",
++            line=node.lineno,
++            expression=self._expression(
++                node.iter
++            ),
++        )
++
++        self._visit_control_body(
++            node.orelse,
++            kind="FOR",
++            branch="ELSE",
++            line=node.lineno,
++        )
++
++    def visit_AsyncFor(
++        self,
++        node: ast.AsyncFor,
++    ) -> None:
++        self._visit_control_body(
++            node.body,
++            kind="ASYNC_FOR",
++            branch="BODY",
++            line=node.lineno,
++            expression=self._expression(
++                node.iter
++            ),
++        )
++
++        self._visit_control_body(
++            node.orelse,
++            kind="ASYNC_FOR",
++            branch="ELSE",
++            line=node.lineno,
++        )
++
++    def visit_While(
++        self,
++        node: ast.While,
++    ) -> None:
++        expression = self._expression(node.test)
++
++        self._visit_control_body(
++            node.body,
++            kind="WHILE",
++            branch="BODY",
++            line=node.lineno,
++            expression=expression,
++        )
++
++        self._visit_control_body(
++            node.orelse,
++            kind="WHILE",
++            branch="ELSE",
++            line=node.lineno,
++            expression=expression,
++        )
++
++    def visit_With(
++        self,
++        node: ast.With,
++    ) -> None:
++        self._visit_control_body(
++            node.body,
++            kind="WITH",
++            branch="BODY",
++            line=node.lineno,
++        )
++
++    def visit_AsyncWith(
++        self,
++        node: ast.AsyncWith,
++    ) -> None:
++        self._visit_control_body(
++            node.body,
++            kind="ASYNC_WITH",
++            branch="BODY",
++            line=node.lineno,
++        )
++
++    def visit_Match(
++        self,
++        node: ast.Match,
++    ) -> None:
++        for index, case in enumerate(node.cases):
++            condition = self._expression(
++                case.pattern
++            )
++
++            if case.guard is not None:
++                condition += (
++                    " GUARD "
++                    + self._expression(case.guard)
++                )
++
++            self._visit_control_body(
++                case.body,
++                kind="MATCH",
++                branch=str(index),
++                line=node.lineno,
++                expression=condition,
++            )
++
++
++def extract_import_provenance(
++    tree: ast.AST,
++    *,
++    module_id: str,
++    source_key: str,
++    source_path: str,
++    source_fingerprint: str,
++) -> ImportProvenance:
++    """Extract individual explicit imports from an AST.
++
++    These are lexical source facts, not runtime proofs.
++
++    A function-local occurrence is not necessarily
++    deferred during module initialization.
++
++    Conditional guards are recorded, not evaluated.
++    """
++
++    if not isinstance(tree, ast.Module):
++        raise TypeError(
++            "tree must be an ast.Module"
++        )
++
++    values = (
++        module_id,
++        source_key,
++        source_path,
++        source_fingerprint,
 +    )
 +
-     engine.state.artifacts["a.b"] = {
-+        **original_a_b_artifact,
-         "consumers": {
-             "c": {
-                 "consumers": [],
-@@ -637,16 +645,28 @@ def test_multi_identity_recompute_stays_fresh_across_clean_later_patch(
-         "channels": {},
-     }
- 
--    from contextor.core.domain.usage_facts import (
--        ModuleUsageFacts,
-+    from contextor.core.reference.engine import (
-+        extract_module_usage_facts,
-     )
-+    other_consumer_facts = extract_module_usage_facts(
-+        "other_consumer",
-+        "import a.b\na.b.c()\n",
-+        imports=[],
++    if not all(
++        isinstance(value, str) and value
++        for value in values
++    ):
++        raise ValueError(
++            "module identity, path and fingerprint "
++            "must be nonempty strings"
++        )
++
++    visitor = _ImportOccurrenceVisitor()
++    visitor.visit(tree)
++
++    ordered = sorted(
++        enumerate(visitor.raw),
++        key=lambda pair: (
++            pair[1][0].lineno,
++            pair[1][0].col_offset,
++            pair[0],
++        ),
 +    )
 +
-+    assert other_consumer_facts.symbol_calls_materialized is True
-+    assert other_consumer_facts.reference_evidence_materialized is True
-+    assert "a.b.c" in other_consumer_facts.direct_calls
++    occurrences: list[ImportOccurrence] = []
++
++    for ordinal, (_, record) in enumerate(
++        ordered
++    ):
++        node, scopes, controls = record
++
++        occurrences.append(
++            ImportOccurrence(
++                ordinal=ordinal,
++                line=node.lineno,
++                column=node.col_offset,
++                end_line=getattr(
++                    node, "end_lineno", None
++                ),
++                end_column=getattr(
++                    node, "end_col_offset", None
++                ),
++                form=(
++                    "IMPORT"
++                    if isinstance(node, ast.Import)
++                    else "IMPORT_FROM"
++                ),
++                module=(
++                    node.module
++                    if isinstance(node, ast.ImportFrom)
++                    else None
++                ),
++                level=(
++                    node.level
++                    if isinstance(node, ast.ImportFrom)
++                    else 0
++                ),
++                aliases=tuple(
++                    (alias.name, alias.asname)
++                    for alias in node.names
++                ),
++                scopes=scopes,
++                controls=controls,
++            )
++        )
++
++    return ImportProvenance(
++        module_id=module_id,
++        source_key=source_key,
++        source_path=source_path,
++        source_fingerprint=source_fingerprint,
++        occurrences=tuple(occurrences),
++    )
+
+### FULL_DIFF: tests/test_cycle_semantics_provenance.py
+diff --git a/tests/test_cycle_semantics_provenance.py b/tests/test_cycle_semantics_provenance.py
+new file mode 100644
+index 0000000..a0d967d
+--- /dev/null
++++ b/tests/test_cycle_semantics_provenance.py
+@@ -0,0 +1,256 @@
++import ast
++import json
++from dataclasses import asdict
++
++import pytest
++
++from contextor.core.cycle_semantics import (
++    extract_import_provenance,
++)
++
++
++def extract(code: str):
++    return extract_import_provenance(
++        ast.parse(code),
++        module_id="p.a",
++        source_key="p/a.py",
++        source_path=r"C:\fixture\p\a.py",
++        source_fingerprint="test-fingerprint",
++    )
++
++
++def test_individual_statements_and_aliases():
++    result = extract(
++        "import os as o, sys\n"
++        "import os\n"
++        "from . import child as c, other\n"
++    )
++
++    assert len(result.occurrences) == 3
++
++    assert [
++        item.ordinal
++        for item in result.occurrences
++    ] == [0, 1, 2]
++
++    assert result.occurrences[0].aliases == (
++        ("os", "o"),
++        ("sys", None),
++    )
++
++    last = result.occurrences[-1]
++    assert last.form == "IMPORT_FROM"
++    assert last.module is None
++    assert last.level == 1
++    assert last.aliases == (
++        ("child", "c"),
++        ("other", None),
++    )
++
++
++def test_class_function_and_method_scopes():
++    result = extract("""
++import root
++
++class C:
++    import in_class
++
++    def method(self):
++        import in_method
++
++def f():
++    class D:
++        import nested_class
++""")
++
++    scopes = [
++        [frame.kind for frame in item.scopes]
++        for item in result.occurrences
++    ]
++
++    assert scopes == [
++        [],
++        ["CLASS"],
++        ["CLASS", "FUNCTION"],
++        ["FUNCTION", "CLASS"],
++    ]
++
 +    assert (
-+        "a.b.c",
-+        "direct_calls",
-+        "",
-+        2,
-+    ) in other_consumer_facts.reference_evidence
++        result.occurrences[2].scopes[-1].name
++        == "method"
++    )
 +
-     engine.state.module_usages[
-         "other_consumer"
--    ] = ModuleUsageFacts(
--        direct_calls=[
--            "a.b.c",
--        ]
--    )
-+    ] = other_consumer_facts
-     engine.state.modules[
-         "other_consumer"
-     ] = Module(
-```
++
++def test_async_function_scope():
++    result = extract("""
++async def load():
++    import deferred_candidate
++""")
++
++    assert len(result.occurrences) == 1
++
++    assert (
++        result.occurrences[0].scopes[0].kind
++        == "ASYNC_FUNCTION"
++    )
++
++
++def test_conditional_guards_preserved():
++    result = extract("""
++from typing import TYPE_CHECKING as TC
++
++if TC:
++    import typing_only_candidate
++else:
++    import runtime_candidate
++
++if False:
++    import unreachable_candidate
++""")
++
++    typing_site = result.occurrences[1]
++    alternative = result.occurrences[2]
++    false_site = result.occurrences[3]
++
++    assert typing_site.controls[0].branch == "BODY"
++    assert "TC" in typing_site.controls[0].expression
++    assert alternative.controls[0].branch == "ELSE"
++    assert "False" in false_site.controls[0].expression
++
++
++def test_try_except_else_finally():
++    result = extract("""
++try:
++    import a
++except ImportError:
++    import b
++else:
++    import c
++finally:
++    import d
++""")
++
++    assert [
++        site.controls[0].kind
++        for site in result.occurrences
++    ] == [
++        "TRY",
++        "EXCEPT",
++        "TRY_ELSE",
++        "FINALLY",
++    ]
++
++    assert (
++        "ImportError"
++        in result.occurrences[1]
++        .controls[0].expression
++    )
++
++
++def test_nested_conditions_and_match():
++    result = extract("""
++for i in range(2):
++    if i:
++        import x
++
++match value:
++    case 1 if enabled:
++        import y
++""")
++
++    assert [
++        frame.kind
++        for frame in result.occurrences[0].controls
++    ] == ["FOR", "IF"]
++
++    assert (
++        result.occurrences[1].controls[0].kind
++        == "MATCH"
++    )
++
++
++def test_main_guard_preserved():
++    result = extract("""
++if __name__ == "__main__":
++    import cli_runtime
++""")
++
++    assert len(result.occurrences) == 1
++
++    guard = result.occurrences[0].controls[0]
++    assert guard.kind == "IF"
++    assert "__main__" in guard.expression
++
++
++def test_dynamic_calls_not_fake_imports():
++    assert extract(
++        "__import__('target')\n"
++    ).occurrences == ()
++
++    assert extract(
++        "importlib.import_module('target')\n"
++    ).occurrences == ()
++
++
++def test_multiple_origins_not_deduplicated():
++    result = extract("""
++import a
++
++def later():
++    import a
++
++class C:
++    import a
++""")
++
++    assert len(result.occurrences) == 3
++    assert len({
++        (site.line, site.column)
++        for site in result.occurrences
++    }) == 3
++
++
++def test_deterministic_no_ast_mutation():
++    tree = ast.parse("""
++if True:
++    import a
++    import a
++""")
++
++    before = ast.dump(
++        tree, include_attributes=True
++    )
++
++    kwargs = {
++        "module_id": "p.a",
++        "source_key": "p/a.py",
++        "source_path": r"C:\fixture\p\a.py",
++        "source_fingerprint": "fingerprint",
++    }
++
++    first = extract_import_provenance(
++        tree, **kwargs
++    )
++    second = extract_import_provenance(
++        tree, **kwargs
++    )
++
++    assert first == second
++    assert len(first.occurrences) == 2
++
++    assert ast.dump(
++        tree, include_attributes=True
++    ) == before
++
++    json.dumps(asdict(first))
++
++
++def test_invalid_tree_rejected():
++    with pytest.raises(TypeError):
++        extract_import_provenance(
++            ast.parse("x").body[0],
++            module_id="p.a",
++            source_key="p/a.py",
++            source_path=r"C:\fixture\p\a.py",
++            source_fingerprint="fingerprint",
++        )
