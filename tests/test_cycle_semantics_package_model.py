@@ -182,14 +182,22 @@ def test_dotted_alias_to_child(tmp_path):
     assert _actual(tmp_path, source, "entry")
 
 
-def test_from_package_child_remains_unknown():
+def test_from_package_child_loads_indexed_child(tmp_path):
     source = {
         "pkg.__init__": "pass",
         "pkg.child": "value=7",
-        "entry": "from pkg import child",
+        "entry": "from pkg import child\nx=child.value",
     }
 
-    assert _model(source, "entry").outcome == "UNKNOWN"
+    result = _model(source, "entry")
+
+    assert result.outcome == "MODEL_PASS"
+    assert any(
+        event.operation == "START_IMPORT"
+        and event.target == "pkg.child"
+        for event in result.events
+    )
+    assert _actual(tmp_path, source, "entry")
 
 
 def test_namespace_ambiguous_external_unknown():
@@ -352,3 +360,130 @@ def test_plain_dotted_import_still_binds_root_package(tmp_path):
     assert result.outcome == "MISSING_ATTRIBUTE"
     assert result.target_module == "pkg"
     assert not _actual(tmp_path, source, "entry")
+
+
+def test_b0g4c2_relative_initializer_imports_child(tmp_path):
+    source = {
+        "pkg.__init__": "from . import child",
+        "pkg.child": "value=7",
+    }
+    result = _model(source, "pkg")
+    assert result.outcome == "MODEL_PASS"
+    assert any(
+        e.operation == "BIND_CHILD"
+        and e.target == "pkg.child"
+        for e in result.events
+    )
+    assert _actual(tmp_path, source, "pkg")
+
+
+def test_b0g4c2_relative_import_from_submodule(tmp_path):
+    source = {
+        "pkg.__init__": "pass",
+        "pkg.child": "value=7",
+        "pkg.user": "from . import child\nx=child.value",
+    }
+    assert _model(source, "pkg.user").outcome == "MODEL_PASS"
+    assert _actual(tmp_path, source, "pkg.user")
+
+
+def test_b0g4c2_existing_attribute_precedes_child(tmp_path):
+    source = {
+        "pkg.__init__": "child=3",
+        "pkg.child": "value=7",
+        "entry": "from pkg import child",
+    }
+    result = _model(source, "entry")
+    assert result.outcome == "MODEL_PASS"
+    assert not any(
+        e.operation == "START_IMPORT"
+        and e.target == "pkg.child"
+        for e in result.events
+    )
+    assert _actual(tmp_path, source, "entry")
+
+
+def test_b0g4c2_constant_attribute_is_not_module(tmp_path):
+    source = {
+        "pkg.__init__": "child=3",
+        "pkg.child": "value=7",
+        "entry": "from pkg import child\nx=child.value",
+    }
+    assert _model(source, "entry").outcome == "UNKNOWN"
+    assert not _actual(tmp_path, source, "entry")
+
+
+def test_b0g4c2_child_already_initialized(tmp_path):
+    source = {
+        "pkg.__init__": "pass",
+        "pkg.child": "value=7",
+        "entry": (
+            "import pkg.child\n"
+            "from pkg import child\n"
+            "x=child.value"
+        ),
+    }
+    result = _model(source, "entry")
+    assert result.outcome == "MODEL_PASS"
+    assert sum(
+        e.operation == "START_IMPORT"
+        and e.target == "pkg.child"
+        for e in result.events
+    ) == 1
+    assert _actual(tmp_path, source, "entry")
+
+
+def test_b0g4c2_regular_attribute_reexport(tmp_path):
+    source = {
+        "pkg.__init__": "from .util import exposed",
+        "pkg.util": "exposed=7",
+        "pkg.user": "from pkg import exposed",
+    }
+    assert _model(source, "pkg.user").outcome == "MODEL_PASS"
+    assert _actual(tmp_path, source, "pkg.user")
+
+
+def test_b0g4c2_reentrant_child_fails_closed(tmp_path):
+    source = {
+        "pkg.__init__": "from . import child",
+        "pkg.child": "from pkg import child",
+    }
+    result = _model(source, "pkg")
+    assert result.outcome == "UNKNOWN"
+    assert _actual(tmp_path, source, "pkg")
+
+
+def test_b0g4c2_missing_member_no_child(tmp_path):
+    source = {
+        "pkg.__init__": "pass",
+        "entry": "from pkg import missing",
+    }
+    result = _model(source, "entry")
+    assert result.outcome == "MISSING_EXPORT"
+    assert not _actual(tmp_path, source, "entry")
+
+
+def test_b0g4c2_multiple_fromlist_members_unknown():
+    source = {
+        "pkg.__init__": "pass",
+        "pkg.a": "pass",
+        "pkg.b": "pass",
+        "entry": "from pkg import a, b",
+    }
+    assert _model(source, "entry").outcome == "UNKNOWN"
+
+
+def test_b0g4c2_shadowing_sequence_stays_unknown():
+    source = {
+        "pkg.__init__": "child=1\nimport pkg.child",
+        "pkg.child": "pass",
+    }
+    assert _model(source, "pkg").outcome == "UNKNOWN"
+
+
+def test_b0g4c2_operation_budget_unknown():
+    source = {
+        "pkg.__init__": "pass",
+        "entry": "import pkg\n" * 10020,
+    }
+    assert _model(source, "entry").outcome == "UNKNOWN"

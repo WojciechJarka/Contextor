@@ -1,151 +1,298 @@
-TASK: CONTEXTOR_B0G4C1F_EXPLICIT_DOTTED_IMPORT_ALIAS_FIX
-FINAL_VERDICT: B0G4C1F_FINAL_PASS
+TASK: CONTEXTOR_B0G4C2_FROM_PACKAGE_MEMBER_RESOLUTION
+FINAL_VERDICT: B0G4C2_PASS
 
-HEAD_BEFORE: cccfd72ddcb5a976771c1400745f72ac3e66c987
-HEAD_AFTER: cccfd72ddcb5a976771c1400745f72ac3e66c987
+HEAD_BEFORE: 14a145d7b4f1e7b4ee0b92cebcd738974d2af549
+HEAD_AFTER: 14a145d7b4f1e7b4ee0b92cebcd738974d2af549
 GIT_STATUS_BEFORE: clean
-GIT_STATUS_AFTER_SOURCE_EDIT: M contextor/core/cycle_semantics/package_model.py; M tests/test_cycle_semantics_package_model.py
-LIVE_REVISION_BEFORE: 422
-LIVE_REVISION_AFTER: 424
-ACTIVITY_EPOCH_BEFORE_AFTER: 1beab26da2ff4932852caa7db6ff4242 (unchanged)
-CANONICAL_FRESHNESS: revision 424; canonical state, graph, cycles, collisions fresh; production and test module workspace_sync=verified; resync_required=false.
-WATCHER_EVENTS: revision 423 desktop_watcher UPDATED contextor/core/cycle_semantics/package_model.py; revision 424 desktop_watcher UPDATED tests/test_cycle_semantics_package_model.py. Event continuity continuous. No manual update_file.
-
-SOURCE_PRECHECK: Contextor implementation and module context confirmed original B0G4C1 anchors, direct test consumer and package_layout dependency at verified revision 422. HEAD and clean Git status checked. Literal comparison with original B0G4C1 text confirmed both files matched the prior implementation; explicit_alias and four regression names were absent. Source anchors matched exactly once before editing.
-OWNERSHIP_AND_BLAST_RADIUS: Contextor identifies package_model as the changed owner; one direct inbound hard dependency from tests.test_cycle_semantics_package_model and one outbound hard dependency to contextor.core.cycle_semantics.package_layout. Relevant symbol artifact consumer is the test module. No broader architectural claim is made from this compact context.
+LIVE_REVISION_BEFORE: 424
+LIVE_REVISION_AFTER: 426
+ACTIVITY_EPOCH: 1beab26da2ff4932852caa7db6ff4242 (unchanged)
+WATCHER_PROPAGATION: desktop_watcher UPDATED package_model.py at revision 425 and test_cycle_semantics_package_model.py at revision 426; continuity continuous, resync_required=false.
+CANONICAL_STATE_AFTER: graph, cycles, collisions, syntax and both changed modules fresh; workspace_sync=verified at revision 426.
 
 FILES_CHANGED:
 - contextor/core/cycle_semantics/package_model.py
 - tests/test_cycle_semantics_package_model.py
-ACTUAL_DIFF=FULL_DIFFS: Complete actual Git diff for both files follows below. walkthrough.md is the report artifact and is not counted as a production/test change.
+The report artifact walkthrough.md is excluded from source/test changed files.
 
-ROOT_CAUSE: CODE_PATH_PROVED. The old import branch used step.binding != target.split(".")[0] as a proxy for an explicit alias. The spelling of `import pkg.sub as pkg` makes that comparison false even though the syntax explicitly binds pkg.sub. This conflated it with `import pkg.sub`, which binds pkg.
-EXACT_CORRECTION: CONTRACT_PROVED against auditor patch. The frozen _Step now records explicit_alias from ast.Import alias.asname. Both import-branch decisions use that syntax flag. ast.ImportFrom, parent-child checks, and ordinary import behavior were preserved. Four exact auditor-specified regression tests were appended.
+SOURCE_PRECHECK: Contextor resolved the exact _compile and evaluate_package_import_order implementations at verified revision 424. The package_model owner has one direct static consumer, tests.test_cycle_semantics_package_model, and one outbound dependency, package_layout. Artifact blast radius reports that test module as the direct consumer and no production downstream module. Literal anchors and C1F explicit_alias code matched the requested baseline. HEAD was clean. Python version: 3.10.9.
+BASELINE_TEST: The specified ten-file suite passed 149 tests before editing.
+
+IMPLEMENTATION_CONTRACT: Applied the four auditor-defined production changes only: refuse multi-member fromlists in _compile; narrow the package child-shadowing guard; on FROM, prioritize an existing package attribute, initialize a NEW indexed child, and return UNKNOWN for an already non-NEW child with absent parent attribute; retain existing FROM completion, BIND_CHILD, BIND, ATTR, READY and C1F explicit_alias behavior. Replaced the one superseded C1 test and appended the 11 exact C2 tests. No graph, resolver, schema, LIVE/MCP/Desktop, or package-export code changed.
+FROM_PACKAGE_RESOLUTION: TEST_COVERED by indexed child, relative initializer, relative submodule and regular reexport cases. A missing member without indexed child remains MISSING_EXPORT.
+ATTRIBUTE_PRECEDENCE: TEST_COVERED: an existing package attribute prevents START_IMPORT of the same-named child. A constant attribute followed by attribute access returns UNKNOWN rather than a false MODEL_PASS.
+PARENT_CHILD_BINDING: TEST_COVERED: relative initializer test sees BIND_CHILD after the child becomes READY.
+REENTRANT_UNKNOWN: TEST_COVERED: child already INITIALIZING with absent parent binding produces UNKNOWN, while the actual fresh-process fixture succeeds through semantics outside this restricted model.
+MULTI_FROMLIST_UNKNOWN: TEST_COVERED: two-member fromlist produces UNKNOWN at compilation.
+BUDGET_REGRESSION: TEST_COVERED: oversized operation sequence returns UNKNOWN.
+C1F_NONREGRESSION: The four C1F explicit alias regressions remain in the passing ten-file suite; explicit_alias code was unchanged.
+SHADOWING: TEST_COVERED: package-owned child binding followed by an import remains UNKNOWN.
+DETERMINISM_AND_AST: Existing focused determinism/no-AST-mutation coverage remains in the passing suite. The model does not execute the indexed source; _actual fixtures run synthesized source in fresh processes to compare behavior.
 
 TEST_COMMAND: & .\.venv\Scripts\python.exe -B -m pytest -p no:cacheprovider -q tests/test_cycle_semantics_package_model.py tests/test_cycle_semantics_package_layout.py tests/test_cycle_semantics_evidence.py tests/test_cycle_semantics_scenarios.py tests/test_cycle_semantics_scc.py tests/test_cycle_semantics_initialization_model.py tests/test_cycle_semantics_binding_order.py tests/test_cycle_semantics_guards.py tests/test_cycle_semantics_execution_context.py tests/test_cycle_semantics_provenance.py
-TEST_RESULTS: DIRECT_EVIDENCE: 149 passed in 5.42s; exit code 0. Previous 145-pass baseline is supplied by the task and was not rerun. Four appended tests are included in the passing run. git diff --check passed.
-FALSE_MODEL_PASS_REGRESSION: TEST_COVERED: explicit alias equal to root with value only on pkg.__init__ now yields MISSING_ATTRIBUTE for pkg.sub/value; the fresh-process Python fixture fails as expected.
-FALSE_HAZARD_REGRESSION: TEST_COVERED: explicit alias equal to root inside pkg.__init__ yields MODEL_PASS; the fresh-process Python fixture succeeds, covering the prior false EARLY_BINDING_HAZARD.
-PLAIN_IMPORT_NONREGRESSION: TEST_COVERED: ordinary `import pkg.sub` still resolves the local name to pkg; the fixture yields MISSING_ATTRIBUTE for pkg/value and actual Python fails. A separate positive fixture verifies `import pkg.sub as pkg` resolves value on pkg.sub and actual Python succeeds.
-AST_AND_ANALYZED_SOURCE: CODE_PATH_PROVED for production change: only immutable step metadata and binding decisions changed. TEST_COVERED by the targeted no-AST-mutation test and synthetic fresh-process fixtures. The model itself did not execute analyzed source.
-COLLISION_COUNT_BEFORE_AFTER: 0 fresh at revision 422 -> 0 fresh at revision 424.
-STRUCTURAL_CYCLE_COUNT_BEFORE_AFTER: 16 fresh at revision 422 -> 16 fresh at revision 424; same activity epoch and verified workspace synchronization.
-NO_WARNING_SUPPRESSION: DIRECT_EVIDENCE: full diff contains no warning, graph, resolver, or diagnostic policy change. Existing attention_required remains true because the 16 preexisting cycles remain.
-RESTRICTIONS: No full suite, FULL analysis, direct update_file, restart, Git mutation, or unrelated source/test edit was performed. No observed missing evidence needed for this focused verdict.
+TEST_RESULTS: DIRECT_EVIDENCE: 160 passed in 8.16s; exit code 0. Baseline 149 passed in 6.25s. git diff --check for both approved source/test files passed.
+COLLISION_COUNT_BEFORE_AFTER: 0 fresh at revision 424 -> 0 fresh at revision 426.
+STRUCTURAL_CYCLE_COUNT_BEFORE_AFTER: 16 fresh at revision 424 -> 16 fresh at revision 426, same activity epoch and verified workspace sync.
+NO_SAFETY_CERTIFICATION: MODEL_PASS is restricted model evidence only. These tests and fresh canonical metrics do not certify arbitrary Python imports as safe.
+NO_WARNING_SUPPRESSION: The actual diff has no warning, graph, resolver, or diagnostic policy changes. Existing attention_required remains true with 16 structural cycles.
+UNRESOLVED_LIMITATIONS: Multiple from-import members, reentrant fromlist fallback, complex package-owned rebinding, nonmodule attribute dereference, and behavior outside indexed closed regular packages remain UNKNOWN by contract.
+EVIDENCE_DISCIPLINE: DIRECT_EVIDENCE = Git, LIVE, test results and diff; CONTRACT_PROVED = exact patch anchors and Contextor implementations; CODE_PATH_PROVED = changed model branches; UNKNOWN = general Python import safety beyond the restricted model. No inference is used to claim global safety.
 
-FULL_DIFFS_BEGINdiff --git a/contextor/core/cycle_semantics/package_model.py b/contextor/core/cycle_semantics/package_model.py
-index e066d4b..3afb3d2 100644
+FULL_DIFFS_BEGIN
+diff --git a/contextor/core/cycle_semantics/package_model.py b/contextor/core/cycle_semantics/package_model.py
+index 3afb3d2..8e48249 100644
 --- a/contextor/core/cycle_semantics/package_model.py
 +++ b/contextor/core/cycle_semantics/package_model.py
-@@ -37,6 +37,7 @@ class _Step:
-     target: str | None = None
-     symbol: str | None = None
-     binding: str | None = None
-+    explicit_alias: bool = False
- 
- 
- def _compile(
-@@ -66,6 +67,7 @@ def _compile(
-                         "IMPORT",
-                         alias.name,
-                         binding=alias.asname or alias.name.split(".")[0],
-+                        explicit_alias=alias.asname is not None,
-                     )
+@@ -72,6 +72,10 @@ def _compile(
                  )
  
-@@ -388,10 +390,7 @@ def evaluate_package_import_order(
+         elif isinstance(stmt, ast.ImportFrom):
++            # Python resolves the entire fromlist before its STORE_NAME steps.
++            # This model processes single members only, to avoid false proofs.
++            if len(stmt.names) != 1:
++                return None
+             if stmt.level:
+                 context = (
+                     logical.split(".")
+@@ -270,23 +274,26 @@ def evaluate_package_import_order(
  
-             if step.op == "IMPORT":
-                 if module != bootstrap:
--                    if (
--                        step.binding != target.split(".")[0]
--                        and "." in target
--                    ):
-+                    if step.explicit_alias and "." in target:
-                         parent, child = target.rsplit(".", 1)
+         programs[name] = program
  
-                         if namespaces[parent].get(child) != target:
-@@ -399,7 +398,7 @@ def evaluate_package_import_order(
+-    # A package initializer that overwrites a direct child
+-    # binding requires richer import-statement semantics.
+-    # This restricted model refuses that case.
++    # A package may prebind a same-named attribute before a later
++    # from-import; the attribute takes priority. Keep more complex
++    # package-owned import/rebinding sequences indeterminate.
+     for package in packages:
+         children = {
+             name.rsplit(".", 1)[1]
+             for name in programs
+-            if (
+-                "." in name
+-                and name.rsplit(".", 1)[0] == package
+-            )
++            if "." in name and name.rsplit(".", 1)[0] == package
+         }
+-
+-        if any(
++        writes_child = any(
+             step.binding in children
++            and (
++                step.op == "BIND"
++                or (step.op == "FROM" and step.target != package)
++            )
++            for step in programs[package]
++        )
++        if writes_child and any(
++            step.op in {"IMPORT", "FROM"}
+             for step in programs[package]
+-            if step.op in {"BIND", "FROM"}
+         ):
+             return result("UNKNOWN", package)
  
-                     binding_target = (
-                         target
--                        if step.binding != target.split(".")[0]
-+                        if step.explicit_alias
-                         else target.split(".")[0]
-                     )
+@@ -416,13 +423,35 @@ def evaluate_package_import_order(
+             else:
+                 member = step.symbol
  
+-                # from-package child resolution is ambiguous.
+-                # C1 does not attempt to resolve that ambiguity.
+-                if (
+-                    target in packages
+-                    and target + "." + member in programs
+-                ):
+-                    return result("UNKNOWN", target, member)
++                # CPython checks a package attribute before attempting
++                # to load a same-named child module. An existing binding
++                # takes precedence over the indexed child candidate.
++                if target in packages and member not in namespaces[target]:
++                    child = target + "." + member
++
++                    if child in programs:
++                        # Reentrant fromlist fallback through sys.modules is
++                        # intentionally unsupported by this restricted model.
++                        if states[child] != "NEW":
++                            return result("UNKNOWN", child, member)
++
++                        next_child = missing_piece(child)
++
++                        if next_child != child:
++                            return result("UNKNOWN", child, member)
++
++                        states[child] = "INITIALIZING"
++
++                        events.append(
++                            PackageModelEvent(
++                                module,
++                                "START_IMPORT",
++                                child,
++                            )
++                        )
++
++                        frames.append((child, 0))
++                        continue
+ 
+                 if member not in namespaces[target]:
+                     outcome = (
 diff --git a/tests/test_cycle_semantics_package_model.py b/tests/test_cycle_semantics_package_model.py
-index a2eb5d2..b43bb77 100644
+index b43bb77..b4afeb4 100644
 --- a/tests/test_cycle_semantics_package_model.py
 +++ b/tests/test_cycle_semantics_package_model.py
-@@ -287,3 +287,68 @@ def test_determinism_invalid_no_ast_mutation():
-         ).outcome
-         == "UNKNOWN"
-     )
-+
-+
-+def test_explicit_alias_equal_root_binds_submodule(tmp_path):
-+    source = {
-+        "pkg.__init__": "pass",
-+        "pkg.sub": "value=2",
-+        "entry": "import pkg.sub as pkg\nx=pkg.value",
-+    }
-+
+@@ -182,14 +182,22 @@ def test_dotted_alias_to_child(tmp_path):
+     assert _actual(tmp_path, source, "entry")
+ 
+ 
+-def test_from_package_child_remains_unknown():
++def test_from_package_child_loads_indexed_child(tmp_path):
+     source = {
+         "pkg.__init__": "pass",
+         "pkg.child": "value=7",
+-        "entry": "from pkg import child",
++        "entry": "from pkg import child\nx=child.value",
+     }
+ 
+-    assert _model(source, "entry").outcome == "UNKNOWN"
 +    result = _model(source, "entry")
 +
 +    assert result.outcome == "MODEL_PASS"
 +    assert any(
-+        event.operation == "ATTR"
-+        and event.target == "pkg.sub"
-+        and event.symbol == "value"
++        event.operation == "START_IMPORT"
++        and event.target == "pkg.child"
 +        for event in result.events
 +    )
 +    assert _actual(tmp_path, source, "entry")
+ 
+ 
+ def test_namespace_ambiguous_external_unknown():
+@@ -352,3 +360,130 @@ def test_plain_dotted_import_still_binds_root_package(tmp_path):
+     assert result.outcome == "MISSING_ATTRIBUTE"
+     assert result.target_module == "pkg"
+     assert not _actual(tmp_path, source, "entry")
 +
 +
-+def test_explicit_alias_equal_root_prevents_false_model_pass(tmp_path):
++def test_b0g4c2_relative_initializer_imports_child(tmp_path):
 +    source = {
-+        "pkg.__init__": "value=2",
-+        "pkg.sub": "pass",
-+        "entry": "import pkg.sub as pkg\nx=pkg.value",
++        "pkg.__init__": "from . import child",
++        "pkg.child": "value=7",
 +    }
-+
-+    result = _model(source, "entry")
-+
-+    assert result.outcome == "MISSING_ATTRIBUTE"
-+    assert result.target_module == "pkg.sub"
-+    assert result.symbol == "value"
-+    assert not _actual(tmp_path, source, "entry")
-+
-+
-+def test_explicit_alias_equal_root_inside_package_initializer(tmp_path):
-+    source = {
-+        "pkg.__init__": "import pkg.sub as pkg\nx=pkg.value",
-+        "pkg.sub": "value=2",
-+    }
-+
 +    result = _model(source, "pkg")
-+
 +    assert result.outcome == "MODEL_PASS"
 +    assert any(
-+        event.operation == "ATTR"
-+        and event.target == "pkg.sub"
-+        for event in result.events
++        e.operation == "BIND_CHILD"
++        and e.target == "pkg.child"
++        for e in result.events
 +    )
 +    assert _actual(tmp_path, source, "pkg")
 +
 +
-+def test_plain_dotted_import_still_binds_root_package(tmp_path):
++def test_b0g4c2_relative_import_from_submodule(tmp_path):
 +    source = {
 +        "pkg.__init__": "pass",
-+        "pkg.sub": "value=2",
-+        "entry": "import pkg.sub\nx=pkg.value",
++        "pkg.child": "value=7",
++        "pkg.user": "from . import child\nx=child.value",
 +    }
++    assert _model(source, "pkg.user").outcome == "MODEL_PASS"
++    assert _actual(tmp_path, source, "pkg.user")
 +
++
++def test_b0g4c2_existing_attribute_precedes_child(tmp_path):
++    source = {
++        "pkg.__init__": "child=3",
++        "pkg.child": "value=7",
++        "entry": "from pkg import child",
++    }
 +    result = _model(source, "entry")
++    assert result.outcome == "MODEL_PASS"
++    assert not any(
++        e.operation == "START_IMPORT"
++        and e.target == "pkg.child"
++        for e in result.events
++    )
++    assert _actual(tmp_path, source, "entry")
 +
-+    assert result.outcome == "MISSING_ATTRIBUTE"
-+    assert result.target_module == "pkg"
++
++def test_b0g4c2_constant_attribute_is_not_module(tmp_path):
++    source = {
++        "pkg.__init__": "child=3",
++        "pkg.child": "value=7",
++        "entry": "from pkg import child\nx=child.value",
++    }
++    assert _model(source, "entry").outcome == "UNKNOWN"
 +    assert not _actual(tmp_path, source, "entry")
-
++
++
++def test_b0g4c2_child_already_initialized(tmp_path):
++    source = {
++        "pkg.__init__": "pass",
++        "pkg.child": "value=7",
++        "entry": (
++            "import pkg.child\n"
++            "from pkg import child\n"
++            "x=child.value"
++        ),
++    }
++    result = _model(source, "entry")
++    assert result.outcome == "MODEL_PASS"
++    assert sum(
++        e.operation == "START_IMPORT"
++        and e.target == "pkg.child"
++        for e in result.events
++    ) == 1
++    assert _actual(tmp_path, source, "entry")
++
++
++def test_b0g4c2_regular_attribute_reexport(tmp_path):
++    source = {
++        "pkg.__init__": "from .util import exposed",
++        "pkg.util": "exposed=7",
++        "pkg.user": "from pkg import exposed",
++    }
++    assert _model(source, "pkg.user").outcome == "MODEL_PASS"
++    assert _actual(tmp_path, source, "pkg.user")
++
++
++def test_b0g4c2_reentrant_child_fails_closed(tmp_path):
++    source = {
++        "pkg.__init__": "from . import child",
++        "pkg.child": "from pkg import child",
++    }
++    result = _model(source, "pkg")
++    assert result.outcome == "UNKNOWN"
++    assert _actual(tmp_path, source, "pkg")
++
++
++def test_b0g4c2_missing_member_no_child(tmp_path):
++    source = {
++        "pkg.__init__": "pass",
++        "entry": "from pkg import missing",
++    }
++    result = _model(source, "entry")
++    assert result.outcome == "MISSING_EXPORT"
++    assert not _actual(tmp_path, source, "entry")
++
++
++def test_b0g4c2_multiple_fromlist_members_unknown():
++    source = {
++        "pkg.__init__": "pass",
++        "pkg.a": "pass",
++        "pkg.b": "pass",
++        "entry": "from pkg import a, b",
++    }
++    assert _model(source, "entry").outcome == "UNKNOWN"
++
++
++def test_b0g4c2_shadowing_sequence_stays_unknown():
++    source = {
++        "pkg.__init__": "child=1\nimport pkg.child",
++        "pkg.child": "pass",
++    }
++    assert _model(source, "pkg").outcome == "UNKNOWN"
++
++
++def test_b0g4c2_operation_budget_unknown():
++    source = {
++        "pkg.__init__": "pass",
++        "entry": "import pkg\n" * 10020,
++    }
++    assert _model(source, "entry").outcome == "UNKNOWN"
 FULL_DIFFS_END

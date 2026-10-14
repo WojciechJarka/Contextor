@@ -72,6 +72,10 @@ def _compile(
                 )
 
         elif isinstance(stmt, ast.ImportFrom):
+            # Python resolves the entire fromlist before its STORE_NAME steps.
+            # This model processes single members only, to avoid false proofs.
+            if len(stmt.names) != 1:
+                return None
             if stmt.level:
                 context = (
                     logical.split(".")
@@ -270,23 +274,26 @@ def evaluate_package_import_order(
 
         programs[name] = program
 
-    # A package initializer that overwrites a direct child
-    # binding requires richer import-statement semantics.
-    # This restricted model refuses that case.
+    # A package may prebind a same-named attribute before a later
+    # from-import; the attribute takes priority. Keep more complex
+    # package-owned import/rebinding sequences indeterminate.
     for package in packages:
         children = {
             name.rsplit(".", 1)[1]
             for name in programs
-            if (
-                "." in name
-                and name.rsplit(".", 1)[0] == package
-            )
+            if "." in name and name.rsplit(".", 1)[0] == package
         }
-
-        if any(
+        writes_child = any(
             step.binding in children
+            and (
+                step.op == "BIND"
+                or (step.op == "FROM" and step.target != package)
+            )
             for step in programs[package]
-            if step.op in {"BIND", "FROM"}
+        )
+        if writes_child and any(
+            step.op in {"IMPORT", "FROM"}
+            for step in programs[package]
         ):
             return result("UNKNOWN", package)
 
@@ -416,13 +423,35 @@ def evaluate_package_import_order(
             else:
                 member = step.symbol
 
-                # from-package child resolution is ambiguous.
-                # C1 does not attempt to resolve that ambiguity.
-                if (
-                    target in packages
-                    and target + "." + member in programs
-                ):
-                    return result("UNKNOWN", target, member)
+                # CPython checks a package attribute before attempting
+                # to load a same-named child module. An existing binding
+                # takes precedence over the indexed child candidate.
+                if target in packages and member not in namespaces[target]:
+                    child = target + "." + member
+
+                    if child in programs:
+                        # Reentrant fromlist fallback through sys.modules is
+                        # intentionally unsupported by this restricted model.
+                        if states[child] != "NEW":
+                            return result("UNKNOWN", child, member)
+
+                        next_child = missing_piece(child)
+
+                        if next_child != child:
+                            return result("UNKNOWN", child, member)
+
+                        states[child] = "INITIALIZING"
+
+                        events.append(
+                            PackageModelEvent(
+                                module,
+                                "START_IMPORT",
+                                child,
+                            )
+                        )
+
+                        frames.append((child, 0))
+                        continue
 
                 if member not in namespaces[target]:
                     outcome = (
