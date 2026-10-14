@@ -1,165 +1,752 @@
-TASK: CONTEXTOR_B0G4C6_REAL_CYCLE_SEMANTICS_DISCOVERY
-FINAL_VERDICT: B0G4C6_DISCOVERY_COMPLETE
+# CONTEXTOR_B0G4C7_CANONICAL_EDGE_IMPORT_SITE_ATTRIBUTION
 
-HEAD: b13df23943aaf38daeab9610bf1bab4fbbe43572
-GIT_STATUS_BEFORE_REPORT: M walkthrough.md
-LIVE_REVISION: 432. Same revision in Contextor get_live_events and stable read-only IPC ping/snapshot/ping checks.
-ACTIVITY_EPOCH: 1beab26da2ff4932852caa7db6ff4242, unchanged in current Contextor event check.
-CANONICAL_FRESHNESS: resync_required=false; graph, cycles and collisions fresh. Contextor get_module_context verified disk/canonical synchronization for all 33 cyclic-SCC members at revision 432. No new mutation events after revision 432 during discovery. Read-only IPC authority identity matched the endpoint before and after snapshot; snapshot revision stayed 432. No snapshot was serialized to disk.
-STRUCTURAL_CYCLE_PATH_COUNT: 16 reported canonical paths, preserved below in their original order. This count is not a count of all possible simple cycles.
-CYCLIC_SCC_COUNT: 2 independent cyclic SCCs from the complete hard graph (461 nodes, 1772 hard edges): SCC01 has 24 modules/56 internal hard edges/15 reported paths; SCC02 has 9 modules/16 internal hard edges/1 reported path. No self-loop SCC was found. Every reported path is closed, uses canonical hard edges and belongs to exactly one SCC.
-NAME_COLLISIONS: 0, fresh in Contextor get_name_collisions at the synchronized revision.
-FILES_CHANGED=NONE for source/test/docs. ACTUAL_DIFF=DIFFS=NONE. walkthrough.md alone is overwritten as the required report artifact.
+## SOURCE_PRECHECK
+DIRECT_EVIDENCE: HEAD 0be273578c980e5b45eaba2e5fd75dc913bc2f54; initial Git status empty; both requested files absent. Repository Python 3.10.9. Existing owners provenance, scc and ParsedSourceInput had canonical fresh, workspace_sync=verified at revision 432. Their fetched signatures and data fields match the supplied implementation. The extractor has 8 confirmed static consumers; SCC analyzer has 2. No material source drift.
+GIT_STATUS_AFTER:
+?? contextor/core/cycle_semantics/edge_sites.py
+?? tests/test_cycle_semantics_edge_sites.py
 
-SCC_INVENTORY:
-SCC01: 24 members; 56 internal hard edges; 15 reported paths.
-SCC_MEMBERS / CANONICAL_IDENTITY_MAPPING / PATHS (index -> canonical module -> repository-relative path -> absolute path):
-01 | contextor.core.analysis.full_analysis_coordinator | contextor\core\analysis\full_analysis_coordinator.py | C:\Temp\Contextor_Repo\contextor\core\analysis\full_analysis_coordinator.py
-02 | contextor.core.analysis.incremental.engine | contextor\core\analysis\incremental\engine.py | C:\Temp\Contextor_Repo\contextor\core\analysis\incremental\engine.py
-03 | contextor.core.analysis.incremental.materialization | contextor\core\analysis\incremental\materialization.py | C:\Temp\Contextor_Repo\contextor\core\analysis\incremental\materialization.py
-04 | contextor.core.analysis.incremental.plan_executor | contextor\core\analysis\incremental\plan_executor.py | C:\Temp\Contextor_Repo\contextor\core\analysis\incremental\plan_executor.py
-05 | contextor.core.analysis.incremental.preparation | contextor\core\analysis\incremental\preparation.py | C:\Temp\Contextor_Repo\contextor\core\analysis\incremental\preparation.py
-06 | contextor.core.analysis.incremental_engine | contextor\core\analysis\incremental_engine.py | C:\Temp\Contextor_Repo\contextor\core\analysis\incremental_engine.py
-07 | contextor.core.analysis.lineage_extraction | contextor\core\analysis\lineage_extraction.py | C:\Temp\Contextor_Repo\contextor\core\analysis\lineage_extraction.py
-08 | contextor.core.analysis.refresh_planner | contextor\core\analysis\refresh_planner.py | C:\Temp\Contextor_Repo\contextor\core\analysis\refresh_planner.py
-09 | contextor.core.analysis.state_manager | contextor\core\analysis\state_manager.py | C:\Temp\Contextor_Repo\contextor\core\analysis\state_manager.py
-10 | contextor.core.api.facade | contextor\core\api\facade.py | C:\Temp\Contextor_Repo\contextor\core\api\facade.py
-11 | contextor.core.lineage_query.live_query | contextor\core\lineage_query\live_query.py | C:\Temp\Contextor_Repo\contextor\core\lineage_query\live_query.py
-12 | contextor.core.live_state.__init__ | contextor\core\live_state\__init__.py | C:\Temp\Contextor_Repo\contextor\core\live_state\__init__.py
-13 | contextor.core.live_state.hydration | contextor\core\live_state\hydration.py | C:\Temp\Contextor_Repo\contextor\core\live_state\hydration.py
-14 | contextor.core.live_state.ipc | contextor\core\live_state\ipc.py | C:\Temp\Contextor_Repo\contextor\core\live_state\ipc.py
-15 | contextor.core.live_state.runtime | contextor\core\live_state\runtime.py | C:\Temp\Contextor_Repo\contextor\core\live_state\runtime.py
-16 | contextor.core.live_state.store | contextor\core\live_state\store.py | C:\Temp\Contextor_Repo\contextor\core\live_state\store.py
-17 | contextor.core.live_state.watcher | contextor\core\live_state\watcher.py | C:\Temp\Contextor_Repo\contextor\core\live_state\watcher.py
-18 | contextor.core.reference.module_usage_reuse | contextor\core\reference\module_usage_reuse.py | C:\Temp\Contextor_Repo\contextor\core\reference\module_usage_reuse.py
-19 | contextor.core.reporting_engine.pipeline | contextor\core\reporting_engine\pipeline.py | C:\Temp\Contextor_Repo\contextor\core\reporting_engine\pipeline.py
-20 | contextor.core.single_file.builders.__init__ | contextor\core\single_file\builders\__init__.py | C:\Temp\Contextor_Repo\contextor\core\single_file\builders\__init__.py
-21 | contextor.core.single_file.builders.layer0_builders | contextor\core\single_file\builders\layer0_builders.py | C:\Temp\Contextor_Repo\contextor\core\single_file\builders\layer0_builders.py
-22 | contextor.core.single_file.builders.layer2_builders | contextor\core\single_file\builders\layer2_builders.py | C:\Temp\Contextor_Repo\contextor\core\single_file\builders\layer2_builders.py
-23 | contextor.core.single_file.single_file_analysis | contextor\core\single_file\single_file_analysis.py | C:\Temp\Contextor_Repo\contextor\core\single_file\single_file_analysis.py
-24 | contextor.core.symbol_engine.indexer | contextor\core\symbol_engine\indexer.py | C:\Temp\Contextor_Repo\contextor\core\symbol_engine\indexer.py
-INTERNAL_HARD_EDGES and PER_SCC_IMPORT_EVIDENCE: source and target indices refer to the complete canonical identities above. Each entry is an actual hard graph edge at revision 432 followed by matching current lexical source occurrence(s).
-01->10 | L88 call:run_full_analysis_exclusive/try/if:analysis_fn is not None from contextor.core.api.facade import ContextorFacade
-02->03 | L20 module-top-level from contextor.core.analysis.incremental.materialization import ( ensure_module_usages, ensure_topology_analytics, ensure_cached_analytics, ensure_cycles, materialize_incremental_state, )
-02->04 | L33 module-top-level from contextor.core.analysis.incremental.plan_executor import ( _prepare_candidate_state, execute_refresh_plan, )
-02->05 | L27 module-top-level from contextor.core.analysis.incremental.preparation import ( extract_artifact_names, calculate_file_delta, prepare_source_update, prepare_deleted_module_update, )
-02->08 | L734 class:IncrementalAnalysisEngine/call:update_file/with from contextor.core.analysis.refresh_planner import RefreshPlanner || L615 class:IncrementalAnalysisEngine/call:update_file/with/if:not current_state from contextor.core.analysis.refresh_planner import RefreshPlanner
-02->09 | L10 module-top-level from contextor.core.analysis.state_manager import FileStateManager, RepositoryAnalysisState, FileDelta || L37 module-top-level from contextor.core.analysis.state_manager import ( artifact_consumption_is_fresh, canonical_python_source_path, clear_module_parse_failure, mark_module_parse_failure, validate_canonical_artifact_consumption_coverage, )
-03->09 | L12 module-top-level from contextor.core.analysis.state_manager import RepositoryAnalysisState || L212 call:ensure_cached_analytics from contextor.core.analysis.state_manager import ( dependency_matrix_inputs_are_fresh, ) || L431 call:ensure_artifact_consumption from contextor.core.analysis.state_manager import ( build_canonical_artifact_consumption, is_legacy_artifact_consumption, validate_canonical_artifact_consumption, validate_canonical_artifact_consumption_coverage, ) || L496 call:ensure_dependency_matrix from contextor.core.analysis.state_manager import ( artifact_consumption_is_fresh, dependency_matrix_inputs_are_fresh, ) || L564 call:ensure_shared_usage_clusters from contextor.core.analysis.state_manager import artifact_consumption_is_fresh
-04->03 | L1475 call:execute_refresh_plan/for/if:family == 'modules'/if:family == 'definitions'/if:family == 'module_usages'/if:family == 'reexport_facts'/if:family == 'dependency_graph'/if:family == 'artifact_consumption'/if:family == 'identity_registry'/if:family == 'cached_analytics'/if:family == 'collision_facts'/if:family == 'collisions' from contextor.core.analysis.incremental.materialization import _validate_collision_facts_dict
-04->08 | L1260 call:execute_refresh_plan/if:plan.recompute_modules from contextor.core.analysis.refresh_planner import ( _find_dependent_consumers, )
-04->09 | L18 module-top-level from contextor.core.analysis.state_manager import ( FileDelta, RepositoryAnalysisState, canonical_artifact_consumption_targets, validate_canonical_artifact_consumption_coverage, ) || L1598 call:execute_refresh_plan/if:(matrix_inputs_changed or cluster_inputs_changed) and plan.refresh_completeness != 'requires_resync' and (not getattr(state, 'resync_required', False)) from contextor.core.analysis.state_manager import artifact_consumption_is_fresh || L1614 call:execute_refresh_plan/if:plan.refresh_completeness == 'requires_resync' or getattr(state, 'resync_required', False)/if:matrix_inputs_changed from contextor.core.analysis.state_manager import ( dependency_matrix_inputs_are_fresh, ) || L1646 call:execute_refresh_plan/if:plan.refresh_completeness == 'requires_resync' or getattr(state, 'resync_required', False)/if:cluster_inputs_changed from contextor.core.analysis.state_manager import ( artifact_consumption_is_fresh, )
-05->07 | L16 module-top-level from contextor.core.analysis.lineage_extraction import extract_lineage_source_facts
-05->09 | L15 module-top-level from contextor.core.analysis.state_manager import FileDelta
-05->24 | L229 call:prepare_source_update/try from contextor.core.symbol_engine.indexer import read_imports
-06->02 | L8 module-top-level from contextor.core.analysis.incremental.engine import ( IncrementalAnalysisEngine, IncrementalUpdateResult, LocalDegreeDeltaResult, )
-07->09 | L5 module-top-level from contextor.core.analysis.state_manager import canonical_python_source_path
-08->09 | L9 module-top-level from contextor.core.analysis.state_manager import FileDelta
-09->12 | L517 call:save_engine_state from contextor.core.live_state import save_snapshot || L541 call:load_engine_state from contextor.core.live_state import load_snapshot
-10->03 | L117 call:_assemble_layer_collision_facts/if:state is not None from contextor.core.analysis.incremental.materialization import ( collision_facts_complete, ) || L850 class:ContextorFacade/call:analyze_project/if:analysis_result from contextor.core.analysis.incremental.materialization import _validate_collision_facts_dict || L1010 class:ContextorFacade/call:analyze_project/if:analysis_result from contextor.core.analysis.incremental.materialization import ( ensure_cached_analytics, )
-10->09 | L812 class:ContextorFacade/call:analyze_project/if:analysis_result from contextor.core.analysis.state_manager import ( FileStateManager, RepositoryAnalysisState, artifact_consumption_is_fresh, build_syntax_diagnostics_from_index, build_canonical_artifact_consumption, dependency_matrix_inputs_are_fresh, save_engine_state, validate_canonical_artifact_consumption_coverage, ) || L1666 class:ContextorFacade/call:_analyze_single_file_uncoordinated/if:resolved is not None/if:state_only_candidate from contextor.core.analysis.state_manager import FileStateManager
-10->12 | L61 module-top-level from contextor.core.live_state import ( hydrate_repository_engine, resolve_authoritative_repository_state, ) || L1149 class:ContextorFacade/call:analyze_project/if:analysis_result/if:meta is not None from contextor.core.live_state import connect
-10->16 | L823 class:ContextorFacade/call:analyze_project/if:analysis_result from contextor.core.live_state.store import read_metadata
-10->18 | L878 class:ContextorFacade/call:analyze_project/if:analysis_result from contextor.core.reference.module_usage_reuse import ( build_module_usage_baseline_with_reuse, )
-10->19 | L36 module-top-level from contextor.core.reporting_engine.pipeline import execute_global_pipeline
-10->23 | L48 module-top-level from contextor.core.single_file.single_file_analysis import collect_all_contexts
-10->24 | L50 module-top-level from contextor.core.symbol_engine.indexer import ( assemble_collision_facts_or_fallback, build_index, index_repository, )
-11->09 | L6 module-top-level from contextor.core.analysis.state_manager import ( module_current_truth, )
-12->13 | L20 module-top-level from .hydration import ( AuthoritativeRepositoryState, HydratedRepositoryEngine, hydrate_repository_engine, resolve_authoritative_repository_state, )
-12->14 | L11 module-top-level from .ipc import CanonicalLiveServer, CanonicalPersistenceConflict, LiveEndpoint, LiveStateClient
-12->15 | L12 module-top-level from .runtime import ( AuthorityLivenessVerifier, EndpointSchemaError, SecondDesktopActive, connect, connect_or_start, )
-12->16 | L3 module-top-level from .store import ( LiveStateMetadata, SnapshotRevisionConflict, load_snapshot, migrate_legacy_snapshot, read_metadata, save_snapshot, )
-12->17 | L19 module-top-level from .watcher import DesktopLiveEventFeed, DesktopLiveWatcher
-13->06 | L94 call:hydrate_repository_engine from contextor.core.analysis.incremental_engine import IncrementalAnalysisEngine
-13->09 | L36 call:resolve_authoritative_repository_state from contextor.core.analysis.state_manager import load_engine_state || L95 call:hydrate_repository_engine from contextor.core.analysis.state_manager import FileStateManager
-13->15 | L37 call:resolve_authoritative_repository_state from contextor.core.live_state.runtime import connect
-13->16 | L38 call:resolve_authoritative_repository_state from contextor.core.live_state.store import migrate_legacy_snapshot, read_metadata
-14->16 | L2032 class:CanonicalLiveServer/call:_execute_update_file/with/if:persister is not None/try from .store import SnapshotRevisionConflict
-15->01 | L1266 call:_repository_mutation_guard/call:guard from contextor.core.analysis.full_analysis_coordinator import ( acquire_full_analysis, release_full_analysis, ) || L1309 call:_repository_recovery_verification_guard/call:guard from contextor.core.analysis.full_analysis_coordinator import ( acquire_full_analysis, release_full_analysis, )
-15->03 | L1449 call:run_service/try/if:state is not None from contextor.core.analysis.incremental.materialization import ( ensure_module_usages, module_usages_require_materialization, )
-15->06 | L1116 call:_repository_updater/call:update from contextor.core.analysis.incremental_engine import IncrementalAnalysisEngine
-15->09 | L1117 call:_repository_updater/call:update from contextor.core.analysis.state_manager import FileStateManager || L1172 call:_repository_persister/call:persist/if:manager is None from contextor.core.analysis.state_manager import FileStateManager || L1500 call:run_service/try/if:state is not None/if:materialization_required/try/if:materialization_required from contextor.core.analysis.state_manager import FileStateManager
-15->11 | L19 module-top-level from contextor.core.lineage_query.live_query import ( query_live_symbol_lineage, )
-15->14 | L39 module-top-level from .ipc import ( CanonicalLiveServer, CanonicalPersistenceConflict, LIVE_ENDPOINT_SCHEMA_VERSION, LIVE_PROTOCOL_VERSION, LiveEndpoint, LiveStateClient, )
-15->16 | L47 module-top-level from .store import ( load_snapshot, locked_committed_snapshot, migrate_legacy_snapshot, read_metadata, save_snapshot, ) || L1218 call:_repository_persister/call:persist/try from contextor.core.live_state.store import SnapshotRevisionConflict
-16->09 | L128 call:_normalize_reexport_facts_state from contextor.core.analysis.state_manager import ( RepositoryAnalysisState, ) || L1524 call:save_snapshot from contextor.core.analysis.state_manager import ( RepositoryAnalysisState, )
-17->09 | L514 class:DesktopLiveWatcher/call:_startup_reconciliation_paths from contextor.core.analysis.state_manager import FileStateManager || L535 class:DesktopLiveWatcher/call:_trusted_file_state from contextor.core.analysis.state_manager import FileStateManager
-17->10 | L486 class:DesktopLiveWatcher/call:_load_watch_filters from contextor.core.api.facade import _analysis_filters
-17->14 | L18 module-top-level from .ipc import LiveStateClient
-17->15 | L372 class:DesktopLiveWatcher/call:_recover_client/try from .runtime import connect_or_start
-18->09 | L4 module-top-level from contextor.core.analysis.state_manager import module_current_truth
-19->09 | L106 call:execute_global_pipeline from contextor.core.analysis.state_manager import ( AnalysisResult, FileStateManager, )
-20->21 | L3 module-top-level from .layer0_builders import ( ModuleIntentBuilder, SymbolContextBuilder, ImportContextBuilder, SemanticContextBuilder, FunctionContextBuilder, StateContextBuilder, ArchitectureContextBuilder, ApiSurfaceBuilder, ImportUsersBuilder, GitContextBuilder )
-20->22 | L10 module-top-level from .layer2_builders import TestContextBuilder, ActivityBuilder
-21->09 | L26 call:_canonical_state_module_is_current from contextor.core.analysis.state_manager import module_current_truth
-22->09 | L11 class:TestContextBuilder/call:build from contextor.core.analysis.state_manager import module_current_truth
-23->20 | L14 module-top-level from contextor.core.single_file.builders import default_registry, ContextPayload
-24->07 | L25 module-top-level from contextor.core.analysis.lineage_extraction import ( deserialize_extracted_lineage_source_facts, extract_lineage_source_facts, serialize_extracted_lineage_source_facts, )
-ASSOCIATED_CYCLE_PATHS:
-CYCLE_01: contextor.core.analysis.full_analysis_coordinator -> contextor.core.api.facade -> contextor.core.analysis.incremental.materialization -> contextor.core.analysis.state_manager -> contextor.core.live_state.__init__ -> contextor.core.live_state.hydration -> contextor.core.live_state.runtime -> contextor.core.analysis.full_analysis_coordinator
-CYCLE_02: contextor.core.analysis.incremental.engine -> contextor.core.analysis.incremental.materialization -> contextor.core.analysis.state_manager -> contextor.core.live_state.__init__ -> contextor.core.live_state.hydration -> contextor.core.analysis.incremental_engine -> contextor.core.analysis.incremental.engine
-CYCLE_03: contextor.core.analysis.incremental.engine -> contextor.core.analysis.incremental.plan_executor -> contextor.core.analysis.incremental.materialization -> contextor.core.analysis.state_manager -> contextor.core.live_state.__init__ -> contextor.core.live_state.hydration -> contextor.core.analysis.incremental_engine -> contextor.core.analysis.incremental.engine
-CYCLE_04: contextor.core.analysis.incremental.engine -> contextor.core.analysis.incremental.plan_executor -> contextor.core.analysis.refresh_planner -> contextor.core.analysis.state_manager -> contextor.core.live_state.__init__ -> contextor.core.live_state.hydration -> contextor.core.analysis.incremental_engine -> contextor.core.analysis.incremental.engine
-CYCLE_05: contextor.core.analysis.incremental.engine -> contextor.core.analysis.incremental.plan_executor -> contextor.core.analysis.state_manager -> contextor.core.live_state.__init__ -> contextor.core.live_state.hydration -> contextor.core.analysis.incremental_engine -> contextor.core.analysis.incremental.engine
-CYCLE_06: contextor.core.analysis.incremental.engine -> contextor.core.analysis.incremental.preparation -> contextor.core.analysis.lineage_extraction -> contextor.core.analysis.state_manager -> contextor.core.live_state.__init__ -> contextor.core.live_state.hydration -> contextor.core.analysis.incremental_engine -> contextor.core.analysis.incremental.engine
-CYCLE_07: contextor.core.analysis.incremental.engine -> contextor.core.analysis.incremental.preparation -> contextor.core.analysis.state_manager -> contextor.core.live_state.__init__ -> contextor.core.live_state.hydration -> contextor.core.analysis.incremental_engine -> contextor.core.analysis.incremental.engine
-CYCLE_08: contextor.core.analysis.incremental.engine -> contextor.core.analysis.state_manager -> contextor.core.live_state.__init__ -> contextor.core.live_state.hydration -> contextor.core.analysis.incremental_engine -> contextor.core.analysis.incremental.engine
-CYCLE_09: contextor.core.analysis.incremental.materialization -> contextor.core.analysis.state_manager -> contextor.core.live_state.__init__ -> contextor.core.live_state.hydration -> contextor.core.live_state.runtime -> contextor.core.analysis.incremental.materialization
-CYCLE_10: contextor.core.analysis.incremental.materialization -> contextor.core.analysis.state_manager -> contextor.core.live_state.__init__ -> contextor.core.live_state.watcher -> contextor.core.api.facade -> contextor.core.analysis.incremental.materialization
-CYCLE_11: contextor.core.analysis.state_manager -> contextor.core.live_state.__init__ -> contextor.core.live_state.hydration -> contextor.core.analysis.state_manager
-CYCLE_12: contextor.core.analysis.state_manager -> contextor.core.live_state.__init__ -> contextor.core.live_state.hydration -> contextor.core.live_state.runtime -> contextor.core.analysis.state_manager
-CYCLE_13: contextor.core.analysis.state_manager -> contextor.core.live_state.__init__ -> contextor.core.live_state.hydration -> contextor.core.live_state.runtime -> contextor.core.lineage_query.live_query -> contextor.core.analysis.state_manager
-CYCLE_14: contextor.core.analysis.state_manager -> contextor.core.live_state.__init__ -> contextor.core.live_state.hydration -> contextor.core.live_state.runtime -> contextor.core.live_state.ipc -> contextor.core.live_state.store -> contextor.core.analysis.state_manager
-CYCLE_15: contextor.core.analysis.state_manager -> contextor.core.live_state.__init__ -> contextor.core.live_state.watcher -> contextor.core.analysis.state_manager
+## HEAD_BEFORE
+0be273578c980e5b45eaba2e5fd75dc913bc2f54
 
-SCC02: 9 members; 16 internal hard edges; 1 reported paths.
-SCC_MEMBERS / CANONICAL_IDENTITY_MAPPING / PATHS (index -> canonical module -> repository-relative path -> absolute path):
-01 | contextor.repo_generator.__init__ | contextor\repo_generator\__init__.py | C:\Temp\Contextor_Repo\contextor\repo_generator\__init__.py
-02 | contextor.repo_generator.filters | contextor\repo_generator\filters.py | C:\Temp\Contextor_Repo\contextor\repo_generator\filters.py
-03 | contextor.repo_generator.icons | contextor\repo_generator\icons.py | C:\Temp\Contextor_Repo\contextor\repo_generator\icons.py
-04 | contextor.repo_generator.main | contextor\repo_generator\main.py | C:\Temp\Contextor_Repo\contextor\repo_generator\main.py
-05 | contextor.ui.__init__ | contextor\ui\__init__.py | C:\Temp\Contextor_Repo\contextor\ui\__init__.py
-06 | contextor.ui.exclude_gui | contextor\ui\exclude_gui.py | C:\Temp\Contextor_Repo\contextor\ui\exclude_gui.py
-07 | contextor.ui.gui | contextor\ui\gui.py | C:\Temp\Contextor_Repo\contextor\ui\gui.py
-08 | contextor.ui.gui_parser | contextor\ui\gui_parser.py | C:\Temp\Contextor_Repo\contextor\ui\gui_parser.py
-09 | contextor.ui.progress_widget | contextor\ui\progress_widget.py | C:\Temp\Contextor_Repo\contextor\ui\progress_widget.py
-INTERNAL_HARD_EDGES and PER_SCC_IMPORT_EVIDENCE: source and target indices refer to the complete canonical identities above. Each entry is an actual hard graph edge at revision 432 followed by matching current lexical source occurrence(s).
-01->04 | L1 module-top-level from contextor.repo_generator.main import run_repo_generator
-02->05 | L5 module-top-level from contextor.ui import theme
-03->05 | L4 module-top-level from contextor.ui import theme
-04->02 | L8 module-top-level from contextor.repo_generator.filters import FilterWindow
-04->03 | L9 module-top-level from contextor.repo_generator.icons import create_icon_button
-04->05 | L11 module-top-level from contextor.ui import theme
-05->07 | L5 module-top-level from .gui import run
-06->05 | L16 module-top-level from contextor.ui import theme
-07->01 | L43 module-top-level from contextor.repo_generator import run_repo_generator
-07->05 | L52 module-top-level from contextor.ui import theme
-07->06 | L54 module-top-level from contextor.ui.exclude_gui import run_exclude_window || L440 class:ContextorGUI/call:_check_stale_excludes/call:worker/call:prompt/if:answer from contextor.ui.exclude_gui import reapply_excludes
-07->08 | L55 module-top-level from contextor.ui.gui_parser import run_parser_window || L411 class:ContextorGUI/call:open_rewrite_tool/if:json_path from contextor.ui.gui_parser import rewrite_index_to_text
-07->09 | L57 module-top-level from contextor.ui.progress_widget import ( create_cpu_indicator, create_log_box, create_progress_bar, run_with_progress, )
-08->05 | L20 module-top-level from contextor.ui import theme
-08->09 | L22 module-top-level from contextor.ui.progress_widget import create_progress_bar, run_with_progress
-09->05 | L15 module-top-level from contextor.ui import theme
-ASSOCIATED_CYCLE_PATHS:
-CYCLE_16: contextor.repo_generator.__init__ -> contextor.repo_generator.main -> contextor.repo_generator.filters -> contextor.ui.__init__ -> contextor.ui.gui -> contextor.repo_generator.__init__
+## HEAD_AFTER
+0be273578c980e5b45eaba2e5fd75dc913bc2f54
 
-MODEL_COVERAGE_BY_SCC:
-SCC01 MODEL_SUPPORTED_CONSTRUCTS: scc.analyze_import_cycle_topology accepts the complete canonical hard-edge mapping and reproduces the two cyclic components. provenance.extract_import_provenance can record lexical import form, aliases, line/column and scope/control stacks from parsed AST plus source fingerprint. execution_context.project_execution_context labels function-local imports CALL_DEPENDENT, without asserting whether called. guards.project_import_guards records guard candidates without arbitrary predicate evaluation. binding_order.extract_cycle_module_binding_order records top-level statement and candidate binding positions. package_layout.build_package_layout maps regular indexed package __init__ IDs to logical packages. package_model supports its restricted import/assignment/pass, zero-argument import-only function, and direct top-level call subset. The source evidence shows many top-level imports and package reexports, plus function-local and guarded imports.
-SCC01 MODEL_UNSUPPORTED_CONSTRUCTS: actual member sources contain ClassDef, AnnAssign, complex assignments, nontrivial function bodies, nested imports, conditionals, loops, with/try blocks and calls beyond package_model's restricted AST. Examples: incremental.engine ClassDef at L97; state_manager ClassDef at L12; facade ClassDef at L506; live_state.runtime ClassDef at L56. Flat initialization_model rejects dotted/relative targets and top-level constructs outside its narrow syntax. scenarios._declared_import_targets rejects dotted and relative imports and requires exact source/graph target equality over the entire reachable closure. Its source-derived flat target set cannot equal this canonical graph as-is. Package-model applicability to the complete SCC or its closure is therefore unproved. SOURCE_EVIDENCE shows state_manager -> live_state.__init__ at L517/L541 inside save_engine_state/load_engine_state, while facade -> live_state.__init__ at L61 is top-level. Treating both hard edges as unconditional top-level execution would be incorrect.
-SCC01 RELEVANT_ENTRY_POINT_CANDIDATES: contextor.cli, contextor.mcp.runtime, contextor.mcp_server, contextor.mcp_worker, contextor.ui.gui and full-analysis/update/watch paths appear as incoming graph or source call candidates. Their actual activation order and side effects were not executed or established here.
-SCC01 MISSING_SOURCE_OR_RESOLUTION_EVIDENCE: canonical hard edges do not carry a unique import-occurrence ID, source line, guard or call activation. Several edges have multiple matching statements and distinct execution contexts. No single revision-bound, complete source snapshot for the entire reachable closure was supplied to scenarios/evidence; disk files were individually verified, not atomically bound as a full closure. Dynamic/runtime targets, from-import attribute versus child-module resolution, call order and authority startup conditions are not proven by edge existence.
-SCC01 CURRENT_JUSTIFIED_CONCLUSION: SEMANTIC_EVIDENCE_INCOMPLETE. The structural cyclic SCC is confirmed; no safety or failure verdict follows.
+## LIVE_REVISION_BEFORE
+432; activity_epoch=1beab26da2ff4932852caa7db6ff4242; resync_required=false. Fresh syntax, collisions and cycles. Collision count 0; structural cycle path count 16.
 
-SCC02 MODEL_SUPPORTED_CONSTRUCTS: scc topology and lexical provenance can describe all 16 hard edges. package_layout can normalize repo_generator.__init__ and ui.__init__. Relative from .gui import run in ui.__init__ at L5 and package reexports are directly visible. All 16 internal edges have matching lexical source occurrences. The principal repo-generator/GUI chain is top-level in source: repo_generator.__init__ L1 -> main L8/L9/L11 -> filters L5 -> ui.__init__ L5 -> gui L43 -> repo_generator.__init__. Function-local additional imports in gui L411/L440 do not make those imports eager.
-SCC02 MODEL_UNSUPPORTED_CONSTRUCTS: filters ClassDef L10, main ClassDef L16 and top-level If L572, gui ClassDef L91 and complex top-level assignments, and other non-import-only function bodies exceed package_model. Flat scenarios reject dotted and relative imports and require complete closure source/graph equality. The static chain shows package initialization ordering candidates, not an executed cold-import trace. Source binding and reexport timing for ui.run and repo_generator.run_repo_generator requires order-specific modeling across complex modules.
-SCC02 SOURCE_BINDING_ORDER: repo_generator.__init__ L1 requests main.run_repo_generator; main defines run_repo_generator at L522-569 only after its earlier top-level imports. ui.__init__ L5 requests gui.run; gui defines run at L2283-2304, after its L43 import of repo_generator.run_repo_generator. Under a fresh repo_generator-first order, gui L43 can ask for the still-unbound repo_generator package reexport; under a ui-first order, the analogous partially initialized package sequence differs. This is static Python-semantics deduction from source positions, not a cold-import execution result.
-SCC02 RELEVANT_ENTRY_POINT_CANDIDATES: import contextor.repo_generator; import contextor.ui; contextor.__main__ -> contextor.ui.gui. They are candidate fresh-process orders only; none was executed.
-SCC02 MISSING_SOURCE_OR_RESOLUTION_EVIDENCE: a coherent graph-to-occurrence mapping and complete regular-package source closure with exact revision fingerprints, plus runtime import order/binding evidence, are absent from the existing scenario inputs. The package models cannot consume the full current complex GUI AST under their restricted contracts. No cold import or GUI startup was run.
-SCC02 CURRENT_JUSTIFIED_CONCLUSION: SEMANTIC_EVIDENCE_INCOMPLETE. The structural cyclic SCC is confirmed; no safety or failure verdict follows.
+## LIVE_REVISION_AFTER
+434; same activity_epoch; resync_required=false; event continuity continuous. DIRECT_EVIDENCE: desktop_watcher UPDATED edge_sites.py at revision 433 and test_cycle_semantics_edge_sites.py at revision 434. Both modules canonical_state=fresh, workspace_sync=verified; graph, topology, cycles and collisions fresh.
 
-UNSUPPORTED_SEMANTICS / CANONICAL_IDENTITY_MAPPING: Canonical graph IDs use literal __init__ nodes; Python import names use package names. SCC01 contextor.core.live_state.__init__ corresponds to logical contextor.core.live_state, and contextor.core.single_file.builders.__init__ to contextor.core.single_file.builders. SCC02 contextor.repo_generator.__init__ maps to contextor.repo_generator and contextor.ui.__init__ maps to contextor.ui. The actual Python import path may also initialize parent packages outside an SCC. No edge collapse or diagnostic suppression is performed. Canonical ImportRef offers module, level, names, is_from_import, is_local and type_only, but not occurrence line/column or call activation. Matching the 72 canonical hard edges to AST imports here is source correspondence, not proof that each lexical statement alone caused the graph edge or executes on every entry path. No TYPE_CHECKING guard was observed among the 72 internal-edge source matches; several internal edges are function-local or conditionally guarded. No simple __import__/importlib.import_module call was observed in the 33 member ASTs; unresolved dynamic mechanisms outside this limited search remain UNKNOWN.
+## FILES_CHANGED
+- contextor/core/cycle_semantics/edge_sites.py (new)
+- tests/test_cycle_semantics_edge_sites.py (new)
+walkthrough.md is the requested report artifact.
 
-REQUIRED_INTEGRATION_INPUTS: The existing interfaces require the current complete hard_edges mapping; canonical module-ID -> source path and __init__ normalization; parsed ast.Module source snapshots bound by raw SHA-256 and AST fingerprints; import occurrence IDs with location, relative resolution, alias and package-member candidate data; lexical scope/control and top-level binding order; complete reachable closure (including parent initializers and external/namespace candidates), entry-order candidates, and explicit unsupported/missing-source status. scenarios.analyze_cycle_scenarios requires hard_edges plus all reachable ASTs and exact declared-import equality. evidence.build_source_bound_cycle_evidence requires ParsedSourceInput for closure and binds graph/source fingerprints. package_model.evaluate_package_import_order takes indexed ASTs plus one entry, with its strict syntax limitations. These are observed API input contracts and evidence gaps, not a proposed implementation.
-OWNERSHIP_AND_BLAST_RADIUS: contextor.core.analysis.state_manager (C:\Temp\Contextor_Repo\contextor\core\analysis\state_manager.py) owns RepositoryAnalysisState including dependency_graph/cycles; contextor.core.source (C:\Temp\Contextor_Repo\contextor\core\source.py) owns ParsedSourceInput and parse_source_snapshot/parse_source_with_fingerprint. contextor.core.cycle_semantics.scc (C:\Temp\Contextor_Repo\contextor\core\cycle_semantics\scc.py)::analyze_import_cycle_topology owns pure SCC projection. scenarios.py::analyze_cycle_scenarios owns flat scenario orchestration; evidence.py::build_source_bound_cycle_evidence owns graph/source binding; package_layout.py::build_package_layout and package_model.py::evaluate_package_import_order own regular-package layout and restricted execution modeling. Contextor direct static consumers: evaluate_package_import_order -> tests.test_cycle_semantics_package_model only; build_source_bound_cycle_evidence -> tests.test_cycle_semantics_evidence only; analyze_cycle_scenarios -> evidence plus tests.test_cycle_semantics_scenarios; build_package_layout -> package_model plus tests.test_cycle_semantics_package_layout. Blast-radius projections show no production downstream module for the package model or evidence builder, and one test downstream each for scenarios and layout. Dynamic Python consumers are not certified absent. The smallest observed boundary is the handoff of current canonical hard edges, exact module/source identities and source-bound AST evidence into these existing pure model interfaces; no integration code or API selection is proposed.
-MISSING_EVIDENCE: No live semantic classification or full source-bound scenario report exists for these SCCs. No exact canonical edge-to-import occurrence mapping, complete atomic source closure, activation order or runtime cold-import proof was obtained. The previously fetched persisted project architecture report is older than revision 432 and was not used as current cycle evidence; it returned a 50 KiB confirmation preflight for summary+structure. Canonical projection import responses for five broad batches returned confirmation_required at the recommended output limit; a narrow 33-module path/count query returned all 33 without truncation. The read-only IPC snapshot returned all 16 paths and complete graph; one verbose boundary-edge response was truncated by command-output limits, so a compact follow-up snapshot at the same revision supplied full SCC memberships and internal edges. Current source AST inspection found a matching lexical import for every internal hard edge; no source file was executed for semantic classification and no test was run.
-EVIDENCE_CLASSES: DIRECT_EVIDENCE = Contextor LIVE/revision/freshness/collision data, canonical IPC snapshot graph and cycles, current Git and 33 synchronized file contexts, exact source AST lines. CODE_PATH_PROVED = model interfaces and fail-closed restrictions from Contextor symbol implementations. INFERENCE = candidate import execution ordering from static source, explicitly unverified at runtime. UNKNOWN = full semantic outcome and exact runtime activation for either SCC.
+## IMPLEMENTATION_CONTRACT
+CONTRACT_PROVED: Both new files byte-for-byte match the auditor-supplied CONTENT blocks after newline normalization. No existing production/test module or __init__.py was edited. The function accepts a complete hard-edge mapping and caller-supplied ParsedSourceInput mapping, computes cyclic topology, and attributes lexical candidates to each internal edge without reading analyzed files or executing analyzed imports.
+
+## TEST_COMMAND
+Baseline:
+.\.venv\Scripts\python.exe -B -m pytest -p no:cacheprovider -q tests/test_cycle_semantics_package_model.py tests/test_cycle_semantics_package_layout.py tests/test_cycle_semantics_evidence.py tests/test_cycle_semantics_scenarios.py tests/test_cycle_semantics_scc.py tests/test_cycle_semantics_initialization_model.py tests/test_cycle_semantics_binding_order.py tests/test_cycle_semantics_guards.py tests/test_cycle_semantics_execution_context.py tests/test_cycle_semantics_provenance.py
+
+Post-change:
+.\.venv\Scripts\python.exe -B -m pytest -p no:cacheprovider -q tests/test_cycle_semantics_edge_sites.py tests/test_cycle_semantics_package_model.py tests/test_cycle_semantics_package_layout.py tests/test_cycle_semantics_evidence.py tests/test_cycle_semantics_scenarios.py tests/test_cycle_semantics_scc.py tests/test_cycle_semantics_initialization_model.py tests/test_cycle_semantics_binding_order.py tests/test_cycle_semantics_guards.py tests/test_cycle_semantics_execution_context.py tests/test_cycle_semantics_provenance.py
+
+## TEST_RESULTS
+DIRECT_EVIDENCE: baseline 190 passed in 10.25s; post-change 204 passed in 11.93s. Full pytest suite was not run.
+
+## CANONICAL_EDGE_PRESERVATION
+CODE_PATH_PROVED: topology is computed from the input hard_edges. Every topology.cyclic_components internal edge receives exactly one HardEdgeSiteEvidence, including unmatched/invalid-source edges. Input graph is not modified. Tests cover two-edge cycles, missing/unmatched edges, determinism and graph immutability. No repository graph snapshot or FULL analysis was requested.
+
+## IMPORT_OCCURRENCE_ATTRIBUTION
+CODE_PATH_PROVED: source AST provenance retains ordinal, line, column, import form, requested name, member, raw scopes and controls. Candidate sites are deterministically ordered and multiple occurrences remain distinct. LEXICAL_CANDIDATES is lexical evidence only.
+
+## PACKAGE_INITIALIZER_CANDIDATES
+CODE_PATH_PROVED: _canonical retains file and package-initializer identities when indexed; _parents emits PARENT_INITIALIZER candidates; OPTIONAL_FROM_CHILD remains a candidate. Tests cover both kinds. No runtime re-execution or submodule resolution is asserted.
+
+## RELATIVE_IMPORT_EVIDENCE
+CODE_PATH_PROVED: _absolute_from uses importer package context and level, rejects invalid names/climbs, then matches indexed targets. Tests cover package-relative and second-level relative forms. Candidate matching is conservative, not runtime resolution.
+
+## FUNCTION_AND_GUARD_SCOPE_EVIDENCE
+CODE_PATH_PROVED: _activation distinguishes MODULE_TOP_LEVEL, GUARDED_TOP_LEVEL, FUNCTION_SCOPED and OTHER_SCOPED while retaining raw frames. Tests cover module, function and guarded occurrences. MODULE_TOP_LEVEL does not certify unconditional execution.
+
+## MISSING_SOURCE_FAIL_CLOSED
+CODE_PATH_PROVED: invalid/missing ParsedSourceInput, invalid AST/fingerprint and AST budget excess mark the source invalid; its internal edges remain with SOURCE_MISSING_OR_INVALID. Valid source without a match remains NO_MATCHING_LEXICAL_SITE. Tests cover missing source, invalid fingerprint and unmatched lexical site. Oversized AST behavior follows the exact code path; no dedicated oversized fixture was supplied.
+
+## COLLISION_COUNT_BEFORE_AFTER
+0 -> 0, both fresh in canonical LIVE diagnostics at revisions 432 and 434.
+
+## STRUCTURAL_CYCLE_COUNT_BEFORE_AFTER
+16 -> 16 reported paths, both fresh in canonical LIVE diagnostics at revisions 432 and 434.
+
+## NO_SAFETY_CERTIFICATION
+No runtime safety verdict or cold-import certification was made. The report evidence_scope explicitly excludes runtime certification.
+
+## NO_WARNING_SUPPRESSION
+No warning suppression, import detector change, graph policy change or diagnostic suppression was added.
+
+## NO_DIRECT_LIVE_PUBLICATION
+No update_file, publish, FULL analysis, restart or direct canonical mutation was requested. Desktop watcher produced the two observed canonical updates.
+
+## UNRESOLVED_LIMITATIONS
+UNKNOWN: The 204 focused tests do not exhaust every Python import runtime state. The provided implementation does not prove activation or actual from-import child resolution. Oversized-source behavior was reviewed from the exact code path but was not separately tested by the supplied test file.
+
+## FINAL_VERDICT
+B0G4C7_PASS
+
+## FULL_DIFFS
+
+diff --git a/contextor/core/cycle_semantics/edge_sites.py b/contextor/core/cycle_semantics/edge_sites.py
+new file mode 100644
+--- /dev/null
++++ b/contextor/core/cycle_semantics/edge_sites.py
+@@ -0,0 +1,383 @@
++"""Source-snapshot lexical candidates for canonical cyclic hard edges.
++
++Matches are provenance evidence, never proof of import activation or runtime
++resolution. Unmatched edges remain explicit, rather than being discarded.
++"""
++
++from __future__ import annotations
++
++import ast
++from collections.abc import Mapping
++from dataclasses import dataclass
++
++from contextor.core.source import ParsedSourceInput
++
++from .provenance import ControlFrame, ScopeFrame, extract_import_provenance
++from .scc import ImportCycleTopology, analyze_import_cycle_topology
++
++MAX_SOURCE_AST_NODES = 100_000
++
++
++@dataclass(frozen=True)
++class LexicalEdgeSite:
++    ordinal: int
++    line: int
++    column: int
++    form: str
++    match_kind: str
++    requested_name: str
++    matched_member: str | None
++    scopes: tuple[ScopeFrame, ...]
++    controls: tuple[ControlFrame, ...]
++    activation_scope: str
++
++
++@dataclass(frozen=True)
++class HardEdgeSiteEvidence:
++    source: str
++    target: str
++    status: str
++    sites: tuple[LexicalEdgeSite, ...]
++
++
++@dataclass(frozen=True)
++class SCCImportSiteEvidence:
++    members: tuple[str, ...]
++    internal_edges: tuple[HardEdgeSiteEvidence, ...]
++    matched_edge_count: int
++    unresolved_edge_count: int
++    evidence_scope: str = "LEXICAL_IMPORT_CANDIDATES_NOT_EXECUTION"
++
++
++@dataclass(frozen=True)
++class CyclicImportSiteReport:
++    topology: ImportCycleTopology
++    components: tuple[SCCImportSiteEvidence, ...]
++    evidence_scope: str = "SNAPSHOT_LEXICAL_EVIDENCE_NOT_RUNTIME_CERTIFICATION"
++
++
++def _canonical(name: str, indexed: set[str]) -> tuple[str, ...]:
++    """Keep indexed file/package collisions as distinct candidates."""
++    return tuple(
++        candidate
++        for candidate in (name, name + ".__init__")
++        if candidate in indexed
++    )
++
++
++def _parents(name: str, indexed: set[str]) -> tuple[str, ...]:
++    pieces = name.split(".")
++    return tuple(
++        prefix + ".__init__"
++        for length in range(1, len(pieces))
++        if (
++            prefix := ".".join(pieces[:length])
++        ) + ".__init__" in indexed
++    )
++
++
++def _absolute_from(
++    importer: str,
++    module: str | None,
++    level: int,
++) -> str | None:
++    if level == 0:
++        return (
++            module
++            if module
++            and all(p.isidentifier() for p in module.split("."))
++            else None
++        )
++
++    if level < 0:
++        return None
++
++    context = (
++        importer.rsplit(".", 1)[0]
++        if not importer.endswith(".__init__")
++        else importer.removesuffix(".__init__")
++    )
++
++    parts = context.split(".") if context else []
++    climb = level - 1
++
++    if not parts or climb >= len(parts):
++        return None
++
++    parent = parts[:len(parts) - climb]
++
++    if module:
++        if not all(p.isidentifier() for p in module.split(".")):
++            return None
++        parent.extend(module.split("."))
++
++    return ".".join(parent)
++
++
++def _candidate_targets(
++    occurrence,
++    importer: str,
++    indexed: set[str],
++) -> tuple[tuple[str, str, str, str | None], ...]:
++    """Return canonical target, match kind, request and member."""
++    found: set[tuple[str, str, str, str | None]] = set()
++
++    if occurrence.form == "IMPORT":
++        for requested, _alias in occurrence.aliases:
++            if (
++                not requested
++                or not all(
++                    p.isidentifier()
++                    for p in requested.split(".")
++                )
++            ):
++                continue
++
++            for candidate in _canonical(requested, indexed):
++                found.add((
++                    candidate,
++                    "DIRECT_MODULE",
++                    requested,
++                    None,
++                ))
++
++            for candidate in _parents(requested, indexed):
++                found.add((
++                    candidate,
++                    "PARENT_INITIALIZER",
++                    requested,
++                    None,
++                ))
++
++    elif occurrence.form == "IMPORT_FROM":
++        base = _absolute_from(
++            importer,
++            occurrence.module,
++            occurrence.level,
++        )
++
++        if base is None:
++            return ()
++
++        for candidate in _canonical(base, indexed):
++            found.add((
++                candidate,
++                "FROM_BASE",
++                base,
++                None,
++            ))
++
++        for candidate in _parents(base, indexed):
++            found.add((
++                candidate,
++                "PARENT_INITIALIZER",
++                base,
++                None,
++            ))
++
++        for member, _alias in occurrence.aliases:
++            if member == "*" or not member.isidentifier():
++                continue
++
++            child = base + "." + member
++
++            for candidate in _canonical(child, indexed):
++                found.add((
++                    candidate,
++                    "OPTIONAL_FROM_CHILD",
++                    base,
++                    member,
++                ))
++
++    return tuple(sorted(found))
++
++
++def _activation(
++    scopes: tuple[ScopeFrame, ...],
++    controls: tuple[ControlFrame, ...],
++) -> str:
++    if any(
++        scope.kind in {"FUNCTION", "ASYNC_FUNCTION"}
++        for scope in scopes
++    ):
++        return "FUNCTION_SCOPED"
++
++    if scopes:
++        return "OTHER_SCOPED"
++
++    if controls:
++        return "GUARDED_TOP_LEVEL"
++
++    return "MODULE_TOP_LEVEL"
++
++
++def analyze_cyclic_import_sites(
++    hard_edges: Mapping[
++        str,
++        set[str] | frozenset[str] | list[str] | tuple[str, ...],
++    ],
++    parsed_sources: Mapping[str, ParsedSourceInput],
++) -> CyclicImportSiteReport:
++    """Join canonical internal SCC edges to lexical AST candidates.
++
++    All graph edges survive even when source or lexical evidence is missing.
++    The model performs no runtime import execution or source reads.
++    """
++    if not isinstance(hard_edges, Mapping):
++        raise TypeError("hard_edges must be a mapping")
++
++    topology = analyze_import_cycle_topology(hard_edges)
++
++    if not isinstance(parsed_sources, Mapping):
++        raise TypeError("parsed_sources must be a mapping")
++
++    indexed = set(hard_edges)
++
++    for targets in hard_edges.values():
++        indexed.update(targets)
++
++    members = {
++        name
++        for component in topology.cyclic_components
++        for name in component.members
++    }
++
++    available: dict[
++        str,
++        dict[str, tuple[LexicalEdgeSite, ...]],
++    ] = {}
++
++    invalid: set[str] = set()
++
++    for module in sorted(members):
++        source = parsed_sources.get(module)
++
++        if (
++            not isinstance(source, ParsedSourceInput)
++            or not isinstance(source.tree, ast.Module)
++            or not isinstance(source.source_fingerprint, str)
++            or len(source.source_fingerprint) != 64
++            or any(
++                c not in "0123456789abcdef"
++                for c in source.source_fingerprint
++            )
++        ):
++            invalid.add(module)
++            continue
++
++        node_count = 0
++
++        for _ in ast.walk(source.tree):
++            node_count += 1
++
++            if node_count > MAX_SOURCE_AST_NODES:
++                invalid.add(module)
++                break
++
++        if module in invalid:
++            continue
++
++        evidence = extract_import_provenance(
++            source.tree,
++            module_id=module,
++            source_key=module,
++            source_path=module,
++            source_fingerprint=source.source_fingerprint,
++        )
++
++        matches: dict[
++            str,
++            set[LexicalEdgeSite],
++        ] = {}
++
++        for occurrence in evidence.occurrences:
++            candidates = _candidate_targets(
++                occurrence,
++                module,
++                indexed,
++            )
++
++            for target, kind, requested, member in candidates:
++                site = LexicalEdgeSite(
++                    ordinal=occurrence.ordinal,
++                    line=occurrence.line,
++                    column=occurrence.column,
++                    form=occurrence.form,
++                    match_kind=kind,
++                    requested_name=requested,
++                    matched_member=member,
++                    scopes=occurrence.scopes,
++                    controls=occurrence.controls,
++                    activation_scope=_activation(
++                        occurrence.scopes,
++                        occurrence.controls,
++                    ),
++                )
++
++                matches.setdefault(target, set()).add(site)
++
++        available[module] = {
++            target: tuple(
++                sorted(
++                    sites,
++                    key=lambda site: (
++                        site.ordinal,
++                        site.match_kind,
++                        site.matched_member or "",
++                    ),
++                )
++            )
++            for target, sites in matches.items()
++        }
++
++    components: list[SCCImportSiteEvidence] = []
++
++    for component in topology.cyclic_components:
++        edges: list[HardEdgeSiteEvidence] = []
++
++        for source, target in component.internal_edges:
++            if source in invalid:
++                edges.append(
++                    HardEdgeSiteEvidence(
++                        source,
++                        target,
++                        "SOURCE_MISSING_OR_INVALID",
++                        (),
++                    )
++                )
++                continue
++
++            sites = available[source].get(target, ())
++
++            edges.append(
++                HardEdgeSiteEvidence(
++                    source,
++                    target,
++                    (
++                        "LEXICAL_CANDIDATES"
++                        if sites
++                        else "NO_MATCHING_LEXICAL_SITE"
++                    ),
++                    sites,
++                )
++            )
++
++        components.append(
++            SCCImportSiteEvidence(
++                members=component.members,
++                internal_edges=tuple(edges),
++                matched_edge_count=sum(
++                    edge.status == "LEXICAL_CANDIDATES"
++                    for edge in edges
++                ),
++                unresolved_edge_count=sum(
++                    edge.status != "LEXICAL_CANDIDATES"
++                    for edge in edges
++                ),
++            )
++        )
++
++    return CyclicImportSiteReport(
++        topology=topology,
++        components=tuple(components),
++    )
+
+diff --git a/tests/test_cycle_semantics_edge_sites.py b/tests/test_cycle_semantics_edge_sites.py
+new file mode 100644
+--- /dev/null
++++ b/tests/test_cycle_semantics_edge_sites.py
+@@ -0,0 +1,278 @@
++import ast
++import hashlib
++import json
++from dataclasses import FrozenInstanceError, asdict
++
++import pytest
++
++from contextor.core.source import ParsedSourceInput
++from contextor.core.cycle_semantics.edge_sites import (
++    analyze_cyclic_import_sites as analyze,
++)
++
++
++def _sources(**items):
++    return {
++        name: ParsedSourceInput(
++            ast.parse(code),
++            hashlib.sha256(code.encode()).hexdigest(),
++        )
++        for name, code in items.items()
++    }
++
++
++def test_plain_import_cycle():
++    result = analyze(
++        {"a": {"b"}, "b": {"a"}},
++        _sources(a="import b", b="import a"),
++    )
++    component = result.components[0]
++    assert component.matched_edge_count == 2
++    assert all(
++        edge.sites[0].match_kind == "DIRECT_MODULE"
++        for edge in component.internal_edges
++    )
++
++
++def test_relative_package_cycle():
++    graph = {
++        "pkg.__init__": {"pkg.child"},
++        "pkg.child": {"pkg.__init__"},
++    }
++    result = analyze(
++        graph,
++        _sources(**{
++            "pkg.__init__": "from . import child",
++            "pkg.child": "from pkg import value",
++        }),
++    )
++    edges = {
++        (edge.source, edge.target): edge
++        for edge in result.components[0].internal_edges
++    }
++    assert edges[
++        "pkg.__init__", "pkg.child"
++    ].sites[0].match_kind == "OPTIONAL_FROM_CHILD"
++    assert edges[
++        "pkg.child", "pkg.__init__"
++    ].sites[0].match_kind == "FROM_BASE"
++
++
++def test_parent_initializer_candidate():
++    graph = {
++        "pkg.__init__": {"pkg.child"},
++        "pkg.child": {"pkg.__init__"},
++    }
++    result = analyze(
++        graph,
++        _sources(**{
++            "pkg.__init__": "import pkg.child",
++            "pkg.child": "import pkg.child",
++        }),
++    )
++    edge = next(
++        edge
++        for edge in result.components[0].internal_edges
++        if edge.source == "pkg.child"
++    )
++    assert edge.sites[0].match_kind == "PARENT_INITIALIZER"
++
++
++def test_function_scope_and_guard_sites_are_not_eager_proofs():
++    result = analyze(
++        {"a": {"b"}, "b": {"a"}},
++        _sources(
++            a=(
++                "import b\n"
++                "def f():\n"
++                "    import b\n"
++                "if False:\n"
++                "    import b"
++            ),
++            b="import a",
++        ),
++    )
++    edge = next(
++        edge
++        for edge in result.components[0].internal_edges
++        if edge.source == "a"
++    )
++    assert [
++        site.activation_scope
++        for site in edge.sites
++    ] == [
++        "MODULE_TOP_LEVEL",
++        "FUNCTION_SCOPED",
++        "GUARDED_TOP_LEVEL",
++    ]
++    assert edge.sites[1].scopes
++    assert edge.sites[2].controls
++
++
++def test_only_function_local_candidate_is_preserved():
++    result = analyze(
++        {"a": {"b"}, "b": {"a"}},
++        _sources(
++            a="def f():\n    import b",
++            b="import a",
++        ),
++    )
++    edge = next(
++        edge
++        for edge in result.components[0].internal_edges
++        if edge.source == "a"
++    )
++    assert edge.status == "LEXICAL_CANDIDATES"
++    assert edge.sites[0].activation_scope == "FUNCTION_SCOPED"
++
++
++def test_missing_and_unmatched_not_dropped():
++    result = analyze(
++        {"a": {"b"}, "b": {"a"}},
++        _sources(a="pass"),
++    )
++    assert {
++        edge.status
++        for edge in result.components[0].internal_edges
++    } == {
++        "NO_MATCHING_LEXICAL_SITE",
++        "SOURCE_MISSING_OR_INVALID",
++    }
++    assert result.components[0].unresolved_edge_count == 2
++
++
++def test_unrelated_sources_do_not_change_results():
++    graph = {
++        "a": {"b"},
++        "b": {"a"},
++        "z": set(),
++    }
++    first = analyze(
++        graph,
++        _sources(
++            a="import b",
++            b="import a",
++            z="pass",
++        ),
++    )
++    second = analyze(
++        graph,
++        _sources(
++            a="import b",
++            b="import a",
++            z="import a",
++        ),
++    )
++    assert first == second
++
++
++def test_from_possible_child_is_not_proof():
++    graph = {
++        "pkg.__init__": {"pkg.x"},
++        "pkg.x": {"pkg.__init__"},
++    }
++    result = analyze(
++        graph,
++        _sources(**{
++            "pkg.__init__": "from pkg import x",
++            "pkg.x": "import pkg",
++        }),
++    )
++    edge = next(
++        edge
++        for edge in result.components[0].internal_edges
++        if edge.source == "pkg.__init__"
++    )
++    assert edge.sites[0].match_kind == "OPTIONAL_FROM_CHILD"
++    assert result.evidence_scope.endswith(
++        "NOT_RUNTIME_CERTIFICATION"
++    )
++
++
++def test_no_cycle():
++    result = analyze(
++        {"a": {"b"}, "b": set()},
++        _sources(a="import b", b="pass"),
++    )
++    assert result.components == ()
++
++
++def test_invalid_source_ast():
++    result = analyze(
++        {"a": {"b"}, "b": {"a"}},
++        {
++            "a": ParsedSourceInput(
++                ast.parse("import b"),
++                hashlib.sha256(b"import b").hexdigest(),
++            ),
++            "b": None,
++        },
++    )
++    assert result.components[0].unresolved_edge_count == 1
++
++
++def test_relative_second_level():
++    graph = {
++        "p.__init__": {"p.sub.mod"},
++        "p.sub.__init__": {"p.__init__"},
++        "p.sub.mod": {
++            "p.__init__",
++            "p.sub.__init__",
++        },
++    }
++    sources = _sources(**{
++        "p.__init__": "from p.sub import mod",
++        "p.sub.__init__": "from .. import foo",
++        "p.sub.mod": "from .. import foo",
++    })
++    result = analyze(graph, sources)
++    edge = next(
++        edge
++        for edge in result.components[0].internal_edges
++        if edge.source == "p.sub.mod"
++        and edge.target == "p.__init__"
++    )
++    assert edge.sites[0].match_kind == "FROM_BASE"
++
++
++def test_determinism_and_frozen():
++    graph = {"a": {"b"}, "b": {"a"}}
++    sources = _sources(a="import b", b="import a")
++    result = analyze(graph, sources)
++    assert result == analyze(graph, sources)
++    json.dumps(asdict(result))
++
++    with pytest.raises(FrozenInstanceError):
++        result.components[0].matched_edge_count = 99
++
++    assert graph == {
++        "a": {"b"},
++        "b": {"a"},
++    }
++
++
++def test_invalid_input_raises():
++    with pytest.raises(TypeError):
++        analyze({"a": {"a"}}, None)
++
++    with pytest.raises(TypeError):
++        analyze(None, {})
++
++
++def test_invalid_fingerprint_is_not_treated_as_source():
++    result = analyze(
++        {"a": {"b"}, "b": {"a"}},
++        {
++            "a": ParsedSourceInput(
++                ast.parse("import b"),
++                "invalid",
++            ),
++            "b": _sources(b="import a")["b"],
++        },
++    )
++    edge = next(
++        edge
++        for edge in result.components[0].internal_edges
++        if edge.source == "a"
++    )
++    assert edge.status == "SOURCE_MISSING_OR_INVALID"
+
