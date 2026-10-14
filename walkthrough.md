@@ -1,294 +1,484 @@
-# CONTEXTOR_B0G4C8_REAL_SCC_EDGE_ATTRIBUTION_DOGFOOD
+# CONTEXTOR_B0G4C9_SCC02_SOURCE_ANCHORED_ENTRY_ORDER_REGRESSIONS
 
-## HEAD
-b1cdbc86e0fd00f616d58a0af36c741976cab5e4
+## HEAD_BEFORE
+4a73254c2622da89b1a7244aebff8b7863d2b544
+
+## HEAD_AFTER
+4a73254c2622da89b1a7244aebff8b7863d2b544
+
 ## GIT_STATUS
-Before: clean. After: M walkthrough.md (the only changed tracked file; report artifact). No production/test/docs changes.
-## LIVE_REVISION_BEFORE_AFTER
-IPC ping/snapshot/ping 434/434/434; stable. MCP precheck revision 434.
-## ACTIVITY_EPOCH
-MCP precheck: 1beab26da2ff4932852caa7db6ff4242; MCP postcheck revision 434, same activity_epoch, resync_required=false, fresh syntax/collisions/cycles, and no new canonical events.
-## CANONICAL_FRESHNESS
-DIRECT_EVIDENCE: MCP precheck resync_required=false, syntax/collisions/cycles fresh; all 33 SCC modules workspace_sync=verified at revision 434. IPC state.cycles_state=fresh, resync_required=false; authority identity stable across snapshot. MCP postcheck revision 434, same activity_epoch, resync_required=false, fresh syntax/collisions/cycles, and no new canonical events.
-## SOURCE_SNAPSHOT_COHERENCE
-DIRECT_EVIDENCE: Paths came from snapshot state.modules. parse_source_with_fingerprint read each of 33 files as one byte snapshot; every per-file fingerprint matched a second read after attribution. IPC revision stable throughout. Snapshot state.file_state has 0 entries, so canonical SHA comparison is unavailable. These 33 reads are individually coherent but not proven atomically bound to canonical revision. No analyzed SCC module was imported or executed.
-## GRAPH_NODE_AND_EDGE_COUNTS
-463 nodes; 1777 distinct hard edges; copied from complete canonical hard_edges.
-## REPORTED_CYCLE_PATH_COUNT
-16
-## CYCLIC_SCC_COUNT
-2
-## CYCLIC_SCC_MEMBERS
-SCC01: 24 modules
-- contextor.core.analysis.full_analysis_coordinator | C:\Temp\Contextor_Repo\contextor\core\analysis\full_analysis_coordinator.py
-- contextor.core.analysis.incremental.engine | C:\Temp\Contextor_Repo\contextor\core\analysis\incremental\engine.py
-- contextor.core.analysis.incremental.materialization | C:\Temp\Contextor_Repo\contextor\core\analysis\incremental\materialization.py
-- contextor.core.analysis.incremental.plan_executor | C:\Temp\Contextor_Repo\contextor\core\analysis\incremental\plan_executor.py
-- contextor.core.analysis.incremental.preparation | C:\Temp\Contextor_Repo\contextor\core\analysis\incremental\preparation.py
-- contextor.core.analysis.incremental_engine | C:\Temp\Contextor_Repo\contextor\core\analysis\incremental_engine.py
-- contextor.core.analysis.lineage_extraction | C:\Temp\Contextor_Repo\contextor\core\analysis\lineage_extraction.py
-- contextor.core.analysis.refresh_planner | C:\Temp\Contextor_Repo\contextor\core\analysis\refresh_planner.py
-- contextor.core.analysis.state_manager | C:\Temp\Contextor_Repo\contextor\core\analysis\state_manager.py
-- contextor.core.api.facade | C:\Temp\Contextor_Repo\contextor\core\api\facade.py
-- contextor.core.lineage_query.live_query | C:\Temp\Contextor_Repo\contextor\core\lineage_query\live_query.py
-- contextor.core.live_state.__init__ | C:\Temp\Contextor_Repo\contextor\core\live_state\__init__.py
-- contextor.core.live_state.hydration | C:\Temp\Contextor_Repo\contextor\core\live_state\hydration.py
-- contextor.core.live_state.ipc | C:\Temp\Contextor_Repo\contextor\core\live_state\ipc.py
-- contextor.core.live_state.runtime | C:\Temp\Contextor_Repo\contextor\core\live_state\runtime.py
-- contextor.core.live_state.store | C:\Temp\Contextor_Repo\contextor\core\live_state\store.py
-- contextor.core.live_state.watcher | C:\Temp\Contextor_Repo\contextor\core\live_state\watcher.py
-- contextor.core.reference.module_usage_reuse | C:\Temp\Contextor_Repo\contextor\core\reference\module_usage_reuse.py
-- contextor.core.reporting_engine.pipeline | C:\Temp\Contextor_Repo\contextor\core\reporting_engine\pipeline.py
-- contextor.core.single_file.builders.__init__ | C:\Temp\Contextor_Repo\contextor\core\single_file\builders\__init__.py
-- contextor.core.single_file.builders.layer0_builders | C:\Temp\Contextor_Repo\contextor\core\single_file\builders\layer0_builders.py
-- contextor.core.single_file.builders.layer2_builders | C:\Temp\Contextor_Repo\contextor\core\single_file\builders\layer2_builders.py
-- contextor.core.single_file.single_file_analysis | C:\Temp\Contextor_Repo\contextor\core\single_file\single_file_analysis.py
-- contextor.core.symbol_engine.indexer | C:\Temp\Contextor_Repo\contextor\core\symbol_engine\indexer.py
-SCC02: 9 modules
-- contextor.repo_generator.__init__ | C:\Temp\Contextor_Repo\contextor\repo_generator\__init__.py
-- contextor.repo_generator.filters | C:\Temp\Contextor_Repo\contextor\repo_generator\filters.py
-- contextor.repo_generator.icons | C:\Temp\Contextor_Repo\contextor\repo_generator\icons.py
-- contextor.repo_generator.main | C:\Temp\Contextor_Repo\contextor\repo_generator\main.py
-- contextor.ui.__init__ | C:\Temp\Contextor_Repo\contextor\ui\__init__.py
-- contextor.ui.exclude_gui | C:\Temp\Contextor_Repo\contextor\ui\exclude_gui.py
-- contextor.ui.gui | C:\Temp\Contextor_Repo\contextor\ui\gui.py
-- contextor.ui.gui_parser | C:\Temp\Contextor_Repo\contextor\ui\gui_parser.py
-- contextor.ui.progress_widget | C:\Temp\Contextor_Repo\contextor\ui\progress_widget.py
-## INTERNAL_HARD_EDGE_COUNT
-72
-## ATTRIBUTION_COMPLETENESS_CHECKS
-A cyclic SCCs=2; B distinct cyclic members=33; C internal edges=72; D records=72; E matched+unresolved=72+0=72; F SOURCE_MISSING_OR_INVALID=0; G NO_MATCHING_LEXICAL_SITE=0; H LEXICAL_CANDIDATES=72. D==C PASS; E==C PASS; matched+unresolved==C PASS.
-## PER_SCC_SUMMARY
-SCC01: members=24, internal_edges=56, matched=56, unresolved=0, lexical_sites=78
-Match kinds: {"FROM_BASE": 77, "PARENT_INITIALIZER": 1}
-Activation scopes: {"FUNCTION_SCOPED": 47, "MODULE_TOP_LEVEL": 31}
-Only function-scoped: contextor.core.analysis.full_analysis_coordinator -> contextor.core.api.facade; contextor.core.analysis.incremental.engine -> contextor.core.analysis.refresh_planner; contextor.core.analysis.incremental.plan_executor -> contextor.core.analysis.incremental.materialization; contextor.core.analysis.incremental.plan_executor -> contextor.core.analysis.refresh_planner; contextor.core.analysis.incremental.preparation -> contextor.core.symbol_engine.indexer; contextor.core.analysis.state_manager -> contextor.core.live_state.__init__; contextor.core.api.facade -> contextor.core.analysis.incremental.materialization; contextor.core.api.facade -> contextor.core.analysis.state_manager; contextor.core.api.facade -> contextor.core.live_state.store; contextor.core.api.facade -> contextor.core.reference.module_usage_reuse; contextor.core.live_state.hydration -> contextor.core.analysis.incremental_engine; contextor.core.live_state.hydration -> contextor.core.analysis.state_manager; contextor.core.live_state.hydration -> contextor.core.live_state.runtime; contextor.core.live_state.hydration -> contextor.core.live_state.store; contextor.core.live_state.ipc -> contextor.core.live_state.store; contextor.core.live_state.runtime -> contextor.core.analysis.full_analysis_coordinator; contextor.core.live_state.runtime -> contextor.core.analysis.incremental.materialization; contextor.core.live_state.runtime -> contextor.core.analysis.incremental_engine; contextor.core.live_state.runtime -> contextor.core.analysis.state_manager; contextor.core.live_state.store -> contextor.core.analysis.state_manager; contextor.core.live_state.watcher -> contextor.core.analysis.state_manager; contextor.core.live_state.watcher -> contextor.core.api.facade; contextor.core.live_state.watcher -> contextor.core.live_state.runtime; contextor.core.reporting_engine.pipeline -> contextor.core.analysis.state_manager; contextor.core.single_file.builders.layer0_builders -> contextor.core.analysis.state_manager; contextor.core.single_file.builders.layer2_builders -> contextor.core.analysis.state_manager
-Only guarded: none
-Top-level and deferred: contextor.core.analysis.incremental.materialization -> contextor.core.analysis.state_manager; contextor.core.analysis.incremental.plan_executor -> contextor.core.analysis.state_manager; contextor.core.api.facade -> contextor.core.live_state.__init__; contextor.core.live_state.runtime -> contextor.core.live_state.store
-Optional child candidate: none
-No source evidence: none
-SCC02: members=9, internal_edges=16, matched=16, unresolved=0, lexical_sites=39
-Match kinds: {"FROM_BASE": 18, "PARENT_INITIALIZER": 21}
-Activation scopes: {"FUNCTION_SCOPED": 6, "MODULE_TOP_LEVEL": 33}
-Only function-scoped: none
-Only guarded: none
-Top-level and deferred: contextor.ui.exclude_gui -> contextor.ui.__init__; contextor.ui.gui -> contextor.ui.__init__; contextor.ui.gui -> contextor.ui.exclude_gui; contextor.ui.gui -> contextor.ui.gui_parser
-Optional child candidate: none
-No source evidence: none
-## PER_EDGE_COMPLETE_INVENTORY
-### SCC01
-- SCC_ID=SCC01; SOURCE_CANONICAL_MODULE=contextor.core.analysis.full_analysis_coordinator; TARGET_CANONICAL_MODULE=contextor.core.api.facade; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\analysis\full_analysis_coordinator.py; STATUS=LEXICAL_CANDIDATES; LEXICAL_SITE_COUNT=1
-  - {"ACTIVATION_SCOPE": "FUNCTION_SCOPED", "COLUMN": 12, "FORM": "IMPORT_FROM", "LINE": 88, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 6, "RAW_CONTROL_FRAMES": [{"branch": "BODY", "expression": null, "kind": "TRY", "line": 68}, {"branch": "ELSE", "expression": "Compare(left=Name(id='analysis_fn', ctx=Load()), ops=[IsNot()], comparators=[Constant(value=None)])", "kind": "IF", "line": 77}], "RAW_SCOPE_FRAMES": [{"kind": "FUNCTION", "line": 41, "name": "run_full_analysis_exclusive"}], "REQUESTED_NAME": "contextor.core.api.facade"}
-- SCC_ID=SCC01; SOURCE_CANONICAL_MODULE=contextor.core.analysis.incremental.engine; TARGET_CANONICAL_MODULE=contextor.core.analysis.incremental.materialization; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\analysis\incremental\engine.py; STATUS=LEXICAL_CANDIDATES; LEXICAL_SITE_COUNT=1
-  - {"ACTIVATION_SCOPE": "MODULE_TOP_LEVEL", "COLUMN": 0, "FORM": "IMPORT_FROM", "LINE": 20, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 13, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [], "REQUESTED_NAME": "contextor.core.analysis.incremental.materialization"}
-- SCC_ID=SCC01; SOURCE_CANONICAL_MODULE=contextor.core.analysis.incremental.engine; TARGET_CANONICAL_MODULE=contextor.core.analysis.incremental.plan_executor; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\analysis\incremental\engine.py; STATUS=LEXICAL_CANDIDATES; LEXICAL_SITE_COUNT=1
-  - {"ACTIVATION_SCOPE": "MODULE_TOP_LEVEL", "COLUMN": 0, "FORM": "IMPORT_FROM", "LINE": 33, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 15, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [], "REQUESTED_NAME": "contextor.core.analysis.incremental.plan_executor"}
-- SCC_ID=SCC01; SOURCE_CANONICAL_MODULE=contextor.core.analysis.incremental.engine; TARGET_CANONICAL_MODULE=contextor.core.analysis.incremental.preparation; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\analysis\incremental\engine.py; STATUS=LEXICAL_CANDIDATES; LEXICAL_SITE_COUNT=1
-  - {"ACTIVATION_SCOPE": "MODULE_TOP_LEVEL", "COLUMN": 0, "FORM": "IMPORT_FROM", "LINE": 27, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 14, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [], "REQUESTED_NAME": "contextor.core.analysis.incremental.preparation"}
-- SCC_ID=SCC01; SOURCE_CANONICAL_MODULE=contextor.core.analysis.incremental.engine; TARGET_CANONICAL_MODULE=contextor.core.analysis.refresh_planner; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\analysis\incremental\engine.py; STATUS=LEXICAL_CANDIDATES; LEXICAL_SITE_COUNT=2
-  - {"ACTIVATION_SCOPE": "FUNCTION_SCOPED", "COLUMN": 16, "FORM": "IMPORT_FROM", "LINE": 615, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 24, "RAW_CONTROL_FRAMES": [{"branch": "BODY", "expression": null, "kind": "WITH", "line": 569}, {"branch": "BODY", "expression": "UnaryOp(op=Not(), operand=Name(id='current_state', ctx=Load()))", "kind": "IF", "line": 602}], "RAW_SCOPE_FRAMES": [{"kind": "CLASS", "line": 150, "name": "IncrementalAnalysisEngine"}, {"kind": "FUNCTION", "line": 564, "name": "update_file"}], "REQUESTED_NAME": "contextor.core.analysis.refresh_planner"}
-  - {"ACTIVATION_SCOPE": "FUNCTION_SCOPED", "COLUMN": 12, "FORM": "IMPORT_FROM", "LINE": 734, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 25, "RAW_CONTROL_FRAMES": [{"branch": "BODY", "expression": null, "kind": "WITH", "line": 569}], "RAW_SCOPE_FRAMES": [{"kind": "CLASS", "line": 150, "name": "IncrementalAnalysisEngine"}, {"kind": "FUNCTION", "line": 564, "name": "update_file"}], "REQUESTED_NAME": "contextor.core.analysis.refresh_planner"}
-- SCC_ID=SCC01; SOURCE_CANONICAL_MODULE=contextor.core.analysis.incremental.engine; TARGET_CANONICAL_MODULE=contextor.core.analysis.state_manager; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\analysis\incremental\engine.py; STATUS=LEXICAL_CANDIDATES; LEXICAL_SITE_COUNT=2
-  - {"ACTIVATION_SCOPE": "MODULE_TOP_LEVEL", "COLUMN": 0, "FORM": "IMPORT_FROM", "LINE": 10, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 8, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [], "REQUESTED_NAME": "contextor.core.analysis.state_manager"}
-  - {"ACTIVATION_SCOPE": "MODULE_TOP_LEVEL", "COLUMN": 0, "FORM": "IMPORT_FROM", "LINE": 37, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 16, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [], "REQUESTED_NAME": "contextor.core.analysis.state_manager"}
-- SCC_ID=SCC01; SOURCE_CANONICAL_MODULE=contextor.core.analysis.incremental.materialization; TARGET_CANONICAL_MODULE=contextor.core.analysis.state_manager; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\analysis\incremental\materialization.py; STATUS=LEXICAL_CANDIDATES; LEXICAL_SITE_COUNT=5
-  - {"ACTIVATION_SCOPE": "MODULE_TOP_LEVEL", "COLUMN": 0, "FORM": "IMPORT_FROM", "LINE": 12, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 2, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [], "REQUESTED_NAME": "contextor.core.analysis.state_manager"}
-  - {"ACTIVATION_SCOPE": "FUNCTION_SCOPED", "COLUMN": 4, "FORM": "IMPORT_FROM", "LINE": 212, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 6, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [{"kind": "FUNCTION", "line": 201, "name": "ensure_cached_analytics"}], "REQUESTED_NAME": "contextor.core.analysis.state_manager"}
-  - {"ACTIVATION_SCOPE": "FUNCTION_SCOPED", "COLUMN": 4, "FORM": "IMPORT_FROM", "LINE": 431, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 11, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [{"kind": "FUNCTION", "line": 414, "name": "ensure_artifact_consumption"}], "REQUESTED_NAME": "contextor.core.analysis.state_manager"}
-  - {"ACTIVATION_SCOPE": "FUNCTION_SCOPED", "COLUMN": 4, "FORM": "IMPORT_FROM", "LINE": 496, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 12, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [{"kind": "FUNCTION", "line": 467, "name": "ensure_dependency_matrix"}], "REQUESTED_NAME": "contextor.core.analysis.state_manager"}
-  - {"ACTIVATION_SCOPE": "FUNCTION_SCOPED", "COLUMN": 4, "FORM": "IMPORT_FROM", "LINE": 564, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 14, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [{"kind": "FUNCTION", "line": 537, "name": "ensure_shared_usage_clusters"}], "REQUESTED_NAME": "contextor.core.analysis.state_manager"}
-- SCC_ID=SCC01; SOURCE_CANONICAL_MODULE=contextor.core.analysis.incremental.plan_executor; TARGET_CANONICAL_MODULE=contextor.core.analysis.incremental.materialization; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\analysis\incremental\plan_executor.py; STATUS=LEXICAL_CANDIDATES; LEXICAL_SITE_COUNT=1
-  - {"ACTIVATION_SCOPE": "FUNCTION_SCOPED", "COLUMN": 12, "FORM": "IMPORT_FROM", "LINE": 1475, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 25, "RAW_CONTROL_FRAMES": [{"branch": "BODY", "expression": "Attribute(value=Name(id='plan', ctx=Load()), attr='patch_families', ctx=Load())", "kind": "FOR", "line": 1342}, {"branch": "ELSE", "expression": "Compare(left=Name(id='family', ctx=Load()), ops=[Eq()], comparators=[Constant(value='modules')])", "kind": "IF", "line": 1343}, {"branch": "ELSE", "expression": "Compare(left=Name(id='family', ctx=Load()), ops=[Eq()], comparators=[Constant(value='definitions')])", "kind": "IF", "line": 1346}, {"branch": "ELSE", "expression": "Compare(left=Name(id='family', ctx=Load()), ops=[Eq()], comparators=[Constant(value='module_usages')])", "kind": "IF", "line": 1349}, {"branch": "ELSE", "expression": "Compare(left=Name(id='family', ctx=Load()), ops=[Eq()], comparators=[Constant(value='reexport_facts')])", "kind": "IF", "line": 1352}, {"branch": "ELSE", "expression": "Compare(left=Name(id='family', ctx=Load()), ops=[Eq()], comparators=[Constant(value='dependency_graph')])", "kind": "IF", "line": 1355}, {"branch": "ELSE", "expression": "Compare(left=Name(id='family', ctx=Load()), ops=[Eq()], comparators=[Constant(value='artifact_consumption')])", "kind": "IF", "line": 1394}, {"branch": "ELSE", "expression": "Compare(left=Name(id='family', ctx=Load()), ops=[Eq()], comparators=[Constant(value='identity_registry')])", "kind": "IF", "line": 1448}, {"branch": "ELSE", "expression": "Compare(left=Name(id='family', ctx=Load()), ops=[Eq()], comparators=[Constant(value='cached_analytics')])", "kind": "IF", "line": 1452}, {"branch": "ELSE", "expression": "Compare(left=Name(id='family', ctx=Load()), ops=[Eq()], comparators=[Constant(value='collision_facts')])", "kind": "IF", "line": 1463}, {"branch": "BODY", "expression": "Compare(left=Name(id='family', ctx=Load()), ops=[Eq()], comparators=[Constant(value='collisions')])", "kind": "IF", "line": 1474}], "RAW_SCOPE_FRAMES": [{"kind": "FUNCTION", "line": 1108, "name": "execute_refresh_plan"}], "REQUESTED_NAME": "contextor.core.analysis.incremental.materialization"}
-- SCC_ID=SCC01; SOURCE_CANONICAL_MODULE=contextor.core.analysis.incremental.plan_executor; TARGET_CANONICAL_MODULE=contextor.core.analysis.refresh_planner; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\analysis\incremental\plan_executor.py; STATUS=LEXICAL_CANDIDATES; LEXICAL_SITE_COUNT=1
-  - {"ACTIVATION_SCOPE": "FUNCTION_SCOPED", "COLUMN": 8, "FORM": "IMPORT_FROM", "LINE": 1260, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 23, "RAW_CONTROL_FRAMES": [{"branch": "BODY", "expression": "Attribute(value=Name(id='plan', ctx=Load()), attr='recompute_modules', ctx=Load())", "kind": "IF", "line": 1259}], "RAW_SCOPE_FRAMES": [{"kind": "FUNCTION", "line": 1108, "name": "execute_refresh_plan"}], "REQUESTED_NAME": "contextor.core.analysis.refresh_planner"}
-- SCC_ID=SCC01; SOURCE_CANONICAL_MODULE=contextor.core.analysis.incremental.plan_executor; TARGET_CANONICAL_MODULE=contextor.core.analysis.state_manager; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\analysis\incremental\plan_executor.py; STATUS=LEXICAL_CANDIDATES; LEXICAL_SITE_COUNT=4
-  - {"ACTIVATION_SCOPE": "MODULE_TOP_LEVEL", "COLUMN": 0, "FORM": "IMPORT_FROM", "LINE": 18, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 5, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [], "REQUESTED_NAME": "contextor.core.analysis.state_manager"}
-  - {"ACTIVATION_SCOPE": "FUNCTION_SCOPED", "COLUMN": 8, "FORM": "IMPORT_FROM", "LINE": 1598, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 30, "RAW_CONTROL_FRAMES": [{"branch": "BODY", "expression": "BoolOp(op=And(), values=[BoolOp(op=Or(), values=[Name(id='matrix_inputs_changed', ctx=Load()), Name(id='cluster_inputs_changed', ctx=Load())]), Compare(left=Attribute(value=Name(id='plan', ctx=Load()), attr='refresh_completeness', ctx=Load()), ops=[NotEq()], comparators=[Constant(value='requires_resync')]), UnaryOp(op=Not(), operand=Call(func=Name(id='getattr', ctx=Load()), args=[Name(id='state', ctx=Load()), Constant(value='resync_required'), Constant(value=False)], keywords=[]))])", "kind": "IF", "line": 1593}], "RAW_SCOPE_FRAMES": [{"kind": "FUNCTION", "line": 1108, "name": "execute_refresh_plan"}], "REQUESTED_NAME": "contextor.core.analysis.state_manager"}
-  - {"ACTIVATION_SCOPE": "FUNCTION_SCOPED", "COLUMN": 8, "FORM": "IMPORT_FROM", "LINE": 1614, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 32, "RAW_CONTROL_FRAMES": [{"branch": "ELSE", "expression": "BoolOp(op=Or(), values=[Compare(left=Attribute(value=Name(id='plan', ctx=Load()), attr='refresh_completeness', ctx=Load()), ops=[Eq()], comparators=[Constant(value='requires_resync')]), Call(func=Name(id='getattr', ctx=Load()), args=[Name(id='state', ctx=Load()), Constant(value='resync_required'), Constant(value=False)], keywords=[])])", "kind": "IF", "line": 1609}, {"branch": "BODY", "expression": "Name(id='matrix_inputs_changed', ctx=Load())", "kind": "IF", "line": 1613}], "RAW_SCOPE_FRAMES": [{"kind": "FUNCTION", "line": 1108, "name": "execute_refresh_plan"}], "REQUESTED_NAME": "contextor.core.analysis.state_manager"}
-  - {"ACTIVATION_SCOPE": "FUNCTION_SCOPED", "COLUMN": 8, "FORM": "IMPORT_FROM", "LINE": 1646, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 34, "RAW_CONTROL_FRAMES": [{"branch": "ELSE", "expression": "BoolOp(op=Or(), values=[Compare(left=Attribute(value=Name(id='plan', ctx=Load()), attr='refresh_completeness', ctx=Load()), ops=[Eq()], comparators=[Constant(value='requires_resync')]), Call(func=Name(id='getattr', ctx=Load()), args=[Name(id='state', ctx=Load()), Constant(value='resync_required'), Constant(value=False)], keywords=[])])", "kind": "IF", "line": 1641}, {"branch": "BODY", "expression": "Name(id='cluster_inputs_changed', ctx=Load())", "kind": "IF", "line": 1645}], "RAW_SCOPE_FRAMES": [{"kind": "FUNCTION", "line": 1108, "name": "execute_refresh_plan"}], "REQUESTED_NAME": "contextor.core.analysis.state_manager"}
-- SCC_ID=SCC01; SOURCE_CANONICAL_MODULE=contextor.core.analysis.incremental.preparation; TARGET_CANONICAL_MODULE=contextor.core.analysis.lineage_extraction; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\analysis\incremental\preparation.py; STATUS=LEXICAL_CANDIDATES; LEXICAL_SITE_COUNT=1
-  - {"ACTIVATION_SCOPE": "MODULE_TOP_LEVEL", "COLUMN": 0, "FORM": "IMPORT_FROM", "LINE": 16, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 4, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [], "REQUESTED_NAME": "contextor.core.analysis.lineage_extraction"}
-- SCC_ID=SCC01; SOURCE_CANONICAL_MODULE=contextor.core.analysis.incremental.preparation; TARGET_CANONICAL_MODULE=contextor.core.analysis.state_manager; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\analysis\incremental\preparation.py; STATUS=LEXICAL_CANDIDATES; LEXICAL_SITE_COUNT=1
-  - {"ACTIVATION_SCOPE": "MODULE_TOP_LEVEL", "COLUMN": 0, "FORM": "IMPORT_FROM", "LINE": 15, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 3, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [], "REQUESTED_NAME": "contextor.core.analysis.state_manager"}
-- SCC_ID=SCC01; SOURCE_CANONICAL_MODULE=contextor.core.analysis.incremental.preparation; TARGET_CANONICAL_MODULE=contextor.core.symbol_engine.indexer; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\analysis\incremental\preparation.py; STATUS=LEXICAL_CANDIDATES; LEXICAL_SITE_COUNT=1
-  - {"ACTIVATION_SCOPE": "FUNCTION_SCOPED", "COLUMN": 8, "FORM": "IMPORT_FROM", "LINE": 229, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 9, "RAW_CONTROL_FRAMES": [{"branch": "BODY", "expression": null, "kind": "TRY", "line": 228}], "RAW_SCOPE_FRAMES": [{"kind": "FUNCTION", "line": 147, "name": "prepare_source_update"}], "REQUESTED_NAME": "contextor.core.symbol_engine.indexer"}
-- SCC_ID=SCC01; SOURCE_CANONICAL_MODULE=contextor.core.analysis.incremental_engine; TARGET_CANONICAL_MODULE=contextor.core.analysis.incremental.engine; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\analysis\incremental_engine.py; STATUS=LEXICAL_CANDIDATES; LEXICAL_SITE_COUNT=1
-  - {"ACTIVATION_SCOPE": "MODULE_TOP_LEVEL", "COLUMN": 0, "FORM": "IMPORT_FROM", "LINE": 8, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 0, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [], "REQUESTED_NAME": "contextor.core.analysis.incremental.engine"}
-- SCC_ID=SCC01; SOURCE_CANONICAL_MODULE=contextor.core.analysis.lineage_extraction; TARGET_CANONICAL_MODULE=contextor.core.analysis.state_manager; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\analysis\lineage_extraction.py; STATUS=LEXICAL_CANDIDATES; LEXICAL_SITE_COUNT=1
-  - {"ACTIVATION_SCOPE": "MODULE_TOP_LEVEL", "COLUMN": 0, "FORM": "IMPORT_FROM", "LINE": 5, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 2, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [], "REQUESTED_NAME": "contextor.core.analysis.state_manager"}
-- SCC_ID=SCC01; SOURCE_CANONICAL_MODULE=contextor.core.analysis.refresh_planner; TARGET_CANONICAL_MODULE=contextor.core.analysis.state_manager; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\analysis\refresh_planner.py; STATUS=LEXICAL_CANDIDATES; LEXICAL_SITE_COUNT=1
-  - {"ACTIVATION_SCOPE": "MODULE_TOP_LEVEL", "COLUMN": 0, "FORM": "IMPORT_FROM", "LINE": 9, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 1, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [], "REQUESTED_NAME": "contextor.core.analysis.state_manager"}
-- SCC_ID=SCC01; SOURCE_CANONICAL_MODULE=contextor.core.analysis.state_manager; TARGET_CANONICAL_MODULE=contextor.core.live_state.__init__; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\analysis\state_manager.py; STATUS=LEXICAL_CANDIDATES; LEXICAL_SITE_COUNT=2
-  - {"ACTIVATION_SCOPE": "FUNCTION_SCOPED", "COLUMN": 4, "FORM": "IMPORT_FROM", "LINE": 517, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 8, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [{"kind": "FUNCTION", "line": 506, "name": "save_engine_state"}], "REQUESTED_NAME": "contextor.core.live_state"}
-  - {"ACTIVATION_SCOPE": "FUNCTION_SCOPED", "COLUMN": 4, "FORM": "IMPORT_FROM", "LINE": 541, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 10, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [{"kind": "FUNCTION", "line": 534, "name": "load_engine_state"}], "REQUESTED_NAME": "contextor.core.live_state"}
-- SCC_ID=SCC01; SOURCE_CANONICAL_MODULE=contextor.core.api.facade; TARGET_CANONICAL_MODULE=contextor.core.analysis.incremental.materialization; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\api\facade.py; STATUS=LEXICAL_CANDIDATES; LEXICAL_SITE_COUNT=3
-  - {"ACTIVATION_SCOPE": "FUNCTION_SCOPED", "COLUMN": 8, "FORM": "IMPORT_FROM", "LINE": 117, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 30, "RAW_CONTROL_FRAMES": [{"branch": "BODY", "expression": "Compare(left=Name(id='state', ctx=Load()), ops=[IsNot()], comparators=[Constant(value=None)])", "kind": "IF", "line": 116}], "RAW_SCOPE_FRAMES": [{"kind": "FUNCTION", "line": 102, "name": "_assemble_layer_collision_facts"}], "REQUESTED_NAME": "contextor.core.analysis.incremental.materialization"}
-  - {"ACTIVATION_SCOPE": "FUNCTION_SCOPED", "COLUMN": 12, "FORM": "IMPORT_FROM", "LINE": 850, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 41, "RAW_CONTROL_FRAMES": [{"branch": "BODY", "expression": "Name(id='analysis_result', ctx=Load())", "kind": "IF", "line": 811}], "RAW_SCOPE_FRAMES": [{"kind": "CLASS", "line": 551, "name": "ContextorFacade"}, {"kind": "FUNCTION", "line": 559, "name": "analyze_project"}], "REQUESTED_NAME": "contextor.core.analysis.incremental.materialization"}
-  - {"ACTIVATION_SCOPE": "FUNCTION_SCOPED", "COLUMN": 12, "FORM": "IMPORT_FROM", "LINE": 1010, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 45, "RAW_CONTROL_FRAMES": [{"branch": "BODY", "expression": "Name(id='analysis_result', ctx=Load())", "kind": "IF", "line": 811}], "RAW_SCOPE_FRAMES": [{"kind": "CLASS", "line": 551, "name": "ContextorFacade"}, {"kind": "FUNCTION", "line": 559, "name": "analyze_project"}], "REQUESTED_NAME": "contextor.core.analysis.incremental.materialization"}
-- SCC_ID=SCC01; SOURCE_CANONICAL_MODULE=contextor.core.api.facade; TARGET_CANONICAL_MODULE=contextor.core.analysis.state_manager; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\api\facade.py; STATUS=LEXICAL_CANDIDATES; LEXICAL_SITE_COUNT=2
-  - {"ACTIVATION_SCOPE": "FUNCTION_SCOPED", "COLUMN": 12, "FORM": "IMPORT_FROM", "LINE": 812, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 37, "RAW_CONTROL_FRAMES": [{"branch": "BODY", "expression": "Name(id='analysis_result', ctx=Load())", "kind": "IF", "line": 811}], "RAW_SCOPE_FRAMES": [{"kind": "CLASS", "line": 551, "name": "ContextorFacade"}, {"kind": "FUNCTION", "line": 559, "name": "analyze_project"}], "REQUESTED_NAME": "contextor.core.analysis.state_manager"}
-  - {"ACTIVATION_SCOPE": "FUNCTION_SCOPED", "COLUMN": 16, "FORM": "IMPORT_FROM", "LINE": 1666, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 55, "RAW_CONTROL_FRAMES": [{"branch": "BODY", "expression": "Compare(left=Name(id='resolved', ctx=Load()), ops=[IsNot()], comparators=[Constant(value=None)])", "kind": "IF", "line": 1645}, {"branch": "BODY", "expression": "Name(id='state_only_candidate', ctx=Load())", "kind": "IF", "line": 1665}], "RAW_SCOPE_FRAMES": [{"kind": "CLASS", "line": 551, "name": "ContextorFacade"}, {"kind": "FUNCTION", "line": 1609, "name": "_analyze_single_file_uncoordinated"}], "REQUESTED_NAME": "contextor.core.analysis.state_manager"}
-- SCC_ID=SCC01; SOURCE_CANONICAL_MODULE=contextor.core.api.facade; TARGET_CANONICAL_MODULE=contextor.core.live_state.__init__; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\api\facade.py; STATUS=LEXICAL_CANDIDATES; LEXICAL_SITE_COUNT=3
-  - {"ACTIVATION_SCOPE": "MODULE_TOP_LEVEL", "COLUMN": 0, "FORM": "IMPORT_FROM", "LINE": 61, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 29, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [], "REQUESTED_NAME": "contextor.core.live_state"}
-  - {"ACTIVATION_SCOPE": "FUNCTION_SCOPED", "COLUMN": 12, "FORM": "IMPORT_FROM", "LINE": 823, "MATCHED_MEMBER": null, "MATCH_KIND": "PARENT_INITIALIZER", "OCCURRENCE_ORDINAL": 39, "RAW_CONTROL_FRAMES": [{"branch": "BODY", "expression": "Name(id='analysis_result', ctx=Load())", "kind": "IF", "line": 811}], "RAW_SCOPE_FRAMES": [{"kind": "CLASS", "line": 551, "name": "ContextorFacade"}, {"kind": "FUNCTION", "line": 559, "name": "analyze_project"}], "REQUESTED_NAME": "contextor.core.live_state.store"}
-  - {"ACTIVATION_SCOPE": "FUNCTION_SCOPED", "COLUMN": 16, "FORM": "IMPORT_FROM", "LINE": 1149, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 46, "RAW_CONTROL_FRAMES": [{"branch": "BODY", "expression": "Name(id='analysis_result', ctx=Load())", "kind": "IF", "line": 811}, {"branch": "BODY", "expression": "Compare(left=Name(id='meta', ctx=Load()), ops=[IsNot()], comparators=[Constant(value=None)])", "kind": "IF", "line": 1148}], "RAW_SCOPE_FRAMES": [{"kind": "CLASS", "line": 551, "name": "ContextorFacade"}, {"kind": "FUNCTION", "line": 559, "name": "analyze_project"}], "REQUESTED_NAME": "contextor.core.live_state"}
-- SCC_ID=SCC01; SOURCE_CANONICAL_MODULE=contextor.core.api.facade; TARGET_CANONICAL_MODULE=contextor.core.live_state.store; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\api\facade.py; STATUS=LEXICAL_CANDIDATES; LEXICAL_SITE_COUNT=1
-  - {"ACTIVATION_SCOPE": "FUNCTION_SCOPED", "COLUMN": 12, "FORM": "IMPORT_FROM", "LINE": 823, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 39, "RAW_CONTROL_FRAMES": [{"branch": "BODY", "expression": "Name(id='analysis_result', ctx=Load())", "kind": "IF", "line": 811}], "RAW_SCOPE_FRAMES": [{"kind": "CLASS", "line": 551, "name": "ContextorFacade"}, {"kind": "FUNCTION", "line": 559, "name": "analyze_project"}], "REQUESTED_NAME": "contextor.core.live_state.store"}
-- SCC_ID=SCC01; SOURCE_CANONICAL_MODULE=contextor.core.api.facade; TARGET_CANONICAL_MODULE=contextor.core.reference.module_usage_reuse; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\api\facade.py; STATUS=LEXICAL_CANDIDATES; LEXICAL_SITE_COUNT=1
-  - {"ACTIVATION_SCOPE": "FUNCTION_SCOPED", "COLUMN": 12, "FORM": "IMPORT_FROM", "LINE": 878, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 42, "RAW_CONTROL_FRAMES": [{"branch": "BODY", "expression": "Name(id='analysis_result', ctx=Load())", "kind": "IF", "line": 811}], "RAW_SCOPE_FRAMES": [{"kind": "CLASS", "line": 551, "name": "ContextorFacade"}, {"kind": "FUNCTION", "line": 559, "name": "analyze_project"}], "REQUESTED_NAME": "contextor.core.reference.module_usage_reuse"}
-- SCC_ID=SCC01; SOURCE_CANONICAL_MODULE=contextor.core.api.facade; TARGET_CANONICAL_MODULE=contextor.core.reporting_engine.pipeline; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\api\facade.py; STATUS=LEXICAL_CANDIDATES; LEXICAL_SITE_COUNT=1
-  - {"ACTIVATION_SCOPE": "MODULE_TOP_LEVEL", "COLUMN": 0, "FORM": "IMPORT_FROM", "LINE": 36, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 19, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [], "REQUESTED_NAME": "contextor.core.reporting_engine.pipeline"}
-- SCC_ID=SCC01; SOURCE_CANONICAL_MODULE=contextor.core.api.facade; TARGET_CANONICAL_MODULE=contextor.core.single_file.single_file_analysis; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\api\facade.py; STATUS=LEXICAL_CANDIDATES; LEXICAL_SITE_COUNT=1
-  - {"ACTIVATION_SCOPE": "MODULE_TOP_LEVEL", "COLUMN": 0, "FORM": "IMPORT_FROM", "LINE": 48, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 25, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [], "REQUESTED_NAME": "contextor.core.single_file.single_file_analysis"}
-- SCC_ID=SCC01; SOURCE_CANONICAL_MODULE=contextor.core.api.facade; TARGET_CANONICAL_MODULE=contextor.core.symbol_engine.indexer; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\api\facade.py; STATUS=LEXICAL_CANDIDATES; LEXICAL_SITE_COUNT=1
-  - {"ACTIVATION_SCOPE": "MODULE_TOP_LEVEL", "COLUMN": 0, "FORM": "IMPORT_FROM", "LINE": 50, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 26, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [], "REQUESTED_NAME": "contextor.core.symbol_engine.indexer"}
-- SCC_ID=SCC01; SOURCE_CANONICAL_MODULE=contextor.core.lineage_query.live_query; TARGET_CANONICAL_MODULE=contextor.core.analysis.state_manager; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\lineage_query\live_query.py; STATUS=LEXICAL_CANDIDATES; LEXICAL_SITE_COUNT=1
-  - {"ACTIVATION_SCOPE": "MODULE_TOP_LEVEL", "COLUMN": 0, "FORM": "IMPORT_FROM", "LINE": 6, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 3, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [], "REQUESTED_NAME": "contextor.core.analysis.state_manager"}
-- SCC_ID=SCC01; SOURCE_CANONICAL_MODULE=contextor.core.live_state.__init__; TARGET_CANONICAL_MODULE=contextor.core.live_state.hydration; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\live_state\__init__.py; STATUS=LEXICAL_CANDIDATES; LEXICAL_SITE_COUNT=1
-  - {"ACTIVATION_SCOPE": "MODULE_TOP_LEVEL", "COLUMN": 0, "FORM": "IMPORT_FROM", "LINE": 20, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 4, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [], "REQUESTED_NAME": "contextor.core.live_state.hydration"}
-- SCC_ID=SCC01; SOURCE_CANONICAL_MODULE=contextor.core.live_state.__init__; TARGET_CANONICAL_MODULE=contextor.core.live_state.ipc; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\live_state\__init__.py; STATUS=LEXICAL_CANDIDATES; LEXICAL_SITE_COUNT=1
-  - {"ACTIVATION_SCOPE": "MODULE_TOP_LEVEL", "COLUMN": 0, "FORM": "IMPORT_FROM", "LINE": 11, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 1, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [], "REQUESTED_NAME": "contextor.core.live_state.ipc"}
-- SCC_ID=SCC01; SOURCE_CANONICAL_MODULE=contextor.core.live_state.__init__; TARGET_CANONICAL_MODULE=contextor.core.live_state.runtime; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\live_state\__init__.py; STATUS=LEXICAL_CANDIDATES; LEXICAL_SITE_COUNT=1
-  - {"ACTIVATION_SCOPE": "MODULE_TOP_LEVEL", "COLUMN": 0, "FORM": "IMPORT_FROM", "LINE": 12, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 2, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [], "REQUESTED_NAME": "contextor.core.live_state.runtime"}
-- SCC_ID=SCC01; SOURCE_CANONICAL_MODULE=contextor.core.live_state.__init__; TARGET_CANONICAL_MODULE=contextor.core.live_state.store; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\live_state\__init__.py; STATUS=LEXICAL_CANDIDATES; LEXICAL_SITE_COUNT=1
-  - {"ACTIVATION_SCOPE": "MODULE_TOP_LEVEL", "COLUMN": 0, "FORM": "IMPORT_FROM", "LINE": 3, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 0, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [], "REQUESTED_NAME": "contextor.core.live_state.store"}
-- SCC_ID=SCC01; SOURCE_CANONICAL_MODULE=contextor.core.live_state.__init__; TARGET_CANONICAL_MODULE=contextor.core.live_state.watcher; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\live_state\__init__.py; STATUS=LEXICAL_CANDIDATES; LEXICAL_SITE_COUNT=1
-  - {"ACTIVATION_SCOPE": "MODULE_TOP_LEVEL", "COLUMN": 0, "FORM": "IMPORT_FROM", "LINE": 19, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 3, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [], "REQUESTED_NAME": "contextor.core.live_state.watcher"}
-- SCC_ID=SCC01; SOURCE_CANONICAL_MODULE=contextor.core.live_state.hydration; TARGET_CANONICAL_MODULE=contextor.core.analysis.incremental_engine; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\live_state\hydration.py; STATUS=LEXICAL_CANDIDATES; LEXICAL_SITE_COUNT=1
-  - {"ACTIVATION_SCOPE": "FUNCTION_SCOPED", "COLUMN": 4, "FORM": "IMPORT_FROM", "LINE": 94, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 8, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [{"kind": "FUNCTION", "line": 87, "name": "hydrate_repository_engine"}], "REQUESTED_NAME": "contextor.core.analysis.incremental_engine"}
-- SCC_ID=SCC01; SOURCE_CANONICAL_MODULE=contextor.core.live_state.hydration; TARGET_CANONICAL_MODULE=contextor.core.analysis.state_manager; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\live_state\hydration.py; STATUS=LEXICAL_CANDIDATES; LEXICAL_SITE_COUNT=2
-  - {"ACTIVATION_SCOPE": "FUNCTION_SCOPED", "COLUMN": 4, "FORM": "IMPORT_FROM", "LINE": 36, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 4, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [{"kind": "FUNCTION", "line": 29, "name": "resolve_authoritative_repository_state"}], "REQUESTED_NAME": "contextor.core.analysis.state_manager"}
-  - {"ACTIVATION_SCOPE": "FUNCTION_SCOPED", "COLUMN": 4, "FORM": "IMPORT_FROM", "LINE": 95, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 9, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [{"kind": "FUNCTION", "line": 87, "name": "hydrate_repository_engine"}], "REQUESTED_NAME": "contextor.core.analysis.state_manager"}
-- SCC_ID=SCC01; SOURCE_CANONICAL_MODULE=contextor.core.live_state.hydration; TARGET_CANONICAL_MODULE=contextor.core.live_state.runtime; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\live_state\hydration.py; STATUS=LEXICAL_CANDIDATES; LEXICAL_SITE_COUNT=1
-  - {"ACTIVATION_SCOPE": "FUNCTION_SCOPED", "COLUMN": 4, "FORM": "IMPORT_FROM", "LINE": 37, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 5, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [{"kind": "FUNCTION", "line": 29, "name": "resolve_authoritative_repository_state"}], "REQUESTED_NAME": "contextor.core.live_state.runtime"}
-- SCC_ID=SCC01; SOURCE_CANONICAL_MODULE=contextor.core.live_state.hydration; TARGET_CANONICAL_MODULE=contextor.core.live_state.store; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\live_state\hydration.py; STATUS=LEXICAL_CANDIDATES; LEXICAL_SITE_COUNT=1
-  - {"ACTIVATION_SCOPE": "FUNCTION_SCOPED", "COLUMN": 4, "FORM": "IMPORT_FROM", "LINE": 38, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 6, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [{"kind": "FUNCTION", "line": 29, "name": "resolve_authoritative_repository_state"}], "REQUESTED_NAME": "contextor.core.live_state.store"}
-- SCC_ID=SCC01; SOURCE_CANONICAL_MODULE=contextor.core.live_state.ipc; TARGET_CANONICAL_MODULE=contextor.core.live_state.store; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\live_state\ipc.py; STATUS=LEXICAL_CANDIDATES; LEXICAL_SITE_COUNT=1
-  - {"ACTIVATION_SCOPE": "FUNCTION_SCOPED", "COLUMN": 20, "FORM": "IMPORT_FROM", "LINE": 2032, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 21, "RAW_CONTROL_FRAMES": [{"branch": "BODY", "expression": null, "kind": "WITH", "line": 1896}, {"branch": "BODY", "expression": "Compare(left=Name(id='persister', ctx=Load()), ops=[IsNot()], comparators=[Constant(value=None)])", "kind": "IF", "line": 2026}, {"branch": "0", "expression": "Name(id='Exception', ctx=Load())", "kind": "EXCEPT", "line": 2031}], "RAW_SCOPE_FRAMES": [{"kind": "CLASS", "line": 728, "name": "CanonicalLiveServer"}, {"kind": "FUNCTION", "line": 1884, "name": "_execute_update_file"}], "REQUESTED_NAME": "contextor.core.live_state.store"}
-- SCC_ID=SCC01; SOURCE_CANONICAL_MODULE=contextor.core.live_state.runtime; TARGET_CANONICAL_MODULE=contextor.core.analysis.full_analysis_coordinator; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\live_state\runtime.py; STATUS=LEXICAL_CANDIDATES; LEXICAL_SITE_COUNT=2
-  - {"ACTIVATION_SCOPE": "FUNCTION_SCOPED", "COLUMN": 8, "FORM": "IMPORT_FROM", "LINE": 1266, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 37, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [{"kind": "FUNCTION", "line": 1263, "name": "_repository_mutation_guard"}, {"kind": "FUNCTION", "line": 1265, "name": "guard"}], "REQUESTED_NAME": "contextor.core.analysis.full_analysis_coordinator"}
-  - {"ACTIVATION_SCOPE": "FUNCTION_SCOPED", "COLUMN": 8, "FORM": "IMPORT_FROM", "LINE": 1309, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 38, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [{"kind": "FUNCTION", "line": 1306, "name": "_repository_recovery_verification_guard"}, {"kind": "FUNCTION", "line": 1308, "name": "guard"}], "REQUESTED_NAME": "contextor.core.analysis.full_analysis_coordinator"}
-- SCC_ID=SCC01; SOURCE_CANONICAL_MODULE=contextor.core.live_state.runtime; TARGET_CANONICAL_MODULE=contextor.core.analysis.incremental.materialization; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\live_state\runtime.py; STATUS=LEXICAL_CANDIDATES; LEXICAL_SITE_COUNT=1
-  - {"ACTIVATION_SCOPE": "FUNCTION_SCOPED", "COLUMN": 12, "FORM": "IMPORT_FROM", "LINE": 1449, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 40, "RAW_CONTROL_FRAMES": [{"branch": "BODY", "expression": null, "kind": "TRY", "line": 1396}, {"branch": "BODY", "expression": "Compare(left=Name(id='state', ctx=Load()), ops=[IsNot()], comparators=[Constant(value=None)])", "kind": "IF", "line": 1447}], "RAW_SCOPE_FRAMES": [{"kind": "FUNCTION", "line": 1329, "name": "run_service"}], "REQUESTED_NAME": "contextor.core.analysis.incremental.materialization"}
-- SCC_ID=SCC01; SOURCE_CANONICAL_MODULE=contextor.core.live_state.runtime; TARGET_CANONICAL_MODULE=contextor.core.analysis.incremental_engine; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\live_state\runtime.py; STATUS=LEXICAL_CANDIDATES; LEXICAL_SITE_COUNT=1
-  - {"ACTIVATION_SCOPE": "FUNCTION_SCOPED", "COLUMN": 8, "FORM": "IMPORT_FROM", "LINE": 1116, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 31, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [{"kind": "FUNCTION", "line": 1108, "name": "_repository_updater"}, {"kind": "FUNCTION", "line": 1112, "name": "update"}], "REQUESTED_NAME": "contextor.core.analysis.incremental_engine"}
-- SCC_ID=SCC01; SOURCE_CANONICAL_MODULE=contextor.core.live_state.runtime; TARGET_CANONICAL_MODULE=contextor.core.analysis.state_manager; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\live_state\runtime.py; STATUS=LEXICAL_CANDIDATES; LEXICAL_SITE_COUNT=3
-  - {"ACTIVATION_SCOPE": "FUNCTION_SCOPED", "COLUMN": 8, "FORM": "IMPORT_FROM", "LINE": 1117, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 32, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [{"kind": "FUNCTION", "line": 1108, "name": "_repository_updater"}, {"kind": "FUNCTION", "line": 1112, "name": "update"}], "REQUESTED_NAME": "contextor.core.analysis.state_manager"}
-  - {"ACTIVATION_SCOPE": "FUNCTION_SCOPED", "COLUMN": 12, "FORM": "IMPORT_FROM", "LINE": 1172, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 35, "RAW_CONTROL_FRAMES": [{"branch": "BODY", "expression": "Compare(left=Name(id='manager', ctx=Load()), ops=[Is()], comparators=[Constant(value=None)])", "kind": "IF", "line": 1171}], "RAW_SCOPE_FRAMES": [{"kind": "FUNCTION", "line": 1153, "name": "_repository_persister"}, {"kind": "FUNCTION", "line": 1163, "name": "persist"}], "REQUESTED_NAME": "contextor.core.analysis.state_manager"}
-  - {"ACTIVATION_SCOPE": "FUNCTION_SCOPED", "COLUMN": 24, "FORM": "IMPORT_FROM", "LINE": 1500, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 42, "RAW_CONTROL_FRAMES": [{"branch": "BODY", "expression": null, "kind": "TRY", "line": 1396}, {"branch": "BODY", "expression": "Compare(left=Name(id='state', ctx=Load()), ops=[IsNot()], comparators=[Constant(value=None)])", "kind": "IF", "line": 1447}, {"branch": "BODY", "expression": "Name(id='materialization_required', ctx=Load())", "kind": "IF", "line": 1467}, {"branch": "BODY", "expression": null, "kind": "TRY", "line": 1479}, {"branch": "BODY", "expression": "Name(id='materialization_required', ctx=Load())", "kind": "IF", "line": 1497}], "RAW_SCOPE_FRAMES": [{"kind": "FUNCTION", "line": 1329, "name": "run_service"}], "REQUESTED_NAME": "contextor.core.analysis.state_manager"}
-- SCC_ID=SCC01; SOURCE_CANONICAL_MODULE=contextor.core.live_state.runtime; TARGET_CANONICAL_MODULE=contextor.core.lineage_query.live_query; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\live_state\runtime.py; STATUS=LEXICAL_CANDIDATES; LEXICAL_SITE_COUNT=1
-  - {"ACTIVATION_SCOPE": "MODULE_TOP_LEVEL", "COLUMN": 0, "FORM": "IMPORT_FROM", "LINE": 19, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 12, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [], "REQUESTED_NAME": "contextor.core.lineage_query.live_query"}
-- SCC_ID=SCC01; SOURCE_CANONICAL_MODULE=contextor.core.live_state.runtime; TARGET_CANONICAL_MODULE=contextor.core.live_state.ipc; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\live_state\runtime.py; STATUS=LEXICAL_CANDIDATES; LEXICAL_SITE_COUNT=1
-  - {"ACTIVATION_SCOPE": "MODULE_TOP_LEVEL", "COLUMN": 0, "FORM": "IMPORT_FROM", "LINE": 39, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 18, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [], "REQUESTED_NAME": "contextor.core.live_state.ipc"}
-- SCC_ID=SCC01; SOURCE_CANONICAL_MODULE=contextor.core.live_state.runtime; TARGET_CANONICAL_MODULE=contextor.core.live_state.store; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\live_state\runtime.py; STATUS=LEXICAL_CANDIDATES; LEXICAL_SITE_COUNT=2
-  - {"ACTIVATION_SCOPE": "MODULE_TOP_LEVEL", "COLUMN": 0, "FORM": "IMPORT_FROM", "LINE": 47, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 19, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [], "REQUESTED_NAME": "contextor.core.live_state.store"}
-  - {"ACTIVATION_SCOPE": "FUNCTION_SCOPED", "COLUMN": 12, "FORM": "IMPORT_FROM", "LINE": 1218, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 36, "RAW_CONTROL_FRAMES": [{"branch": "0", "expression": "Name(id='Exception', ctx=Load())", "kind": "EXCEPT", "line": 1206}], "RAW_SCOPE_FRAMES": [{"kind": "FUNCTION", "line": 1153, "name": "_repository_persister"}, {"kind": "FUNCTION", "line": 1163, "name": "persist"}], "REQUESTED_NAME": "contextor.core.live_state.store"}
-- SCC_ID=SCC01; SOURCE_CANONICAL_MODULE=contextor.core.live_state.store; TARGET_CANONICAL_MODULE=contextor.core.analysis.state_manager; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\live_state\store.py; STATUS=LEXICAL_CANDIDATES; LEXICAL_SITE_COUNT=2
-  - {"ACTIVATION_SCOPE": "FUNCTION_SCOPED", "COLUMN": 4, "FORM": "IMPORT_FROM", "LINE": 128, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 16, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [{"kind": "FUNCTION", "line": 122, "name": "_normalize_reexport_facts_state"}], "REQUESTED_NAME": "contextor.core.analysis.state_manager"}
-  - {"ACTIVATION_SCOPE": "FUNCTION_SCOPED", "COLUMN": 4, "FORM": "IMPORT_FROM", "LINE": 1524, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 23, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [{"kind": "FUNCTION", "line": 1507, "name": "save_snapshot"}], "REQUESTED_NAME": "contextor.core.analysis.state_manager"}
-- SCC_ID=SCC01; SOURCE_CANONICAL_MODULE=contextor.core.live_state.watcher; TARGET_CANONICAL_MODULE=contextor.core.analysis.state_manager; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\live_state\watcher.py; STATUS=LEXICAL_CANDIDATES; LEXICAL_SITE_COUNT=2
-  - {"ACTIVATION_SCOPE": "FUNCTION_SCOPED", "COLUMN": 8, "FORM": "IMPORT_FROM", "LINE": 514, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 18, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [{"kind": "CLASS", "line": 110, "name": "DesktopLiveWatcher"}, {"kind": "FUNCTION", "line": 498, "name": "_startup_reconciliation_paths"}], "REQUESTED_NAME": "contextor.core.analysis.state_manager"}
-  - {"ACTIVATION_SCOPE": "FUNCTION_SCOPED", "COLUMN": 8, "FORM": "IMPORT_FROM", "LINE": 535, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 20, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [{"kind": "CLASS", "line": 110, "name": "DesktopLiveWatcher"}, {"kind": "FUNCTION", "line": 533, "name": "_trusted_file_state"}], "REQUESTED_NAME": "contextor.core.analysis.state_manager"}
-- SCC_ID=SCC01; SOURCE_CANONICAL_MODULE=contextor.core.live_state.watcher; TARGET_CANONICAL_MODULE=contextor.core.api.facade; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\live_state\watcher.py; STATUS=LEXICAL_CANDIDATES; LEXICAL_SITE_COUNT=1
-  - {"ACTIVATION_SCOPE": "FUNCTION_SCOPED", "COLUMN": 8, "FORM": "IMPORT_FROM", "LINE": 486, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 17, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [{"kind": "CLASS", "line": 110, "name": "DesktopLiveWatcher"}, {"kind": "FUNCTION", "line": 485, "name": "_load_watch_filters"}], "REQUESTED_NAME": "contextor.core.api.facade"}
-- SCC_ID=SCC01; SOURCE_CANONICAL_MODULE=contextor.core.live_state.watcher; TARGET_CANONICAL_MODULE=contextor.core.live_state.ipc; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\live_state\watcher.py; STATUS=LEXICAL_CANDIDATES; LEXICAL_SITE_COUNT=1
-  - {"ACTIVATION_SCOPE": "MODULE_TOP_LEVEL", "COLUMN": 0, "FORM": "IMPORT_FROM", "LINE": 18, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 12, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [], "REQUESTED_NAME": "contextor.core.live_state.ipc"}
-- SCC_ID=SCC01; SOURCE_CANONICAL_MODULE=contextor.core.live_state.watcher; TARGET_CANONICAL_MODULE=contextor.core.live_state.runtime; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\live_state\watcher.py; STATUS=LEXICAL_CANDIDATES; LEXICAL_SITE_COUNT=1
-  - {"ACTIVATION_SCOPE": "FUNCTION_SCOPED", "COLUMN": 12, "FORM": "IMPORT_FROM", "LINE": 372, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 14, "RAW_CONTROL_FRAMES": [{"branch": "BODY", "expression": null, "kind": "TRY", "line": 371}], "RAW_SCOPE_FRAMES": [{"kind": "CLASS", "line": 110, "name": "DesktopLiveWatcher"}, {"kind": "FUNCTION", "line": 350, "name": "_recover_client"}], "REQUESTED_NAME": "contextor.core.live_state.runtime"}
-- SCC_ID=SCC01; SOURCE_CANONICAL_MODULE=contextor.core.reference.module_usage_reuse; TARGET_CANONICAL_MODULE=contextor.core.analysis.state_manager; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\reference\module_usage_reuse.py; STATUS=LEXICAL_CANDIDATES; LEXICAL_SITE_COUNT=1
-  - {"ACTIVATION_SCOPE": "MODULE_TOP_LEVEL", "COLUMN": 0, "FORM": "IMPORT_FROM", "LINE": 4, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 2, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [], "REQUESTED_NAME": "contextor.core.analysis.state_manager"}
-- SCC_ID=SCC01; SOURCE_CANONICAL_MODULE=contextor.core.reporting_engine.pipeline; TARGET_CANONICAL_MODULE=contextor.core.analysis.state_manager; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\reporting_engine\pipeline.py; STATUS=LEXICAL_CANDIDATES; LEXICAL_SITE_COUNT=1
-  - {"ACTIVATION_SCOPE": "FUNCTION_SCOPED", "COLUMN": 4, "FORM": "IMPORT_FROM", "LINE": 106, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 6, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [{"kind": "FUNCTION", "line": 34, "name": "execute_global_pipeline"}], "REQUESTED_NAME": "contextor.core.analysis.state_manager"}
-- SCC_ID=SCC01; SOURCE_CANONICAL_MODULE=contextor.core.single_file.builders.__init__; TARGET_CANONICAL_MODULE=contextor.core.single_file.builders.layer0_builders; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\single_file\builders\__init__.py; STATUS=LEXICAL_CANDIDATES; LEXICAL_SITE_COUNT=1
-  - {"ACTIVATION_SCOPE": "MODULE_TOP_LEVEL", "COLUMN": 0, "FORM": "IMPORT_FROM", "LINE": 3, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 1, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [], "REQUESTED_NAME": "contextor.core.single_file.builders.layer0_builders"}
-- SCC_ID=SCC01; SOURCE_CANONICAL_MODULE=contextor.core.single_file.builders.__init__; TARGET_CANONICAL_MODULE=contextor.core.single_file.builders.layer2_builders; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\single_file\builders\__init__.py; STATUS=LEXICAL_CANDIDATES; LEXICAL_SITE_COUNT=1
-  - {"ACTIVATION_SCOPE": "MODULE_TOP_LEVEL", "COLUMN": 0, "FORM": "IMPORT_FROM", "LINE": 10, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 3, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [], "REQUESTED_NAME": "contextor.core.single_file.builders.layer2_builders"}
-- SCC_ID=SCC01; SOURCE_CANONICAL_MODULE=contextor.core.single_file.builders.layer0_builders; TARGET_CANONICAL_MODULE=contextor.core.analysis.state_manager; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\single_file\builders\layer0_builders.py; STATUS=LEXICAL_CANDIDATES; LEXICAL_SITE_COUNT=1
-  - {"ACTIVATION_SCOPE": "FUNCTION_SCOPED", "COLUMN": 4, "FORM": "IMPORT_FROM", "LINE": 26, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 4, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [{"kind": "FUNCTION", "line": 18, "name": "_canonical_state_module_is_current"}], "REQUESTED_NAME": "contextor.core.analysis.state_manager"}
-- SCC_ID=SCC01; SOURCE_CANONICAL_MODULE=contextor.core.single_file.builders.layer2_builders; TARGET_CANONICAL_MODULE=contextor.core.analysis.state_manager; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\single_file\builders\layer2_builders.py; STATUS=LEXICAL_CANDIDATES; LEXICAL_SITE_COUNT=1
-  - {"ACTIVATION_SCOPE": "FUNCTION_SCOPED", "COLUMN": 8, "FORM": "IMPORT_FROM", "LINE": 11, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 3, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [{"kind": "CLASS", "line": 4, "name": "TestContextBuilder"}, {"kind": "FUNCTION", "line": 9, "name": "build"}], "REQUESTED_NAME": "contextor.core.analysis.state_manager"}
-- SCC_ID=SCC01; SOURCE_CANONICAL_MODULE=contextor.core.single_file.single_file_analysis; TARGET_CANONICAL_MODULE=contextor.core.single_file.builders.__init__; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\single_file\single_file_analysis.py; STATUS=LEXICAL_CANDIDATES; LEXICAL_SITE_COUNT=1
-  - {"ACTIVATION_SCOPE": "MODULE_TOP_LEVEL", "COLUMN": 0, "FORM": "IMPORT_FROM", "LINE": 14, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 4, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [], "REQUESTED_NAME": "contextor.core.single_file.builders"}
-- SCC_ID=SCC01; SOURCE_CANONICAL_MODULE=contextor.core.symbol_engine.indexer; TARGET_CANONICAL_MODULE=contextor.core.analysis.lineage_extraction; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\symbol_engine\indexer.py; STATUS=LEXICAL_CANDIDATES; LEXICAL_SITE_COUNT=1
-  - {"ACTIVATION_SCOPE": "MODULE_TOP_LEVEL", "COLUMN": 0, "FORM": "IMPORT_FROM", "LINE": 25, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 9, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [], "REQUESTED_NAME": "contextor.core.analysis.lineage_extraction"}
-### SCC02
-- SCC_ID=SCC02; SOURCE_CANONICAL_MODULE=contextor.repo_generator.__init__; TARGET_CANONICAL_MODULE=contextor.repo_generator.main; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\repo_generator\__init__.py; STATUS=LEXICAL_CANDIDATES; LEXICAL_SITE_COUNT=1
-  - {"ACTIVATION_SCOPE": "MODULE_TOP_LEVEL", "COLUMN": 0, "FORM": "IMPORT_FROM", "LINE": 1, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 0, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [], "REQUESTED_NAME": "contextor.repo_generator.main"}
-- SCC_ID=SCC02; SOURCE_CANONICAL_MODULE=contextor.repo_generator.filters; TARGET_CANONICAL_MODULE=contextor.ui.__init__; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\repo_generator\filters.py; STATUS=LEXICAL_CANDIDATES; LEXICAL_SITE_COUNT=3
-  - {"ACTIVATION_SCOPE": "MODULE_TOP_LEVEL", "COLUMN": 0, "FORM": "IMPORT_FROM", "LINE": 5, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 3, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [], "REQUESTED_NAME": "contextor.ui"}
-  - {"ACTIVATION_SCOPE": "MODULE_TOP_LEVEL", "COLUMN": 0, "FORM": "IMPORT_FROM", "LINE": 6, "MATCHED_MEMBER": null, "MATCH_KIND": "PARENT_INITIALIZER", "OCCURRENCE_ORDINAL": 4, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [], "REQUESTED_NAME": "contextor.ui.path_memory"}
-  - {"ACTIVATION_SCOPE": "MODULE_TOP_LEVEL", "COLUMN": 0, "FORM": "IMPORT_FROM", "LINE": 7, "MATCHED_MEMBER": null, "MATCH_KIND": "PARENT_INITIALIZER", "OCCURRENCE_ORDINAL": 5, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [], "REQUESTED_NAME": "contextor.ui.theme"}
-- SCC_ID=SCC02; SOURCE_CANONICAL_MODULE=contextor.repo_generator.icons; TARGET_CANONICAL_MODULE=contextor.ui.__init__; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\repo_generator\icons.py; STATUS=LEXICAL_CANDIDATES; LEXICAL_SITE_COUNT=2
-  - {"ACTIVATION_SCOPE": "MODULE_TOP_LEVEL", "COLUMN": 0, "FORM": "IMPORT_FROM", "LINE": 4, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 2, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [], "REQUESTED_NAME": "contextor.ui"}
-  - {"ACTIVATION_SCOPE": "MODULE_TOP_LEVEL", "COLUMN": 0, "FORM": "IMPORT_FROM", "LINE": 5, "MATCHED_MEMBER": null, "MATCH_KIND": "PARENT_INITIALIZER", "OCCURRENCE_ORDINAL": 3, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [], "REQUESTED_NAME": "contextor.ui.theme"}
-- SCC_ID=SCC02; SOURCE_CANONICAL_MODULE=contextor.repo_generator.main; TARGET_CANONICAL_MODULE=contextor.repo_generator.filters; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\repo_generator\main.py; STATUS=LEXICAL_CANDIDATES; LEXICAL_SITE_COUNT=1
-  - {"ACTIVATION_SCOPE": "MODULE_TOP_LEVEL", "COLUMN": 0, "FORM": "IMPORT_FROM", "LINE": 8, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 6, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [], "REQUESTED_NAME": "contextor.repo_generator.filters"}
-- SCC_ID=SCC02; SOURCE_CANONICAL_MODULE=contextor.repo_generator.main; TARGET_CANONICAL_MODULE=contextor.repo_generator.icons; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\repo_generator\main.py; STATUS=LEXICAL_CANDIDATES; LEXICAL_SITE_COUNT=1
-  - {"ACTIVATION_SCOPE": "MODULE_TOP_LEVEL", "COLUMN": 0, "FORM": "IMPORT_FROM", "LINE": 9, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 7, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [], "REQUESTED_NAME": "contextor.repo_generator.icons"}
-- SCC_ID=SCC02; SOURCE_CANONICAL_MODULE=contextor.repo_generator.main; TARGET_CANONICAL_MODULE=contextor.ui.__init__; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\repo_generator\main.py; STATUS=LEXICAL_CANDIDATES; LEXICAL_SITE_COUNT=3
-  - {"ACTIVATION_SCOPE": "MODULE_TOP_LEVEL", "COLUMN": 0, "FORM": "IMPORT_FROM", "LINE": 11, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 9, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [], "REQUESTED_NAME": "contextor.ui"}
-  - {"ACTIVATION_SCOPE": "MODULE_TOP_LEVEL", "COLUMN": 0, "FORM": "IMPORT_FROM", "LINE": 12, "MATCHED_MEMBER": null, "MATCH_KIND": "PARENT_INITIALIZER", "OCCURRENCE_ORDINAL": 10, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [], "REQUESTED_NAME": "contextor.ui.path_memory"}
-  - {"ACTIVATION_SCOPE": "MODULE_TOP_LEVEL", "COLUMN": 0, "FORM": "IMPORT_FROM", "LINE": 13, "MATCHED_MEMBER": null, "MATCH_KIND": "PARENT_INITIALIZER", "OCCURRENCE_ORDINAL": 11, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [], "REQUESTED_NAME": "contextor.ui.theme"}
-- SCC_ID=SCC02; SOURCE_CANONICAL_MODULE=contextor.ui.__init__; TARGET_CANONICAL_MODULE=contextor.ui.gui; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\ui\__init__.py; STATUS=LEXICAL_CANDIDATES; LEXICAL_SITE_COUNT=1
-  - {"ACTIVATION_SCOPE": "MODULE_TOP_LEVEL", "COLUMN": 0, "FORM": "IMPORT_FROM", "LINE": 5, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 0, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [], "REQUESTED_NAME": "contextor.ui.gui"}
-- SCC_ID=SCC02; SOURCE_CANONICAL_MODULE=contextor.ui.exclude_gui; TARGET_CANONICAL_MODULE=contextor.ui.__init__; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\ui\exclude_gui.py; STATUS=LEXICAL_CANDIDATES; LEXICAL_SITE_COUNT=4
-  - {"ACTIVATION_SCOPE": "MODULE_TOP_LEVEL", "COLUMN": 0, "FORM": "IMPORT_FROM", "LINE": 16, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 6, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [], "REQUESTED_NAME": "contextor.ui"}
-  - {"ACTIVATION_SCOPE": "MODULE_TOP_LEVEL", "COLUMN": 0, "FORM": "IMPORT_FROM", "LINE": 17, "MATCHED_MEMBER": null, "MATCH_KIND": "PARENT_INITIALIZER", "OCCURRENCE_ORDINAL": 7, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [], "REQUESTED_NAME": "contextor.ui.theme"}
-  - {"ACTIVATION_SCOPE": "FUNCTION_SCOPED", "COLUMN": 4, "FORM": "IMPORT_FROM", "LINE": 127, "MATCHED_MEMBER": null, "MATCH_KIND": "PARENT_INITIALIZER", "OCCURRENCE_ORDINAL": 8, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [{"kind": "FUNCTION", "line": 125, "name": "find_repo_root"}], "REQUESTED_NAME": "contextor.ui.path_memory"}
-  - {"ACTIVATION_SCOPE": "FUNCTION_SCOPED", "COLUMN": 4, "FORM": "IMPORT_FROM", "LINE": 148, "MATCHED_MEMBER": null, "MATCH_KIND": "PARENT_INITIALIZER", "OCCURRENCE_ORDINAL": 9, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [{"kind": "FUNCTION", "line": 142, "name": "run_exclude_window"}], "REQUESTED_NAME": "contextor.ui.path_memory"}
-- SCC_ID=SCC02; SOURCE_CANONICAL_MODULE=contextor.ui.gui; TARGET_CANONICAL_MODULE=contextor.repo_generator.__init__; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\ui\gui.py; STATUS=LEXICAL_CANDIDATES; LEXICAL_SITE_COUNT=1
-  - {"ACTIVATION_SCOPE": "MODULE_TOP_LEVEL", "COLUMN": 0, "FORM": "IMPORT_FROM", "LINE": 43, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 17, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [], "REQUESTED_NAME": "contextor.repo_generator"}
-- SCC_ID=SCC02; SOURCE_CANONICAL_MODULE=contextor.ui.gui; TARGET_CANONICAL_MODULE=contextor.ui.__init__; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\ui\gui.py; STATUS=LEXICAL_CANDIDATES; LEXICAL_SITE_COUNT=11
-  - {"ACTIVATION_SCOPE": "MODULE_TOP_LEVEL", "COLUMN": 0, "FORM": "IMPORT_FROM", "LINE": 52, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 19, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [], "REQUESTED_NAME": "contextor.ui"}
-  - {"ACTIVATION_SCOPE": "MODULE_TOP_LEVEL", "COLUMN": 0, "FORM": "IMPORT_FROM", "LINE": 53, "MATCHED_MEMBER": null, "MATCH_KIND": "PARENT_INITIALIZER", "OCCURRENCE_ORDINAL": 20, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [], "REQUESTED_NAME": "contextor.ui.exclude_check"}
-  - {"ACTIVATION_SCOPE": "MODULE_TOP_LEVEL", "COLUMN": 0, "FORM": "IMPORT_FROM", "LINE": 54, "MATCHED_MEMBER": null, "MATCH_KIND": "PARENT_INITIALIZER", "OCCURRENCE_ORDINAL": 21, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [], "REQUESTED_NAME": "contextor.ui.exclude_gui"}
-  - {"ACTIVATION_SCOPE": "MODULE_TOP_LEVEL", "COLUMN": 0, "FORM": "IMPORT_FROM", "LINE": 55, "MATCHED_MEMBER": null, "MATCH_KIND": "PARENT_INITIALIZER", "OCCURRENCE_ORDINAL": 22, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [], "REQUESTED_NAME": "contextor.ui.gui_parser"}
-  - {"ACTIVATION_SCOPE": "MODULE_TOP_LEVEL", "COLUMN": 0, "FORM": "IMPORT_FROM", "LINE": 56, "MATCHED_MEMBER": null, "MATCH_KIND": "PARENT_INITIALIZER", "OCCURRENCE_ORDINAL": 23, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [], "REQUESTED_NAME": "contextor.ui.path_memory"}
-  - {"ACTIVATION_SCOPE": "MODULE_TOP_LEVEL", "COLUMN": 0, "FORM": "IMPORT_FROM", "LINE": 57, "MATCHED_MEMBER": null, "MATCH_KIND": "PARENT_INITIALIZER", "OCCURRENCE_ORDINAL": 24, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [], "REQUESTED_NAME": "contextor.ui.progress_widget"}
-  - {"ACTIVATION_SCOPE": "MODULE_TOP_LEVEL", "COLUMN": 0, "FORM": "IMPORT_FROM", "LINE": 64, "MATCHED_MEMBER": null, "MATCH_KIND": "PARENT_INITIALIZER", "OCCURRENCE_ORDINAL": 26, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [], "REQUESTED_NAME": "contextor.ui.system_actions"}
-  - {"ACTIVATION_SCOPE": "MODULE_TOP_LEVEL", "COLUMN": 0, "FORM": "IMPORT_FROM", "LINE": 69, "MATCHED_MEMBER": null, "MATCH_KIND": "PARENT_INITIALIZER", "OCCURRENCE_ORDINAL": 27, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [], "REQUESTED_NAME": "contextor.ui.test_runner"}
-  - {"ACTIVATION_SCOPE": "MODULE_TOP_LEVEL", "COLUMN": 0, "FORM": "IMPORT_FROM", "LINE": 74, "MATCHED_MEMBER": null, "MATCH_KIND": "PARENT_INITIALIZER", "OCCURRENCE_ORDINAL": 28, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [], "REQUESTED_NAME": "contextor.ui.theme"}
-  - {"ACTIVATION_SCOPE": "FUNCTION_SCOPED", "COLUMN": 12, "FORM": "IMPORT_FROM", "LINE": 411, "MATCHED_MEMBER": null, "MATCH_KIND": "PARENT_INITIALIZER", "OCCURRENCE_ORDINAL": 31, "RAW_CONTROL_FRAMES": [{"branch": "BODY", "expression": "Name(id='json_path', ctx=Load())", "kind": "IF", "line": 410}], "RAW_SCOPE_FRAMES": [{"kind": "CLASS", "line": 91, "name": "ContextorGUI"}, {"kind": "FUNCTION", "line": 399, "name": "open_rewrite_tool"}], "REQUESTED_NAME": "contextor.ui.gui_parser"}
-  - {"ACTIVATION_SCOPE": "FUNCTION_SCOPED", "COLUMN": 20, "FORM": "IMPORT_FROM", "LINE": 440, "MATCHED_MEMBER": null, "MATCH_KIND": "PARENT_INITIALIZER", "OCCURRENCE_ORDINAL": 32, "RAW_CONTROL_FRAMES": [{"branch": "BODY", "expression": "Name(id='answer', ctx=Load())", "kind": "IF", "line": 439}], "RAW_SCOPE_FRAMES": [{"kind": "CLASS", "line": 91, "name": "ContextorGUI"}, {"kind": "FUNCTION", "line": 418, "name": "_check_stale_excludes"}, {"kind": "FUNCTION", "line": 426, "name": "worker"}, {"kind": "FUNCTION", "line": 433, "name": "prompt"}], "REQUESTED_NAME": "contextor.ui.exclude_gui"}
-- SCC_ID=SCC02; SOURCE_CANONICAL_MODULE=contextor.ui.gui; TARGET_CANONICAL_MODULE=contextor.ui.exclude_gui; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\ui\gui.py; STATUS=LEXICAL_CANDIDATES; LEXICAL_SITE_COUNT=2
-  - {"ACTIVATION_SCOPE": "MODULE_TOP_LEVEL", "COLUMN": 0, "FORM": "IMPORT_FROM", "LINE": 54, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 21, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [], "REQUESTED_NAME": "contextor.ui.exclude_gui"}
-  - {"ACTIVATION_SCOPE": "FUNCTION_SCOPED", "COLUMN": 20, "FORM": "IMPORT_FROM", "LINE": 440, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 32, "RAW_CONTROL_FRAMES": [{"branch": "BODY", "expression": "Name(id='answer', ctx=Load())", "kind": "IF", "line": 439}], "RAW_SCOPE_FRAMES": [{"kind": "CLASS", "line": 91, "name": "ContextorGUI"}, {"kind": "FUNCTION", "line": 418, "name": "_check_stale_excludes"}, {"kind": "FUNCTION", "line": 426, "name": "worker"}, {"kind": "FUNCTION", "line": 433, "name": "prompt"}], "REQUESTED_NAME": "contextor.ui.exclude_gui"}
-- SCC_ID=SCC02; SOURCE_CANONICAL_MODULE=contextor.ui.gui; TARGET_CANONICAL_MODULE=contextor.ui.gui_parser; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\ui\gui.py; STATUS=LEXICAL_CANDIDATES; LEXICAL_SITE_COUNT=2
-  - {"ACTIVATION_SCOPE": "MODULE_TOP_LEVEL", "COLUMN": 0, "FORM": "IMPORT_FROM", "LINE": 55, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 22, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [], "REQUESTED_NAME": "contextor.ui.gui_parser"}
-  - {"ACTIVATION_SCOPE": "FUNCTION_SCOPED", "COLUMN": 12, "FORM": "IMPORT_FROM", "LINE": 411, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 31, "RAW_CONTROL_FRAMES": [{"branch": "BODY", "expression": "Name(id='json_path', ctx=Load())", "kind": "IF", "line": 410}], "RAW_SCOPE_FRAMES": [{"kind": "CLASS", "line": 91, "name": "ContextorGUI"}, {"kind": "FUNCTION", "line": 399, "name": "open_rewrite_tool"}], "REQUESTED_NAME": "contextor.ui.gui_parser"}
-- SCC_ID=SCC02; SOURCE_CANONICAL_MODULE=contextor.ui.gui; TARGET_CANONICAL_MODULE=contextor.ui.progress_widget; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\ui\gui.py; STATUS=LEXICAL_CANDIDATES; LEXICAL_SITE_COUNT=1
-  - {"ACTIVATION_SCOPE": "MODULE_TOP_LEVEL", "COLUMN": 0, "FORM": "IMPORT_FROM", "LINE": 57, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 24, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [], "REQUESTED_NAME": "contextor.ui.progress_widget"}
-- SCC_ID=SCC02; SOURCE_CANONICAL_MODULE=contextor.ui.gui_parser; TARGET_CANONICAL_MODULE=contextor.ui.__init__; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\ui\gui_parser.py; STATUS=LEXICAL_CANDIDATES; LEXICAL_SITE_COUNT=4
-  - {"ACTIVATION_SCOPE": "MODULE_TOP_LEVEL", "COLUMN": 0, "FORM": "IMPORT_FROM", "LINE": 20, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 6, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [], "REQUESTED_NAME": "contextor.ui"}
-  - {"ACTIVATION_SCOPE": "MODULE_TOP_LEVEL", "COLUMN": 0, "FORM": "IMPORT_FROM", "LINE": 21, "MATCHED_MEMBER": null, "MATCH_KIND": "PARENT_INITIALIZER", "OCCURRENCE_ORDINAL": 7, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [], "REQUESTED_NAME": "contextor.ui.path_memory"}
-  - {"ACTIVATION_SCOPE": "MODULE_TOP_LEVEL", "COLUMN": 0, "FORM": "IMPORT_FROM", "LINE": 22, "MATCHED_MEMBER": null, "MATCH_KIND": "PARENT_INITIALIZER", "OCCURRENCE_ORDINAL": 8, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [], "REQUESTED_NAME": "contextor.ui.progress_widget"}
-  - {"ACTIVATION_SCOPE": "MODULE_TOP_LEVEL", "COLUMN": 0, "FORM": "IMPORT_FROM", "LINE": 23, "MATCHED_MEMBER": null, "MATCH_KIND": "PARENT_INITIALIZER", "OCCURRENCE_ORDINAL": 9, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [], "REQUESTED_NAME": "contextor.ui.theme"}
-- SCC_ID=SCC02; SOURCE_CANONICAL_MODULE=contextor.ui.gui_parser; TARGET_CANONICAL_MODULE=contextor.ui.progress_widget; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\ui\gui_parser.py; STATUS=LEXICAL_CANDIDATES; LEXICAL_SITE_COUNT=1
-  - {"ACTIVATION_SCOPE": "MODULE_TOP_LEVEL", "COLUMN": 0, "FORM": "IMPORT_FROM", "LINE": 22, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 8, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [], "REQUESTED_NAME": "contextor.ui.progress_widget"}
-- SCC_ID=SCC02; SOURCE_CANONICAL_MODULE=contextor.ui.progress_widget; TARGET_CANONICAL_MODULE=contextor.ui.__init__; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\ui\progress_widget.py; STATUS=LEXICAL_CANDIDATES; LEXICAL_SITE_COUNT=1
-  - {"ACTIVATION_SCOPE": "MODULE_TOP_LEVEL", "COLUMN": 0, "FORM": "IMPORT_FROM", "LINE": 15, "MATCHED_MEMBER": null, "MATCH_KIND": "FROM_BASE", "OCCURRENCE_ORDINAL": 6, "RAW_CONTROL_FRAMES": [], "RAW_SCOPE_FRAMES": [], "REQUESTED_NAME": "contextor.ui"}
-## IMPORT_SITE_SCOPE_DISTRIBUTION
-{"FUNCTION_SCOPED": 53, "MODULE_TOP_LEVEL": 64}
-## IMPORT_MATCH_KIND_DISTRIBUTION
-{"FROM_BASE": 95, "PARENT_INITIALIZER": 22}
-## UNMATCHED_OR_INVALID_SOURCE_EDGES
-none
-## SCC02_REEXPORT_BINDING_ORDER_EVIDENCE
-- contextor.repo_generator.__init__ -> contextor.repo_generator.main: LEXICAL_CANDIDATES; line 1:0 IMPORT_FROM FROM_BASE MODULE_TOP_LEVEL
-- contextor.repo_generator.main -> contextor.repo_generator.filters: LEXICAL_CANDIDATES; line 8:0 IMPORT_FROM FROM_BASE MODULE_TOP_LEVEL
-- contextor.repo_generator.filters -> contextor.ui.__init__: LEXICAL_CANDIDATES; line 5:0 IMPORT_FROM FROM_BASE MODULE_TOP_LEVEL, line 6:0 IMPORT_FROM PARENT_INITIALIZER MODULE_TOP_LEVEL, line 7:0 IMPORT_FROM PARENT_INITIALIZER MODULE_TOP_LEVEL
-- contextor.ui.__init__ -> contextor.ui.gui: LEXICAL_CANDIDATES; line 5:0 IMPORT_FROM FROM_BASE MODULE_TOP_LEVEL
-- contextor.ui.gui -> contextor.repo_generator.__init__: LEXICAL_CANDIDATES; line 43:0 IMPORT_FROM FROM_BASE MODULE_TOP_LEVEL
-DIRECT_EVIDENCE: contextor/repo_generator/__init__.py:1 imports run_repo_generator from main and line 3 declares __all__; main.py:522 defines run_repo_generator(parent=None), so the package binding can occur only after that definition is reached and main import returns. main.py:8 imports FilterWindow from filters. filters.py:5-7 imports ui theme, path_memory and theme names. contextor/ui/__init__.py:5 imports run from gui and line 7 declares __all__; gui.py:2283 defines run(*, single_instance=None), so ui.run binds after gui import returns. gui.py:43 requests run_repo_generator from the repo_generator package. These five canonical edges are module-top-level lexical occurrences. Package __all__ declarations do not themselves bind the imported callable.
-PYTHON_SEMANTICS_DEDUCED: Candidate entry through contextor.repo_generator first can reach repo_generator initializer -> main -> filters -> ui initializer -> gui -> request for repo_generator.run_repo_generator before main reaches line 522 and before repo_generator initializer completes line 1. Under that order, the requested package attribute may be absent, allowing ImportError from a partially initialized package. Entry through contextor.ui first changes the partial-initialization order and may reach the reverse package request; no execution was authorized, so neither outcome is certified.
-RUNTIME_UNVERIFIED: Actual import outcomes depend on initial sys.modules/package attribute state, third-party/transitive imports and execution order. The lexical model cannot prove an ImportError or successful initialization. Focused result: SEMANTIC_EVIDENCE_INCOMPLETE.
-## REMAINING_SEMANTIC_GAPS
-SOURCE snapshots are per-file, not atomic across all 33 modules; canonical file-state SHA absent. Lexical candidate kinds cannot establish actual from-import binding, package attribute state, or import-time execution. Restricted package_model was not run. Runtime verdict: SEMANTIC_EVIDENCE_INCOMPLETE.
-## NO_RUNTIME_SAFETY_CERTIFICATION
-No SAFE, FALSE_POSITIVE or RESOLVED classification; no analyzed SCC import executed.
-## NO_WARNING_SUPPRESSION
-No diagnostic policy or warning suppression changes.
+Before: clean. After: M walkthrough.md and ?? tests/test_cycle_semantics_scc02_entry_order.py. walkthrough.md is the requested report artifact.
+
+## LIVE_REVISION_BEFORE
+434; activity_epoch=1beab26da2ff4932852caa7db6ff4242; resync_required=false. Canonical graph, cycles and collisions fresh. Collisions=0; reported structural cycle paths=16.
+
+## LIVE_REVISION_AFTER
+435; same activity_epoch; resync_required=false; continuous event feed. DIRECT_EVIDENCE: desktop_watcher UPDATED tests/test_cycle_semantics_scc02_entry_order.py at revision 435. Contextor module context: canonical_state=fresh, workspace_sync=verified, graph/cycles/collisions fresh; one hard dependency to contextor.core.cycle_semantics.package_model.
+
 ## FILES_CHANGED
-NONE (walkthrough.md report only). ACTUAL_DIFF=DIFFS=NONE.
+- tests/test_cycle_semantics_scc02_entry_order.py (new)
+walkthrough.md is the report artifact. No production source or existing test changed.
+
+## SOURCE_CHAIN_ANCHORS
+DIRECT_EVIDENCE from Contextor source ranges, all at revision 434 and workspace_sync=verified:
+- contextor/repo_generator/__init__.py:1 imports run_repo_generator from main; line 3 exports it in __all__.
+- contextor/repo_generator/main.py:8 imports FilterWindow from filters; run_repo_generator definition begins at line 522.
+- contextor/repo_generator/filters.py:5 imports theme from contextor.ui; FilterWindow class begins at line 10.
+- contextor/ui/__init__.py:5 imports run from .gui; line 7 exports it in __all__.
+- contextor/ui/gui.py:43 imports run_repo_generator from contextor.repo_generator; run definition begins at line 2283.
+The new test's AST source anchors and ordering assertions passed. No source drift was found.
+
+## REEXPORT_BINDING_ORDER_EVIDENCE
+CODE_PATH_PROVED: The real package initializers use from-import reexports. Their requested members are defined later in the nested main/gui modules. The new tests assert import statements precede run_repo_generator, FilterWindow and run definitions. This establishes the lexical ordering condition; actual real-GUI import execution was not tested.
+
+## SYNTHETIC_PROJECTION_SCOPE
+The test uses a seven-module restricted source map with the same five import-chain anchors, a synthetic contextor root and theme module. The model receives only parsed synthetic ASTs. Fresh CPython subprocesses use -I -B with a temporary synthetic package tree; they do not import real Contextor GUI/repo-generator modules. The fixture is a restricted semantic projection, not a full production import simulator.
+
+## REPO_GENERATOR_FIRST_RESULT
+DIRECT_EVIDENCE: The restricted model returned EARLY_BINDING_HAZARD targeting contextor.repo_generator.run_repo_generator before its main-module DEFINE_FUNCTION event. The corresponding fresh CPython synthetic import had a nonzero exit status, as asserted by the passing parameterized test. No production traceback is claimed.
+
+## UI_FIRST_RESULT
+DIRECT_EVIDENCE: The restricted model returned MODEL_PASS and READY events ordered main -> repo_generator package -> ui.gui. The corresponding fresh CPython synthetic import exited zero, as asserted by the passing parameterized test.
+
+## FRESH_PROCESS_CPYTHON_COMPARISON
+Two isolated synthetic entry cases ran via sys.executable -I -B -c. The tests compare only returncode success/failure, not a manufactured traceback or actual GUI outcome. Both cases passed.
+
+## SAME_GRAPH_DIFFERENT_BINDING_OUTCOME
+CODE_PATH_PROVED: The prebinding fixture prepends an early run_repo_generator definition to the synthetic package initializer. The test asserts AST import declarations are unchanged, then observes EARLY_BINDING_HAZARD -> MODEL_PASS and a successful synthetic CPython process. No production source was changed.
+
+## TEST_COMMAND
+Baseline:
+.\.venv\Scripts\python.exe -B -m pytest -p no:cacheprovider -q tests/test_cycle_semantics_edge_sites.py tests/test_cycle_semantics_package_model.py tests/test_cycle_semantics_package_layout.py tests/test_cycle_semantics_evidence.py tests/test_cycle_semantics_scenarios.py tests/test_cycle_semantics_scc.py tests/test_cycle_semantics_initialization_model.py tests/test_cycle_semantics_binding_order.py tests/test_cycle_semantics_guards.py tests/test_cycle_semantics_execution_context.py tests/test_cycle_semantics_provenance.py
+
+Post-change:
+.\.venv\Scripts\python.exe -B -m pytest -p no:cacheprovider -q tests/test_cycle_semantics_scc02_entry_order.py tests/test_cycle_semantics_edge_sites.py tests/test_cycle_semantics_package_model.py tests/test_cycle_semantics_package_layout.py tests/test_cycle_semantics_evidence.py tests/test_cycle_semantics_scenarios.py tests/test_cycle_semantics_scc.py tests/test_cycle_semantics_initialization_model.py tests/test_cycle_semantics_binding_order.py tests/test_cycle_semantics_guards.py tests/test_cycle_semantics_execution_context.py tests/test_cycle_semantics_provenance.py
+
+## TEST_RESULTS
+DIRECT_EVIDENCE: baseline 204 passed in 13.58s; post-change 212 passed in 13.77s. Eight new test cases passed. Full pytest suite was not run.
+
+## CANONICAL_FRESHNESS
+Before and after canonical graph, topology, cycles, collisions and lineage were fresh; source files for the SCC02 chain and package_model were workspace_sync=verified before change. New test file was workspace_sync=verified after watcher update. No forced resync or direct publication occurred.
+
+## COLLISION_COUNT_BEFORE_AFTER
+0 -> 0, fresh.
+
+## STRUCTURAL_CYCLE_COUNT_BEFORE_AFTER
+16 -> 16 reported paths, fresh.
+
+## NO_REAL_GUI_EXECUTION
+The test parses actual source but imports only package_model in the parent test process; subprocesses import only generated synthetic package files. No real Tkinter GUI or repo_generator module is imported by the new test.
+
+## NO_RUNTIME_SAFETY_CERTIFICATION
+No safety, failure or resolution verdict for the production SCC02 import cycle. Only the restricted model and synthetic CPython fixture were executed.
+
+## NO_WARNING_SUPPRESSION
+No warnings, import diagnostics or graph policies were suppressed or modified.
+
+## UNRESOLVED_LIMITATIONS
+UNKNOWN: Actual Contextor GUI/repo-generator import outcome across real environment, sys.modules states and third-party/transitive imports. The synthetic source omits most production statements. The tests compare success status only and cannot certify full production startup behavior.
+
 ## FINAL_VERDICT
-B0G4C8_DOGFOOD_PASS
+B0G4C9_PASS
+
+## FULL_DIFFS
+
+```diff
+diff --git a/tests/test_cycle_semantics_scc02_entry_order.py b/tests/test_cycle_semantics_scc02_entry_order.py
+new file mode 100644
+--- /dev/null
++++ b/tests/test_cycle_semantics_scc02_entry_order.py
+@@ -0,0 +1,393 @@
++"""Restricted SCC02 import-order projection.
++
++Read actual Contextor source only to verify lexical anchors.
++Execute ONLY synthesized minimal modules in isolated processes.
++No result here certifies the behavior of the production GUI.
++"""
++
++import ast
++import json
++import subprocess
++import sys
++from dataclasses import asdict
++from pathlib import Path
++
++import pytest
++
++from contextor.core.cycle_semantics.package_model import (
++    evaluate_package_import_order,
++)
++
++
++_ROOT = Path(__file__).resolve().parents[1]
++
++
++def _real_tree(relative_path):
++    path = _ROOT.joinpath(*relative_path.split("/"))
++    return ast.parse(
++        path.read_text(encoding="utf-8"),
++        filename=str(path),
++    )
++
++
++def _from(tree, module, member, level=0):
++    found = [
++        stmt
++        for stmt in tree.body
++        if isinstance(stmt, ast.ImportFrom)
++        and stmt.module == module
++        and stmt.level == level
++        and any(
++            alias.name == member
++            for alias in stmt.names
++        )
++    ]
++    assert len(found) == 1
++    return found[0]
++
++
++def _definition(tree, name):
++    found = [
++        stmt
++        for stmt in tree.body
++        if isinstance(
++            stmt,
++            (ast.FunctionDef, ast.ClassDef),
++        )
++        and stmt.name == name
++    ]
++    assert len(found) == 1
++    return found[0]
++
++
++def _projection():
++    return {
++        "contextor.__init__": "pass",
++        "contextor.repo_generator.__init__": (
++            "from contextor.repo_generator.main "
++            "import run_repo_generator"
++        ),
++        "contextor.repo_generator.main": (
++            "from contextor.repo_generator.filters "
++            "import FilterWindow\n"
++            "def run_repo_generator():\n"
++            "    pass"
++        ),
++        "contextor.repo_generator.filters": (
++            "from contextor.ui import theme\n"
++            "def FilterWindow():\n"
++            "    pass"
++        ),
++        "contextor.ui.__init__": (
++            "from contextor.ui.gui import run"
++        ),
++        "contextor.ui.gui": (
++            "from contextor.repo_generator "
++            "import run_repo_generator\n"
++            "def run():\n"
++            "    pass"
++        ),
++        "contextor.ui.theme": "pass",
++    }
++
++
++def _model(source, entry):
++    return evaluate_package_import_order(
++        {
++            name: ast.parse(code)
++            for name, code in source.items()
++        },
++        entry,
++    )
++
++
++def _runtime(tmp_path, source, entry):
++    for module, code in source.items():
++        parts = module.split(".")
++
++        if parts[-1] == "__init__":
++            path = tmp_path.joinpath(
++                *parts[:-1],
++                "__init__.py",
++            )
++        else:
++            path = tmp_path.joinpath(
++                *parts[:-1],
++                parts[-1] + ".py",
++            )
++
++        path.parent.mkdir(
++            parents=True,
++            exist_ok=True,
++        )
++        path.write_text(
++            code + "\n",
++            encoding="utf-8",
++        )
++
++    process = subprocess.run(
++        [
++            sys.executable,
++            "-I",
++            "-B",
++            "-c",
++            (
++                "import importlib,sys;"
++                "sys.path.insert(0,sys.argv[1]);"
++                "importlib.import_module(sys.argv[2])"
++            ),
++            str(tmp_path),
++            entry,
++        ],
++        capture_output=True,
++        text=True,
++        timeout=10,
++        check=False,
++    )
++
++    return process
++
++
++def test_scc02_source_chain_still_exists():
++    repo = _real_tree(
++        "contextor/repo_generator/__init__.py"
++    )
++    main = _real_tree(
++        "contextor/repo_generator/main.py"
++    )
++    filters = _real_tree(
++        "contextor/repo_generator/filters.py"
++    )
++    ui = _real_tree(
++        "contextor/ui/__init__.py"
++    )
++    gui = _real_tree(
++        "contextor/ui/gui.py"
++    )
++
++    _from(
++        repo,
++        "contextor.repo_generator.main",
++        "run_repo_generator",
++    )
++    _from(
++        main,
++        "contextor.repo_generator.filters",
++        "FilterWindow",
++    )
++    _from(
++        filters,
++        "contextor.ui",
++        "theme",
++    )
++    _from(
++        ui,
++        "gui",
++        "run",
++        level=1,
++    )
++    _from(
++        gui,
++        "contextor.repo_generator",
++        "run_repo_generator",
++    )
++
++
++def test_scc02_reexport_bindings_follow_imports():
++    main = _real_tree(
++        "contextor/repo_generator/main.py"
++    )
++    filters = _real_tree(
++        "contextor/repo_generator/filters.py"
++    )
++    gui = _real_tree(
++        "contextor/ui/gui.py"
++    )
++
++    assert _from(
++        main,
++        "contextor.repo_generator.filters",
++        "FilterWindow",
++    ).lineno < _definition(
++        main,
++        "run_repo_generator",
++    ).lineno
++
++    assert _from(
++        filters,
++        "contextor.ui",
++        "theme",
++    ).lineno < _definition(
++        filters,
++        "FilterWindow",
++    ).lineno
++
++    assert _from(
++        gui,
++        "contextor.repo_generator",
++        "run_repo_generator",
++    ).lineno < _definition(
++        gui,
++        "run",
++    ).lineno
++
++
++def test_scc02_projection_repo_generator_first_hazard():
++    result = _model(
++        _projection(),
++        "contextor.repo_generator",
++    )
++
++    assert result.outcome == "EARLY_BINDING_HAZARD"
++    assert (
++        result.target_module
++        == "contextor.repo_generator"
++    )
++    assert result.symbol == "run_repo_generator"
++
++    assert not any(
++        event.operation == "DEFINE_FUNCTION"
++        and event.module == "contextor.repo_generator.main"
++        and event.symbol == "run_repo_generator"
++        for event in result.events
++    )
++
++
++def test_scc02_projection_ui_first_passes():
++    result = _model(
++        _projection(),
++        "contextor.ui",
++    )
++
++    assert result.outcome == "MODEL_PASS"
++
++    ready = [
++        event.module
++        for event in result.events
++        if event.operation == "READY"
++    ]
++
++    assert (
++        ready.index("contextor.repo_generator.main")
++        < ready.index("contextor.repo_generator")
++    )
++
++    assert (
++        ready.index("contextor.repo_generator")
++        < ready.index("contextor.ui.gui")
++    )
++
++
++@pytest.mark.parametrize(
++    "entry,expected_success",
++    [
++        ("contextor.repo_generator", False),
++        ("contextor.ui", True),
++    ],
++)
++def test_scc02_projection_matches_fresh_cpython(
++    tmp_path,
++    entry,
++    expected_success,
++):
++    process = _runtime(
++        tmp_path,
++        _projection(),
++        entry,
++    )
++
++    assert (
++        process.returncode == 0
++    ) is expected_success
++
++
++def test_scc02_prebinding_changes_result_without_import_changes(
++    tmp_path,
++):
++    original = _projection()
++    prebound = dict(original)
++
++    prebound["contextor.repo_generator.__init__"] = (
++        "def run_repo_generator():\n"
++        "    pass\n"
++        + original["contextor.repo_generator.__init__"]
++    )
++
++    original_imports = {
++        module: tuple(
++            ast.dump(node, include_attributes=False)
++            for node in ast.walk(ast.parse(code))
++            if isinstance(
++                node,
++                (ast.Import, ast.ImportFrom),
++            )
++        )
++        for module, code in original.items()
++    }
++
++    prebound_imports = {
++        module: tuple(
++            ast.dump(node, include_attributes=False)
++            for node in ast.walk(ast.parse(code))
++            if isinstance(
++                node,
++                (ast.Import, ast.ImportFrom),
++            )
++        )
++        for module, code in prebound.items()
++    }
++
++    assert original_imports == prebound_imports
++
++    original_result = _model(
++        original,
++        "contextor.repo_generator",
++    )
++    changed_result = _model(
++        prebound,
++        "contextor.repo_generator",
++    )
++
++    assert (
++        original_result.outcome
++        == "EARLY_BINDING_HAZARD"
++    )
++    assert changed_result.outcome == "MODEL_PASS"
++
++    process = _runtime(
++        tmp_path,
++        prebound,
++        "contextor.repo_generator",
++    )
++    assert process.returncode == 0
++
++
++def test_scc02_projection_determinism_and_no_ast_mutation():
++    sources = {
++        name: ast.parse(code)
++        for name, code in _projection().items()
++    }
++
++    before = {
++        name: ast.dump(tree, include_attributes=True)
++        for name, tree in sources.items()
++    }
++
++    first = evaluate_package_import_order(
++        sources,
++        "contextor.repo_generator",
++    )
++    second = evaluate_package_import_order(
++        sources,
++        "contextor.repo_generator",
++    )
++
++    assert first == second
++    assert first.outcome == "EARLY_BINDING_HAZARD"
++
++    assert {
++        name: ast.dump(tree, include_attributes=True)
++        for name, tree in sources.items()
++    } == before
++
++    json.dumps(asdict(first))
+```
