@@ -443,13 +443,19 @@ def test_b0g4c2_regular_attribute_reexport(tmp_path):
     assert _actual(tmp_path, source, "pkg.user")
 
 
-def test_b0g4c2_reentrant_child_fails_closed(tmp_path):
+def test_b0g4c3_reentrant_child_uses_same_thread_fallback(tmp_path):
     source = {
         "pkg.__init__": "from . import child",
         "pkg.child": "from pkg import child",
     }
     result = _model(source, "pkg")
-    assert result.outcome == "UNKNOWN"
+    assert result.outcome == "MODEL_PASS"
+    assert any(
+        event.operation == "FROM_REENTRANT_CHILD"
+        and event.target == "pkg.child"
+        and event.module == "pkg.child"
+        for event in result.events
+    )
     assert _actual(tmp_path, source, "pkg")
 
 
@@ -485,5 +491,93 @@ def test_b0g4c2_operation_budget_unknown():
     source = {
         "pkg.__init__": "pass",
         "entry": "import pkg\n" * 10020,
+    }
+    assert _model(source, "entry").outcome == "UNKNOWN"
+
+
+def test_b0g4c3_early_read_from_reentrant_child(tmp_path):
+    source = {
+        "pkg.__init__": "from . import child",
+        "pkg.child": (
+            "from pkg import child\n"
+            "x=child.value\n"
+            "value=7"
+        ),
+    }
+    result = _model(source, "pkg")
+    assert result.outcome == "EARLY_BINDING_HAZARD"
+    assert result.target_module == "pkg.child"
+    assert result.symbol == "value"
+    assert not _actual(tmp_path, source, "pkg")
+
+
+def test_b0g4c3_bound_attribute_before_reentrant_read(tmp_path):
+    source = {
+        "pkg.__init__": "from . import child",
+        "pkg.child": (
+            "value=7\n"
+            "from pkg import child\n"
+            "x=child.value"
+        ),
+    }
+    result = _model(source, "pkg")
+    assert result.outcome == "MODEL_PASS"
+    assert _actual(tmp_path, source, "pkg")
+
+
+def test_b0g4c3_relative_reentrant_child(tmp_path):
+    source = {
+        "pkg.__init__": "from . import child",
+        "pkg.child": "from . import child",
+    }
+    result = _model(source, "pkg")
+    assert result.outcome == "MODEL_PASS"
+    assert any(
+        event.operation == "FROM_REENTRANT_CHILD"
+        for event in result.events
+    )
+    assert _actual(tmp_path, source, "pkg")
+
+
+def test_b0g4c3_explicit_from_alias(tmp_path):
+    source = {
+        "pkg.__init__": "from . import child",
+        "pkg.child": (
+            "value=7\n"
+            "from pkg import child as c\n"
+            "x=c.value"
+        ),
+    }
+    result = _model(source, "pkg")
+    assert result.outcome == "MODEL_PASS"
+    assert any(
+        event.operation == "FROM_REENTRANT_CHILD"
+        and event.symbol == "child"
+        for event in result.events
+    )
+    assert _actual(tmp_path, source, "pkg")
+
+
+def test_b0g4c3_nested_regular_package_fallback(tmp_path):
+    source = {
+        "pkg.__init__": "pass",
+        "pkg.sub.__init__": "from . import child",
+        "pkg.sub.child": "from pkg.sub import child",
+    }
+    result = _model(source, "pkg.sub")
+    assert result.outcome == "MODEL_PASS"
+    assert any(
+        event.operation == "FROM_REENTRANT_CHILD"
+        and event.target == "pkg.sub.child"
+        for event in result.events
+    )
+    assert _actual(tmp_path, source, "pkg.sub")
+
+
+def test_b0g4c3_multi_member_fromlist_still_unknown():
+    source = {
+        "pkg.__init__": "pass",
+        "pkg.child": "pass",
+        "entry": "from pkg import child, missing",
     }
     assert _model(source, "entry").outcome == "UNKNOWN"

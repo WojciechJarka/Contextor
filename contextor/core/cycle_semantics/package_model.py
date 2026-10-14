@@ -430,8 +430,30 @@ def evaluate_package_import_order(
                     child = target + "." + member
 
                     if child in programs:
-                        # Reentrant fromlist fallback through sys.modules is
-                        # intentionally unsupported by this restricted model.
+                        # CPython 3.10 IMPORT_FROM can fall back to sys.modules
+                        # for a child that has not yet been attached to its
+                        # parent package. Model only the active same-thread case.
+                        if states[child] == "INITIALIZING":
+                            if not any(
+                                active == child
+                                for active, _ in frames
+                            ):
+                                return result("UNKNOWN", child, member)
+
+                            namespaces[module][step.binding] = child
+
+                            events.append(
+                                PackageModelEvent(
+                                    module,
+                                    "FROM_REENTRANT_CHILD",
+                                    child,
+                                    member,
+                                )
+                            )
+
+                            frames[-1] = (module, index + 1)
+                            continue
+
                         if states[child] != "NEW":
                             return result("UNKNOWN", child, member)
 
