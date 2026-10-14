@@ -72,9 +72,9 @@ def _compile(
                 )
 
         elif isinstance(stmt, ast.ImportFrom):
-            # Python resolves the entire fromlist before its STORE_NAME steps.
-            # This model processes single members only, to avoid false proofs.
-            if len(stmt.names) != 1:
+            # CPython resolves the fromlist during IMPORT_NAME,
+            # before individual IMPORT_FROM / STORE_NAME operations.
+            if not stmt.names:
                 return None
             if stmt.level:
                 context = (
@@ -105,6 +105,31 @@ def _compile(
                 part.isidentifier() for part in target.split(".")
             ):
                 return None
+
+            if len(stmt.names) > 1:
+                # Validate every member before emitting phase steps.
+                if any(
+                    not alias.name.isidentifier()
+                    or alias.name.startswith("__")
+                    or (
+                        alias.asname is not None
+                        and (
+                            not alias.asname.isidentifier()
+                            or alias.asname.startswith("__")
+                        )
+                    )
+                    for alias in stmt.names
+                ):
+                    return None
+
+                for alias in stmt.names:
+                    steps.append(
+                        _Step(
+                            "PREPARE_FROM_MEMBER",
+                            target,
+                            alias.name,
+                        )
+                    )
 
             for alias in stmt.names:
                 if (
@@ -370,7 +395,11 @@ def evaluate_package_import_order(
 
         step = steps[index]
 
-        if step.op in {"IMPORT", "FROM"}:
+        if step.op in {
+            "IMPORT",
+            "FROM",
+            "PREPARE_FROM_MEMBER",
+        }:
             target = step.target
 
             if not target or target not in programs:
@@ -395,7 +424,53 @@ def evaluate_package_import_order(
                 frames.append((next_piece, 0))
                 continue
 
-            if step.op == "IMPORT":
+            if step.op == "PREPARE_FROM_MEMBER":
+                member = step.symbol
+
+                if (
+                    target in packages
+                    and member not in namespaces[target]
+                ):
+                    child = target + "." + member
+
+                    if child in programs:
+                        if states[child] == "NEW":
+                            if missing_piece(child) != child:
+                                return result("UNKNOWN", child, member)
+
+                            states[child] = "INITIALIZING"
+
+                            events.append(
+                                PackageModelEvent(
+                                    module,
+                                    "START_IMPORT",
+                                    child,
+                                )
+                            )
+
+                            frames.append((child, 0))
+                            continue
+
+                        if states[child] == "INITIALIZING":
+                            if not any(
+                                active == child
+                                for active, _ in frames
+                            ):
+                                return result("UNKNOWN", child, member)
+
+                        elif states[child] == "READY":
+                            return result("UNKNOWN", child, member)
+
+                events.append(
+                    PackageModelEvent(
+                        module,
+                        "PREPARE_FROM_MEMBER",
+                        target,
+                        member,
+                    )
+                )
+
+            elif step.op == "IMPORT":
                 if module != bootstrap:
                     if step.explicit_alias and "." in target:
                         parent, child = target.rsplit(".", 1)

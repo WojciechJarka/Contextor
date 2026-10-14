@@ -469,14 +469,16 @@ def test_b0g4c2_missing_member_no_child(tmp_path):
     assert not _actual(tmp_path, source, "entry")
 
 
-def test_b0g4c2_multiple_fromlist_members_unknown():
+def test_b0g4c4_multiple_fromlist_members_supported(tmp_path):
     source = {
         "pkg.__init__": "pass",
         "pkg.a": "pass",
         "pkg.b": "pass",
         "entry": "from pkg import a, b",
     }
-    assert _model(source, "entry").outcome == "UNKNOWN"
+    result = _model(source, "entry")
+    assert result.outcome == "MODEL_PASS"
+    assert _actual(tmp_path, source, "entry")
 
 
 def test_b0g4c2_shadowing_sequence_stays_unknown():
@@ -574,10 +576,171 @@ def test_b0g4c3_nested_regular_package_fallback(tmp_path):
     assert _actual(tmp_path, source, "pkg.sub")
 
 
-def test_b0g4c3_multi_member_fromlist_still_unknown():
+def test_b0g4c4_multi_member_missing_export(tmp_path):
     source = {
         "pkg.__init__": "pass",
         "pkg.child": "pass",
         "entry": "from pkg import child, missing",
+    }
+    result = _model(source, "entry")
+    assert result.outcome == "MISSING_EXPORT"
+    assert result.target_module == "pkg"
+    assert result.symbol == "missing"
+    assert not _actual(tmp_path, source, "entry")
+
+
+def test_b0g4c4_preparation_before_local_binding_hazard(tmp_path):
+    source = {
+        "pkg.__init__": "pass",
+        "pkg.a": "value=1",
+        "pkg.b": "import entry\nx=entry.a",
+        "entry": "from pkg import a,b",
+    }
+    result = _model(source, "entry")
+    assert result.outcome == "EARLY_BINDING_HAZARD"
+    assert result.target_module == "entry"
+    assert result.symbol == "a"
+    assert not _actual(tmp_path, source, "entry")
+
+
+def test_b0g4c4_all_prepares_before_from_bindings(tmp_path):
+    source = {
+        "pkg.__init__": "pass",
+        "pkg.a": "pass",
+        "pkg.b": "pass",
+        "entry": "from pkg import a,b",
+    }
+    result = _model(source, "entry")
+    assert result.outcome == "MODEL_PASS"
+    operations = [
+        e.operation
+        for e in result.events
+        if e.module == "entry"
+        and e.operation in {"PREPARE_FROM_MEMBER", "FROM"}
+    ]
+    assert operations == [
+        "PREPARE_FROM_MEMBER",
+        "PREPARE_FROM_MEMBER",
+        "FROM",
+        "FROM",
+    ]
+    assert _actual(tmp_path, source, "entry")
+
+
+def test_b0g4c4_aliases_after_preparation(tmp_path):
+    source = {
+        "pkg.__init__": "pass",
+        "pkg.a": "value=1",
+        "pkg.b": "value=2",
+        "entry": "from pkg import a as aa,b as bb\nx=aa.value",
+    }
+    assert _model(source, "entry").outcome == "MODEL_PASS"
+    assert _actual(tmp_path, source, "entry")
+
+
+def test_b0g4c4_multi_from_plain_module(tmp_path):
+    source = {
+        "provider": "x=1\ny=2",
+        "entry": "from provider import x,y",
+    }
+    assert _model(source, "entry").outcome == "MODEL_PASS"
+    assert _actual(tmp_path, source, "entry")
+
+
+def test_b0g4c4_relative_multi_in_initializer(tmp_path):
+    source = {
+        "pkg.__init__": "from . import a,b",
+        "pkg.a": "value=1",
+        "pkg.b": "from pkg import a\nx=a.value",
+    }
+    assert _model(source, "pkg").outcome == "MODEL_PASS"
+    assert _actual(tmp_path, source, "pkg")
+
+
+def test_b0g4c4_relative_multi_in_module(tmp_path):
+    source = {
+        "pkg.__init__": "pass",
+        "pkg.a": "value=1",
+        "pkg.b": "value=2",
+        "pkg.user": "from . import a,b",
+    }
+    assert _model(source, "pkg.user").outcome == "MODEL_PASS"
+    assert _actual(tmp_path, source, "pkg.user")
+
+
+def test_b0g4c4_nested_relative_multi(tmp_path):
+    source = {
+        "pkg.__init__": "pass",
+        "pkg.sub.__init__": "from . import a,b",
+        "pkg.sub.a": "pass",
+        "pkg.sub.b": "pass",
+    }
+    assert _model(source, "pkg.sub").outcome == "MODEL_PASS"
+    assert _actual(tmp_path, source, "pkg.sub")
+
+
+def test_b0g4c4_attribute_precedence_during_preparation(tmp_path):
+    source = {
+        "pkg.__init__": "a=7",
+        "pkg.a": "pass",
+        "pkg.b": "pass",
+        "entry": "from pkg import a,b",
+    }
+    result = _model(source, "entry")
+    assert result.outcome == "MODEL_PASS"
+    assert not any(
+        e.operation == "START_IMPORT" and e.target == "pkg.a"
+        for e in result.events
+    )
+    assert _actual(tmp_path, source, "entry")
+
+
+def test_b0g4c4_reentrant_child_chain(tmp_path):
+    source = {
+        "pkg.__init__": "from . import a,b",
+        "pkg.a": "from pkg import b",
+        "pkg.b": "from pkg import a",
+    }
+    result = _model(source, "pkg")
+    assert result.outcome == "MODEL_PASS"
+    assert any(
+        e.operation == "FROM_REENTRANT_CHILD"
+        for e in result.events
+    )
+    assert _actual(tmp_path, source, "pkg")
+
+
+def test_b0g4c4_later_child_loads_before_missing_export(tmp_path):
+    source = {
+        "pkg.__init__": "pass",
+        "pkg.b": "pass",
+        "entry": "from pkg import missing,b",
+    }
+    result = _model(source, "entry")
+    assert result.outcome == "MISSING_EXPORT"
+    assert ("pkg.b", "READY") in [
+        (e.module, e.operation)
+        for e in result.events
+    ]
+    assert not _actual(tmp_path, source, "entry")
+
+
+def test_b0g4c4_sibling_uses_prepared_child(tmp_path):
+    source = {
+        "pkg.__init__": "pass",
+        "pkg.a": "value=1",
+        "pkg.b": "from pkg import a\nx=a.value",
+        "entry": "from pkg import a,b",
+    }
+    result = _model(source, "entry")
+    assert result.outcome == "MODEL_PASS"
+    assert _actual(tmp_path, source, "entry")
+
+
+def test_b0g4c4_namespace_layout_remains_unknown():
+    source = {
+        "pkg.a": "pass",
+        "pkg.b": "pass",
+        "entry": "from pkg import a,b",
     }
     assert _model(source, "entry").outcome == "UNKNOWN"
