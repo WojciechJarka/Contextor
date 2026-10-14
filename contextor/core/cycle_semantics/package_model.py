@@ -42,12 +42,87 @@ class _Step:
     function_local: bool = False
 
 
+def _safe_passive_function_definition(
+    statement: ast.FunctionDef,
+) -> bool:
+    """A definition whose creation has no unknown evaluations.
+
+    Its body may be opaque because function bodies are deferred.
+    Only literal default expressions are supported.
+    """
+    if (
+        not statement.name.isidentifier()
+        or statement.name.startswith("__")
+        or statement.decorator_list
+        or statement.returns is not None
+        or statement.type_comment is not None
+        or getattr(statement, "type_params", ())
+    ):
+        return False
+
+    arguments = statement.args
+
+    parameters = (
+        tuple(arguments.posonlyargs)
+        + tuple(arguments.args)
+        + tuple(arguments.kwonlyargs)
+        + (
+            (arguments.vararg,)
+            if arguments.vararg is not None
+            else ()
+        )
+        + (
+            (arguments.kwarg,)
+            if arguments.kwarg is not None
+            else ()
+        )
+    )
+
+    if any(
+        parameter.annotation is not None
+        for parameter in parameters
+    ):
+        return False
+
+    def safe_default(value: ast.AST) -> bool:
+        return (
+            isinstance(value, ast.Constant)
+            and type(value.value) in (
+                type(None),
+                bool,
+                int,
+                float,
+                complex,
+                str,
+                bytes,
+            )
+        )
+
+    if any(
+        not safe_default(value)
+        for value in arguments.defaults
+    ):
+        return False
+
+    if any(
+        value is not None and not safe_default(value)
+        for value in arguments.kw_defaults
+    ):
+        return False
+
+    return True
+
+
 def _compile(
     tree: ast.Module,
     logical: str,
     package: bool,
+    _depth: int = 0,
 ) -> tuple[_Step, ...] | None:
     steps: list[_Step] = []
+
+    if _depth >= 32:
+        return None
 
     for stmt in tree.body:
         if isinstance(stmt, ast.Import):
@@ -156,6 +231,52 @@ def _compile(
                     )
                 )
 
+        elif isinstance(stmt, ast.If):
+            condition = stmt.test
+
+            if (
+                not isinstance(condition, ast.Compare)
+                or not isinstance(condition.left, ast.Name)
+                or condition.left.id != "__name__"
+                or len(condition.ops) != 1
+                or not isinstance(
+                    condition.ops[0],
+                    (ast.Eq, ast.NotEq),
+                )
+                or len(condition.comparators) != 1
+                or not isinstance(
+                    condition.comparators[0],
+                    ast.Constant,
+                )
+                or type(
+                    condition.comparators[0].value
+                ) is not str
+                or condition.comparators[0].value
+                != "__main__"
+            ):
+                return None
+
+            selected = (
+                stmt.orelse
+                if isinstance(condition.ops[0], ast.Eq)
+                else stmt.body
+            )
+
+            selected_steps = _compile(
+                ast.Module(
+                    body=selected,
+                    type_ignores=[],
+                ),
+                logical,
+                package,
+                _depth=_depth + 1,
+            )
+
+            if selected_steps is None:
+                return None
+
+            steps.extend(selected_steps)
+
         elif isinstance(stmt, ast.Assign):
             if (
                 len(stmt.targets) != 1
@@ -200,72 +321,83 @@ def _compile(
                 return None
 
         elif isinstance(stmt, ast.FunctionDef):
+            if not _safe_passive_function_definition(stmt):
+                return None
+
             args = stmt.args
 
-            if (
-                not stmt.name.isidentifier()
-                or stmt.name.startswith("__")
-                or stmt.decorator_list
-                or stmt.returns is not None
-                or stmt.type_comment is not None
-                or args.posonlyargs
+            restricted_callable = not (
+                args.posonlyargs
                 or args.args
                 or args.vararg is not None
                 or args.kwonlyargs
                 or args.kwarg is not None
                 or args.defaults
                 or args.kw_defaults
-            ):
-                return None
+            )
 
             function_steps: list[_Step] = []
 
-            for body_statement in stmt.body:
-                if isinstance(body_statement, ast.Pass):
-                    continue
+            if restricted_callable:
+                for body_statement in stmt.body:
+                    if isinstance(body_statement, ast.Pass):
+                        continue
 
-                if not isinstance(
-                    body_statement,
-                    (ast.Import, ast.ImportFrom),
-                ):
-                    return None
+                    if not isinstance(
+                        body_statement,
+                        (ast.Import, ast.ImportFrom),
+                    ):
+                        restricted_callable = False
+                        break
 
-                fragment = ast.Module(
-                    body=[body_statement],
-                    type_ignores=[],
-                )
+                    fragment = ast.Module(
+                        body=[body_statement],
+                        type_ignores=[],
+                    )
 
-                compiled = _compile(
-                    fragment,
-                    logical,
-                    package,
-                )
+                    compiled = _compile(
+                        fragment,
+                        logical,
+                        package,
+                    )
 
-                if (
-                    compiled is None
-                    or any(
-                        item.op not in {
-                            "IMPORT",
-                            "FROM",
-                            "PREPARE_FROM_MEMBER",
-                        }
+                    if (
+                        compiled is None
+                        or any(
+                            item.op not in {
+                                "IMPORT",
+                                "FROM",
+                                "PREPARE_FROM_MEMBER",
+                            }
+                            for item in compiled
+                        )
+                    ):
+                        restricted_callable = False
+                        break
+
+                    function_steps.extend(
+                        replace(
+                            item,
+                            function_local=True,
+                        )
                         for item in compiled
                     )
-                ):
-                    return None
 
-                function_steps.extend(
-                    replace(item, function_local=True)
-                    for item in compiled
+            if restricted_callable:
+                steps.append(
+                    _Step(
+                        "DEFINE_FUNCTION",
+                        binding=stmt.name,
+                        function_body=tuple(function_steps),
+                    )
                 )
-
-            steps.append(
-                _Step(
-                    "DEFINE_FUNCTION",
-                    binding=stmt.name,
-                    function_body=tuple(function_steps),
+            else:
+                steps.append(
+                    _Step(
+                        "DEFINE_OPAQUE_FUNCTION",
+                        binding=stmt.name,
+                    )
                 )
-            )
 
         elif isinstance(stmt, ast.Expr):
             expression = stmt.value
@@ -401,7 +533,10 @@ def evaluate_package_import_order(
         # same package attribute name need richer shadowing
         # and import-binding semantics.
         if any(
-            step.op == "DEFINE_FUNCTION"
+            step.op in {
+                "DEFINE_FUNCTION",
+                "DEFINE_OPAQUE_FUNCTION",
+            }
             and step.binding in children
             for step in programs[package]
         ):
@@ -714,6 +849,22 @@ def evaluate_package_import_order(
                 PackageModelEvent(
                     module,
                     "DEFINE_FUNCTION",
+                    symbol=step.binding,
+                )
+            )
+
+        elif step.op == "DEFINE_OPAQUE_FUNCTION":
+            namespaces[module][step.binding] = (
+                "\x00OPAQUE_FUNCTION:"
+                + module
+                + ":"
+                + step.binding
+            )
+
+            events.append(
+                PackageModelEvent(
+                    module,
+                    "DEFINE_OPAQUE_FUNCTION",
                     symbol=step.binding,
                 )
             )
