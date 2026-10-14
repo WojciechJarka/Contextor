@@ -224,7 +224,10 @@ def _compile(
                 if isinstance(body_statement, ast.Pass):
                     continue
 
-                if not isinstance(body_statement, ast.Import):
+                if not isinstance(
+                    body_statement,
+                    (ast.Import, ast.ImportFrom),
+                ):
                     return None
 
                 fragment = ast.Module(
@@ -240,7 +243,14 @@ def _compile(
 
                 if (
                     compiled is None
-                    or any(item.op != "IMPORT" for item in compiled)
+                    or any(
+                        item.op not in {
+                            "IMPORT",
+                            "FROM",
+                            "PREPARE_FROM_MEMBER",
+                        }
+                        for item in compiled
+                    )
                 ):
                     return None
 
@@ -617,12 +627,17 @@ def evaluate_package_import_order(
                             ):
                                 return result("UNKNOWN", child, member)
 
-                            namespaces[module][step.binding] = child
+                            if not step.function_local:
+                                namespaces[module][step.binding] = child
 
                             events.append(
                                 PackageModelEvent(
                                     module,
-                                    "FROM_REENTRANT_CHILD",
+                                    (
+                                        "FUNCTION_LOCAL_FROM_REENTRANT_CHILD"
+                                        if step.function_local
+                                        else "FROM_REENTRANT_CHILD"
+                                    ),
                                     child,
                                     member,
                                 )
@@ -670,12 +685,17 @@ def evaluate_package_import_order(
 
                     return result(outcome, target, member)
 
-                namespaces[module][step.binding] = namespaces[target][member]
+                if not step.function_local:
+                    namespaces[module][step.binding] = namespaces[target][member]
 
                 events.append(
                     PackageModelEvent(
                         module,
-                        "FROM",
+                        (
+                            "FUNCTION_LOCAL_FROM"
+                            if step.function_local
+                            else "FROM"
+                        ),
                         target,
                         member,
                     )
