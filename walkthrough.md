@@ -1,420 +1,748 @@
-# CONTEXTOR_B0G4B7_SOURCE_BOUND_CYCLE_EVIDENCE
+TASK: CONTEXTOR_B0G4C0_PACKAGE_IMPORT_LAYOUT
 
-## HEAD_BEFORE
-3057087843d24572992f52fd8d08f47272543653. Git status clean. B0G4B6 scenarios.py and prior cycle_semantics components existed. Both B0G4B7 target files were absent. Contextor resolved ParsedSourceInput to contextor.core.source, with a frozen dataclass containing tree: ast.AST and source_fingerprint: str; its source was complete and workspace_sync=verified.
+HEAD_BEFORE
+d22f7b454b51c3269839aa544ce6cfc1d1d92219
 
-## HEAD_AFTER
-3057087843d24572992f52fd8d08f47272543653. No commit. Git status shows only the two new task files as untracked.
+HEAD_AFTER
+d22f7b454b51c3269839aa544ce6cfc1d1d92219
 
-## LIVE_REVISION_BEFORE
-416; activity_epoch=1beab26da2ff4932852caa7db6ff4242; continuity=continuous; resync_required=false; canonical_state=fresh; name_collisions=0 fresh; structural cycles=16 fresh. Global workspace_sync=unverified. Contextor identified scenarios.py as the existing SCC scenario owner with only its targeted test as direct consumer and no downstream consumers.
+GIT_STATUS_BEFORE
+clean
 
-## LIVE_REVISION_AFTER
-418; same activity_epoch; continuity=continuous; resync_required=false; canonical_state=fresh; all reported families fresh; no parse-stale modules; name_collisions=0; structural cycles=16. Desktop watcher revision 417 UPDATED evidence.py and revision 418 UPDATED test_cycle_semantics_evidence.py, both blast_radius_state=fresh. New production module workspace_sync=verified by full get_file_edit_context at revision 418; global project overlay remains unverified.
+GIT_STATUS_AFTER
+?? contextor/core/cycle_semantics/package_layout.py
+?? tests/test_cycle_semantics_package_layout.py
+walkthrough.md is this task report and is excluded from FILES_CHANGED.
 
-## FILES_CHANGED
-- contextor/core/cycle_semantics/evidence.py (new)
-- tests/test_cycle_semantics_evidence.py (new)
+LIVE_REVISION_BEFORE
+418
+activity_epoch=1beab26da2ff4932852caa7db6ff4242
+canonical_state=fresh
+graph=fresh
+cycles=fresh, reported cycle diagnostics=16
+resync_required=false
+name_collisions=0 (fresh)
 
-No existing production/test file or __init__.py changed. walkthrough.md is this report and excluded from source/test diff accounting.
+LIVE_REVISION_AFTER
+420
+activity_epoch=1beab26da2ff4932852caa7db6ff4242 (unchanged)
+canonical_state=fresh
+graph=fresh
+cycles=fresh, reported cycle diagnostics=16
+resync_required=false
+name_collisions=0 (fresh)
 
-## IMPLEMENTATION_CONTRACT
-CONTRACT_PROVED: The exact auditor-supplied two files were written with one final newline. build_source_bound_cycle_evidence accepts an in-memory hard-edge graph and ParsedSourceInput snapshots, validates source identity and lowercase SHA-256 fingerprints, hashes the supplied AST including attributes, joins the existing SCC scenario report, computes graph and source-manifest fingerprints, and issues per-SCC tokens from semantic version, members, reachable subgraph and complete closure source signatures. Missing reachable sources remain explicit MISSING values. compare_source_bound_cycle_evidence emits only MODEL_CLASSIFICATION_CHANGED, EVIDENCE_REVISED, STRUCTURE_ADDED and STRUCTURE_REMOVED when appropriate. Output dataclasses are frozen.
-CODE_PATH_PROVED: Production code uses caller-supplied graph and AST snapshots; it does not read disk source, execute analyzed AST, mutate the canonical graph, publish warnings or emit LIVE diagnostic_changes. Contextor reports the new module's only direct consumer as tests.test_cycle_semantics_evidence, with zero downstream consumers.
+LIVE_WATCHER_EVIDENCE
+- Revision 419: desktop_watcher UPDATED contextor/core/cycle_semantics/package_layout.py; affected module contextor.core.cycle_semantics.package_layout.
+- Revision 420: desktop_watcher UPDATED tests/test_cycle_semantics_package_layout.py; affected module tests.test_cycle_semantics_package_layout.
+- Event continuity=continuous; no direct update_file or publish request was made.
 
-## TEST_COMMAND
-Pre-edit: `& .\.venv\Scripts\python.exe -m pytest -q tests/test_cycle_semantics_scenarios.py tests/test_cycle_semantics_scc.py tests/test_cycle_semantics_initialization_model.py tests/test_cycle_semantics_binding_order.py tests/test_cycle_semantics_guards.py tests/test_cycle_semantics_execution_context.py tests/test_cycle_semantics_provenance.py`
-Post-edit: `& .\.venv\Scripts\python.exe -m pytest -q tests/test_cycle_semantics_evidence.py tests/test_cycle_semantics_scenarios.py tests/test_cycle_semantics_scc.py tests/test_cycle_semantics_initialization_model.py tests/test_cycle_semantics_binding_order.py tests/test_cycle_semantics_guards.py tests/test_cycle_semantics_execution_context.py tests/test_cycle_semantics_provenance.py`
+SOURCE_PRECHECK
+- HEAD and status were checked before editing; HEAD stayed unchanged. Initial status was clean.
+- B0G4B7 evidence module contextor.core.cycle_semantics.evidence existed and was LIVE at revision 418 with workspace_sync=verified.
+- Contextor resolved ImportOccurrence to the frozen dataclass in contextor/core/cycle_semantics/provenance.py (lines 28-40). The artifact has three confirmed direct static consumers in the canonical evidence: cycle_semantics.__init__, cycle_semantics.binding_order, and tests.test_cycle_semantics_execution_context.
+- Existing package naming uses flat modules under contextor.core.cycle_semantics. No __init__.py was changed.
+- Existing relative source-module resolver _resolve_import_module is owned by contextor.core.analysis.lineage_extraction_contracts (lines 143-149); its one direct consumer is contextor.core.analysis.lineage_extraction_visitors. It was not modified.
+- ProjectGraph is owned by contextor.core.domain.graph (lines 10-54); Contextor reports 30 direct module consumers. The new package-layout module does not import or modify ProjectGraph.
+- After watcher synchronization, Contextor reported the new package-layout module with one hard outbound edge to provenance and its test with hard dependencies on package_layout and provenance.
 
-## TEST_RESULTS
-Repository Python 3.10.9. Pre-edit exit 0: 108 passed in 3.19s. Post-edit exit 0: 121 passed in 3.94s (13 new plus 108 existing). No other tests, full suite or FULL analysis run. New production syntax diagnostics are fresh and empty at revision 418.
+FILES_CHANGED
+- contextor/core/cycle_semantics/package_layout.py (new)
+- tests/test_cycle_semantics_package_layout.py (new)
 
-## SOURCE_FINGERPRINT_EVIDENCE
-CONTRACT_PROVED: Graph identity uses normalized sorted hard-edge adjacency. Source manifest uses raw SHA-256 and AST SHA-256 for each supplied module. Per-SCC evidence token covers the component's complete reachable dependency closure, including explicit MISSING signatures. A source-only binding-order edit changes the token despite unchanged graph; AST attribute tampering changes the AST fingerprint even with a spoofed unchanged raw hash. Tests cover both. The caller remains responsible for snapshot provenance and disk freshness.
+IMPLEMENTATION_CONTRACT
+- Both files match the supplied contents exactly; comparison against the attached specification returned true for each.
+- The production module adds frozen evidence records for package layout and import-site plans. It maps indexed __init__ module IDs to regular-package candidates, classifies module files, namespace candidates, ambiguous layouts, and unknown modules, and returns deterministic parent load chains.
+- The planner uses ImportOccurrence facts and preserves the occurrence ordinal, line, relative level, requested names, aliases, local bindings, and possible child-module candidates.
+- It reports from-import member/submodule ambiguity as unresolved. Namespace candidates are explicitly repository-layout candidates, not runtime namespace-package proof. External imports remain unresolved.
+- No analyzed source file is accessed or imported by this module. It does not mutate ProjectGraph, hard_edges, soft_edges, cycles, canonical state, or publication state. Valid from __future__ imports remain represented as import evidence.
 
-## SEMANTIC_TRANSITION_EVIDENCE
-CONTRACT_PROVED: With identical hard edges, moving a binding before an import changes the model classification and emits MODEL_CLASSIFICATION_CHANGED. A comment-only source change revises evidence without changing classification and emits EVIDENCE_REVISED. A graph change removing a cyclic SCC emits STRUCTURE_REMOVED. These are model evidence transitions, not user-visible warning ADD/RESOLVE events. Tests confirm no RESOLVED action is emitted.
+TEST_COMMAND
+Baseline:
+& ..venvScriptspython.exe -B -m pytest -p no:cacheprovider -q tests/test_cycle_semantics_evidence.py tests/test_cycle_semantics_scenarios.py tests/test_cycle_semantics_scc.py tests/test_cycle_semantics_initialization_model.py tests/test_cycle_semantics_binding_order.py tests/test_cycle_semantics_guards.py tests/test_cycle_semantics_execution_context.py tests/test_cycle_semantics_provenance.py
 
-## UNRELATED_CHANGE_ISOLATION
-CONTRACT_PROVED: A source change outside the SCC's reachable closure changes the global source-manifest fingerprint but leaves that SCC's token unchanged and produces no per-SCC transition. A reachable noncyclic dependency change does revise the SCC token. Tests cover independent SCCs so only the affected component changes.
+Post-change:
+& ..venvScriptspython.exe -B -m pytest -p no:cacheprovider -q tests/test_cycle_semantics_package_layout.py tests/test_cycle_semantics_evidence.py tests/test_cycle_semantics_scenarios.py tests/test_cycle_semantics_scc.py tests/test_cycle_semantics_initialization_model.py tests/test_cycle_semantics_binding_order.py tests/test_cycle_semantics_guards.py tests/test_cycle_semantics_execution_context.py tests/test_cycle_semantics_provenance.py
 
-## COLLISION_COUNT_BEFORE_AFTER
-0 -> 0 from fresh canonical get_name_collisions at revisions 416 and 418. No new name collision.
+TEST_RESULTS
+- Repository Python: 3.10.9.
+- Baseline: 121 passed in 3.75s.
+- Post-change: 133 passed in 3.96s (12 new tests plus 121 existing).
+- No warnings were emitted. No warning filter or warning-suppression option was used.
+- Only the specified eight baseline files and nine post-change files were run.
 
-## STRUCTURAL_CYCLE_COUNT_BEFORE_AFTER
-16 -> 16 from fresh canonical diagnostics. Existing graph and cycle detection code were untouched. Watcher indexing of two new modules may add ordinary dependency edges; a byte-identical whole-repository graph is not claimed.
+PACKAGE_LAYOUT_EVIDENCE
+- Tests verify deterministic ordering, __init__ normalization, regular-package parent chains, module-file and namespace-candidate classification, and explicit file/package conflicts.
+- Contextor after watcher processing confirms the new module is workspace_sync=verified at revision 420. Its canonical hard dependency is provenance; no ProjectGraph dependency is present.
 
-## NO_SAFETY_CERTIFICATION
-CODE_PATH_PROVED: Authority is SNAPSHOT_ONLY_NOT_LIVE_FRESHNESS, and scenario evidence_scope remains SCENARIO_MODEL_NOT_RUNTIME_CERTIFICATION. No SAFE, RUNTIME_CONFIRMED or NO_INITIALIZATION_HAZARD state is emitted. Missing and mismatched source scenarios remain INDETERMINATE.
+RELATIVE_IMPORT_EVIDENCE
+- Targeted tests pass for from . import child, from .. import child, preservation of the requested package name, and relative traversal beyond top level returning RELATIVE_BEYOND_TOP_LEVEL with no entries.
+- The planner uses the lexical occurrence level and indexed importer identity; it does not execute Python import resolution.
 
-## NO_WARNING_SUPPRESSION
-CODE_PATH_PROVED: ArchitectureCycle/warning publication code was neither edited nor called. No LIVE_DIAGNOSTIC_CYCLE_RESOLVED action is emitted. Canonical structural cycles remain 16.
+FROM_IMPORT_AMBIGUITY_EVIDENCE
+- Tests pass for from pkg import child as c: pkg.child is retained only as a possible child module, the local alias is c, and resolution remains MEMBER_OR_SUBMODULE_UNRESOLVED.
+- Imports from a plain module and star imports remain unresolved. External imports are reported as layout-unresolved.
+- The future-import regression confirms from __future__ import annotations remains represented and unresolved as a repository-local layout target.
 
-## NO_DIRECT_LIVE_PUBLICATION
-CODE_PATH_PROVED: The new module is imported only by its targeted test and is not exported from __init__.py or integrated with FULL/incremental, MCP, LIVE, Desktop or snapshots. Desktop watcher indexing is external observation. No direct update_file, restart or commit.
+COLLISION_COUNT_BEFORE_AFTER
+- Before: 0, availability=fresh, revision=418.
+- After: 0, availability=fresh, revision=420.
+- Both values are from Contextor canonical collision diagnostics after the corresponding source state was synchronized.
 
-## UNRESOLVED_LIMITATIONS
-UNKNOWN: This component cannot verify that the caller's ParsedSourceInput matches current disk bytes or LIVE authority. It cannot certify runtime safety or failure from model evidence. Global project workspace_sync is unverified in the overlay, although the new production file was verified against disk. Only closed, supported scenario inputs yield determinate model classifications.
+STRUCTURAL_CYCLE_COUNT_BEFORE_AFTER
+- Before: 16 reported cycle diagnostics, availability=fresh, revision=418.
+- After: 16 reported cycle diagnostics, availability=fresh, revision=420.
+- The new package module has one hard edge to provenance. LIVE reports no change in the canonical reported cycle count. This count is the Contextor cycle diagnostic count, not a claim that every possible runtime import cycle was enumerated.
 
-## FINAL_VERDICT
-B0G4B7_PASS — exact isolated two-file implementation, 121 focused tests passed, both watcher events observed, fresh canonical state, zero name collisions and unchanged structural cycle count. Await `proceduj`.
+NO_SAFETY_CERTIFICATION
+- PASS: no runtime safety certification is made. Tests exercise synthetic AST/import-occurrence inputs and the static layout planner. No analyzed module imports were executed and no cold-import experiment was run.
 
-## FULL_DIFFS
+NO_WARNING_SUPPRESSION
+- PASS: no warning suppression was added to source or tests, and pytest was not invoked with warning suppression.
 
-### FULL_DIFF: contextor/core/cycle_semantics/evidence.py
+NO_DIRECT_LIVE_PUBLICATION
+- PASS: no update_file, publish, forced resync, or restart was requested. The desktop_watcher synchronized both new files and advanced LIVE from revision 418 to 420.
 
-diff --git a/contextor/core/cycle_semantics/evidence.py b/contextor/core/cycle_semantics/evidence.py
+UNRESOLVED_LIMITATIONS
+- NAMESPACE_CANDIDATE describes only the indexed repository layout; external namespace portions, runtime import hooks, and environment-dependent import behavior are outside this evidence.
+- A possible child module does not establish whether a from-import binds a package attribute or loads a submodule.
+- Runtime import targets and runtime safety remain unverified.
+- The graph and collision conclusions are bounded to the fresh canonical Contextor state at revision 420.
+
+EVIDENCE_CLASSES
+- DIRECT_EVIDENCE: test outputs, Git HEAD/status, Contextor revisions/events/freshness/collision and cycle diagnostics, and workspace_sync=verified.
+- CODE_PATH_PROVED: supplied implementation was byte-for-byte content-matched after newline normalization; Contextor resolved the new module's canonical edge to provenance.
+- CONTRACT_PROVED: the 12 targeted tests passed; the public ProjectGraph and ImportOccurrence ownership checks came from Contextor source contracts.
+- INFERENCE: unchanged reported cycle count and the new module's single edge support no observed cycle increase in the canonical graph.
+- UNKNOWN: runtime package resolution and runtime safety for arbitrary analyzed imports.
+
+FINAL_VERDICT
+B0G4C0_PASS
+
+FULL_DIFFS
+diff --git a/contextor/core/cycle_semantics/package_layout.py b/contextor/core/cycle_semantics/package_layout.py
 new file mode 100644
-index 0000000..b691410
 --- /dev/null
-+++ b/contextor/core/cycle_semantics/evidence.py
-@@ -0,0 +1,179 @@
-+"""Source-bound, snapshot-only evidence for cyclic SCC scenario assessments.
++++ b/contextor/core/cycle_semantics/package_layout.py
+@@ -0,0 +1,396 @@
++"""Conservative, source-independent inventory of Python import package layout.
 +
-+Tokens invalidate on source-only semantic changes, even with identical hard edges.
-+This module neither establishes current LIVE freshness nor publishes warnings.
++Never executes imports, mutates the canonical graph or certifies runtime targets.
 +"""
 +
 +from __future__ import annotations
 +
-+import ast
-+import hashlib
-+import json
-+from collections.abc import Mapping
++from collections.abc import Iterable
 +from dataclasses import dataclass
 +
-+from contextor.core.source import ParsedSourceInput
-+
-+from .scenarios import CycleScenarioReport, analyze_cycle_scenarios
-+
-+EVIDENCE_SEMANTIC_VERSION = "cycle-semantics-evidence/1"
-+_MISSING = "MISSING"
-+
-+
-+def _digest(value: object) -> str:
-+    payload = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
-+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
++from contextor.core.cycle_semantics.provenance import ImportOccurrence
 +
 +
 +@dataclass(frozen=True)
-+class ComponentSourceEvidence:
-+    members: tuple[str, ...]
-+    reachable_modules: tuple[str, ...]
-+    source_signatures: tuple[tuple[str, str, str], ...]
-+    evidence_token: str
-+    classification: str
-+    coverage: str
-+    reason: str | None
++class PackageLayoutNode:
++    name: str
++    kind: str
++    indexed_module_ids: tuple[str, ...]
 +
 +
 +@dataclass(frozen=True)
-+class SourceBoundCycleEvidence:
-+    semantic_version: str
-+    graph_fingerprint: str
-+    source_manifest_fingerprint: str
-+    components: tuple[ComponentSourceEvidence, ...]
-+    scenarios: CycleScenarioReport
-+    authority: str = "SNAPSHOT_ONLY_NOT_LIVE_FRESHNESS"
++class PackageLayout:
++    nodes: tuple[PackageLayoutNode, ...]
++    authority: str = "REPOSITORY_LAYOUT_CANDIDATES_ONLY"
 +
 +
 +@dataclass(frozen=True)
-+class CycleEvidenceChange:
-+    members: tuple[str, ...]
-+    change: str
-+    before: str | None
-+    after: str | None
-+    before_token: str | None
-+    after_token: str | None
++class ImportNamePlan:
++    requested_name: str
++    local_binding: str
++    load_chain: tuple[PackageLayoutNode, ...]
++    member_name: str | None
++    possible_child_module: str | None
++    resolution: str
 +
 +
-+def build_source_bound_cycle_evidence(
-+    hard_edges: Mapping[str, set[str] | frozenset[str] | list[str] | tuple[str, ...]],
-+    parsed_sources: Mapping[str, ParsedSourceInput],
-+) -> SourceBoundCycleEvidence:
-+    """Bind an SCC scenario report to graph and exact source-snapshot evidence.
++@dataclass(frozen=True)
++class ImportSitePlan:
++    module_id: str
++    occurrence_ordinal: int
++    line: int
++    status: str
++    entries: tuple[ImportNamePlan, ...]
++    authority: str = "STATIC_LAYOUT_NOT_RUNTIME_PROOF"
 +
-+    ParsedSourceInput is expected from parse_source_snapshot/with_fingerprint.
-+    In-memory AST hashes guard against inconsistent caller-provided AST objects.
-+    No disk source freshness or LIVE authority is established by this function.
-+    """
-+    if not isinstance(parsed_sources, Mapping):
-+        raise TypeError("parsed_sources must be a mapping")
 +
-+    signatures: dict[str, tuple[str, str]] = {}
-+    trees: dict[str, ast.Module] = {}
-+    for module, source in parsed_sources.items():
-+        if not isinstance(module, str) or not module:
-+            raise ValueError("invalid source module identity")
-+        if not isinstance(source, ParsedSourceInput) or not isinstance(source.tree, ast.Module):
-+            raise TypeError("sources must contain parsed ast.Module snapshots")
-+        raw_fingerprint = source.source_fingerprint
-+        if (
-+            not isinstance(raw_fingerprint, str)
-+            or len(raw_fingerprint) != 64
-+            or any(ch not in "0123456789abcdef" for ch in raw_fingerprint)
-+        ):
-+            raise ValueError("source_fingerprint must be a lowercase SHA-256 digest")
-+        ast_fingerprint = hashlib.sha256(
-+            ast.dump(source.tree, include_attributes=True).encode("utf-8")
-+        ).hexdigest()
-+        signatures[module] = (raw_fingerprint, ast_fingerprint)
-+        trees[module] = source.tree
-+
-+    report = analyze_cycle_scenarios(hard_edges, trees)
-+    adjacency: dict[str, tuple[str, ...]] = {
-+        source: tuple(sorted(set(targets))) for source, targets in hard_edges.items()
-+    }
-+    for targets in tuple(adjacency.values()):
-+        for target in targets:
-+            adjacency.setdefault(target, ())
-+    graph_items = tuple((node, adjacency[node]) for node in sorted(adjacency))
-+    graph_fingerprint = _digest(graph_items)
-+    source_manifest = tuple((name, *signatures[name]) for name in sorted(signatures))
-+
-+    components: list[ComponentSourceEvidence] = []
-+    for component in report.components:
-+        visited = set(component.members)
-+        pending = list(component.members)
-+        while pending:
-+            for target in adjacency[pending.pop()]:
-+                if target not in visited:
-+                    visited.add(target)
-+                    pending.append(target)
-+        closure = tuple(sorted(visited))
-+        source_signatures = tuple(
-+            (module, *signatures.get(module, (_MISSING, _MISSING)))
-+            for module in closure
-+        )
-+        subgraph = tuple((node, adjacency[node]) for node in closure)
-+        token = _digest((
-+            EVIDENCE_SEMANTIC_VERSION,
-+            component.members,
-+            subgraph,
-+            source_signatures,
-+        ))
-+        components.append(ComponentSourceEvidence(
-+            members=component.members,
-+            reachable_modules=closure,
-+            source_signatures=source_signatures,
-+            evidence_token=token,
-+            classification=component.classification,
-+            coverage=component.coverage,
-+            reason=component.reason,
-+        ))
-+
-+    return SourceBoundCycleEvidence(
-+        semantic_version=EVIDENCE_SEMANTIC_VERSION,
-+        graph_fingerprint=graph_fingerprint,
-+        source_manifest_fingerprint=_digest(source_manifest),
-+        components=tuple(components),
-+        scenarios=report,
++def _dotted(name: str) -> bool:
++    return bool(name) and all(
++        part.isidentifier()
++        for part in name.split(".")
 +    )
 +
 +
-+def compare_source_bound_cycle_evidence(
-+    before: SourceBoundCycleEvidence,
-+    after: SourceBoundCycleEvidence,
-+) -> tuple[CycleEvidenceChange, ...]:
-+    """Report model evidence transitions, never LIVE warning ADD/RESOLVE.
++def build_package_layout(
++    indexed_modules: Iterable[str],
++) -> PackageLayout:
++    """Classify indexed modules, regular packages and namespace candidates.
 +
-+    Stable SCC member identities survive source-only edits and DFS cycle changes.
-+    Equal evidence tokens do not generate noise from unrelated module changes.
++    A namespace is only a candidate: external portions and runtime import hooks
++    are not modeled. File/package conflicts are explicitly marked ambiguous.
 +    """
-+    if not isinstance(before, SourceBoundCycleEvidence) or not isinstance(after, SourceBoundCycleEvidence):
-+        raise TypeError("comparison requires source-bound evidence snapshots")
-+    old = {component.members: component for component in before.components}
-+    new = {component.members: component for component in after.components}
-+    changes: list[CycleEvidenceChange] = []
-+    for members in sorted(old.keys() | new.keys()):
-+        past, current = old.get(members), new.get(members)
-+        if past is None:
-+            kind = "STRUCTURE_ADDED"
-+        elif current is None:
-+            kind = "STRUCTURE_REMOVED"
-+        elif past.classification != current.classification:
-+            kind = "MODEL_CLASSIFICATION_CHANGED"
-+        elif (past.evidence_token != current.evidence_token
-+              or past.coverage != current.coverage or past.reason != current.reason
-+              or before.semantic_version != after.semantic_version):
-+            kind = "EVIDENCE_REVISED"
++    if isinstance(indexed_modules, (str, bytes)):
++        raise TypeError(
++            "indexed_modules must be an iterable of module IDs"
++        )
++
++    try:
++        supplied = list(indexed_modules)
++    except TypeError:
++        raise TypeError(
++            "indexed_modules must be iterable"
++        ) from None
++
++    if any(
++        not isinstance(item, str) or not _dotted(item)
++        for item in supplied
++    ):
++        raise ValueError("invalid indexed module ID")
++
++    if len(supplied) != len(set(supplied)):
++        raise ValueError("duplicate indexed module ID")
++
++    ids = set(supplied)
++    origins: dict[str, set[str]] = {}
++
++    for index_id in ids:
++        if index_id.endswith(".__init__"):
++            name = index_id.removesuffix(".__init__")
++            origins.setdefault(name, set()).add(index_id)
 +        else:
-+            continue
-+        changes.append(CycleEvidenceChange(
-+            members=members,
-+            change=kind,
-+            before=past.classification if past is not None else None,
-+            after=current.classification if current is not None else None,
-+            before_token=past.evidence_token if past is not None else None,
-+            after_token=current.evidence_token if current is not None else None,
-+        ))
-+    return tuple(changes)
++            origins.setdefault(index_id, set()).add(index_id)
++
++    children: set[str] = set()
++
++    for name in origins:
++        parts = name.split(".")
++        for length in range(1, len(parts)):
++            children.add(".".join(parts[:length]))
++
++    nodes = []
++
++    for name in sorted(set(origins) | children):
++        choices = tuple(sorted(origins.get(name, ())))
++        is_init = f"{name}.__init__" in choices
++        is_file = name in choices
++        has_children = name in children
++
++        if (
++            (is_init and is_file)
++            or (is_file and has_children and not is_init)
++        ):
++            kind = "AMBIGUOUS_LAYOUT"
++        elif is_init:
++            kind = "REGULAR_PACKAGE"
++        elif is_file:
++            kind = "MODULE_FILE"
++        else:
++            kind = "NAMESPACE_CANDIDATE"
++
++        nodes.append(
++            PackageLayoutNode(name, kind, choices)
++        )
++
++    return PackageLayout(tuple(nodes))
++
++
++def _module_context(
++    module_id: str,
++    names: set[str],
++) -> tuple[str, ...] | None:
++    if module_id not in names:
++        return None
++
++    return tuple(module_id.split(".")[:-1])
++
++
++def _chain(
++    name: str,
++    lookup: dict[str, PackageLayoutNode],
++) -> tuple[PackageLayoutNode, ...]:
++    parts = name.split(".")
++    result = []
++
++    for length in range(1, len(parts) + 1):
++        path = ".".join(parts[:length])
++        node = lookup.get(path)
++
++        result.append(
++            node
++            if node is not None
++            else PackageLayoutNode(
++                path, "UNKNOWN_MODULE", ()
++            )
++        )
++
++    return tuple(result)
++
++
++def plan_package_import(
++    module_id: str,
++    occurrence: ImportOccurrence,
++    layout: PackageLayout,
++) -> ImportSitePlan:
++    """Plan lexical package-loading candidates without executing imports.
++
++    A possible submodule never proves a from-import member's runtime target.
++    """
++    if not isinstance(layout, PackageLayout):
++        raise TypeError("layout must be PackageLayout")
++
++    if not isinstance(occurrence, ImportOccurrence):
++        raise TypeError(
++            "occurrence must be ImportOccurrence"
++        )
++
++    if not isinstance(module_id, str) or not _dotted(module_id):
++        raise ValueError("invalid importer ID")
++
++    lookup = {
++        node.name: node
++        for node in layout.nodes
++    }
++
++    indexed = {
++        origin
++        for node in layout.nodes
++        for origin in node.indexed_module_ids
++    }
++
++    context = _module_context(module_id, indexed)
++
++    if context is None:
++        return ImportSitePlan(
++            module_id,
++            occurrence.ordinal,
++            occurrence.line,
++            "IMPORTER_NOT_INDEXED",
++            (),
++        )
++
++    if occurrence.form not in {"IMPORT", "IMPORT_FROM"}:
++        return ImportSitePlan(
++            module_id,
++            occurrence.ordinal,
++            occurrence.line,
++            "UNSUPPORTED_FORM",
++            (),
++        )
++
++    if occurrence.form == "IMPORT_FROM":
++        if (
++            not isinstance(occurrence.level, int)
++            or occurrence.level < 0
++        ):
++            return ImportSitePlan(
++                module_id,
++                occurrence.ordinal,
++                occurrence.line,
++                "INVALID_LEVEL",
++                (),
++            )
++
++        if occurrence.level:
++            climb = occurrence.level - 1
++
++            if not context or climb >= len(context):
++                return ImportSitePlan(
++                    module_id,
++                    occurrence.ordinal,
++                    occurrence.line,
++                    "RELATIVE_BEYOND_TOP_LEVEL",
++                    (),
++                )
++
++            base = list(
++                context[:len(context) - climb]
++            )
++
++            if occurrence.module is not None:
++                if not _dotted(occurrence.module):
++                    return ImportSitePlan(
++                        module_id,
++                        occurrence.ordinal,
++                        occurrence.line,
++                        "INVALID_MODULE_NAME",
++                        (),
++                    )
++                base.extend(
++                    occurrence.module.split(".")
++                )
++
++            requested_base = ".".join(base)
++
++        else:
++            requested_base = occurrence.module or ""
++
++            if not _dotted(requested_base):
++                return ImportSitePlan(
++                    module_id,
++                    occurrence.ordinal,
++                    occurrence.line,
++                    "INVALID_MODULE_NAME",
++                    (),
++                )
++
++    else:
++        if occurrence.level != 0:
++            return ImportSitePlan(
++                module_id,
++                occurrence.ordinal,
++                occurrence.line,
++                "INVALID_LEVEL",
++                (),
++            )
++
++        requested_base = ""
++
++    output = []
++
++    for requested, alias in occurrence.aliases:
++        if (
++            not isinstance(requested, str)
++            or (
++                requested != "*"
++                and not _dotted(requested)
++            )
++        ):
++            return ImportSitePlan(
++                module_id,
++                occurrence.ordinal,
++                occurrence.line,
++                "INVALID_MEMBER_NAME",
++                (),
++            )
++
++        if alias is not None and (
++            not isinstance(alias, str)
++            or not alias.isidentifier()
++        ):
++            return ImportSitePlan(
++                module_id,
++                occurrence.ordinal,
++                occurrence.line,
++                "INVALID_BINDING",
++                (),
++            )
++
++        if occurrence.form == "IMPORT":
++            if requested == "*":
++                return ImportSitePlan(
++                    module_id,
++                    occurrence.ordinal,
++                    occurrence.line,
++                    "INVALID_MEMBER_NAME",
++                    (),
++                )
++
++            chain = _chain(requested, lookup)
++            local = alias or requested.split(".")[0]
++
++            outcome = (
++                "LAYOUT_CHAIN_CANDIDATE"
++                if all(
++                    node.kind not in {
++                        "UNKNOWN_MODULE",
++                        "AMBIGUOUS_LAYOUT",
++                    }
++                    for node in chain
++                )
++                else "LAYOUT_UNRESOLVED"
++            )
++
++            output.append(
++                ImportNamePlan(
++                    requested,
++                    local,
++                    chain,
++                    None,
++                    None,
++                    outcome,
++                )
++            )
++
++        else:
++            chain = _chain(requested_base, lookup)
++            local = alias or requested
++
++            possible_child = (
++                f"{requested_base}.{requested}"
++                if (
++                    requested != "*"
++                    and chain[-1].kind in {
++                        "REGULAR_PACKAGE",
++                        "NAMESPACE_CANDIDATE",
++                        "AMBIGUOUS_LAYOUT",
++                    }
++                    and f"{requested_base}.{requested}" in lookup
++                )
++                else None
++            )
++
++            outcome = (
++                "STAR_EXPORTS_UNRESOLVED"
++                if requested == "*"
++                else "MEMBER_OR_SUBMODULE_UNRESOLVED"
++                if possible_child is not None
++                else "MEMBER_BINDING_UNRESOLVED"
++            )
++
++            if any(
++                node.kind in {
++                    "UNKNOWN_MODULE",
++                    "AMBIGUOUS_LAYOUT",
++                }
++                for node in chain
++            ):
++                outcome = "LAYOUT_UNRESOLVED"
++
++            output.append(
++                ImportNamePlan(
++                    requested_base,
++                    local,
++                    chain,
++                    requested,
++                    possible_child,
++                    outcome,
++                )
++            )
++
++    return ImportSitePlan(
++        module_id,
++        occurrence.ordinal,
++        occurrence.line,
++        "PLANNED",
++        tuple(output),
++    )
 
-### FULL_DIFF: tests/test_cycle_semantics_evidence.py
-
-diff --git a/tests/test_cycle_semantics_evidence.py b/tests/test_cycle_semantics_evidence.py
+diff --git a/tests/test_cycle_semantics_package_layout.py b/tests/test_cycle_semantics_package_layout.py
 new file mode 100644
-index 0000000..2f3e6dc
 --- /dev/null
-+++ b/tests/test_cycle_semantics_evidence.py
-@@ -0,0 +1,161 @@
++++ b/tests/test_cycle_semantics_package_layout.py
+@@ -0,0 +1,218 @@
 +import ast
-+import hashlib
 +import json
-+from dataclasses import asdict
++from dataclasses import asdict, FrozenInstanceError
 +
 +import pytest
 +
-+from contextor.core.source import ParsedSourceInput
-+from contextor.core.cycle_semantics.evidence import (
-+    build_source_bound_cycle_evidence as build,
-+    compare_source_bound_cycle_evidence as compare,
++from contextor.core.cycle_semantics.package_layout import (
++    build_package_layout,
++    plan_package_import,
++)
++from contextor.core.cycle_semantics.provenance import (
++    extract_import_provenance,
 +)
 +
 +
-+def _sources(**source_map):
-+    return {
-+        name: ParsedSourceInput(
-+            ast.parse(text),
-+            hashlib.sha256(text.encode()).hexdigest(),
-+        )
-+        for name, text in source_map.items()
-+    }
-+
-+
-+def _fixture(order=False):
-+    edges = {"a": {"b"}, "b": {"a"}}
-+    if order:
-+        return build(edges, _sources(
-+            a="value=1\nimport b\n",
-+            b="import a\nx=a.value\n",
-+        ))
-+    return build(edges, _sources(
-+        a="import b\nvalue=1\n",
-+        b="import a\nx=a.value\n",
-+    ))
-+
-+
-+def test_unmodified_deterministic_and_immutable():
-+    a = _fixture()
-+    assert a == _fixture()
-+    assert compare(a, a) == ()
-+    assert a.components[0].classification == "MODEL_INTERNAL_EARLY_BINDING_HAZARD"
-+    with pytest.raises(Exception):
-+        a.components[0].classification = "fake"
-+    json.dumps(asdict(a))
-+
-+
-+def test_same_graph_semantic_flip_visible():
-+    a, b = _fixture(), _fixture(True)
-+    assert a.graph_fingerprint == b.graph_fingerprint
-+    assert a.source_manifest_fingerprint != b.source_manifest_fingerprint
-+    assert a.components[0].evidence_token != b.components[0].evidence_token
-+    changes = compare(a, b)
-+    assert len(changes) == 1
-+    assert changes[0].members == ("a", "b")
-+    assert changes[0].change == "MODEL_CLASSIFICATION_CHANGED"
-+    assert changes[0].before == "MODEL_INTERNAL_EARLY_BINDING_HAZARD"
-+    assert changes[0].after == "MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS"
-+    assert all(c.change != "RESOLVED" for c in changes)
-+    assert compare(b, a)[0].change == "MODEL_CLASSIFICATION_CHANGED"
-+
-+
-+def test_comment_only_edit_revises_evidence_not_outcome():
-+    edges = {"a": {"b"}, "b": {"a"}}
-+    before = build(edges, _sources(a="import b\nx=1\n", b="import a\ny=2\n"))
-+    after = build(edges, _sources(a="import b\nx=1\n# note\n", b="import a\ny=2\n"))
-+    assert before.components[0].classification == after.components[0].classification
-+    assert compare(before, after)[0].change == "EVIDENCE_REVISED"
-+
-+
-+def test_unrelated_source_edit_does_not_spam_scc_evidence():
-+    edges = {"a": {"b"}, "b": {"a"}, "unrelated": set()}
-+    old = build(edges, _sources(a="import b", b="import a", unrelated="x=1"))
-+    new = build(edges, _sources(a="import b", b="import a", unrelated="x=2"))
-+    assert old.source_manifest_fingerprint != new.source_manifest_fingerprint
-+    assert old.components[0].evidence_token == new.components[0].evidence_token
-+    assert compare(old, new) == ()
-+
-+
-+def test_reachable_dependency_change_revises_evidence():
-+    edges = {"a": {"b", "dep"}, "b": {"a"}, "dep": set()}
-+    old = build(edges, _sources(a="import b\nimport dep", b="import a", dep="x=1"))
-+    new = build(edges, _sources(a="import b\nimport dep", b="import a", dep="x=2"))
-+    assert compare(old, new)[0].change == "EVIDENCE_REVISED"
-+
-+
-+def test_graph_source_mismatch_fails_closed_and_transition():
-+    edges = {"a": {"b"}, "b": {"a"}}
-+    old = build(edges, _sources(a="import b", b="import a"))
-+    new = build(edges, _sources(a="import b\nimport unknown", b="import a"))
-+    assert new.components[0].classification == "INDETERMINATE"
-+    assert new.components[0].reason == "GRAPH_SOURCE_IMPORT_MISMATCH"
-+    assert compare(old, new)[0].change == "MODEL_CLASSIFICATION_CHANGED"
-+
-+
-+def test_missing_source_and_addition():
-+    edges = {"a": {"b"}, "b": {"a"}}
-+    old = build(edges, _sources(a="import b"))
-+    new = build(edges, _sources(a="import b", b="import a"))
-+    assert old.components[0].source_signatures[1] == ("b", "MISSING", "MISSING")
-+    assert old.components[0].classification == "INDETERMINATE"
-+    assert new.components[0].classification == "MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS"
-+    assert compare(old, new)[0].change == "MODEL_CLASSIFICATION_CHANGED"
-+
-+
-+def test_graph_internal_edge_change_reclassifies():
-+    sources = _sources(a="import b", b="import a")
-+    before = build({"a": {"b"}, "b": {"a"}}, sources)
-+    after = build({"a": {"b"}, "b": set()}, sources)
-+    c = compare(before, after)[0]
-+    assert c.change == "STRUCTURE_REMOVED"
-+
-+
-+def test_two_independent_sccs_only_one_changed():
-+    edges = {"a": {"b"}, "b": {"a"}, "x": {"y"}, "y": {"x"}}
-+    old = build(edges, _sources(
-+        a="import b", b="import a", x="import y", y="import x",
-+    ))
-+    new = build(edges, _sources(
-+        a="import b\n# extra", b="import a", x="import y", y="import x",
-+    ))
-+    changes = compare(old, new)
-+    assert len(changes) == 1 and changes[0].members == ("a", "b")
-+
-+
-+def test_ast_tamper_even_if_spoofed_same_raw_hash():
-+    edges = {"a": {"b"}, "b": {"a"}}
-+    sources = _sources(a="import b", b="import a")
-+    before = build(edges, sources)
-+    sources["a"].tree.body[0].lineno = 12
-+    after = build(edges, sources)
-+    assert before.source_manifest_fingerprint != after.source_manifest_fingerprint
-+    assert compare(before, after)[0].change == "EVIDENCE_REVISED"
-+
-+
-+def test_no_components():
-+    e = build(
-+        {"a": {"b"}, "b": set()},
-+        _sources(a="import b", b="pass"),
++def _plan(importer, module_ids, source):
++    tree = ast.parse(source)
++    facts = extract_import_provenance(
++        tree,
++        module_id=importer,
++        source_key=importer.replace(".", "/") + ".py",
++        source_path="C:/synthetic/source.py",
++        source_fingerprint="synthetic",
 +    )
-+    assert e.components == () and compare(e, e) == ()
++    assert len(facts.occurrences) == 1
++    return plan_package_import(
++        importer,
++        facts.occurrences[0],
++        build_package_layout(module_ids),
++    )
 +
 +
-+def test_bad_input_fail_closed():
-+    with pytest.raises(TypeError):
-+        build({"a": {"a"}}, None)
-+    with pytest.raises(TypeError):
-+        build({"a": {"a"}}, {"a": ast.parse("import a")})
++def test_regular_package_parent_load_chain():
++    p = _plan(
++        "pkg.user",
++        [
++            "pkg.__init__",
++            "pkg.sub.__init__",
++            "pkg.sub.item",
++            "pkg.user",
++        ],
++        "import pkg.sub.item",
++    )
++    assert tuple(
++        (x.name, x.kind, x.indexed_module_ids)
++        for x in p.entries[0].load_chain
++    ) == (
++        ("pkg", "REGULAR_PACKAGE", ("pkg.__init__",)),
++        ("pkg.sub", "REGULAR_PACKAGE", ("pkg.sub.__init__",)),
++        ("pkg.sub.item", "MODULE_FILE", ("pkg.sub.item",)),
++    )
++    assert p.entries[0].local_binding == "pkg"
++    assert p.entries[0].resolution == "LAYOUT_CHAIN_CANDIDATE"
++
++
++def test_dotted_import_alias_binds_alias():
++    p = _plan(
++        "pkg.user",
++        ["pkg.__init__", "pkg.sub", "pkg.user"],
++        "import pkg.sub as alias",
++    )
++    assert p.entries[0].local_binding == "alias"
++    assert p.entries[0].resolution == "LAYOUT_CHAIN_CANDIDATE"
++
++
++def test_from_package_member_remains_ambiguous():
++    p = _plan(
++        "pkg.user",
++        ["pkg.__init__", "pkg.child", "pkg.user"],
++        "from pkg import child as c",
++    )
++    item = p.entries[0]
++    assert item.possible_child_module == "pkg.child"
++    assert item.resolution == "MEMBER_OR_SUBMODULE_UNRESOLVED"
++    assert item.local_binding == "c"
++    assert tuple(x.name for x in item.load_chain) == ("pkg",)
++
++
++def test_relative_from_package_initializer():
++    p = _plan(
++        "pkg.__init__",
++        ["pkg.__init__", "pkg.child"],
++        "from . import child",
++    )
++    assert p.entries[0].requested_name == "pkg"
++    assert p.entries[0].possible_child_module == "pkg.child"
++
++
++def test_relative_import_parent_and_beyond_top():
++    ids = [
++        "pkg.__init__",
++        "pkg.deep.__init__",
++        "pkg.deep.mod",
++        "pkg.child",
++    ]
++    p = _plan(
++        "pkg.deep.mod",
++        ids,
++        "from .. import child",
++    )
++    assert p.entries[0].requested_name == "pkg"
++
++    p = _plan(
++        "pkg.deep.mod",
++        ids,
++        "from ... import child",
++    )
++    assert p.status == "RELATIVE_BEYOND_TOP_LEVEL"
++    assert not p.entries
++
++
++def test_namespace_candidates_are_not_runtime_proof():
++    layout = build_package_layout(
++        ["pkg.a", "pkg.sub.b"]
++    )
++    assert tuple(
++        (n.name, n.kind)
++        for n in layout.nodes
++    ) == (
++        ("pkg", "NAMESPACE_CANDIDATE"),
++        ("pkg.a", "MODULE_FILE"),
++        ("pkg.sub", "NAMESPACE_CANDIDATE"),
++        ("pkg.sub.b", "MODULE_FILE"),
++    )
++    assert layout.authority == (
++        "REPOSITORY_LAYOUT_CANDIDATES_ONLY"
++    )
++
++
++def test_conflicting_indexed_module_and_package_fail_closed():
++    layout = build_package_layout(
++        ["pkg", "pkg.__init__", "pkg.sub"]
++    )
++    assert layout.nodes[0].kind == "AMBIGUOUS_LAYOUT"
++
++    p = _plan(
++        "pkg.sub",
++        ["pkg", "pkg.__init__", "pkg.sub"],
++        "import pkg.sub",
++    )
++    assert p.entries[0].resolution == "LAYOUT_UNRESOLVED"
++
++
++def test_from_plain_module_not_guessed_as_child():
++    p = _plan(
++        "pkg.user",
++        ["pkg.__init__", "pkg.mod", "pkg.user"],
++        "from pkg.mod import method",
++    )
++    assert p.entries[0].possible_child_module is None
++    assert p.entries[0].resolution == "MEMBER_BINDING_UNRESOLVED"
++
++
++def test_external_import_not_claimed_resolved():
++    p = _plan(
++        "pkg.user",
++        ["pkg.user"],
++        "import external.nested",
++    )
++    assert p.entries[0].resolution == "LAYOUT_UNRESOLVED"
++    assert all(
++        node.kind == "UNKNOWN_MODULE"
++        for node in p.entries[0].load_chain
++    )
++
++
++def test_future_directive_keeps_runtime_import_evidence():
++    p = _plan(
++        "pkg.user",
++        ["pkg.user"],
++        "from __future__ import annotations",
++    )
++    assert p.status == "PLANNED"
++    assert p.entries[0].requested_name == "__future__"
++    assert p.entries[0].resolution == "LAYOUT_UNRESOLVED"
++
++
++def test_duplicate_invalid_and_unindexed_importer():
 +    with pytest.raises(ValueError):
-+        build({"a": {"a"}}, {
-+            "a": ParsedSourceInput(ast.parse("import a"), "foo")
-+        })
++        build_package_layout(["pkg.mod", "pkg.mod"])
++
 +    with pytest.raises(TypeError):
-+        compare(None, None)
++        build_package_layout("pkg.mod")
++
++    tree = ast.parse("import pkg")
++    occ = extract_import_provenance(
++        tree,
++        module_id="unknown",
++        source_key="unknown.py",
++        source_path="C:/unknown.py",
++        source_fingerprint="synthetic",
++    ).occurrences[0]
++
++    result = plan_package_import(
++        "unknown",
++        occ,
++        build_package_layout(["pkg.user"]),
++    )
++    assert result.status == "IMPORTER_NOT_INDEXED"
++    assert result.entries == ()
 +
 +
-+def test_snapshot_only_authority_no_warning_action():
-+    x = _fixture()
-+    assert x.authority == "SNAPSHOT_ONLY_NOT_LIVE_FRESHNESS"
-+    assert x.scenarios.evidence_scope == "SCENARIO_MODEL_NOT_RUNTIME_CERTIFICATION"
-+    assert "SAFE" not in x.components[0].classification
++def test_deterministic_immutable_and_json_serializable():
++    p = _plan(
++        "pkg.user",
++        ["pkg.__init__", "pkg.user"],
++        "import pkg",
++    )
++    assert p == _plan(
++        "pkg.user",
++        ["pkg.user", "pkg.__init__"],
++        "import pkg",
++    )
++    json.dumps(asdict(p))
++    assert p.authority == "STATIC_LAYOUT_NOT_RUNTIME_PROOF"
++
++    with pytest.raises(FrozenInstanceError):
++        p.status = "FAKE_SUCCESS"
+
