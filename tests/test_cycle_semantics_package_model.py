@@ -906,7 +906,6 @@ def test_b0g4c5_unsupported_definition_effects_unknown():
         "def f(x):\n    import pkg.child",
         "@decorator\ndef f():\n    import pkg.child",
         "def f() -> int:\n    import pkg.child",
-        "def f():\n    from pkg import child",
         "def f():\n    helper()",
         "async def f():\n    import pkg.child",
         "def f():\n    return 1",
@@ -916,6 +915,42 @@ def test_b0g4c5_unsupported_definition_effects_unknown():
             {"pkg.__init__": code, "pkg.child": "pass"},
             "pkg",
         ).outcome == "UNKNOWN"
+
+
+def test_b0g4c15_uncalled_function_local_from_supported(tmp_path):
+    source = {
+        "pkg.__init__": (
+            "def f():\n"
+            "    from pkg import child"
+        ),
+        "pkg.child": "pass",
+    }
+
+    result = _model(source, "pkg")
+
+    assert result.outcome == "MODEL_PASS"
+
+    assert any(
+        event.operation == "DEFINE_FUNCTION"
+        and event.symbol == "f"
+        for event in result.events
+    )
+
+    assert not any(
+        event.operation in {
+            "FUNCTION_LOCAL_FROM",
+            "FUNCTION_LOCAL_FROM_REENTRANT_CHILD",
+        }
+        for event in result.events
+    )
+
+    assert not any(
+        event.operation == "START_IMPORT"
+        and event.target == "pkg.child"
+        for event in result.events
+    )
+
+    assert _actual(tmp_path, source, "pkg")
 
 
 def test_b0g4c5_deterministic_ast_unchanged():
