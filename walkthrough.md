@@ -1,748 +1,947 @@
-TASK: CONTEXTOR_B0G4C0_PACKAGE_IMPORT_LAYOUT
+TASK: CONTEXTOR_B0G4C1_RESTRICTED_PACKAGE_INITIALIZATION
 
 HEAD_BEFORE
-d22f7b454b51c3269839aa544ce6cfc1d1d92219
+c9858b869f72138e5c2ab986daaa89af2524fa18
 
 HEAD_AFTER
-d22f7b454b51c3269839aa544ce6cfc1d1d92219
+c9858b869f72138e5c2ab986daaa89af2524fa18
 
 GIT_STATUS_BEFORE
 clean
 
 GIT_STATUS_AFTER
-?? contextor/core/cycle_semantics/package_layout.py
-?? tests/test_cycle_semantics_package_layout.py
-walkthrough.md is this task report and is excluded from FILES_CHANGED.
+M walkthrough.md
+?? contextor/core/cycle_semantics/package_model.py
+?? tests/test_cycle_semantics_package_model.py
+walkthrough.md is the required current-task report and is excluded from FILES_CHANGED.
 
 LIVE_REVISION_BEFORE
-418
+420
 activity_epoch=1beab26da2ff4932852caa7db6ff4242
 canonical_state=fresh
 graph=fresh
 cycles=fresh, reported cycle diagnostics=16
 resync_required=false
-name_collisions=0 (fresh)
+name_collisions=0, availability=fresh
 
 LIVE_REVISION_AFTER
-420
+422
 activity_epoch=1beab26da2ff4932852caa7db6ff4242 (unchanged)
 canonical_state=fresh
 graph=fresh
 cycles=fresh, reported cycle diagnostics=16
 resync_required=false
-name_collisions=0 (fresh)
+name_collisions=0, availability=fresh
+package_model workspace_sync=verified at canonical revision 422
 
 LIVE_WATCHER_EVIDENCE
-- Revision 419: desktop_watcher UPDATED contextor/core/cycle_semantics/package_layout.py; affected module contextor.core.cycle_semantics.package_layout.
-- Revision 420: desktop_watcher UPDATED tests/test_cycle_semantics_package_layout.py; affected module tests.test_cycle_semantics_package_layout.
-- Event continuity=continuous; no direct update_file or publish request was made.
+- Revision 421: desktop_watcher UPDATED contextor/core/cycle_semantics/package_model.py; affected module contextor.core.cycle_semantics.package_model.
+- Revision 422: desktop_watcher UPDATED tests/test_cycle_semantics_package_model.py; affected module tests.test_cycle_semantics_package_model.
+- Event continuity=continuous. No direct update_file, publish, forced resync, or restart request was made.
+- The current activity_epoch remained unchanged across the observed edits.
 
 SOURCE_PRECHECK
-- HEAD and status were checked before editing; HEAD stayed unchanged. Initial status was clean.
-- B0G4B7 evidence module contextor.core.cycle_semantics.evidence existed and was LIVE at revision 418 with workspace_sync=verified.
-- Contextor resolved ImportOccurrence to the frozen dataclass in contextor/core/cycle_semantics/provenance.py (lines 28-40). The artifact has three confirmed direct static consumers in the canonical evidence: cycle_semantics.__init__, cycle_semantics.binding_order, and tests.test_cycle_semantics_execution_context.
-- Existing package naming uses flat modules under contextor.core.cycle_semantics. No __init__.py was changed.
-- Existing relative source-module resolver _resolve_import_module is owned by contextor.core.analysis.lineage_extraction_contracts (lines 143-149); its one direct consumer is contextor.core.analysis.lineage_extraction_visitors. It was not modified.
-- ProjectGraph is owned by contextor.core.domain.graph (lines 10-54); Contextor reports 30 direct module consumers. The new package-layout module does not import or modify ProjectGraph.
-- After watcher synchronization, Contextor reported the new package-layout module with one hard outbound edge to provenance and its test with hard dependencies on package_layout and provenance.
+- Contextor reported contextor.core.cycle_semantics.package_layout at revision 420 with canonical_state=fresh and workspace_sync=verified.
+- Existing build_package_layout is defined by package_layout.py. Its one confirmed direct static consumer before this task was tests.test_cycle_semantics_package_layout. Its hard dependency is contextor.core.cycle_semantics.provenance.
+- The requested package_model module and test file did not exist before this task. No cycle_semantics/__init__.py or existing production/test module was changed.
+- Git HEAD before editing was c9858b869f72138e5c2ab986daaa89af2524fa18; initial Git status was clean.
+- Repository Python was 3.10.9.
 
 FILES_CHANGED
-- contextor/core/cycle_semantics/package_layout.py (new)
-- tests/test_cycle_semantics_package_layout.py (new)
+- contextor/core/cycle_semantics/package_model.py (new)
+- tests/test_cycle_semantics_package_model.py (new)
 
 IMPLEMENTATION_CONTRACT
-- Both files match the supplied contents exactly; comparison against the attached specification returned true for each.
-- The production module adds frozen evidence records for package layout and import-site plans. It maps indexed __init__ module IDs to regular-package candidates, classifies module files, namespace candidates, ambiguous layouts, and unknown modules, and returns deterministic parent load chains.
-- The planner uses ImportOccurrence facts and preserves the occurrence ordinal, line, relative level, requested names, aliases, local bindings, and possible child-module candidates.
-- It reports from-import member/submodule ambiguity as unresolved. Namespace candidates are explicitly repository-layout candidates, not runtime namespace-package proof. External imports remain unresolved.
-- No analyzed source file is accessed or imported by this module. It does not mutate ProjectGraph, hard_edges, soft_edges, cycles, canonical state, or publication state. Valid from __future__ imports remain represented as import evidence.
+- Both created files match the supplied implementation and tests exactly; an in-memory comparison with the attachment returned true for both files.
+- The production module models only indexed regular packages and module files with complete source closure. It compiles supported import, from-import, constant assignment, single-level module-attribute read, and pass statements into a restricted operation sequence.
+- It models parent-before-child initialization, partially initialized modules, module namespaces, and parent child binding after the child reaches READY.
+- Unsupported, ambiguous, incomplete, dynamic, namespace, and special-attribute cases return UNKNOWN. Early reads from an INITIALIZING module return EARLY_BINDING_HAZARD. MODEL_PASS is limited to this model and does not mean SAFE.
+- The implementation reads no analyzed source files, executes no analyzed code, invokes no subprocess, mutates no AST, and does not touch ProjectGraph, hard_edges, soft_edges, ArchitectureCycle, detect_cycles, canonical state, or publication.
+- The 10,000-step budget is decremented in the model loop; exhaustion returns UNKNOWN. The supplied tests do not contain a dedicated budget-exhaustion fixture.
 
 TEST_COMMAND
 Baseline:
-& ..venvScriptspython.exe -B -m pytest -p no:cacheprovider -q tests/test_cycle_semantics_evidence.py tests/test_cycle_semantics_scenarios.py tests/test_cycle_semantics_scc.py tests/test_cycle_semantics_initialization_model.py tests/test_cycle_semantics_binding_order.py tests/test_cycle_semantics_guards.py tests/test_cycle_semantics_execution_context.py tests/test_cycle_semantics_provenance.py
+& .\.venv\Scripts\python.exe -B -m pytest -p no:cacheprovider -q tests/test_cycle_semantics_package_layout.py tests/test_cycle_semantics_evidence.py tests/test_cycle_semantics_scenarios.py tests/test_cycle_semantics_scc.py tests/test_cycle_semantics_initialization_model.py tests/test_cycle_semantics_binding_order.py tests/test_cycle_semantics_guards.py tests/test_cycle_semantics_execution_context.py tests/test_cycle_semantics_provenance.py
 
 Post-change:
-& ..venvScriptspython.exe -B -m pytest -p no:cacheprovider -q tests/test_cycle_semantics_package_layout.py tests/test_cycle_semantics_evidence.py tests/test_cycle_semantics_scenarios.py tests/test_cycle_semantics_scc.py tests/test_cycle_semantics_initialization_model.py tests/test_cycle_semantics_binding_order.py tests/test_cycle_semantics_guards.py tests/test_cycle_semantics_execution_context.py tests/test_cycle_semantics_provenance.py
+& .\.venv\Scripts\python.exe -B -m pytest -p no:cacheprovider -q tests/test_cycle_semantics_package_model.py tests/test_cycle_semantics_package_layout.py tests/test_cycle_semantics_evidence.py tests/test_cycle_semantics_scenarios.py tests/test_cycle_semantics_scc.py tests/test_cycle_semantics_initialization_model.py tests/test_cycle_semantics_binding_order.py tests/test_cycle_semantics_guards.py tests/test_cycle_semantics_execution_context.py tests/test_cycle_semantics_provenance.py
 
 TEST_RESULTS
-- Repository Python: 3.10.9.
-- Baseline: 121 passed in 3.75s.
-- Post-change: 133 passed in 3.96s (12 new tests plus 121 existing).
-- No warnings were emitted. No warning filter or warning-suppression option was used.
-- Only the specified eight baseline files and nine post-change files were run.
+- Baseline: 133 passed in 5.08s across the nine specified existing files.
+- Post-change: 145 passed in 5.45s across the ten specified files (12 new tests and 133 existing).
+- Only the specified files were run. No full repository pytest or full Contextor analysis was run.
+- No warnings were emitted; no warning suppression option or filter was used.
+- The 12 new tests cover initialization order, early binding, reordered imports, child binding, relative and absolute reexports, dotted aliases, fail-closed ambiguity/unsupported cases, determinism, JSON serialization, invalid input, and no AST mutation.
 
-PACKAGE_LAYOUT_EVIDENCE
-- Tests verify deterministic ordering, __init__ normalization, regular-package parent chains, module-file and namespace-candidate classification, and explicit file/package conflicts.
-- Contextor after watcher processing confirms the new module is workspace_sync=verified at revision 420. Its canonical hard dependency is provenance; no ProjectGraph dependency is present.
+PACKAGE_INITIALIZATION_EVIDENCE
+- test_parent_initializer_precedes_submodule asserts pkg reaches READY before pkg.sub and confirms the synthetic fresh-process import succeeds.
+- test_package_relative_reexport and test_package_explicit_reexport confirm supported relative and absolute reexports in both the model and synthetic runtime fixtures.
+- Contextor after watcher synchronization reports package_model workspace_sync=verified at revision 422. The model has one hard outbound dependency on package_layout and one direct inbound consumer, tests.test_cycle_semantics_package_model.
 
-RELATIVE_IMPORT_EVIDENCE
-- Targeted tests pass for from . import child, from .. import child, preservation of the requested package name, and relative traversal beyond top level returning RELATIVE_BEYOND_TOP_LEVEL with no entries.
-- The planner uses the lexical occurrence level and indexed importer identity; it does not execute Python import resolution.
+PARENT_CHILD_BINDING_EVIDENCE
+- test_child_attribute_bound_after_ready verifies the child READY event precedes the parent BIND_CHILD event and confirms the synthetic runtime fixture succeeds.
+- The implementation sets a module READY only after its operation frame completes, then records the child reference in the parent namespace and emits BIND_CHILD.
 
-FROM_IMPORT_AMBIGUITY_EVIDENCE
-- Tests pass for from pkg import child as c: pkg.child is retained only as a possible child module, the local alias is c, and resolution remains MEMBER_OR_SUBMODULE_UNRESOLVED.
-- Imports from a plain module and star imports remain unresolved. External imports are reported as layout-unresolved.
-- The future-import regression confirms from __future__ import annotations remains represented and unresolved as a repository-local layout target.
+EARLY_BINDING_RUNTIME_FIXTURES
+- test_package_early_attribute_failure models pkg.sub reading pkg.value while pkg is still INITIALIZING; outcome is EARLY_BINDING_HAZARD and the isolated synthetic import fails.
+- test_same_imports_reordered_pass moves the package binding before the child import; both the model and isolated synthetic import pass.
+- test_package_early_from_import_hazard models the corresponding partially initialized from-import; the model reports EARLY_BINDING_HAZARD and the isolated synthetic import fails.
+- test_dotted_alias_to_child and test_child_attribute_bound_after_ready confirm supported dotted child access after initialization in the isolated synthetic runtime.
+- These subprocess checks operate on temporary synthetic modules created by the test helper. They do not execute analyzed repository modules.
+
+UNKNOWN_FAIL_CLOSED_EVIDENCE
+- Tests confirm namespace and ambiguous file/package layouts, an unresolved external import, from-package child ambiguity, special __path__ mutation, module __getattr__, child binding shadowing, and star imports return UNKNOWN.
+- The model rejects unsupported AST statement forms instead of claiming a successful import.
+- The deterministic test compares repeated results, checks JSON serialization, and verifies that the input AST dumps remain unchanged.
 
 COLLISION_COUNT_BEFORE_AFTER
-- Before: 0, availability=fresh, revision=418.
-- After: 0, availability=fresh, revision=420.
-- Both values are from Contextor canonical collision diagnostics after the corresponding source state was synchronized.
+- Before: 0, fresh at revision 420.
+- After: 0, fresh at revision 422.
 
 STRUCTURAL_CYCLE_COUNT_BEFORE_AFTER
-- Before: 16 reported cycle diagnostics, availability=fresh, revision=418.
-- After: 16 reported cycle diagnostics, availability=fresh, revision=420.
-- The new package module has one hard edge to provenance. LIVE reports no change in the canonical reported cycle count. This count is the Contextor cycle diagnostic count, not a claim that every possible runtime import cycle was enumerated.
+- Before: 16 reported cycle diagnostics, fresh at revision 420.
+- After: 16 reported cycle diagnostics, fresh at revision 422.
+- Contextor reports the new model's only hard outbound edge to package_layout. The canonical cycle count is unchanged; this is graph evidence and does not certify all Python runtime import behavior.
 
 NO_SAFETY_CERTIFICATION
-- PASS: no runtime safety certification is made. Tests exercise synthetic AST/import-occurrence inputs and the static layout planner. No analyzed module imports were executed and no cold-import experiment was run.
+- PASS: no general runtime safety claim is made. Synthetic subprocess fixtures validate only the supplied restricted cases. MODEL_PASS and EARLY_BINDING_HAZARD remain restricted-model outcomes and do not suppress ArchitectureCycle.
 
 NO_WARNING_SUPPRESSION
-- PASS: no warning suppression was added to source or tests, and pytest was not invoked with warning suppression.
+- PASS: no warning filters or suppression options were added to source, tests, or the pytest command.
 
 NO_DIRECT_LIVE_PUBLICATION
-- PASS: no update_file, publish, forced resync, or restart was requested. The desktop_watcher synchronized both new files and advanced LIVE from revision 418 to 420.
+- PASS: no direct update_file, publish, forced resync, or restart was requested. The desktop_watcher synchronized the two changed files at revisions 421 and 422.
 
 UNRESOLVED_LIMITATIONS
-- NAMESPACE_CANDIDATE describes only the indexed repository layout; external namespace portions, runtime import hooks, and environment-dependent import behavior are outside this evidence.
-- A possible child module does not establish whether a from-import binds a package attribute or loads a submodule.
-- Runtime import targets and runtime safety remain unverified.
-- The graph and collision conclusions are bounded to the fresh canonical Contextor state at revision 420.
+- Namespace packages, import hooks, dynamic imports, calls, decorators, classes, star imports, special runtime attributes, ambiguous from-package child resolution, child-binding shadowing, and incomplete indexed source closure are deliberately unsupported and return UNKNOWN.
+- Synthetic runtime agreement covers only the fixtures in the targeted tests; it is not a certification of arbitrary imports, installed packages, or environment-dependent behavior.
+- The 10,000-step exhaustion branch is present in source but has no dedicated test fixture in the supplied test file.
 
 EVIDENCE_CLASSES
-- DIRECT_EVIDENCE: test outputs, Git HEAD/status, Contextor revisions/events/freshness/collision and cycle diagnostics, and workspace_sync=verified.
-- CODE_PATH_PROVED: supplied implementation was byte-for-byte content-matched after newline normalization; Contextor resolved the new module's canonical edge to provenance.
-- CONTRACT_PROVED: the 12 targeted tests passed; the public ProjectGraph and ImportOccurrence ownership checks came from Contextor source contracts.
-- INFERENCE: unchanged reported cycle count and the new module's single edge support no observed cycle increase in the canonical graph.
-- UNKNOWN: runtime package resolution and runtime safety for arbitrary analyzed imports.
+- DIRECT_EVIDENCE: baseline and post-change pytest results; Git HEAD/status; Contextor watcher events, revisions, activity epoch, freshness, collision count, and cycle count.
+- CODE_PATH_PROVED: both files match the supplied contents; Contextor reports package_model's source verified and its hard dependency on package_layout.
+- CONTRACT_PROVED: the specified 12 new tests and 133 existing tests pass; synthetic runtime outcomes are checked by the tests.
+- INFERENCE: unchanged fresh canonical cycle count and the new module's single hard dependency show no observed cycle increase in the canonical graph.
+- UNKNOWN: general runtime import safety and behavior outside the restricted fixtures.
 
 FINAL_VERDICT
-B0G4C0_PASS
+B0G4C1_PASS
 
 FULL_DIFFS
-diff --git a/contextor/core/cycle_semantics/package_layout.py b/contextor/core/cycle_semantics/package_layout.py
+diff --git a/contextor/core/cycle_semantics/package_model.py b/contextor/core/cycle_semantics/package_model.py
 new file mode 100644
 --- /dev/null
-+++ b/contextor/core/cycle_semantics/package_layout.py
-@@ -0,0 +1,396 @@
-+"""Conservative, source-independent inventory of Python import package layout.
++++ b/contextor/core/cycle_semantics/package_model.py
+@@ -0,0 +1,516 @@
++"""Restricted package-aware recursive import initialization evidence.
 +
-+Never executes imports, mutates the canonical graph or certifies runtime targets.
++Only regular, indexed Python packages and simple import/constant/attribute AST.
++Never executes analyzed code or certifies general runtime safety.
 +"""
 +
 +from __future__ import annotations
 +
-+from collections.abc import Iterable
++import ast
++from collections.abc import Mapping
 +from dataclasses import dataclass
 +
-+from contextor.core.cycle_semantics.provenance import ImportOccurrence
++from contextor.core.cycle_semantics.package_layout import build_package_layout
 +
 +
 +@dataclass(frozen=True)
-+class PackageLayoutNode:
-+    name: str
-+    kind: str
-+    indexed_module_ids: tuple[str, ...]
++class PackageModelEvent:
++    module: str
++    operation: str
++    target: str | None = None
++    symbol: str | None = None
 +
 +
 +@dataclass(frozen=True)
-+class PackageLayout:
-+    nodes: tuple[PackageLayoutNode, ...]
-+    authority: str = "REPOSITORY_LAYOUT_CANDIDATES_ONLY"
++class PackageImportAssessment:
++    entry_module: str
++    outcome: str
++    target_module: str | None
++    symbol: str | None
++    events: tuple[PackageModelEvent, ...]
++    evidence_scope: str = "RESTRICTED_REGULAR_PACKAGE_MODEL"
 +
 +
 +@dataclass(frozen=True)
-+class ImportNamePlan:
-+    requested_name: str
-+    local_binding: str
-+    load_chain: tuple[PackageLayoutNode, ...]
-+    member_name: str | None
-+    possible_child_module: str | None
-+    resolution: str
++class _Step:
++    op: str
++    target: str | None = None
++    symbol: str | None = None
++    binding: str | None = None
 +
 +
-+@dataclass(frozen=True)
-+class ImportSitePlan:
-+    module_id: str
-+    occurrence_ordinal: int
-+    line: int
-+    status: str
-+    entries: tuple[ImportNamePlan, ...]
-+    authority: str = "STATIC_LAYOUT_NOT_RUNTIME_PROOF"
++def _compile(
++    tree: ast.Module,
++    logical: str,
++    package: bool,
++) -> tuple[_Step, ...] | None:
++    steps: list[_Step] = []
++
++    for stmt in tree.body:
++        if isinstance(stmt, ast.Import):
++            for alias in stmt.names:
++                if (
++                    not all(part.isidentifier() for part in alias.name.split("."))
++                    or (
++                        alias.asname is not None
++                        and (
++                            not alias.asname.isidentifier()
++                            or alias.asname.startswith("__")
++                        )
++                    )
++                ):
++                    return None
++
++                steps.append(
++                    _Step(
++                        "IMPORT",
++                        alias.name,
++                        binding=alias.asname or alias.name.split(".")[0],
++                    )
++                )
++
++        elif isinstance(stmt, ast.ImportFrom):
++            if stmt.level:
++                context = (
++                    logical.split(".")
++                    if package
++                    else logical.split(".")[:-1]
++                )
++                climb = stmt.level - 1
++
++                if not context or climb >= len(context):
++                    return None
++
++                base = context[:len(context) - climb]
++
++                if stmt.module:
++                    if not all(
++                        part.isidentifier()
++                        for part in stmt.module.split(".")
++                    ):
++                        return None
++                    base.extend(stmt.module.split("."))
++
++                target = ".".join(base)
++            else:
++                target = stmt.module
++
++            if not target or not all(
++                part.isidentifier() for part in target.split(".")
++            ):
++                return None
++
++            for alias in stmt.names:
++                if (
++                    not alias.name.isidentifier()
++                    or alias.name.startswith("__")
++                    or (
++                        alias.asname is not None
++                        and (
++                            not alias.asname.isidentifier()
++                            or alias.asname.startswith("__")
++                        )
++                    )
++                ):
++                    return None
++
++                steps.append(
++                    _Step(
++                        "FROM",
++                        target,
++                        alias.name,
++                        alias.asname or alias.name,
++                    )
++                )
++
++        elif isinstance(stmt, ast.Assign):
++            if (
++                len(stmt.targets) != 1
++                or not isinstance(stmt.targets[0], ast.Name)
++            ):
++                return None
++
++            name = stmt.targets[0].id
++            if name.startswith("__"):
++                return None
++
++            value = stmt.value
++
++            if (
++                isinstance(value, ast.Constant)
++                and type(value.value) in (
++                    type(None),
++                    bool,
++                    int,
++                    float,
++                    complex,
++                    str,
++                    bytes,
++                )
++            ):
++                steps.append(_Step("BIND", binding=name))
++
++            elif (
++                isinstance(value, ast.Attribute)
++                and isinstance(value.value, ast.Name)
++                and not value.attr.startswith("__")
++            ):
++                steps.append(
++                    _Step(
++                        "ATTR",
++                        value.value.id,
++                        value.attr,
++                        name,
++                    )
++                )
++            else:
++                return None
++
++        elif isinstance(stmt, ast.Pass):
++            continue
++
++        else:
++            return None
++
++    return tuple(steps)
 +
 +
-+def _dotted(name: str) -> bool:
-+    return bool(name) and all(
-+        part.isidentifier()
-+        for part in name.split(".")
-+    )
++def evaluate_package_import_order(
++    indexed_sources: Mapping[str, ast.AST],
++    entry_module: str,
++) -> PackageImportAssessment:
++    """Simulate a restricted closed regular-package source set.
 +
++    Indexed package __init__ IDs are translated to logical package names.
++    The operation budget prevents unbounded model execution.
 +
-+def build_package_layout(
-+    indexed_modules: Iterable[str],
-+) -> PackageLayout:
-+    """Classify indexed modules, regular packages and namespace candidates.
-+
-+    A namespace is only a candidate: external portions and runtime import hooks
-+    are not modeled. File/package conflicts are explicitly marked ambiguous.
++    Results cannot certify general Python import safety.
 +    """
-+    if isinstance(indexed_modules, (str, bytes)):
-+        raise TypeError(
-+            "indexed_modules must be an iterable of module IDs"
++    events: list[PackageModelEvent] = []
++
++    def result(
++        outcome: str,
++        target: str | None = None,
++        symbol: str | None = None,
++    ) -> PackageImportAssessment:
++        return PackageImportAssessment(
++            entry_module,
++            outcome,
++            target,
++            symbol,
++            tuple(events),
 +        )
 +
-+    try:
-+        supplied = list(indexed_modules)
-+    except TypeError:
-+        raise TypeError(
-+            "indexed_modules must be iterable"
-+        ) from None
++    if (
++        not isinstance(indexed_sources, Mapping)
++        or not isinstance(entry_module, str)
++    ):
++        return result("UNKNOWN")
 +
 +    if any(
-+        not isinstance(item, str) or not _dotted(item)
-+        for item in supplied
++        not isinstance(name, str)
++        or not isinstance(tree, ast.Module)
++        for name, tree in indexed_sources.items()
 +    ):
-+        raise ValueError("invalid indexed module ID")
++        return result("UNKNOWN")
 +
-+    if len(supplied) != len(set(supplied)):
-+        raise ValueError("duplicate indexed module ID")
++    try:
++        layout = build_package_layout(indexed_sources)
++    except (TypeError, ValueError):
++        return result("UNKNOWN")
 +
-+    ids = set(supplied)
-+    origins: dict[str, set[str]] = {}
++    nodes = {node.name: node for node in layout.nodes}
 +
-+    for index_id in ids:
-+        if index_id.endswith(".__init__"):
-+            name = index_id.removesuffix(".__init__")
-+            origins.setdefault(name, set()).add(index_id)
-+        else:
-+            origins.setdefault(index_id, set()).add(index_id)
++    logical_sources: dict[str, ast.Module] = {}
++    packages: set[str] = set()
 +
-+    children: set[str] = set()
++    for name, node in nodes.items():
++        if node.kind not in {
++            "REGULAR_PACKAGE",
++            "MODULE_FILE",
++        }:
++            return result("UNKNOWN", name)
 +
-+    for name in origins:
-+        parts = name.split(".")
-+        for length in range(1, len(parts)):
-+            children.add(".".join(parts[:length]))
++        indexed_id = node.indexed_module_ids[0]
 +
-+    nodes = []
++        if indexed_id not in indexed_sources:
++            return result("UNKNOWN", name)
 +
-+    for name in sorted(set(origins) | children):
-+        choices = tuple(sorted(origins.get(name, ())))
-+        is_init = f"{name}.__init__" in choices
-+        is_file = name in choices
-+        has_children = name in children
++        logical_sources[name] = indexed_sources[indexed_id]
 +
-+        if (
-+            (is_init and is_file)
-+            or (is_file and has_children and not is_init)
-+        ):
-+            kind = "AMBIGUOUS_LAYOUT"
-+        elif is_init:
-+            kind = "REGULAR_PACKAGE"
-+        elif is_file:
-+            kind = "MODULE_FILE"
-+        else:
-+            kind = "NAMESPACE_CANDIDATE"
++        if node.kind == "REGULAR_PACKAGE":
++            packages.add(name)
 +
-+        nodes.append(
-+            PackageLayoutNode(name, kind, choices)
++    def valid_chain(target: str) -> bool:
++        if target not in logical_sources:
++            return False
++
++        parts = target.split(".")
++
++        return all(
++            ".".join(parts[:length]) in packages
++            for length in range(1, len(parts))
 +        )
 +
-+    return PackageLayout(tuple(nodes))
++    if not valid_chain(entry_module):
++        return result("UNKNOWN", entry_module)
 +
++    programs: dict[str, tuple[_Step, ...]] = {}
 +
-+def _module_context(
-+    module_id: str,
-+    names: set[str],
-+) -> tuple[str, ...] | None:
-+    if module_id not in names:
++    for name, tree in logical_sources.items():
++        if not valid_chain(name):
++            return result("UNKNOWN", name)
++
++        program = _compile(tree, name, name in packages)
++
++        if program is None:
++            return result("UNKNOWN", name)
++
++        programs[name] = program
++
++    # A package initializer that overwrites a direct child
++    # binding requires richer import-statement semantics.
++    # This restricted model refuses that case.
++    for package in packages:
++        children = {
++            name.rsplit(".", 1)[1]
++            for name in programs
++            if (
++                "." in name
++                and name.rsplit(".", 1)[0] == package
++            )
++        }
++
++        if any(
++            step.binding in children
++            for step in programs[package]
++            if step.op in {"BIND", "FROM"}
++        ):
++            return result("UNKNOWN", package)
++
++    states = {
++        name: "NEW"
++        for name in programs
++    }
++
++    namespaces: dict[str, dict[str, str | None]] = {
++        name: {}
++        for name in programs
++    }
++
++    bootstrap = "\x00ENTRY"
++    frames: list[tuple[str, int]] = [(bootstrap, 0)]
++
++    def chain(name: str) -> tuple[str, ...]:
++        parts = name.split(".")
++
++        return tuple(
++            ".".join(parts[:index])
++            for index in range(1, len(parts) + 1)
++        )
++
++    def missing_piece(name: str) -> str | None:
++        for piece in chain(name):
++            if piece not in states:
++                return piece
++
++            if states[piece] == "NEW":
++                return piece
++
 +        return None
 +
-+    return tuple(module_id.split(".")[:-1])
++    step_budget = 10000
 +
++    while frames:
++        step_budget -= 1
 +
-+def _chain(
-+    name: str,
-+    lookup: dict[str, PackageLayoutNode],
-+) -> tuple[PackageLayoutNode, ...]:
-+    parts = name.split(".")
-+    result = []
++        if step_budget < 0:
++            return result("UNKNOWN")
 +
-+    for length in range(1, len(parts) + 1):
-+        path = ".".join(parts[:length])
-+        node = lookup.get(path)
++        module, index = frames[-1]
 +
-+        result.append(
-+            node
-+            if node is not None
-+            else PackageLayoutNode(
-+                path, "UNKNOWN_MODULE", ()
-+            )
++        steps = (
++            (_Step("IMPORT", entry_module, binding=None),)
++            if module == bootstrap
++            else programs[module]
 +        )
 +
-+    return tuple(result)
++        if index >= len(steps):
++            frames.pop()
 +
-+
-+def plan_package_import(
-+    module_id: str,
-+    occurrence: ImportOccurrence,
-+    layout: PackageLayout,
-+) -> ImportSitePlan:
-+    """Plan lexical package-loading candidates without executing imports.
-+
-+    A possible submodule never proves a from-import member's runtime target.
-+    """
-+    if not isinstance(layout, PackageLayout):
-+        raise TypeError("layout must be PackageLayout")
-+
-+    if not isinstance(occurrence, ImportOccurrence):
-+        raise TypeError(
-+            "occurrence must be ImportOccurrence"
-+        )
-+
-+    if not isinstance(module_id, str) or not _dotted(module_id):
-+        raise ValueError("invalid importer ID")
-+
-+    lookup = {
-+        node.name: node
-+        for node in layout.nodes
-+    }
-+
-+    indexed = {
-+        origin
-+        for node in layout.nodes
-+        for origin in node.indexed_module_ids
-+    }
-+
-+    context = _module_context(module_id, indexed)
-+
-+    if context is None:
-+        return ImportSitePlan(
-+            module_id,
-+            occurrence.ordinal,
-+            occurrence.line,
-+            "IMPORTER_NOT_INDEXED",
-+            (),
-+        )
-+
-+    if occurrence.form not in {"IMPORT", "IMPORT_FROM"}:
-+        return ImportSitePlan(
-+            module_id,
-+            occurrence.ordinal,
-+            occurrence.line,
-+            "UNSUPPORTED_FORM",
-+            (),
-+        )
-+
-+    if occurrence.form == "IMPORT_FROM":
-+        if (
-+            not isinstance(occurrence.level, int)
-+            or occurrence.level < 0
-+        ):
-+            return ImportSitePlan(
-+                module_id,
-+                occurrence.ordinal,
-+                occurrence.line,
-+                "INVALID_LEVEL",
-+                (),
-+            )
-+
-+        if occurrence.level:
-+            climb = occurrence.level - 1
-+
-+            if not context or climb >= len(context):
-+                return ImportSitePlan(
-+                    module_id,
-+                    occurrence.ordinal,
-+                    occurrence.line,
-+                    "RELATIVE_BEYOND_TOP_LEVEL",
-+                    (),
++            if module != bootstrap:
++                states[module] = "READY"
++                events.append(
++                    PackageModelEvent(module, "READY")
 +                )
 +
-+            base = list(
-+                context[:len(context) - climb]
-+            )
++                if "." in module:
++                    parent, child = module.rsplit(".", 1)
++                    namespaces[parent][child] = module
 +
-+            if occurrence.module is not None:
-+                if not _dotted(occurrence.module):
-+                    return ImportSitePlan(
-+                        module_id,
-+                        occurrence.ordinal,
-+                        occurrence.line,
-+                        "INVALID_MODULE_NAME",
-+                        (),
++                    events.append(
++                        PackageModelEvent(
++                            parent,
++                            "BIND_CHILD",
++                            module,
++                            child,
++                        )
 +                    )
-+                base.extend(
-+                    occurrence.module.split(".")
++
++            continue
++
++        step = steps[index]
++
++        if step.op in {"IMPORT", "FROM"}:
++            target = step.target
++
++            if not target or target not in programs:
++                return result("UNKNOWN", target)
++
++            next_piece = missing_piece(target)
++
++            if next_piece:
++                if next_piece not in programs:
++                    return result("UNKNOWN", next_piece)
++
++                states[next_piece] = "INITIALIZING"
++
++                events.append(
++                    PackageModelEvent(
++                        module,
++                        "START_IMPORT",
++                        next_piece,
++                    )
 +                )
 +
-+            requested_base = ".".join(base)
++                frames.append((next_piece, 0))
++                continue
 +
-+        else:
-+            requested_base = occurrence.module or ""
++            if step.op == "IMPORT":
++                if module != bootstrap:
++                    if (
++                        step.binding != target.split(".")[0]
++                        and "." in target
++                    ):
++                        parent, child = target.rsplit(".", 1)
 +
-+            if not _dotted(requested_base):
-+                return ImportSitePlan(
-+                    module_id,
-+                    occurrence.ordinal,
-+                    occurrence.line,
-+                    "INVALID_MODULE_NAME",
-+                    (),
-+                )
++                        if namespaces[parent].get(child) != target:
++                            return result("UNKNOWN", target, child)
 +
-+    else:
-+        if occurrence.level != 0:
-+            return ImportSitePlan(
-+                module_id,
-+                occurrence.ordinal,
-+                occurrence.line,
-+                "INVALID_LEVEL",
-+                (),
-+            )
++                    binding_target = (
++                        target
++                        if step.binding != target.split(".")[0]
++                        else target.split(".")[0]
++                    )
 +
-+        requested_base = ""
++                    namespaces[module][step.binding] = binding_target
 +
-+    output = []
++                    events.append(
++                        PackageModelEvent(
++                            module,
++                            "IMPORT",
++                            target,
++                            step.binding,
++                        )
++                    )
 +
-+    for requested, alias in occurrence.aliases:
-+        if (
-+            not isinstance(requested, str)
-+            or (
-+                requested != "*"
-+                and not _dotted(requested)
-+            )
-+        ):
-+            return ImportSitePlan(
-+                module_id,
-+                occurrence.ordinal,
-+                occurrence.line,
-+                "INVALID_MEMBER_NAME",
-+                (),
-+            )
++            else:
++                member = step.symbol
 +
-+        if alias is not None and (
-+            not isinstance(alias, str)
-+            or not alias.isidentifier()
-+        ):
-+            return ImportSitePlan(
-+                module_id,
-+                occurrence.ordinal,
-+                occurrence.line,
-+                "INVALID_BINDING",
-+                (),
-+            )
-+
-+        if occurrence.form == "IMPORT":
-+            if requested == "*":
-+                return ImportSitePlan(
-+                    module_id,
-+                    occurrence.ordinal,
-+                    occurrence.line,
-+                    "INVALID_MEMBER_NAME",
-+                    (),
-+                )
-+
-+            chain = _chain(requested, lookup)
-+            local = alias or requested.split(".")[0]
-+
-+            outcome = (
-+                "LAYOUT_CHAIN_CANDIDATE"
-+                if all(
-+                    node.kind not in {
-+                        "UNKNOWN_MODULE",
-+                        "AMBIGUOUS_LAYOUT",
-+                    }
-+                    for node in chain
-+                )
-+                else "LAYOUT_UNRESOLVED"
-+            )
-+
-+            output.append(
-+                ImportNamePlan(
-+                    requested,
-+                    local,
-+                    chain,
-+                    None,
-+                    None,
-+                    outcome,
-+                )
-+            )
-+
-+        else:
-+            chain = _chain(requested_base, lookup)
-+            local = alias or requested
-+
-+            possible_child = (
-+                f"{requested_base}.{requested}"
++                # from-package child resolution is ambiguous.
++                # C1 does not attempt to resolve that ambiguity.
 +                if (
-+                    requested != "*"
-+                    and chain[-1].kind in {
-+                        "REGULAR_PACKAGE",
-+                        "NAMESPACE_CANDIDATE",
-+                        "AMBIGUOUS_LAYOUT",
-+                    }
-+                    and f"{requested_base}.{requested}" in lookup
++                    target in packages
++                    and target + "." + member in programs
++                ):
++                    return result("UNKNOWN", target, member)
++
++                if member not in namespaces[target]:
++                    outcome = (
++                        "EARLY_BINDING_HAZARD"
++                        if states[target] == "INITIALIZING"
++                        else "MISSING_EXPORT"
++                    )
++
++                    events.append(
++                        PackageModelEvent(
++                            module,
++                            outcome,
++                            target,
++                            member,
++                        )
++                    )
++
++                    return result(outcome, target, member)
++
++                namespaces[module][step.binding] = namespaces[target][member]
++
++                events.append(
++                    PackageModelEvent(
++                        module,
++                        "FROM",
++                        target,
++                        member,
++                    )
 +                )
-+                else None
++
++        elif step.op == "BIND":
++            namespaces[module][step.binding] = None
++
++            events.append(
++                PackageModelEvent(
++                    module,
++                    "BIND",
++                    symbol=step.binding,
++                )
 +            )
 +
-+            outcome = (
-+                "STAR_EXPORTS_UNRESOLVED"
-+                if requested == "*"
-+                else "MEMBER_OR_SUBMODULE_UNRESOLVED"
-+                if possible_child is not None
-+                else "MEMBER_BINDING_UNRESOLVED"
-+            )
++        elif step.op == "ATTR":
++            reference = namespaces[module].get(step.target)
 +
-+            if any(
-+                node.kind in {
-+                    "UNKNOWN_MODULE",
-+                    "AMBIGUOUS_LAYOUT",
-+                }
-+                for node in chain
-+            ):
-+                outcome = "LAYOUT_UNRESOLVED"
++            if reference not in namespaces:
++                return result(
++                    "UNKNOWN",
++                    step.target,
++                    step.symbol,
++                )
 +
-+            output.append(
-+                ImportNamePlan(
-+                    requested_base,
-+                    local,
-+                    chain,
-+                    requested,
-+                    possible_child,
++            if step.symbol not in namespaces[reference]:
++                outcome = (
++                    "EARLY_BINDING_HAZARD"
++                    if states[reference] == "INITIALIZING"
++                    else "MISSING_ATTRIBUTE"
++                )
++
++                events.append(
++                    PackageModelEvent(
++                        module,
++                        outcome,
++                        reference,
++                        step.symbol,
++                    )
++                )
++
++                return result(
 +                    outcome,
++                    reference,
++                    step.symbol,
++                )
++
++            namespaces[module][step.binding] = namespaces[reference][step.symbol]
++
++            events.append(
++                PackageModelEvent(
++                    module,
++                    "ATTR",
++                    reference,
++                    step.symbol,
 +                )
 +            )
 +
-+    return ImportSitePlan(
-+        module_id,
-+        occurrence.ordinal,
-+        occurrence.line,
-+        "PLANNED",
-+        tuple(output),
-+    )
++        else:
++            return result("UNKNOWN")
++
++        frames[-1] = (module, index + 1)
++
++    return result("MODEL_PASS")
 
-diff --git a/tests/test_cycle_semantics_package_layout.py b/tests/test_cycle_semantics_package_layout.py
+diff --git a/tests/test_cycle_semantics_package_model.py b/tests/test_cycle_semantics_package_model.py
 new file mode 100644
 --- /dev/null
-+++ b/tests/test_cycle_semantics_package_layout.py
-@@ -0,0 +1,218 @@
++++ b/tests/test_cycle_semantics_package_model.py
+@@ -0,0 +1,289 @@
 +import ast
 +import json
-+from dataclasses import asdict, FrozenInstanceError
++import subprocess
++import sys
++from dataclasses import asdict
 +
-+import pytest
-+
-+from contextor.core.cycle_semantics.package_layout import (
-+    build_package_layout,
-+    plan_package_import,
-+)
-+from contextor.core.cycle_semantics.provenance import (
-+    extract_import_provenance,
++from contextor.core.cycle_semantics.package_model import (
++    evaluate_package_import_order,
 +)
 +
 +
-+def _plan(importer, module_ids, source):
-+    tree = ast.parse(source)
-+    facts = extract_import_provenance(
-+        tree,
-+        module_id=importer,
-+        source_key=importer.replace(".", "/") + ".py",
-+        source_path="C:/synthetic/source.py",
-+        source_fingerprint="synthetic",
-+    )
-+    assert len(facts.occurrences) == 1
-+    return plan_package_import(
-+        importer,
-+        facts.occurrences[0],
-+        build_package_layout(module_ids),
++def _model(source, entry):
++    return evaluate_package_import_order(
++        {
++            key: ast.parse(code)
++            for key, code in source.items()
++        },
++        entry,
 +    )
 +
 +
-+def test_regular_package_parent_load_chain():
-+    p = _plan(
-+        "pkg.user",
++def _actual(tmp_path, source, entry):
++    for module_id, code in source.items():
++        parts = module_id.split(".")
++
++        if parts[-1] == "__init__":
++            path = tmp_path.joinpath(
++                *parts[:-1],
++                "__init__.py",
++            )
++        else:
++            path = tmp_path.joinpath(
++                *parts[:-1],
++                parts[-1] + ".py",
++            )
++
++        path.parent.mkdir(
++            parents=True,
++            exist_ok=True,
++        )
++        path.write_text(
++            code + "\n",
++            encoding="utf-8",
++        )
++
++    process = subprocess.run(
 +        [
-+            "pkg.__init__",
-+            "pkg.sub.__init__",
-+            "pkg.sub.item",
-+            "pkg.user",
++            sys.executable,
++            "-I",
++            "-B",
++            "-c",
++            (
++                "import importlib,sys;"
++                "sys.path.insert(0,sys.argv[1]);"
++                "importlib.import_module(sys.argv[2])"
++            ),
++            str(tmp_path),
++            entry,
 +        ],
-+        "import pkg.sub.item",
++        capture_output=True,
++        text=True,
++        timeout=8,
++        check=False,
 +    )
-+    assert tuple(
-+        (x.name, x.kind, x.indexed_module_ids)
-+        for x in p.entries[0].load_chain
-+    ) == (
-+        ("pkg", "REGULAR_PACKAGE", ("pkg.__init__",)),
-+        ("pkg.sub", "REGULAR_PACKAGE", ("pkg.sub.__init__",)),
-+        ("pkg.sub.item", "MODULE_FILE", ("pkg.sub.item",)),
-+    )
-+    assert p.entries[0].local_binding == "pkg"
-+    assert p.entries[0].resolution == "LAYOUT_CHAIN_CANDIDATE"
++
++    return process.returncode == 0
 +
 +
-+def test_dotted_import_alias_binds_alias():
-+    p = _plan(
-+        "pkg.user",
-+        ["pkg.__init__", "pkg.sub", "pkg.user"],
-+        "import pkg.sub as alias",
-+    )
-+    assert p.entries[0].local_binding == "alias"
-+    assert p.entries[0].resolution == "LAYOUT_CHAIN_CANDIDATE"
++def test_parent_initializer_precedes_submodule(tmp_path):
++    source = {
++        "pkg.__init__": "value=7",
++        "pkg.sub": "from pkg import value",
++    }
 +
++    result = _model(source, "pkg.sub")
 +
-+def test_from_package_member_remains_ambiguous():
-+    p = _plan(
-+        "pkg.user",
-+        ["pkg.__init__", "pkg.child", "pkg.user"],
-+        "from pkg import child as c",
-+    )
-+    item = p.entries[0]
-+    assert item.possible_child_module == "pkg.child"
-+    assert item.resolution == "MEMBER_OR_SUBMODULE_UNRESOLVED"
-+    assert item.local_binding == "c"
-+    assert tuple(x.name for x in item.load_chain) == ("pkg",)
++    assert result.outcome == "MODEL_PASS"
 +
-+
-+def test_relative_from_package_initializer():
-+    p = _plan(
-+        "pkg.__init__",
-+        ["pkg.__init__", "pkg.child"],
-+        "from . import child",
-+    )
-+    assert p.entries[0].requested_name == "pkg"
-+    assert p.entries[0].possible_child_module == "pkg.child"
-+
-+
-+def test_relative_import_parent_and_beyond_top():
-+    ids = [
-+        "pkg.__init__",
-+        "pkg.deep.__init__",
-+        "pkg.deep.mod",
-+        "pkg.child",
++    assert [
++        (event.module, event.operation)
++        for event in result.events
++        if event.operation == "READY"
++    ] == [
++        ("pkg", "READY"),
++        ("pkg.sub", "READY"),
 +    ]
-+    p = _plan(
-+        "pkg.deep.mod",
-+        ids,
-+        "from .. import child",
-+    )
-+    assert p.entries[0].requested_name == "pkg"
 +
-+    p = _plan(
-+        "pkg.deep.mod",
-+        ids,
-+        "from ... import child",
-+    )
-+    assert p.status == "RELATIVE_BEYOND_TOP_LEVEL"
-+    assert not p.entries
++    assert _actual(tmp_path, source, "pkg.sub")
 +
 +
-+def test_namespace_candidates_are_not_runtime_proof():
-+    layout = build_package_layout(
-+        ["pkg.a", "pkg.sub.b"]
-+    )
-+    assert tuple(
-+        (n.name, n.kind)
-+        for n in layout.nodes
-+    ) == (
-+        ("pkg", "NAMESPACE_CANDIDATE"),
-+        ("pkg.a", "MODULE_FILE"),
-+        ("pkg.sub", "NAMESPACE_CANDIDATE"),
-+        ("pkg.sub.b", "MODULE_FILE"),
-+    )
-+    assert layout.authority == (
-+        "REPOSITORY_LAYOUT_CANDIDATES_ONLY"
-+    )
++def test_package_early_attribute_failure(tmp_path):
++    source = {
++        "pkg.__init__": "import pkg.sub\nvalue=2",
++        "pkg.sub": "import pkg\nx=pkg.value",
++    }
++
++    result = _model(source, "pkg")
++
++    assert result.outcome == "EARLY_BINDING_HAZARD"
++    assert result.target_module == "pkg"
++    assert result.symbol == "value"
++    assert not _actual(tmp_path, source, "pkg")
 +
 +
-+def test_conflicting_indexed_module_and_package_fail_closed():
-+    layout = build_package_layout(
-+        ["pkg", "pkg.__init__", "pkg.sub"]
-+    )
-+    assert layout.nodes[0].kind == "AMBIGUOUS_LAYOUT"
++def test_same_imports_reordered_pass(tmp_path):
++    source = {
++        "pkg.__init__": "value=2\nimport pkg.sub",
++        "pkg.sub": "import pkg\nx=pkg.value",
++    }
 +
-+    p = _plan(
++    assert _model(source, "pkg").outcome == "MODEL_PASS"
++    assert _actual(tmp_path, source, "pkg")
++
++
++def test_child_attribute_bound_after_ready(tmp_path):
++    source = {
++        "pkg.__init__": "pass",
++        "pkg.sub": "value=7",
++        "entry": "import pkg.sub\nx=pkg.sub",
++    }
++
++    result = _model(source, "entry")
++
++    assert result.outcome == "MODEL_PASS"
++
++    operations = [
++        (event.module, event.operation, event.target)
++        for event in result.events
++    ]
++
++    assert operations.index(
++        ("pkg.sub", "READY", None)
++    ) < operations.index(
++        ("pkg", "BIND_CHILD", "pkg.sub")
++    )
++
++    assert _actual(tmp_path, source, "entry")
++
++
++def test_package_relative_reexport(tmp_path):
++    source = {
++        "pkg.__init__": "from .sub import value",
++        "pkg.sub": "value=7",
++    }
++
++    assert _model(source, "pkg").outcome == "MODEL_PASS"
++    assert _actual(tmp_path, source, "pkg")
++
++
++def test_package_explicit_reexport(tmp_path):
++    source = {
++        "pkg.__init__": "from pkg.sub import value",
++        "pkg.sub": "value=7",
++    }
++
++    assert _model(source, "pkg").outcome == "MODEL_PASS"
++    assert _actual(tmp_path, source, "pkg")
++
++
++def test_package_early_from_import_hazard(tmp_path):
++    source = {
++        "pkg.__init__": "from pkg.sub import value",
++        "pkg.sub": "from pkg import value",
++    }
++
++    assert (
++        _model(source, "pkg").outcome
++        == "EARLY_BINDING_HAZARD"
++    )
++
++    assert not _actual(tmp_path, source, "pkg")
++
++
++def test_dotted_alias_to_child(tmp_path):
++    source = {
++        "pkg.__init__": "pass",
++        "pkg.sub": "value=7",
++        "entry": "import pkg.sub as s\nx=s.value",
++    }
++
++    assert _model(source, "entry").outcome == "MODEL_PASS"
++    assert _actual(tmp_path, source, "entry")
++
++
++def test_from_package_child_remains_unknown():
++    source = {
++        "pkg.__init__": "pass",
++        "pkg.child": "value=7",
++        "entry": "from pkg import child",
++    }
++
++    assert _model(source, "entry").outcome == "UNKNOWN"
++
++
++def test_namespace_ambiguous_external_unknown():
++    assert _model(
++        {"pkg.sub": "value=7"},
 +        "pkg.sub",
-+        ["pkg", "pkg.__init__", "pkg.sub"],
-+        "import pkg.sub",
++    ).outcome == "UNKNOWN"
++
++    assert _model(
++        {
++            "pkg": "pass",
++            "pkg.__init__": "pass",
++        },
++        "pkg",
++    ).outcome == "UNKNOWN"
++
++    assert _model(
++        {"pkg.__init__": "import os"},
++        "pkg",
++    ).outcome == "UNKNOWN"
++
++
++def test_unsupported_hooks_mutations_unknown():
++    assert _model(
++        {"pkg.__init__": "__path__=[]"},
++        "pkg",
++    ).outcome == "UNKNOWN"
++
++    assert _model(
++        {
++            "pkg.__init__":
++                "def __getattr__(name):\n    pass"
++        },
++        "pkg",
++    ).outcome == "UNKNOWN"
++
++    assert _model(
++        {
++            "pkg.__init__": "sub=1\nimport pkg.sub",
++            "pkg.sub": "pass",
++        },
++        "pkg",
++    ).outcome == "UNKNOWN"
++
++    assert _model(
++        {
++            "pkg.__init__": "pass",
++            "pkg.sub": "pass",
++            "entry": "from pkg import *",
++        },
++        "entry",
++    ).outcome == "UNKNOWN"
++
++
++def test_determinism_invalid_no_ast_mutation():
++    sources = {
++        "pkg.__init__": ast.parse("import pkg.sub"),
++        "pkg.sub": ast.parse("import pkg"),
++    }
++
++    before = {
++        key: ast.dump(tree, include_attributes=True)
++        for key, tree in sources.items()
++    }
++
++    first = evaluate_package_import_order(
++        sources,
++        "pkg",
 +    )
-+    assert p.entries[0].resolution == "LAYOUT_UNRESOLVED"
 +
-+
-+def test_from_plain_module_not_guessed_as_child():
-+    p = _plan(
-+        "pkg.user",
-+        ["pkg.__init__", "pkg.mod", "pkg.user"],
-+        "from pkg.mod import method",
-+    )
-+    assert p.entries[0].possible_child_module is None
-+    assert p.entries[0].resolution == "MEMBER_BINDING_UNRESOLVED"
-+
-+
-+def test_external_import_not_claimed_resolved():
-+    p = _plan(
-+        "pkg.user",
-+        ["pkg.user"],
-+        "import external.nested",
-+    )
-+    assert p.entries[0].resolution == "LAYOUT_UNRESOLVED"
-+    assert all(
-+        node.kind == "UNKNOWN_MODULE"
-+        for node in p.entries[0].load_chain
++    second = evaluate_package_import_order(
++        sources,
++        "pkg",
 +    )
 +
++    assert first == second
++    assert first.outcome == "MODEL_PASS"
 +
-+def test_future_directive_keeps_runtime_import_evidence():
-+    p = _plan(
-+        "pkg.user",
-+        ["pkg.user"],
-+        "from __future__ import annotations",
++    assert {
++        key: ast.dump(tree, include_attributes=True)
++        for key, tree in sources.items()
++    } == before
++
++    json.dumps(asdict(first))
++
++    assert (
++        evaluate_package_import_order(None, "pkg").outcome
++        == "UNKNOWN"
 +    )
-+    assert p.status == "PLANNED"
-+    assert p.entries[0].requested_name == "__future__"
-+    assert p.entries[0].resolution == "LAYOUT_UNRESOLVED"
 +
-+
-+def test_duplicate_invalid_and_unindexed_importer():
-+    with pytest.raises(ValueError):
-+        build_package_layout(["pkg.mod", "pkg.mod"])
-+
-+    with pytest.raises(TypeError):
-+        build_package_layout("pkg.mod")
-+
-+    tree = ast.parse("import pkg")
-+    occ = extract_import_provenance(
-+        tree,
-+        module_id="unknown",
-+        source_key="unknown.py",
-+        source_path="C:/unknown.py",
-+        source_fingerprint="synthetic",
-+    ).occurrences[0]
-+
-+    result = plan_package_import(
-+        "unknown",
-+        occ,
-+        build_package_layout(["pkg.user"]),
++    assert (
++        evaluate_package_import_order(
++            {"pkg.__init__": None},
++            "pkg",
++        ).outcome
++        == "UNKNOWN"
 +    )
-+    assert result.status == "IMPORTER_NOT_INDEXED"
-+    assert result.entries == ()
-+
-+
-+def test_deterministic_immutable_and_json_serializable():
-+    p = _plan(
-+        "pkg.user",
-+        ["pkg.__init__", "pkg.user"],
-+        "import pkg",
-+    )
-+    assert p == _plan(
-+        "pkg.user",
-+        ["pkg.user", "pkg.__init__"],
-+        "import pkg",
-+    )
-+    json.dumps(asdict(p))
-+    assert p.authority == "STATIC_LAYOUT_NOT_RUNTIME_PROOF"
-+
-+    with pytest.raises(FrozenInstanceError):
-+        p.status = "FAKE_SUCCESS"
 
