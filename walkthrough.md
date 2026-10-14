@@ -1,352 +1,455 @@
-# CONTEXTOR_B0G4B5_STRUCTURAL_SCC_KERNEL
+# CONTEXTOR_B0G4B6_SCC_SCENARIO_DIAGNOSTICS
 
 ## HEAD_BEFORE
-cf9379143672497f48cb8dee6cdadb863b438585. Git status clean. B0G4B4 initialization_model.py existed; both B0G4B5 target paths were absent. Contextor identified `contextor.core.graph.cycles::detect_cycles` as existing structural cycle owner with 12 consumers; no edit to that owner was planned.
+e356152af143a35e385631b4feed9c0fd475e142. Git status clean. B0G4B5 scc.py and B0G4B4 initialization_model.py existed and were indexed in fresh Contextor LIVE state. Both B0G4B6 target files were absent.
 
 ## HEAD_AFTER
-cf9379143672497f48cb8dee6cdadb863b438585. No commit. Git status shows only the two new task files as untracked.
+e356152af143a35e385631b4feed9c0fd475e142. No commit. Git status shows only the two new B0G4B6 files as untracked.
 
 ## LIVE_REVISION_BEFORE
-412; activity_epoch=1beab26da2ff4932852caa7db6ff4242; continuity=continuous; resync_required=false; canonical_state=fresh; collisions=0 fresh; cycles=16 fresh. Global workspace_sync=unverified. Contextor found initialization_model isolated with only its targeted test as a direct consumer and no downstream consumers.
+414; activity_epoch=1beab26da2ff4932852caa7db6ff4242; continuity=continuous; resync_required=false; canonical_state=fresh; graph, topology, collisions and cycles fresh; name_collisions=0; structural cycles=16. Project overlay workspace_sync=unverified. Contextor confirms SCC kernel owner in contextor.core.cycle_semantics.scc and restricted model owner in contextor.core.cycle_semantics.initialization_model; each had only its targeted test as a direct consumer before this task.
 
 ## LIVE_REVISION_AFTER
-414; same activity_epoch; continuity=continuous; resync_required=false; canonical_state=fresh; all reported families fresh; no parse-stale modules; collisions=0; cycles=16. Desktop watcher revision 413 UPDATED scc.py and revision 414 UPDATED test_cycle_semantics_scc.py, both blast_radius_state=fresh. New production module workspace_sync=verified by full get_file_edit_context at revision 414; project overlay remains unverified.
+416; same activity_epoch; continuity=continuous; resync_required=false; canonical_state=fresh; all displayed families fresh; no parse-stale modules; collisions=0; cycles=16. Desktop watcher revision 415 UPDATED scenarios.py and revision 416 UPDATED test_cycle_semantics_scenarios.py, both blast_radius_state=fresh. New production module workspace_sync=verified by full get_file_edit_context at revision 416; project overlay remains unverified.
 
 ## FILES_CHANGED
-- contextor/core/cycle_semantics/scc.py (new)
-- tests/test_cycle_semantics_scc.py (new)
+- contextor/core/cycle_semantics/scenarios.py (new)
+- tests/test_cycle_semantics_scenarios.py (new)
 
-No existing production/test file or __init__.py changed. walkthrough.md is this report and excluded from source/test diff accounting.
+No existing file, including __init__.py, was edited. walkthrough.md is this report and excluded from source/test diff accounting.
 
 ## IMPLEMENTATION_CONTRACT
-CONTRACT_PROVED: Both files exactly match the auditor-supplied content with one final newline. The kernel validates and normalizes an explicit hard-edge mapping, adds target-only nodes, orders nodes and adjacency deterministically, performs iterative two-pass SCC traversal, and retains all members and internal hard edges for cyclic components. A self-loop yields a one-node cyclic component; overlapping simple cycle paths remain one SCC. Output dataclasses are frozen. The input graph is not mutated.
-CODE_PATH_PROVED: The kernel receives an in-memory mapping and returns structural evidence. It does not read source, enumerate all simple cycles, invoke existing detect_cycles, change ProjectGraph/hard_edges/soft_edges, or publish warnings. Contextor reports the new module's only direct consumer as tests.test_cycle_semantics_scc, with zero downstream consumers.
+CONTRACT_PROVED: The two files implement the supplied literal design. The component obtains cyclic SCCs from the approved kernel, computes each component's reachable closure, requires all reachable ASTs, enforces entry/statement/AST-node budgets, requires exact graph-to-syntactic-import target parity, and evaluates the restricted initialization model independently from each SCC member. Result dataclasses are frozen and preserve per-entry assessments. Classifications are MODEL_INTERNAL_EARLY_BINDING_HAZARD, MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS, or INDETERMINATE. A hazard is internal only when the failing event's source and target are both SCC members.
+CODE_PATH_PROVED: The component consumes in-memory graph and AST inputs; it does not execute analyzed code, read source files, mutate the graph/canonical state, publish diagnostics, or call LIVE/MCP. Contextor reports its only direct consumer as tests.test_cycle_semantics_scenarios, with zero downstream consumers.
 
 ## TEST_COMMAND
-Pre-edit: `& .\.venv\Scripts\python.exe -m pytest -q tests/test_cycle_semantics_initialization_model.py tests/test_cycle_semantics_binding_order.py tests/test_cycle_semantics_guards.py tests/test_cycle_semantics_execution_context.py tests/test_cycle_semantics_provenance.py`
-Post-edit: `& .\.venv\Scripts\python.exe -m pytest -q tests/test_cycle_semantics_scc.py tests/test_cycle_semantics_initialization_model.py tests/test_cycle_semantics_binding_order.py tests/test_cycle_semantics_guards.py tests/test_cycle_semantics_execution_context.py tests/test_cycle_semantics_provenance.py`
+Pre-edit: `& .\.venv\Scripts\python.exe -m pytest -q tests/test_cycle_semantics_scc.py tests/test_cycle_semantics_initialization_model.py tests/test_cycle_semantics_binding_order.py tests/test_cycle_semantics_guards.py tests/test_cycle_semantics_execution_context.py tests/test_cycle_semantics_provenance.py`
+Post-edit: `& .\.venv\Scripts\python.exe -m pytest -q tests/test_cycle_semantics_scenarios.py tests/test_cycle_semantics_scc.py tests/test_cycle_semantics_initialization_model.py tests/test_cycle_semantics_binding_order.py tests/test_cycle_semantics_guards.py tests/test_cycle_semantics_execution_context.py tests/test_cycle_semantics_provenance.py`
 
 ## TEST_RESULTS
-Repository Python 3.10.9. Pre-edit exit 0: 77 passed in 2.33s. Post-edit exit 0: 92 passed in 3.10s (15 new plus 77 existing). No other tests, full suite, or FULL analysis run. New production syntax diagnostics are fresh and empty at revision 414.
+Repository Python 3.10.9. Pre-edit exit 0: 92 passed in 2.78s. Post-edit exit 0: 108 passed in 4.15s (16 new plus 92 existing). No other tests, full suite or FULL analysis run. New production syntax diagnostics are fresh and error-free at revision 416.
 
-## SCC_STRUCTURAL_EVIDENCE
-CONTRACT_PROVED: Targeted tests cover empty and target-only graphs, acyclic chains, overlapping cycles, independent SCCs, self-loop, deterministic order and edge deduplication, 4101-node cyclic and 3001-node acyclic chains without recursion, invalid graphs, input immutability, and randomized comparison with the mutual-reachability definition. The result counts SCCs, not simple cycle paths; exact internal edges are retained. SCC membership is structural graph evidence only.
+## SCC_SCENARIO_EVIDENCE
+CONTRACT_PROVED: Tests show the same hard-edge topology can yield an internal early-binding hazard or all modeled fresh-member entries passing when only binding order changes. Every member has an independent ImportOrderAssessment. Two independent SCCs receive separate classifications. An acyclic graph yields no component scenarios. A self-loop is analyzed as a cyclic unit. A successful reachable noncyclic dependency is included in the closure without becoming a separate component diagnosis.
+
+## GRAPH_SOURCE_PARITY_EVIDENCE
+CONTRACT_PROVED: The declared AST import targets are compared exactly against hard-edge adjacency for every reachable module. A graph/source discrepancy yields INDETERMINATE with GRAPH_SOURCE_IMPORT_MISMATCH and no entry assessments; a missing reachable source yields MISSING_OR_INVALID_SOURCE. Relative, star and dotted imports cannot be promoted to a closed flat-module proof. Tests cover discrepancy and missing-source cases.
+
+## CROSS_SCC_ATTRIBUTION_EVIDENCE
+CONTRACT_PROVED: Internal hazard attribution requires the final EARLY_BINDING_HAZARD event's source and target to be members of the component. A downstream SCC hazard is not attributed to an upstream SCC. An error in an external noncyclic dependency similarly leaves the current SCC INDETERMINATE. Targeted tests cover both cases.
+
+## BUDGET_EVIDENCE
+CONTRACT_PROVED: More than 64 members yields ENTRY_BUDGET_EXCEEDED, more than 4096 closure statements yields STATEMENT_BUDGET_EXCEEDED, and more than 16384 closure AST nodes yields AST_NODE_BUDGET_EXCEEDED. Each path returns INDETERMINATE with coverage NONE and no entry assessments. Tests cover all three.
 
 ## COLLISION_COUNT_BEFORE_AFTER
-0 -> 0 from fresh canonical get_name_collisions at revisions 412 and 414. No new name collision.
+0 -> 0 from fresh canonical get_name_collisions at revisions 414 and 416. No new name collision.
 
 ## STRUCTURAL_CYCLE_COUNT_BEFORE_AFTER
-16 -> 16 from fresh canonical diagnostics. Existing detect_cycles and structural graph code were not edited. Watcher indexing of two new modules may add ordinary dependency edges; a byte-identical whole-repository graph is not claimed.
+16 -> 16 from fresh canonical diagnostics. Existing structural graph and cycle detection code were not edited. Watcher indexing of two new modules may add ordinary dependency edges; a byte-identical whole-repository graph is not claimed.
 
 ## NO_SAFETY_CERTIFICATION
-CODE_PATH_PROVED: The output scope is STRUCTURAL_HARD_IMPORT_GRAPH. It emits no SAFE, runtime reachability, or failure classification. SCC membership is not treated as import-execution evidence.
+CODE_PATH_PROVED: Report scope is SCENARIO_MODEL_NOT_RUNTIME_CERTIFICATION and component scope is CLOSED_FLAT_MODULE_FRESH_ENTRY_MODEL. MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS is explicitly limited to modeled fresh entry scenarios, not SAFE or a general runtime proof. Unsupported or incomplete inputs fail closed to INDETERMINATE.
 
 ## NO_WARNING_SUPPRESSION
-CODE_PATH_PROVED: ArchitectureCycle and warning-publication code were untouched. Fresh canonical cycle count remains 16; no suppression rule was added.
+CODE_PATH_PROVED: No ArchitectureCycle or warning-publication code was edited or called. Canonical structural cycles remain 16. No suppression rule was added.
 
 ## NO_DIRECT_LIVE_PUBLICATION
-CODE_PATH_PROVED: The new module is imported only by its targeted test, not exported from __init__.py, and not integrated with FULL/incremental, MCP, LIVE, Desktop or snapshots. Watcher indexing is external observation. No direct update_file, restart or commit.
+CODE_PATH_PROVED: The new module is imported only by its test and not exported from __init__.py or integrated with FULL/incremental, MCP, LIVE, Desktop or snapshots. Watcher indexing is external observation. No direct update_file, restart or commit.
+
+## UNRESOLVED_LIMITATIONS
+UNKNOWN: The model does not certify general runtime reachability, safety, or failure. It requires a closed flat-module import subset and fresh-entry assessment of each SCC member. Missing ASTs, graph/source mismatch, unsupported syntax and budget excess are explicit INDETERMINATE outcomes. Project-wide workspace synchronization is unverified in the global overlay, though the target production file was verified against disk.
 
 ## FINAL_VERDICT
-B0G4B5_PASS — exact isolated two-file SCC kernel, 92 focused tests passed, both watcher events observed, fresh canonical state, zero name collisions and unchanged structural cycle count. Await `proceduj`.
+B0G4B6_PASS — exact isolated two-file implementation, 108 focused tests passed, both watcher events observed, fresh canonical state, zero name collisions and unchanged structural cycle count. Await `proceduj`.
 
 ## FULL_DIFFS
 
-### FULL_DIFF: contextor/core/cycle_semantics/scc.py
+### FULL_DIFF: contextor/core/cycle_semantics/scenarios.py
 
-diff --git a/contextor/core/cycle_semantics/scc.py b/contextor/core/cycle_semantics/scc.py
+diff --git a/contextor/core/cycle_semantics/scenarios.py b/contextor/core/cycle_semantics/scenarios.py
 new file mode 100644
-index 0000000..e9daf4d
+index 0000000..25b839b
 --- /dev/null
-+++ b/contextor/core/cycle_semantics/scc.py
-@@ -0,0 +1,131 @@
-+"""Deterministic, iterative SCC evidence from an unchanged hard-import graph.
++++ b/contextor/core/cycle_semantics/scenarios.py
+@@ -0,0 +1,194 @@
++"""Bounded SCC scenario analysis over an explicitly closed flat-module model.
 +
-+Structural membership is not import-execution evidence or a safety verdict.
++This is deliberately not a safety certificate, publication policy or LIVE state.
 +"""
 +
 +from __future__ import annotations
 +
++import ast
 +from collections.abc import Mapping
 +from dataclasses import dataclass
 +
++from .initialization_model import ImportOrderAssessment, evaluate_flat_import_order
++from .scc import CyclicImportComponent, ImportCycleTopology, analyze_import_cycle_topology
++
++MAX_COMPONENT_ENTRIES = 64
++MAX_CLOSURE_STATEMENTS = 4096
++MAX_CLOSURE_AST_NODES = 16384
++
 +
 +@dataclass(frozen=True)
-+class CyclicImportComponent:
++class CycleComponentScenarios:
 +    members: tuple[str, ...]
 +    internal_edges: tuple[tuple[str, str], ...]
-+    kind: str
++    classification: str
++    coverage: str
++    reason: str | None
++    entry_assessments: tuple[ImportOrderAssessment, ...]
++    evidence_scope: str = "CLOSED_FLAT_MODULE_FRESH_ENTRY_MODEL"
 +
 +
 +@dataclass(frozen=True)
-+class ImportCycleTopology:
-+    node_count: int
-+    hard_edge_count: int
-+    total_scc_count: int
-+    cyclic_components: tuple[CyclicImportComponent, ...]
-+    evidence_scope: str = "STRUCTURAL_HARD_IMPORT_GRAPH"
++class CycleScenarioReport:
++    topology: ImportCycleTopology
++    components: tuple[CycleComponentScenarios, ...]
++    evidence_scope: str = "SCENARIO_MODEL_NOT_RUNTIME_CERTIFICATION"
 +
 +
-+def analyze_import_cycle_topology(
-+    hard_edges: Mapping[
-+        str,
-+        set[str] | frozenset[str] | list[str] | tuple[str, ...],
-+    ],
-+) -> ImportCycleTopology:
-+    """Find all cyclic SCCs without mutating input or enumerating simple cycles.
++def _declared_import_targets(tree: ast.Module) -> set[str] | None:
++    """Return syntactic targets; refuse relative/star or dotted imports."""
++    found: set[str] = set()
++    for node in ast.walk(tree):
++        if isinstance(node, ast.Import):
++            for alias in node.names:
++                if not alias.name.isidentifier():
++                    return None
++                found.add(alias.name)
++        elif isinstance(node, ast.ImportFrom):
++            if node.level or not node.module or not node.module.isidentifier():
++                return None
++            if any(alias.name == "*" for alias in node.names):
++                return None
++            found.add(node.module)
++    return found
 +
-+    A self-loop is cyclic, and multiple cycle paths inside an SCC still count
-+    as one cyclic component. Edges to target-only nodes remain represented.
++
++def _closure(
++    members: tuple[str, ...], adjacency: Mapping[str, frozenset[str]]
++) -> set[str]:
++    visited = set(members)
++    pending = list(members)
++    while pending:
++        for target in adjacency[pending.pop()]:
++            if target not in visited:
++                visited.add(target)
++                pending.append(target)
++    return visited
++
++
++def _component_result(
++    component: CyclicImportComponent,
++    classification: str,
++    *,
++    coverage: str,
++    reason: str | None = None,
++    assessments: tuple[ImportOrderAssessment, ...] = (),
++) -> CycleComponentScenarios:
++    return CycleComponentScenarios(
++        members=component.members,
++        internal_edges=component.internal_edges,
++        classification=classification,
++        coverage=coverage,
++        reason=reason,
++        entry_assessments=assessments,
++    )
++
++
++def analyze_cycle_scenarios(
++    hard_edges: Mapping[str, set[str] | frozenset[str] | list[str] | tuple[str, ...]],
++    modules: Mapping[str, ast.AST],
++) -> CycleScenarioReport:
++    """Analyze every fresh entry module of each cyclic SCC, without executing code.
++
++    Source-to-graph edge equality is required for the entire reachable closure.
++    Missing, dynamic and unsupported semantics yield INDETERMINATE, never safe.
 +    """
-+    if not isinstance(hard_edges, Mapping):
-+        raise TypeError("hard_edges must be a mapping")
++    topology = analyze_import_cycle_topology(hard_edges)
++    if not isinstance(modules, Mapping):
++        raise TypeError("modules must be a mapping")
 +
-+    adjacency_sets: dict[str, set[str]] = {}
-+    for source, targets in hard_edges.items():
-+        if not isinstance(source, str) or not source:
-+            raise ValueError("invalid source module")
-+        if not isinstance(targets, (set, frozenset, tuple, list)):
-+            raise TypeError("targets must be an explicit collection")
-+        normalized: set[str] = set()
++    adjacency = {name: frozenset(targets) for name, targets in hard_edges.items()}
++    for targets in tuple(adjacency.values()):
 +        for target in targets:
-+            if not isinstance(target, str) or not target:
-+                raise ValueError("invalid target module")
-+            normalized.add(target)
-+        adjacency_sets[source] = normalized
++            adjacency.setdefault(target, frozenset())
 +
-+    for targets in tuple(adjacency_sets.values()):
-+        for target in targets:
-+            adjacency_sets.setdefault(target, set())
-+
-+    adjacency = {
-+        node: tuple(sorted(targets))
-+        for node, targets in sorted(adjacency_sets.items())
-+    }
-+    predecessors: dict[str, list[str]] = {node: [] for node in adjacency}
-+    for source, targets in adjacency.items():
-+        for target in targets:
-+            predecessors[target].append(source)
-+    reverse = {node: tuple(sorted(pred)) for node, pred in predecessors.items()}
-+
-+    visited: set[str] = set()
-+    finish_order: list[str] = []
-+    for source in adjacency:
-+        if source in visited:
++    output: list[CycleComponentScenarios] = []
++    for component in topology.cyclic_components:
++        if len(component.members) > MAX_COMPONENT_ENTRIES:
++            output.append(_component_result(
++                component, "INDETERMINATE", coverage="NONE",
++                reason="ENTRY_BUDGET_EXCEEDED",
++            ))
 +            continue
-+        visited.add(source)
-+        stack: list[tuple[str, int]] = [(source, 0)]
-+        while stack:
-+            node, index = stack[-1]
-+            successors = adjacency[node]
-+            if index == len(successors):
-+                finish_order.append(node)
-+                stack.pop()
-+                continue
-+            stack[-1] = (node, index + 1)
-+            next_node = successors[index]
-+            if next_node not in visited:
-+                visited.add(next_node)
-+                stack.append((next_node, 0))
 +
-+    visited.clear()
-+    cyclic: list[CyclicImportComponent] = []
-+    all_scc_count = 0
-+    for source in reversed(finish_order):
-+        if source in visited:
++        reachable = _closure(component.members, adjacency)
++        if any(name not in modules or not isinstance(modules[name], ast.Module)
++               for name in reachable):
++            output.append(_component_result(
++                component, "INDETERMINATE", coverage="NONE",
++                reason="MISSING_OR_INVALID_SOURCE",
++            ))
 +            continue
-+        all_scc_count += 1
-+        members: list[str] = []
-+        stack = [source]
-+        visited.add(source)
-+        while stack:
-+            node = stack.pop()
-+            members.append(node)
-+            for predecessor in reverse[node]:
-+                if predecessor not in visited:
-+                    visited.add(predecessor)
-+                    stack.append(predecessor)
 +
-+        ordered_members = tuple(sorted(members))
-+        if len(ordered_members) == 1:
-+            only = ordered_members[0]
-+            if only not in adjacency[only]:
-+                continue
++        if sum(len(modules[name].body) for name in reachable) > MAX_CLOSURE_STATEMENTS:
++            output.append(_component_result(
++                component, "INDETERMINATE", coverage="NONE",
++                reason="STATEMENT_BUDGET_EXCEEDED",
++            ))
++            continue
 +
-+        member_set = set(ordered_members)
-+        internal_edges = tuple(
-+            (node, target)
-+            for node in ordered_members
-+            for target in adjacency[node]
-+            if target in member_set
++        # A single top-level statement can contain an arbitrarily large AST.
++        ast_budget = MAX_CLOSURE_AST_NODES
++        for name in sorted(reachable):
++            for _ in ast.walk(modules[name]):
++                ast_budget -= 1
++                if ast_budget < 0:
++                    break
++            if ast_budget < 0:
++                break
++        if ast_budget < 0:
++            output.append(_component_result(
++                component, "INDETERMINATE", coverage="NONE",
++                reason="AST_NODE_BUDGET_EXCEEDED",
++            ))
++            continue
++
++        # The graph and AST must describe the exact same import targets.
++        # No name-based exceptions and no guessed package resolution.
++        if any(
++            _declared_import_targets(modules[name]) != set(adjacency[name])
++            for name in reachable
++        ):
++            output.append(_component_result(
++                component, "INDETERMINATE", coverage="NONE",
++                reason="GRAPH_SOURCE_IMPORT_MISMATCH",
++            ))
++            continue
++
++        sources = {name: modules[name] for name in sorted(reachable)}
++        assessments = tuple(
++            evaluate_flat_import_order(sources, entry)
++            for entry in component.members
 +        )
-+        cyclic.append(CyclicImportComponent(
-+            members=ordered_members,
-+            internal_edges=internal_edges,
-+            kind="SELF_LOOP" if len(ordered_members) == 1 else "MULTI_MODULE",
++        member_set = set(component.members)
++        internal_hazard = any(
++            result.outcome == "EARLY_BINDING_HAZARD"
++            and result.events
++            and result.events[-1].operation == "EARLY_BINDING_HAZARD"
++            and result.events[-1].module in member_set
++            and result.events[-1].target in member_set
++            for result in assessments
++        )
++        if internal_hazard:
++            classification = "MODEL_INTERNAL_EARLY_BINDING_HAZARD"
++        elif all(result.outcome == "MODEL_PASS" for result in assessments):
++            classification = "MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS"
++        else:
++            classification = "INDETERMINATE"
++
++        coverage = (
++            "COMPLETE_FRESH_MEMBER_ENTRIES"
++            if all(result.outcome != "UNKNOWN" for result in assessments)
++            else "PARTIAL_FRESH_MEMBER_ENTRIES"
++        )
++        reason = (
++            "UNRESOLVED_SCENARIO"
++            if classification == "INDETERMINATE"
++            else None
++        )
++        output.append(_component_result(
++            component, classification, coverage=coverage,
++            reason=reason, assessments=assessments,
 +        ))
 +
-+    return ImportCycleTopology(
-+        node_count=len(adjacency),
-+        hard_edge_count=sum(len(targets) for targets in adjacency.values()),
-+        total_scc_count=all_scc_count,
-+        cyclic_components=tuple(sorted(cyclic, key=lambda item: item.members)),
-+    )
++    return CycleScenarioReport(topology, tuple(output))
 
-### FULL_DIFF: tests/test_cycle_semantics_scc.py
+### FULL_DIFF: tests/test_cycle_semantics_scenarios.py
 
-diff --git a/tests/test_cycle_semantics_scc.py b/tests/test_cycle_semantics_scc.py
+diff --git a/tests/test_cycle_semantics_scenarios.py b/tests/test_cycle_semantics_scenarios.py
 new file mode 100644
-index 0000000..ec3041c
+index 0000000..2979b7b
 --- /dev/null
-+++ b/tests/test_cycle_semantics_scc.py
-@@ -0,0 +1,150 @@
++++ b/tests/test_cycle_semantics_scenarios.py
+@@ -0,0 +1,178 @@
++import ast
 +import json
-+import random
 +from dataclasses import asdict
 +
 +import pytest
 +
-+from contextor.core.cycle_semantics.scc import (
-+    analyze_import_cycle_topology as analyze,
++from contextor.core.cycle_semantics.scenarios import (
++    analyze_cycle_scenarios,
++    MAX_COMPONENT_ENTRIES,
++    MAX_CLOSURE_AST_NODES,
 +)
 +
 +
-+def test_b0g4b5_acyclic_target_only_and_empty():
-+    assert analyze({}).node_count == 0
-+    out = analyze({"a": {"b"}, "b": {"c"}})
-+    assert (
-+        out.node_count,
-+        out.hard_edge_count,
-+        out.total_scc_count,
-+        out.cyclic_components,
-+    ) == (3, 2, 3, ())
++def _assess(sources, edges):
++    return analyze_cycle_scenarios(edges, {k: ast.parse(v) for k, v in sources.items()})
 +
 +
-+def test_b0g4b5_overlapping_cycles_one_scc():
-+    out = analyze({
-+        "a": {"b", "c", "x"},
-+        "b": {"c"},
-+        "c": {"a"},
-+        "x": set(),
-+    })
-+    assert out.total_scc_count == 2
-+    assert len(out.cyclic_components) == 1
-+    assert out.cyclic_components[0].members == ("a", "b", "c")
-+    assert out.cyclic_components[0].internal_edges == (
-+        ("a", "b"),
-+        ("a", "c"),
-+        ("b", "c"),
-+        ("c", "a"),
-+    )
-+
-+
-+def test_b0g4b5_independent_sccs_and_self_loop():
-+    out = analyze({
-+        "a": {"b"}, "b": {"a"},
-+        "c": {"c"},
-+        "d": {"e"}, "e": {"d"},
-+        "f": set(),
-+    })
-+    assert tuple(c.members for c in out.cyclic_components) == (
-+        ("a", "b"), ("c",), ("d", "e")
-+    )
-+    assert tuple(c.kind for c in out.cyclic_components) == (
-+        "MULTI_MODULE", "SELF_LOOP", "MULTI_MODULE"
-+    )
-+    assert out.total_scc_count == 4
-+
-+
-+def test_b0g4b5_order_independent_and_deduplicated():
-+    first = analyze({"b": ["a", "a"], "a": ("b", "c"), "c": ()})
-+    second = analyze({"c": set(), "a": {"c", "b"}, "b": {"a"}})
-+    assert first == second
-+    assert first.hard_edge_count == 3
-+    json.dumps(asdict(first))
-+
-+
-+def test_b0g4b5_deep_cycle_no_recursion():
-+    n = 4100
-+    graph = {f"m{i}": {f"m{i+1}"} for i in range(n)}
-+    graph[f"m{n}"] = {"m0"}
-+    out = analyze(graph)
-+    assert (
-+        out.node_count,
-+        out.hard_edge_count,
-+        out.total_scc_count,
-+    ) == (n + 1, n + 1, 1)
-+    assert len(out.cyclic_components[0].members) == n + 1
-+
-+
-+def test_b0g4b5_deep_acyclic_chain_no_recursion():
-+    n = 3000
-+    out = analyze({
-+        f"m{i}": {f"m{i+1}"} for i in range(n)
-+    })
-+    assert (
-+        out.node_count,
-+        out.total_scc_count,
-+        len(out.cyclic_components),
-+    ) == (n + 1, n + 1, 0)
-+
-+
-+@pytest.mark.parametrize("graph, error", [
-+    (None, TypeError),
-+    ([("a", {"b"})], TypeError),
-+    ({"a": "b"}, TypeError),
-+    ({"a": None}, TypeError),
-+    ({"": set()}, ValueError),
-+    ({1: {"a"}}, ValueError),
-+    ({"a": {None}}, ValueError),
-+])
-+def test_b0g4b5_rejects_invalid_graph(graph, error):
-+    with pytest.raises(error):
-+        analyze(graph)
-+
-+
-+def test_b0g4b5_no_graph_mutation():
++def test_hazard_same_edges_safe_reordering():
 +    graph = {"a": {"b"}, "b": {"a"}}
-+    before = {k: set(v) for k, v in graph.items()}
-+    out = analyze(graph)
-+    assert graph == before
++    x = _assess(
++        {"a": "import b\nvalue=1\n", "b": "import a\nx=a.value\n"}, graph
++    )
++    assert x.components[0].classification == "MODEL_INTERNAL_EARLY_BINDING_HAZARD"
++    assert [s.outcome for s in x.components[0].entry_assessments] == [
++        "EARLY_BINDING_HAZARD", "MODEL_PASS"
++    ]
++    y = _assess(
++        {"a": "value=1\nimport b\n", "b": "import a\nx=a.value\n"}, graph
++    )
++    assert y.components[0].classification == "MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS"
++    assert x.topology == y.topology
++    assert y.components[0].coverage == "COMPLETE_FRESH_MEMBER_ENTRIES"
++
++
++def test_two_independent_sccs():
++    edges = {"a": {"b"}, "b": {"a"}, "x": {"y"}, "y": {"x"}}
++    sources = {
++        "a": "import b\nvalue=1",
++        "b": "import a\nx=a.value",
++        "x": "import y\na=1",
++        "y": "import x\nb=2",
++    }
++    r = _assess(sources, edges)
++    assert [c.classification for c in r.components] == [
++        "MODEL_INTERNAL_EARLY_BINDING_HAZARD",
++        "MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS",
++    ]
++
++
++def test_unsupported_inside_component_is_unknown():
++    r = _assess(
++        {"a": "if True:\n    import b", "b": "import a"},
++        {"a": {"b"}, "b": {"a"}},
++    )
++    assert r.components[0].classification == "INDETERMINATE"
++    assert r.components[0].coverage == "PARTIAL_FRESH_MEMBER_ENTRIES"
++
++
++def test_graph_source_discrepancy_fails_closed():
++    r = _assess(
++        {"a": "import b\nimport c", "b": "import a", "c": "pass"},
++        {"a": {"b"}, "b": {"a"}, "c": set()},
++    )
++    assert r.components[0].reason == "GRAPH_SOURCE_IMPORT_MISMATCH"
++    assert r.components[0].entry_assessments == ()
++
++
++def test_missing_imported_source_fails_closed():
++    r = _assess(
++        {"a": "import b", "b": "import a\nimport c"},
++        {"a": {"b"}, "b": {"a", "c"}},
++    )
++    assert r.components[0].reason == "MISSING_OR_INVALID_SOURCE"
++
++
++def test_unrelated_unsupported_module_is_not_contamination():
++    r = _assess(
++        {"a": "import b", "b": "import a", "z": "class Dangerous:\n    pass"},
++        {"a": {"b"}, "b": {"a"}, "z": set()},
++    )
++    assert r.components[0].classification == "MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS"
++
++
++def test_external_error_not_mislabeled_internal_cycle():
++    r = _assess(
++        {
++            "a": "import b\nimport c",
++            "b": "import a",
++            "c": "from d import missing",
++            "d": "pass",
++        },
++        {"a": {"b", "c"}, "b": {"a"}, "c": {"d"}, "d": set()},
++    )
++    assert r.components[0].classification == "INDETERMINATE"
++    assert all(
++        x.outcome == "MISSING_EXPORT"
++        for x in r.components[0].entry_assessments
++    )
++
++
++def test_acyclic_no_components():
++    r = _assess(
++        {"a": "import b", "b": "pass"},
++        {"a": {"b"}, "b": set()},
++    )
++    assert r.components == ()
++    assert r.topology.total_scc_count == 2
++
++
++def test_self_loop_is_not_error():
++    r = _assess({"a": "import a\nx=1"}, {"a": {"a"}})
++    assert r.components[0].classification == "MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS"
++
++
++def test_large_scc_budget_unknown():
++    n = MAX_COMPONENT_ENTRIES + 1
++    edges = {f"m{i}": {f"m{(i+1)%n}"} for i in range(n)}
++    sources = {k: "import " + next(iter(targets)) for k, targets in edges.items()}
++    r = _assess(sources, edges)
++    assert r.components[0].classification == "INDETERMINATE"
++    assert r.components[0].reason == "ENTRY_BUDGET_EXCEEDED"
++
++
++def test_budget_statements():
++    n = 4097
++    s = "import b\n" + "pass\n" * n
++    r = _assess({"a": s, "b": "import a"}, {"a": {"b"}, "b": {"a"}})
++    assert r.components[0].reason == "STATEMENT_BUDGET_EXCEEDED"
++
++
++def test_determinism_immutability_serialization():
++    src = {"a": "import b", "b": "import a"}
++    edges = {"a": {"b"}, "b": {"a"}}
++    r = _assess(src, edges)
++    assert r == _assess(src, edges)
++    json.dumps(asdict(r))
 +    with pytest.raises(Exception):
-+        out.cyclic_components[0].members = ("fake",)
++        r.components[0].classification = "fake"
++    assert edges == {"a": {"b"}, "b": {"a"}}
 +
 +
-+def test_b0g4b5_random_graphs_against_reachability_definition():
-+    rng = random.Random(710)
-+    for n in range(2, 7):
-+        nodes = [f"x{i}" for i in range(n)]
-+        for _ in range(12):
-+            graph = {
-+                u: {v for v in nodes if rng.randrange(4) == 0}
-+                for u in nodes
-+            }
-+            out = analyze(graph)
++def test_invalid_modules_fail_type_check():
++    with pytest.raises(TypeError):
++        analyze_cycle_scenarios({"a": {"a"}}, None)
 +
-+            reach = {}
-+            for u in nodes:
-+                found = {u}
-+                stack = [u]
-+                while stack:
-+                    for v in graph[stack.pop()]:
-+                        if v not in found:
-+                            found.add(v)
-+                            stack.append(v)
-+                reach[u] = found
 +
-+            unused = set(nodes)
-+            expected = []
-+            while unused:
-+                u = min(unused)
-+                group = {
-+                    v for v in nodes
-+                    if v in reach[u] and u in reach[v]
-+                }
-+                unused -= group
-+                if len(group) > 1 or u in graph[u]:
-+                    expected.append(tuple(sorted(group)))
++def test_dependency_on_successful_noncyclic_module():
++    r = _assess(
++        {"a": "import b\nimport c", "b": "import a", "c": "x=1"},
++        {"a": {"b", "c"}, "b": {"a"}, "c": set()},
++    )
++    assert r.components[0].classification == "MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS"
 +
-+            assert tuple(
-+                component.members
-+                for component in out.cyclic_components
-+            ) == tuple(sorted(expected))
++
++def test_downstream_scc_hazard_not_attributed_to_upstream_scc():
++    r = _assess(
++        {
++            "a": "import b\nimport x",
++            "b": "import a",
++            "x": "import y\nvalue=1",
++            "y": "import x\nobserved=x.value",
++        },
++        {"a": {"b", "x"}, "b": {"a"}, "x": {"y"}, "y": {"x"}},
++    )
++    assert [c.classification for c in r.components] == [
++        "INDETERMINATE",
++        "MODEL_INTERNAL_EARLY_BINDING_HAZARD",
++    ]
++
++
++def test_ast_budget_one_large_statement():
++    n = MAX_CLOSURE_AST_NODES + 2
++    literal = ",".join("1" for _ in range(n))
++    r = _assess(
++        {"a": "import b\nx=[" + literal + "]", "b": "import a"},
++        {"a": {"b"}, "b": {"a"}},
++    )
++    assert r.components[0].reason == "AST_NODE_BUDGET_EXCEEDED"
