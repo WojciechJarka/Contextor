@@ -1,430 +1,352 @@
-# CONTEXTOR_B0G4B4_RESTRICTED_IMPORT_INITIALIZATION_MODEL
+# CONTEXTOR_B0G4B5_STRUCTURAL_SCC_KERNEL
 
 ## HEAD_BEFORE
-
-d8422ab2ccc90b1d9d6ae62fcfc9744069b7dadc. Git status clean. B0G4B0 provenance, B0G4B1 execution_context, B0G4B2 guards and B0G4B3 binding_order existed. B0G4B2F `_project_guard_evidence` rename present. Both B0G4B4 target paths absent.
+cf9379143672497f48cb8dee6cdadb863b438585. Git status clean. B0G4B4 initialization_model.py existed; both B0G4B5 target paths were absent. Contextor identified `contextor.core.graph.cycles::detect_cycles` as existing structural cycle owner with 12 consumers; no edit to that owner was planned.
 
 ## HEAD_AFTER
-
-d8422ab2ccc90b1d9d6ae62fcfc9744069b7dadc. No commit. Git status shows only the two new task files as untracked.
+cf9379143672497f48cb8dee6cdadb863b438585. No commit. Git status shows only the two new task files as untracked.
 
 ## LIVE_REVISION_BEFORE
-
-410; activity_epoch=1beab26da2ff4932852caa7db6ff4242; continuity=continuous; resync_required=false; canonical_state=fresh; collisions=0 fresh; cycles=16 fresh. Global workspace_sync=unverified. Contextor identified binding_order as an isolated cycle_semantics module with only its own test as direct consumer and zero downstream consumers.
+412; activity_epoch=1beab26da2ff4932852caa7db6ff4242; continuity=continuous; resync_required=false; canonical_state=fresh; collisions=0 fresh; cycles=16 fresh. Global workspace_sync=unverified. Contextor found initialization_model isolated with only its targeted test as a direct consumer and no downstream consumers.
 
 ## LIVE_REVISION_AFTER
-
-412; same activity_epoch; continuity=continuous; resync_required=false; canonical_state=fresh; all reported families fresh; no parse-stale modules; collisions=0; cycles=16. Desktop watcher revision 411 UPDATED initialization_model.py and revision 412 UPDATED test_cycle_semantics_initialization_model.py, both blast_radius_state=fresh. New production module workspace_sync=verified by full get_file_edit_context at revision 412; global project overlay remains unverified.
+414; same activity_epoch; continuity=continuous; resync_required=false; canonical_state=fresh; all reported families fresh; no parse-stale modules; collisions=0; cycles=16. Desktop watcher revision 413 UPDATED scc.py and revision 414 UPDATED test_cycle_semantics_scc.py, both blast_radius_state=fresh. New production module workspace_sync=verified by full get_file_edit_context at revision 414; project overlay remains unverified.
 
 ## FILES_CHANGED
+- contextor/core/cycle_semantics/scc.py (new)
+- tests/test_cycle_semantics_scc.py (new)
 
-- contextor/core/cycle_semantics/initialization_model.py (new)
-- tests/test_cycle_semantics_initialization_model.py (new)
-
-No existing file, including package __init__.py, was edited. walkthrough.md is this report and is excluded from source/test diff accounting.
+No existing production/test file or __init__.py changed. walkthrough.md is this report and excluded from source/test diff accounting.
 
 ## IMPLEMENTATION_CONTRACT
-
-CONTRACT_PROVED: Both new files exactly match the auditor-supplied content with one final newline. The production module compiles only the explicitly supported flat-module AST statements into immutable ModelStep tuples, then iteratively models NEW/INITIALIZING/READY module states, bound names, aliases, recursive import caching, and source-order steps. Unsupported AST, unknown module, invalid input and external dependencies yield UNKNOWN. Distinct outcomes include MODEL_PASS, EARLY_BINDING_HAZARD, MISSING_EXPORT and MISSING_ATTRIBUTE, with immutable event tuples and evidence_scope=RESTRICTED_FLAT_MODULE_MODEL.
-CODE_PATH_PROVED: Production code consumes AST objects supplied by the caller. It does not execute analyzed code, read source files, launch subprocesses, mutate AST, change graph/canonical state, or publish diagnostics. Contextor reports only tests.test_cycle_semantics_initialization_model as a direct consumer, with zero downstream consumers. No FULL/incremental, MCP, Desktop, LIVE or snapshot integration was added.
+CONTRACT_PROVED: Both files exactly match the auditor-supplied content with one final newline. The kernel validates and normalizes an explicit hard-edge mapping, adds target-only nodes, orders nodes and adjacency deterministically, performs iterative two-pass SCC traversal, and retains all members and internal hard edges for cyclic components. A self-loop yields a one-node cyclic component; overlapping simple cycle paths remain one SCC. Output dataclasses are frozen. The input graph is not mutated.
+CODE_PATH_PROVED: The kernel receives an in-memory mapping and returns structural evidence. It does not read source, enumerate all simple cycles, invoke existing detect_cycles, change ProjectGraph/hard_edges/soft_edges, or publish warnings. Contextor reports the new module's only direct consumer as tests.test_cycle_semantics_scc, with zero downstream consumers.
 
 ## TEST_COMMAND
-
-Pre-edit: `& .\.venv\Scripts\python.exe -m pytest -q tests/test_cycle_semantics_binding_order.py tests/test_cycle_semantics_guards.py tests/test_cycle_semantics_execution_context.py tests/test_cycle_semantics_provenance.py`
-Post-edit: `& .\.venv\Scripts\python.exe -m pytest -q tests/test_cycle_semantics_initialization_model.py tests/test_cycle_semantics_binding_order.py tests/test_cycle_semantics_guards.py tests/test_cycle_semantics_execution_context.py tests/test_cycle_semantics_provenance.py`
+Pre-edit: `& .\.venv\Scripts\python.exe -m pytest -q tests/test_cycle_semantics_initialization_model.py tests/test_cycle_semantics_binding_order.py tests/test_cycle_semantics_guards.py tests/test_cycle_semantics_execution_context.py tests/test_cycle_semantics_provenance.py`
+Post-edit: `& .\.venv\Scripts\python.exe -m pytest -q tests/test_cycle_semantics_scc.py tests/test_cycle_semantics_initialization_model.py tests/test_cycle_semantics_binding_order.py tests/test_cycle_semantics_guards.py tests/test_cycle_semantics_execution_context.py tests/test_cycle_semantics_provenance.py`
 
 ## TEST_RESULTS
+Repository Python 3.10.9. Pre-edit exit 0: 77 passed in 2.33s. Post-edit exit 0: 92 passed in 3.10s (15 new plus 77 existing). No other tests, full suite, or FULL analysis run. New production syntax diagnostics are fresh and empty at revision 414.
 
-Repository Python 3.10.9. Pre-edit exit 0: 51 passed in 1.40s. Post-edit exit 0: 77 passed in 3.29s (26 new cases plus 51 existing). No other tests, full suite or full analysis run. Contextor syntax diagnostics for the new production module are fresh and empty at revision 412.
-
-## RUNTIME_FIXTURE_EVIDENCE
-
-DIRECT_EVIDENCE: The new tests write only synthetic source strings to pytest `tmp_path` and invoke a fresh Python process using `sys.executable -I -B -c`, inserting only that temporary directory for importlib.import_module. Tests compare both entry orders for plain cycles, early attribute binding, moved binding, and `from` import hazards. The model itself receives already parsed ASTs; only the test helper `_actual` uses subprocess/runtime import of fixture modules. These fixture results support the restricted examples, not general runtime certification.
-
-## MODEL_SCOPE_AND_UNKNOWN_LIMITATIONS
-
-CONTRACT_PROVED: Supported subset is flat module imports, from-import names, aliases, simple constant assignments, simple module.attribute reads and pass. Unsupported syntax and dependencies explicitly yield UNKNOWN. Packages/__init__, dynamic imports, decorators, classes, arbitrary calls and general Python execution are outside the model. MODEL_PASS applies to a single entry order and recognized subset; EARLY_BINDING_HAZARD is model evidence and not a universal runtime-failure proof. No general safety or reachability claim is made.
+## SCC_STRUCTURAL_EVIDENCE
+CONTRACT_PROVED: Targeted tests cover empty and target-only graphs, acyclic chains, overlapping cycles, independent SCCs, self-loop, deterministic order and edge deduplication, 4101-node cyclic and 3001-node acyclic chains without recursion, invalid graphs, input immutability, and randomized comparison with the mutual-reachability definition. The result counts SCCs, not simple cycle paths; exact internal edges are retained. SCC membership is structural graph evidence only.
 
 ## COLLISION_COUNT_BEFORE_AFTER
-
-0 -> 0 from fresh canonical get_name_collisions at revisions 410 and 412. No new Contextor name collision.
+0 -> 0 from fresh canonical get_name_collisions at revisions 412 and 414. No new name collision.
 
 ## STRUCTURAL_CYCLE_COUNT_BEFORE_AFTER
-
-16 -> 16 from fresh canonical diagnostics. Structural graph code and cycle detection were not changed; watcher indexing of two new modules may add ordinary dependency edges, so a byte-identical whole-repository graph is not claimed.
+16 -> 16 from fresh canonical diagnostics. Existing detect_cycles and structural graph code were not edited. Watcher indexing of two new modules may add ordinary dependency edges; a byte-identical whole-repository graph is not claimed.
 
 ## NO_SAFETY_CERTIFICATION
-
-CODE_PATH_PROVED: The model emits MODEL_PASS only within RESTRICTED_FLAT_MODULE_MODEL and does not emit SAFE or universal runtime certification. Both import entry orders are evaluated separately in tests.
+CODE_PATH_PROVED: The output scope is STRUCTURAL_HARD_IMPORT_GRAPH. It emits no SAFE, runtime reachability, or failure classification. SCC membership is not treated as import-execution evidence.
 
 ## NO_WARNING_SUPPRESSION
-
-CODE_PATH_PROVED: No ArchitectureCycle or warning-publication code was edited or called. Fresh structural cycle count remains 16; no suppression rule was introduced.
+CODE_PATH_PROVED: ArchitectureCycle and warning-publication code were untouched. Fresh canonical cycle count remains 16; no suppression rule was added.
 
 ## NO_DIRECT_LIVE_PUBLICATION
-
-CODE_PATH_PROVED: The module is imported directly only by its new test and is not exported in __init__.py or integrated with service/public projections. Desktop watcher indexing is external observation. No direct update_file call, restart or commit.
+CODE_PATH_PROVED: The new module is imported only by its targeted test, not exported from __init__.py, and not integrated with FULL/incremental, MCP, LIVE, Desktop or snapshots. Watcher indexing is external observation. No direct update_file, restart or commit.
 
 ## FINAL_VERDICT
-
-B0G4B4_PASS — exact two-file restricted model, 77 focused tests passed, watcher indexed both files, fresh canonical state, zero name collisions and unchanged structural cycle count. Await `proceduj`.
+B0G4B5_PASS — exact isolated two-file SCC kernel, 92 focused tests passed, both watcher events observed, fresh canonical state, zero name collisions and unchanged structural cycle count. Await `proceduj`.
 
 ## FULL_DIFFS
 
-### FULL_DIFF: contextor/core/cycle_semantics/initialization_model.py
+### FULL_DIFF: contextor/core/cycle_semantics/scc.py
 
-diff --git a/contextor/core/cycle_semantics/initialization_model.py b/contextor/core/cycle_semantics/initialization_model.py
+diff --git a/contextor/core/cycle_semantics/scc.py b/contextor/core/cycle_semantics/scc.py
 new file mode 100644
-index 0000000..abdbca2
+index 0000000..e9daf4d
 --- /dev/null
-+++ b/contextor/core/cycle_semantics/initialization_model.py
-@@ -0,0 +1,197 @@
-+"""A deliberately restricted model of Python 3.10 flat-module import recursion.
++++ b/contextor/core/cycle_semantics/scc.py
+@@ -0,0 +1,131 @@
++"""Deterministic, iterative SCC evidence from an unchanged hard-import graph.
 +
-+Results are evidence about this explicitly supported subset, never a general
-+runtime proof or permission to suppress structural cycle warnings.
++Structural membership is not import-execution evidence or a safety verdict.
 +"""
 +
 +from __future__ import annotations
 +
-+import ast
++from collections.abc import Mapping
 +from dataclasses import dataclass
-+from typing import Mapping
 +
 +
 +@dataclass(frozen=True)
-+class ModelStep:
-+    operation: str
-+    target: str | None = None
-+    symbol: str | None = None
-+    binding: str | None = None
++class CyclicImportComponent:
++    members: tuple[str, ...]
++    internal_edges: tuple[tuple[str, str], ...]
++    kind: str
 +
 +
 +@dataclass(frozen=True)
-+class ModelEvent:
-+    module: str
-+    operation: str
-+    target: str | None = None
-+    symbol: str | None = None
++class ImportCycleTopology:
++    node_count: int
++    hard_edge_count: int
++    total_scc_count: int
++    cyclic_components: tuple[CyclicImportComponent, ...]
++    evidence_scope: str = "STRUCTURAL_HARD_IMPORT_GRAPH"
 +
 +
-+@dataclass(frozen=True)
-+class ImportOrderAssessment:
-+    entry_module: str
-+    outcome: str
-+    target_module: str | None
-+    symbol: str | None
-+    events: tuple[ModelEvent, ...]
-+    evidence_scope: str = "RESTRICTED_FLAT_MODULE_MODEL"
++def analyze_import_cycle_topology(
++    hard_edges: Mapping[
++        str,
++        set[str] | frozenset[str] | list[str] | tuple[str, ...],
++    ],
++) -> ImportCycleTopology:
++    """Find all cyclic SCCs without mutating input or enumerating simple cycles.
 +
-+
-+def _valid_name(name: str) -> bool:
-+    return bool(name) and name.isidentifier() and not name.startswith("__")
-+
-+
-+def _compile(tree: ast.Module) -> tuple[ModelStep, ...] | None:
-+    steps: list[ModelStep] = []
-+    for statement in tree.body:
-+        if isinstance(statement, ast.Import):
-+            for alias in statement.names:
-+                if not _valid_name(alias.name) or (
-+                    alias.asname is not None and not _valid_name(alias.asname)
-+                ):
-+                    return None
-+                steps.append(ModelStep(
-+                    "IMPORT_MODULE", alias.name,
-+                    binding=alias.asname or alias.name,
-+                ))
-+        elif isinstance(statement, ast.ImportFrom):
-+            if statement.level != 0 or not _valid_name(statement.module or ""):
-+                return None
-+            for alias in statement.names:
-+                if not _valid_name(alias.name) or (
-+                    alias.asname is not None and not _valid_name(alias.asname)
-+                ):
-+                    return None
-+                steps.append(ModelStep(
-+                    "IMPORT_NAME", statement.module, alias.name,
-+                    alias.asname or alias.name,
-+                ))
-+        elif isinstance(statement, ast.Assign):
-+            if len(statement.targets) != 1 or not isinstance(statement.targets[0], ast.Name):
-+                return None
-+            name = statement.targets[0].id
-+            if not _valid_name(name):
-+                return None
-+            value = statement.value
-+            if isinstance(value, ast.Constant) and type(value.value) in {
-+                type(None), bool, int, float, complex, str, bytes,
-+            }:
-+                steps.append(ModelStep("BIND_CONSTANT", binding=name))
-+            elif (
-+                isinstance(value, ast.Attribute)
-+                and isinstance(value.value, ast.Name)
-+                and _valid_name(value.value.id)
-+                and _valid_name(value.attr)
-+            ):
-+                steps.append(ModelStep(
-+                    "READ_ATTRIBUTE", value.value.id, value.attr, name,
-+                ))
-+            else:
-+                return None
-+        elif isinstance(statement, ast.Pass):
-+            continue
-+        else:
-+            return None
-+    return tuple(steps)
-+
-+
-+def evaluate_flat_import_order(
-+    modules: Mapping[str, ast.AST],
-+    entry_module: str,
-+) -> ImportOrderAssessment:
-+    """Evaluate one import order without evaluating any user-provided Python.
-+
-+    MODEL_PASS covers only recognized flat modules, operations, and one order.
-+    Any unsupported AST is UNKNOWN, not a proof of failure or safety.
++    A self-loop is cyclic, and multiple cycle paths inside an SCC still count
++    as one cyclic component. Edges to target-only nodes remain represented.
 +    """
-+    def result(
-+        outcome: str,
-+        target: str | None = None,
-+        symbol: str | None = None,
-+    ) -> ImportOrderAssessment:
-+        return ImportOrderAssessment(
-+            entry_module, outcome, target, symbol, tuple(events)
-+        )
++    if not isinstance(hard_edges, Mapping):
++        raise TypeError("hard_edges must be a mapping")
 +
-+    events: list[ModelEvent] = []
-+    if not isinstance(modules, Mapping) or not _valid_name(entry_module):
-+        return result("UNKNOWN")
-+    if entry_module not in modules:
-+        return result("UNKNOWN", entry_module)
++    adjacency_sets: dict[str, set[str]] = {}
++    for source, targets in hard_edges.items():
++        if not isinstance(source, str) or not source:
++            raise ValueError("invalid source module")
++        if not isinstance(targets, (set, frozenset, tuple, list)):
++            raise TypeError("targets must be an explicit collection")
++        normalized: set[str] = set()
++        for target in targets:
++            if not isinstance(target, str) or not target:
++                raise ValueError("invalid target module")
++            normalized.add(target)
++        adjacency_sets[source] = normalized
 +
-+    programs: dict[str, tuple[ModelStep, ...]] = {}
-+    for module, tree in modules.items():
-+        if not isinstance(module, str) or not _valid_name(module):
-+            return result("UNKNOWN")
-+        if not isinstance(tree, ast.Module):
-+            return result("UNKNOWN", module)
-+        compiled = _compile(tree)
-+        if compiled is None:
-+            return result("UNKNOWN", module)
-+        programs[module] = compiled
++    for targets in tuple(adjacency_sets.values()):
++        for target in targets:
++            adjacency_sets.setdefault(target, set())
 +
-+    states = {name: "NEW" for name in programs}
-+    bindings: dict[str, set[str]] = {name: set() for name in programs}
-+    aliases: dict[str, dict[str, str]] = {name: {} for name in programs}
-+    frames: list[tuple[str, int]] = [(entry_module, 0)]
-+    states[entry_module] = "INITIALIZING"
++    adjacency = {
++        node: tuple(sorted(targets))
++        for node, targets in sorted(adjacency_sets.items())
++    }
++    predecessors: dict[str, list[str]] = {node: [] for node in adjacency}
++    for source, targets in adjacency.items():
++        for target in targets:
++            predecessors[target].append(source)
++    reverse = {node: tuple(sorted(pred)) for node, pred in predecessors.items()}
 +
-+    while frames:
-+        module, index = frames[-1]
-+        program = programs[module]
-+        if index >= len(program):
-+            states[module] = "READY"
-+            frames.pop()
-+            events.append(ModelEvent(module, "READY"))
++    visited: set[str] = set()
++    finish_order: list[str] = []
++    for source in adjacency:
++        if source in visited:
 +            continue
-+
-+        step = program[index]
-+        if step.operation in {"IMPORT_MODULE", "IMPORT_NAME"}:
-+            target = step.target
-+            if target not in programs:
-+                return result("UNKNOWN", target)
-+            if states[target] == "NEW":
-+                states[target] = "INITIALIZING"
-+                events.append(ModelEvent(module, "START_IMPORT", target))
-+                frames.append((target, 0))
++        visited.add(source)
++        stack: list[tuple[str, int]] = [(source, 0)]
++        while stack:
++            node, index = stack[-1]
++            successors = adjacency[node]
++            if index == len(successors):
++                finish_order.append(node)
++                stack.pop()
 +                continue
-+            if step.operation == "IMPORT_MODULE":
-+                bindings[module].add(step.binding)
-+                aliases[module][step.binding] = target
-+            else:
-+                if step.symbol not in bindings[target]:
-+                    outcome = (
-+                        "EARLY_BINDING_HAZARD"
-+                        if states[target] == "INITIALIZING"
-+                        else "MISSING_EXPORT"
-+                    )
-+                    events.append(ModelEvent(module, outcome, target, step.symbol))
-+                    return result(outcome, target, step.symbol)
-+                bindings[module].add(step.binding)
-+                aliases[module].pop(step.binding, None)
-+            events.append(ModelEvent(module, step.operation, target, step.symbol))
-+        elif step.operation == "BIND_CONSTANT":
-+            bindings[module].add(step.binding)
-+            aliases[module].pop(step.binding, None)
-+            events.append(ModelEvent(module, "BIND_CONSTANT", symbol=step.binding))
-+        elif step.operation == "READ_ATTRIBUTE":
-+            target = aliases[module].get(step.target)
-+            if target is None:
-+                return result("UNKNOWN", step.target, step.symbol)
-+            if step.symbol not in bindings[target]:
-+                outcome = (
-+                    "EARLY_BINDING_HAZARD"
-+                    if states[target] == "INITIALIZING"
-+                    else "MISSING_ATTRIBUTE"
-+                )
-+                events.append(ModelEvent(module, outcome, target, step.symbol))
-+                return result(outcome, target, step.symbol)
-+            bindings[module].add(step.binding)
-+            aliases[module].pop(step.binding, None)
-+            events.append(ModelEvent(module, "READ_ATTRIBUTE", target, step.symbol))
-+        else:
-+            return result("UNKNOWN")
++            stack[-1] = (node, index + 1)
++            next_node = successors[index]
++            if next_node not in visited:
++                visited.add(next_node)
++                stack.append((next_node, 0))
 +
-+        frames[-1] = (module, index + 1)
++    visited.clear()
++    cyclic: list[CyclicImportComponent] = []
++    all_scc_count = 0
++    for source in reversed(finish_order):
++        if source in visited:
++            continue
++        all_scc_count += 1
++        members: list[str] = []
++        stack = [source]
++        visited.add(source)
++        while stack:
++            node = stack.pop()
++            members.append(node)
++            for predecessor in reverse[node]:
++                if predecessor not in visited:
++                    visited.add(predecessor)
++                    stack.append(predecessor)
 +
-+    return result("MODEL_PASS")
++        ordered_members = tuple(sorted(members))
++        if len(ordered_members) == 1:
++            only = ordered_members[0]
++            if only not in adjacency[only]:
++                continue
++
++        member_set = set(ordered_members)
++        internal_edges = tuple(
++            (node, target)
++            for node in ordered_members
++            for target in adjacency[node]
++            if target in member_set
++        )
++        cyclic.append(CyclicImportComponent(
++            members=ordered_members,
++            internal_edges=internal_edges,
++            kind="SELF_LOOP" if len(ordered_members) == 1 else "MULTI_MODULE",
++        ))
++
++    return ImportCycleTopology(
++        node_count=len(adjacency),
++        hard_edge_count=sum(len(targets) for targets in adjacency.values()),
++        total_scc_count=all_scc_count,
++        cyclic_components=tuple(sorted(cyclic, key=lambda item: item.members)),
++    )
 
-### FULL_DIFF: tests/test_cycle_semantics_initialization_model.py
+### FULL_DIFF: tests/test_cycle_semantics_scc.py
 
-diff --git a/tests/test_cycle_semantics_initialization_model.py b/tests/test_cycle_semantics_initialization_model.py
+diff --git a/tests/test_cycle_semantics_scc.py b/tests/test_cycle_semantics_scc.py
 new file mode 100644
-index 0000000..2af1589
+index 0000000..ec3041c
 --- /dev/null
-+++ b/tests/test_cycle_semantics_initialization_model.py
-@@ -0,0 +1,143 @@
-+import ast
++++ b/tests/test_cycle_semantics_scc.py
+@@ -0,0 +1,150 @@
 +import json
-+import subprocess
-+import sys
++import random
 +from dataclasses import asdict
 +
 +import pytest
 +
-+from contextor.core.cycle_semantics.initialization_model import (
-+    evaluate_flat_import_order,
++from contextor.core.cycle_semantics.scc import (
++    analyze_import_cycle_topology as analyze,
 +)
 +
 +
-+def _assess(sources, entry):
-+    return evaluate_flat_import_order(
-+        {name: ast.parse(code) for name, code in sources.items()}, entry
++def test_b0g4b5_acyclic_target_only_and_empty():
++    assert analyze({}).node_count == 0
++    out = analyze({"a": {"b"}, "b": {"c"}})
++    assert (
++        out.node_count,
++        out.hard_edge_count,
++        out.total_scc_count,
++        out.cyclic_components,
++    ) == (3, 2, 3, ())
++
++
++def test_b0g4b5_overlapping_cycles_one_scc():
++    out = analyze({
++        "a": {"b", "c", "x"},
++        "b": {"c"},
++        "c": {"a"},
++        "x": set(),
++    })
++    assert out.total_scc_count == 2
++    assert len(out.cyclic_components) == 1
++    assert out.cyclic_components[0].members == ("a", "b", "c")
++    assert out.cyclic_components[0].internal_edges == (
++        ("a", "b"),
++        ("a", "c"),
++        ("b", "c"),
++        ("c", "a"),
 +    )
 +
 +
-+def _actual(tmp_path, sources, entry):
-+    for name, code in sources.items():
-+        (tmp_path / (name + ".py")).write_text(code, encoding="utf-8")
-+    result = subprocess.run(
-+        [sys.executable, "-I", "-B", "-c", (
-+            "import importlib,sys; "
-+            "sys.path.insert(0,sys.argv[1]); "
-+            "importlib.import_module(sys.argv[2])"
-+        ), str(tmp_path), entry],
-+        capture_output=True, text=True, timeout=10, check=False,
++def test_b0g4b5_independent_sccs_and_self_loop():
++    out = analyze({
++        "a": {"b"}, "b": {"a"},
++        "c": {"c"},
++        "d": {"e"}, "e": {"d"},
++        "f": set(),
++    })
++    assert tuple(c.members for c in out.cyclic_components) == (
++        ("a", "b"), ("c",), ("d", "e")
 +    )
-+    return result.returncode == 0
++    assert tuple(c.kind for c in out.cyclic_components) == (
++        "MULTI_MODULE", "SELF_LOOP", "MULTI_MODULE"
++    )
++    assert out.total_scc_count == 4
 +
 +
-+def test_plain_cycle_both_orders(tmp_path):
-+    sources = {"a": "import b\nvalue = 1\n", "b": "import a\nother = 2\n"}
-+    for entry in ("a", "b"):
-+        assert _assess(sources, entry).outcome == "MODEL_PASS"
-+        assert _actual(tmp_path, sources, entry)
++def test_b0g4b5_order_independent_and_deduplicated():
++    first = analyze({"b": ["a", "a"], "a": ("b", "c"), "c": ()})
++    second = analyze({"c": set(), "a": {"c", "b"}, "b": {"a"}})
++    assert first == second
++    assert first.hard_edge_count == 3
++    json.dumps(asdict(first))
 +
 +
-+def test_missing_attribute_first_order_hazard(tmp_path):
-+    sources = {"a": "import b\nvalue = 1\n", "b": "import a\nobserved = a.value\n"}
-+    assert _assess(sources, "a").outcome == "EARLY_BINDING_HAZARD"
-+    assert _assess(sources, "b").outcome == "MODEL_PASS"
-+    assert not _actual(tmp_path, sources, "a")
-+    assert _actual(tmp_path, sources, "b")
++def test_b0g4b5_deep_cycle_no_recursion():
++    n = 4100
++    graph = {f"m{i}": {f"m{i+1}"} for i in range(n)}
++    graph[f"m{n}"] = {"m0"}
++    out = analyze(graph)
++    assert (
++        out.node_count,
++        out.hard_edge_count,
++        out.total_scc_count,
++    ) == (n + 1, n + 1, 1)
++    assert len(out.cyclic_components[0].members) == n + 1
 +
 +
-+def test_move_binding_before_import_changes_outcome_not_edges(tmp_path):
-+    sources = {"a": "value = 1\nimport b\n", "b": "import a\nobserved = a.value\n"}
-+    for entry in ("a", "b"):
-+        assert _assess(sources, entry).outcome == "MODEL_PASS"
-+        assert _actual(tmp_path, sources, entry)
++def test_b0g4b5_deep_acyclic_chain_no_recursion():
++    n = 3000
++    out = analyze({
++        f"m{i}": {f"m{i+1}"} for i in range(n)
++    })
++    assert (
++        out.node_count,
++        out.total_scc_count,
++        len(out.cyclic_components),
++    ) == (n + 1, n + 1, 0)
 +
 +
-+def test_from_import_hazard(tmp_path):
-+    sources = {"a": "import b\nvalue = 1\n", "b": "from a import value\n"}
-+    assert _assess(sources, "a").outcome == "EARLY_BINDING_HAZARD"
-+    assert _assess(sources, "b").outcome == "MODEL_PASS"
-+    assert not _actual(tmp_path, sources, "a")
-+    assert _actual(tmp_path, sources, "b")
-+
-+
-+def test_from_import_completed_missing_export():
-+    r = _assess({"a": "from b import missing\n", "b": "pass\n"}, "a")
-+    assert r.outcome == "MISSING_EXPORT"
-+    assert r.target_module == "b"
-+    assert r.symbol == "missing"
-+
-+
-+def test_missing_attribute_completed_module():
-+    r = _assess({"a": "import b\nx = b.missing\n", "b": "pass\n"}, "a")
-+    assert r.outcome == "MISSING_ATTRIBUTE"
-+
-+
-+def test_self_import_is_not_automatically_failure():
-+    assert _assess({"a": "import a\nx = 1\n"}, "a").outcome == "MODEL_PASS"
-+
-+
-+def test_repeated_import_and_alias():
-+    sources = {"a": "import b as alias\nimport b\nx = alias.value\n", "b": "value=3\n"}
-+    assert _assess(sources, "a").outcome == "MODEL_PASS"
-+
-+
-+def test_from_import_alias_binding():
-+    assert _assess({"a": "from b import value as x\n", "b": "value = 3\n"}, "a").outcome == "MODEL_PASS"
-+
-+
-+@pytest.mark.parametrize("source", [
-+    "if True:\n    import b\n",
-+    "def f():\n    import b\n",
-+    "import importlib\nimportlib.import_module('b')\n",
-+    "import pkg.b\n",
-+    "from . import b\n",
-+    "from b import *\n",
-+    "x = f()\n",
-+    "class X: pass\n",
-+    "import b\nx = getattr(b,'value')\n",
-+    "x, y = (1,2)\n",
-+    "raise RuntimeError('must never execute')\n",
-+    "import b\ndel b\n",
-+    "import b\nawait b\n",
++@pytest.mark.parametrize("graph, error", [
++    (None, TypeError),
++    ([("a", {"b"})], TypeError),
++    ({"a": "b"}, TypeError),
++    ({"a": None}, TypeError),
++    ({"": set()}, ValueError),
++    ({1: {"a"}}, ValueError),
++    ({"a": {None}}, ValueError),
 +])
-+def test_unsupported_fail_closed(source):
-+    assert _assess({"a": source, "b": "value=2\n"}, "a").outcome == "UNKNOWN"
++def test_b0g4b5_rejects_invalid_graph(graph, error):
++    with pytest.raises(error):
++        analyze(graph)
 +
 +
-+def test_external_dependency_unknown():
-+    assert _assess({"a": "import os\n"}, "a").outcome == "UNKNOWN"
++def test_b0g4b5_no_graph_mutation():
++    graph = {"a": {"b"}, "b": {"a"}}
++    before = {k: set(v) for k, v in graph.items()}
++    out = analyze(graph)
++    assert graph == before
++    with pytest.raises(Exception):
++        out.cyclic_components[0].members = ("fake",)
 +
 +
-+def test_invalid_inputs_unknown():
-+    assert evaluate_flat_import_order(None, "a").outcome == "UNKNOWN"
-+    assert evaluate_flat_import_order({"a": None}, "a").outcome == "UNKNOWN"
-+    assert evaluate_flat_import_order({"a": ast.parse("pass\n")}, "missing").outcome == "UNKNOWN"
++def test_b0g4b5_random_graphs_against_reachability_definition():
++    rng = random.Random(710)
++    for n in range(2, 7):
++        nodes = [f"x{i}" for i in range(n)]
++        for _ in range(12):
++            graph = {
++                u: {v for v in nodes if rng.randrange(4) == 0}
++                for u in nodes
++            }
++            out = analyze(graph)
 +
++            reach = {}
++            for u in nodes:
++                found = {u}
++                stack = [u]
++                while stack:
++                    for v in graph[stack.pop()]:
++                        if v not in found:
++                            found.add(v)
++                            stack.append(v)
++                reach[u] = found
 +
-+def test_no_ast_mutation_determinism_serializable():
-+    modules = {
-+        "a": ast.parse("import b\nx=1"),
-+        "b": ast.parse("import a\ny=2"),
-+    }
-+    before = {
-+        name: ast.dump(tree, include_attributes=True)
-+        for name, tree in modules.items()
-+    }
-+    one = evaluate_flat_import_order(modules, "a")
-+    two = evaluate_flat_import_order(modules, "a")
-+    assert one == two
-+    assert {
-+        name: ast.dump(tree, include_attributes=True)
-+        for name, tree in modules.items()
-+    } == before
-+    json.dumps(asdict(one))
++            unused = set(nodes)
++            expected = []
++            while unused:
++                u = min(unused)
++                group = {
++                    v for v in nodes
++                    if v in reach[u] and u in reach[v]
++                }
++                unused -= group
++                if len(group) > 1 or u in graph[u]:
++                    expected.append(tuple(sorted(group)))
 +
-+
-+def test_iterative_1200_module_chain():
-+    modules = {
-+        f"m{i}": ast.parse(f"import m{i+1}\n")
-+        for i in range(1200)
-+    }
-+    modules["m1200"] = ast.parse("x=1\n")
-+    assert evaluate_flat_import_order(modules, "m0").outcome == "MODEL_PASS"
++            assert tuple(
++                component.members
++                for component in out.cyclic_components
++            ) == tuple(sorted(expected))
