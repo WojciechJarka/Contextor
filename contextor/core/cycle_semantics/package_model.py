@@ -44,6 +44,8 @@ class _Step:
 
 def _safe_passive_function_definition(
     statement: ast.FunctionDef,
+    *,
+    allow_dunder: bool = False,
 ) -> bool:
     """A definition whose creation has no unknown evaluations.
 
@@ -52,7 +54,10 @@ def _safe_passive_function_definition(
     """
     if (
         not statement.name.isidentifier()
-        or statement.name.startswith("__")
+        or (
+            statement.name.startswith("__")
+            and not allow_dunder
+        )
         or statement.decorator_list
         or statement.returns is not None
         or statement.type_comment is not None
@@ -108,6 +113,59 @@ def _safe_passive_function_definition(
         value is not None and not safe_default(value)
         for value in arguments.kw_defaults
     ):
+        return False
+
+    return True
+
+
+def _safe_passive_class_definition(
+    statement: ast.ClassDef,
+) -> bool:
+    """Validate a class whose body has no unknown effects.
+
+    Class body evaluation is not generally passive.
+    Only a literal docstring, Pass and safe method
+    definitions are modeled here.
+
+    The model records class-name binding only.
+    It does not execute class or method code.
+    """
+    if (
+        not statement.name.isidentifier()
+        or statement.name.startswith("__")
+        or statement.bases
+        or statement.keywords
+        or statement.decorator_list
+        or getattr(statement, "type_params", ())
+    ):
+        return False
+
+    for index, body_statement in enumerate(
+        statement.body
+    ):
+        if isinstance(body_statement, ast.Pass):
+            continue
+
+        if (
+            index == 0
+            and isinstance(body_statement, ast.Expr)
+            and isinstance(
+                body_statement.value,
+                ast.Constant,
+            )
+            and type(body_statement.value.value) is str
+        ):
+            continue
+
+        if (
+            isinstance(body_statement, ast.FunctionDef)
+            and _safe_passive_function_definition(
+                body_statement,
+                allow_dunder=True,
+            )
+        ):
+            continue
+
         return False
 
     return True
@@ -320,6 +378,17 @@ def _compile(
             else:
                 return None
 
+        elif isinstance(stmt, ast.ClassDef):
+            if not _safe_passive_class_definition(stmt):
+                return None
+
+            steps.append(
+                _Step(
+                    "DEFINE_PASSIVE_CLASS",
+                    binding=stmt.name,
+                )
+            )
+
         elif isinstance(stmt, ast.FunctionDef):
             if not _safe_passive_function_definition(stmt):
                 return None
@@ -466,6 +535,30 @@ def evaluate_package_import_order(
     ):
         return result("UNKNOWN")
 
+    # AST parsing alone does not enforce every CPython
+    # compilation rule. Even an uncalled function body
+    # may contain a compile-time SyntaxError.
+    #
+    # Compile code objects WITHOUT executing them.
+    # Fail closed instead of accepting an invalid
+    # opaque function definition as MODEL_PASS.
+    for indexed_id, tree in indexed_sources.items():
+        try:
+            compile(
+                tree,
+                "<cycle_semantics:" + indexed_id + ">",
+                "exec",
+                dont_inherit=True,
+            )
+        except (
+            SyntaxError,
+            TypeError,
+            ValueError,
+            RecursionError,
+            OverflowError,
+        ):
+            return result("UNKNOWN", indexed_id)
+
     try:
         layout = build_package_layout(indexed_sources)
     except (TypeError, ValueError):
@@ -536,6 +629,7 @@ def evaluate_package_import_order(
             step.op in {
                 "DEFINE_FUNCTION",
                 "DEFINE_OPAQUE_FUNCTION",
+                "DEFINE_PASSIVE_CLASS",
             }
             and step.binding in children
             for step in programs[package]
@@ -865,6 +959,22 @@ def evaluate_package_import_order(
                 PackageModelEvent(
                     module,
                     "DEFINE_OPAQUE_FUNCTION",
+                    symbol=step.binding,
+                )
+            )
+
+        elif step.op == "DEFINE_PASSIVE_CLASS":
+            namespaces[module][step.binding] = (
+                "\x00PASSIVE_CLASS:"
+                + module
+                + ":"
+                + step.binding
+            )
+
+            events.append(
+                PackageModelEvent(
+                    module,
+                    "DEFINE_PASSIVE_CLASS",
                     symbol=step.binding,
                 )
             )

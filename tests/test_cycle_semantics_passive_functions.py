@@ -229,3 +229,83 @@ def test_c23_determinism_ast_immutability_json():
         for name, tree in trees.items()
     }
     json.dumps(asdict(first))
+
+
+def test_c23f_star_import_inside_uncalled_function_unknown(
+    tmp_path,
+):
+    sources = {
+        "pkg.__init__": "pass",
+        "pkg.a": (
+            "def go():\n"
+            "    from pkg.child import *"
+        ),
+        "pkg.child": "pass",
+    }
+
+    result = _model(sources, "pkg.a")
+    assert result.outcome == "UNKNOWN"
+
+    process = _actual(tmp_path, sources, "pkg.a")
+    assert process.returncode != 0
+    assert "SyntaxError" in process.stderr
+
+
+def test_c23f_break_outside_loop_in_function_unknown(
+    tmp_path,
+):
+    sources = {
+        "pkg.__init__": "pass",
+        "pkg.a": (
+            "def go():\n"
+            "    break"
+        ),
+    }
+
+    result = _model(sources, "pkg.a")
+    assert result.outcome == "UNKNOWN"
+
+    process = _actual(tmp_path, sources, "pkg.a")
+    assert process.returncode != 0
+    assert "SyntaxError" in process.stderr
+
+
+def test_c23f_nonlocal_without_binding_unknown(
+    tmp_path,
+):
+    sources = {
+        "pkg.__init__": "pass",
+        "pkg.a": (
+            "def go():\n"
+            "    nonlocal missing"
+        ),
+    }
+
+    result = _model(sources, "pkg.a")
+    assert result.outcome == "UNKNOWN"
+
+    process = _actual(tmp_path, sources, "pkg.a")
+    assert process.returncode != 0
+    assert "SyntaxError" in process.stderr
+
+
+def test_c23f_skipped_main_guard_does_not_hide_syntax_error(
+    tmp_path,
+):
+    sources = {
+        "pkg.__init__": "pass",
+        "pkg.a": (
+            'if __name__ == "__main__":\n'
+            "    def go():\n"
+            "        from pkg.child import *\n"
+            "ready = 1"
+        ),
+        "pkg.child": "pass",
+    }
+
+    result = _model(sources, "pkg.a")
+    assert result.outcome == "UNKNOWN"
+
+    process = _actual(tmp_path, sources, "pkg.a")
+    assert process.returncode != 0
+    assert "SyntaxError" in process.stderr

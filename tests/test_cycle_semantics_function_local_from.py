@@ -439,27 +439,31 @@ def test_repeated_function_calls_do_not_reimport_child(
     ).returncode == 0
 
 
-def test_unsupported_function_semantics_stay_unknown():
-    unsupported = (
+def test_passive_function_definitions_and_invalid_syntax():
+    cases = (
         (
             "def go():\n"
-            "    from pkg.child import *"
+            "    from pkg.child import *",
+            "UNKNOWN",
         ),
         (
             "def go(x=1):\n"
-            "    from pkg.child import value"
+            "    from pkg.child import value",
+            "MODEL_PASS",
         ),
         (
             "def go():\n"
-            "    from ..child import value"
+            "    from ..child import value",
+            "MODEL_PASS",
         ),
         (
             "def go():\n"
-            "    value = 1"
+            "    value = 1",
+            "MODEL_PASS",
         ),
     )
 
-    for source in unsupported:
+    for source, expected in cases:
         result = _model(
             {
                 "pkg.__init__": source,
@@ -468,7 +472,13 @@ def test_unsupported_function_semantics_stay_unknown():
             "pkg",
         )
 
-        assert result.outcome == "UNKNOWN"
+        assert result.outcome == expected
+
+        if expected == "MODEL_PASS":
+            assert not any(
+                event.operation.startswith("FUNCTION_LOCAL_")
+                for event in result.events
+            )
 
 
 def test_determinism_and_source_ast_unchanged():

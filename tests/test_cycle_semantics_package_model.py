@@ -900,21 +900,45 @@ def test_b0g4c5_shadowed_function_call_unknown(tmp_path):
     assert not _actual(tmp_path, source, "pkg")
 
 
-def test_b0g4c5_unsupported_definition_effects_unknown():
-    samples = [
-        "def f(x=1):\n    import pkg.child",
-        "def f(x):\n    import pkg.child",
-        "@decorator\ndef f():\n    import pkg.child",
-        "def f() -> int:\n    import pkg.child",
-        "def f():\n    helper()",
-        "async def f():\n    import pkg.child",
-        "def f():\n    return 1",
-    ]
-    for code in samples:
-        assert _model(
+def test_b0g4c5_definition_effects_updated_contract():
+    samples = (
+        (
+            "def f(x=1):\n    import pkg.child",
+            "MODEL_PASS",
+        ),
+        (
+            "def f(x):\n    import pkg.child",
+            "MODEL_PASS",
+        ),
+        (
+            "@decorator\ndef f():\n    import pkg.child",
+            "UNKNOWN",
+        ),
+        (
+            "def f() -> int:\n    import pkg.child",
+            "UNKNOWN",
+        ),
+        (
+            "def f():\n    helper()",
+            "MODEL_PASS",
+        ),
+        (
+            "async def f():\n    import pkg.child",
+            "UNKNOWN",
+        ),
+        (
+            "def f():\n    return 1",
+            "MODEL_PASS",
+        ),
+    )
+
+    for code, expected in samples:
+        result = _model(
             {"pkg.__init__": code, "pkg.child": "pass"},
             "pkg",
-        ).outcome == "UNKNOWN"
+        )
+
+        assert result.outcome == expected
 
 
 def test_b0g4c15_uncalled_function_local_from_supported(tmp_path):
