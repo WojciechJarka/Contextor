@@ -1,698 +1,405 @@
-# CONTEXTOR_B0G4C10_IMPORT_ACTIVATION_CANDIDATE_VIEW
-
-## HEAD_BEFORE
-b6bcfb118c54c0f6d85cb9969c80dba381d49f86
-
-## HEAD_AFTER
-b6bcfb118c54c0f6d85cb9969c80dba381d49f86
-
+# CONTEXTOR_B0G4C11_REAL_SCC_ACTIVATION_VIEW_DOGFOOD
+## TASK
+Read-only execution of existing edge-site and activation-view functions on the complete current canonical hard graph.
+## HEAD
+3501b88e6dab75ef84f10366a44ab45a475c3ea9
 ## GIT_STATUS
-Before: clean. After writing report: M walkthrough.md and the two untracked files in FILES_CHANGED.
-
-## LIVE_REVISION_BEFORE
-435; activity_epoch=1beab26da2ff4932852caa7db6ff4242; resync_required=false; graph/cycles/collisions fresh. Structural cycle paths 16; name collisions 0.
-
-## LIVE_REVISION_AFTER
-437; same activity_epoch; continuous event feed, resync_required=false. DIRECT_EVIDENCE: desktop_watcher UPDATED activation_view.py at 436 and test_cycle_semantics_activation_view.py at 437. Both module contexts report workspace_sync=verified, canonical_state=fresh, graph/cycles/collisions fresh.
-
-## FILES_CHANGED
-- contextor/core/cycle_semantics/activation_view.py (new)
-- tests/test_cycle_semantics_activation_view.py (new)
-walkthrough.md is the requested report artifact.
-
-## IMPLEMENTATION_CONTRACT
-CONTRACT_PROVED: Both files exactly match the auditor-supplied CONTENT blocks after newline normalization. Existing CyclicImportSiteReport, SCCImportSiteEvidence, HardEdgeSiteEvidence, LexicalEdgeSite, ImportCycleTopology and analyze_import_cycle_topology contracts matched current Contextor source at revision 435. The new pure view consumes existing evidence and creates separate per-SCC candidate topology without changing the input graph or any existing module. Canonical owners were workspace_sync=verified. Static direct consumer of analyze_cyclic_import_sites before change was its test module; SCC topology analyzer had three confirmed direct consumers.
-
-## TEST_COMMAND
-Baseline:
-.\.venv\Scripts\python.exe -B -m pytest -p no:cacheprovider -q tests/test_cycle_semantics_scc02_entry_order.py tests/test_cycle_semantics_edge_sites.py tests/test_cycle_semantics_package_model.py tests/test_cycle_semantics_package_layout.py tests/test_cycle_semantics_evidence.py tests/test_cycle_semantics_scenarios.py tests/test_cycle_semantics_scc.py tests/test_cycle_semantics_initialization_model.py tests/test_cycle_semantics_binding_order.py tests/test_cycle_semantics_guards.py tests/test_cycle_semantics_execution_context.py tests/test_cycle_semantics_provenance.py
-
-Post-change:
-.\.venv\Scripts\python.exe -B -m pytest -p no:cacheprovider -q tests/test_cycle_semantics_activation_view.py tests/test_cycle_semantics_scc02_entry_order.py tests/test_cycle_semantics_edge_sites.py tests/test_cycle_semantics_package_model.py tests/test_cycle_semantics_package_layout.py tests/test_cycle_semantics_evidence.py tests/test_cycle_semantics_scenarios.py tests/test_cycle_semantics_scc.py tests/test_cycle_semantics_initialization_model.py tests/test_cycle_semantics_binding_order.py tests/test_cycle_semantics_guards.py tests/test_cycle_semantics_execution_context.py tests/test_cycle_semantics_provenance.py
-
-## TEST_RESULTS
-DIRECT_EVIDENCE: baseline 212 passed in 13.24s; post-change 226 passed in 13.66s. Fourteen new test cases passed. Full suite was not run.
-
-## STRUCTURAL_EDGE_PRESERVATION
-CODE_PATH_PROVED: Every component retains every input internal HardEdgeSiteEvidence as an EdgeActivationView. The original structural_topology is the input topology. The separate selected mapping contains only candidate direct edges. Tests cover direct cycles, missing/unmatched sites, multiple SCCs, self-loop, input immutability and deterministic serialization.
-
-## UNGUARDED_DIRECT_PROJECTION
-CODE_PATH_PROVED: Only MODULE_TOP_LEVEL sites with DIRECT_MODULE or FROM_BASE increment unguarded_direct_count and select an edge. A deterministic adjacency mapping includes every member, including those with no selected outgoing edge. The derived topology is computed independently for each SCC. The tests cover cyclic and acyclic candidate subgraphs.
-
-## CALL_DEPENDENT_EVIDENCE
-CODE_PATH_PROVED: FUNCTION_SCOPED sites contribute to function_scoped_count and, absent a higher-priority candidate, classify the edge CALL_DEPENDENT_CANDIDATE. A mixed top-level/function edge retains both counts. Function scope does not certify late activation.
-
-## GUARDED_AND_INDIRECT_EVIDENCE
-CODE_PATH_PROVED: GUARDED_TOP_LEVEL is counted but never promoted to an unguarded direct edge. OPTIONAL_FROM_CHILD and PARENT_INITIALIZER are counted as indirect candidates and remain outside the direct subset unless another direct site exists. Tests cover both categories.
-
-## OTHER_SCOPE_FAIL_CLOSED
-CODE_PATH_PROVED: OTHER_SCOPED sites classify as OTHER_SCOPE_CANDIDATE unless a higher-priority site is present. Class-body imports may execute during definition; no deferral is inferred.
-
-## MULTI_SCC_AND_SELF_LOOP_REGRESSIONS
-DIRECT_EVIDENCE: Tests passed for two independent structural SCCs with distinct candidate topologies and for a self-loop candidate. Empty acyclic input returns no components.
-
-## DETERMINISM_AND_IMMUTABILITY
-DIRECT_EVIDENCE: Repeated calls yield equal frozen dataclasses; asdict serializes to JSON; attempted mutation raises FrozenInstanceError; source graph and evidence stay equal to their original values in tests.
-
-## COLLISION_COUNT_BEFORE_AFTER
-0 -> 0; canonical diagnostics fresh.
-
-## STRUCTURAL_CYCLE_COUNT_BEFORE_AFTER
-16 -> 16 reported paths; canonical diagnostics fresh.
-
+Before report: clean; after report: M walkthrough.md only.
+## LIVE_REVISION_BEFORE_AFTER
+IPC ping/snapshot/ping=437/437/437; stable. MCP precheck revision 437; MCP final recheck: revision 437, same activity_epoch, resync_required=false, fresh syntax/collisions/cycles, 16 reported paths, zero collisions and no new canonical events.
+## ACTIVITY_EPOCH
+MCP precheck 1beab26da2ff4932852caa7db6ff4242; final recheck: same activity_epoch.
+## CANONICAL_FRESHNESS
+DIRECT_EVIDENCE: MCP precheck resync_required=false, syntax/collisions/cycles fresh, 16 reported paths and 0 collisions. All 33 prior SCC member files checked through Contextor at revision 437 with workspace_sync=verified; source function owners likewise verified. IPC state cycles_state=fresh, resync_required=false; authority identity stable. Final MCP recheck pending.
+## SOURCE_SNAPSHOT_COHERENCE
+DIRECT_EVIDENCE: 33 canonical member paths obtained from snapshot state.modules. parse_source_with_fingerprint produced one byte-snapshot SHA per file. A second read after both analyses matched all 33 SHA values. IPC revision and authority identity stable. Canonical state.file_state entries=0; per-file canonical SHA unavailable, so the snapshots are individually stable and Contextor verified, but not proven atomically bound to revision 437.
+## CANONICAL_GRAPH_COUNTS
+Complete copied hard graph: nodes=466, hard_edges=1783. No input graph mutation.
+## STRUCTURAL_SCC_COUNT
+2
+## STRUCTURAL_CYCLE_PATH_COUNT
+16
+## STRUCTURAL_EDGE_COMPLETENESS
+Distinct cyclic members=33; internal structural hard edges=72; site records=72; matched lexical edges=72; unresolved lexical edges=0; equality PASS.
+## ACTIVATION_RECORD_COMPLETENESS
+Activation records=72; direct candidate edges=46; non-direct candidate edges=26; unresolved activation edges=0; direct+non-direct=72; equal structural count PASS; activation.structural_topology == sites.topology PASS.
+## PER_SCC_ACTIVATION_SUMMARY
+### SCC01
+MEMBER_COUNT=24; INTERNAL_STRUCTURAL_EDGE_COUNT=56; total_source_sites=78; module_top_level_direct_sites=31; function_scoped_sites=47; guarded_sites=0; other_scoped_sites=0; indirect_sites=1.
+CLASSIFICATION_COUNTS={"CALL_DEPENDENT_CANDIDATE": 26, "GUARDED_TOP_LEVEL_CANDIDATE": 0, "INDIRECT_TOP_LEVEL_CANDIDATE": 0, "OTHER_SCOPE_CANDIDATE": 0, "UNGUARDED_DIRECT_CANDIDATE": 30, "UNRECOGNIZED_SITE_SEMANTICS": 0, "UNRESOLVED_SOURCE_SITE": 0}
+BOTH_DIRECT_AND_FUNCTION=contextor.core.analysis.incremental.materialization -> contextor.core.analysis.state_manager; contextor.core.analysis.incremental.plan_executor -> contextor.core.analysis.state_manager; contextor.core.api.facade -> contextor.core.live_state.__init__; contextor.core.live_state.runtime -> contextor.core.live_state.store
+ONLY_FUNCTION_SCOPED=contextor.core.analysis.full_analysis_coordinator -> contextor.core.api.facade; contextor.core.analysis.incremental.engine -> contextor.core.analysis.refresh_planner; contextor.core.analysis.incremental.plan_executor -> contextor.core.analysis.incremental.materialization; contextor.core.analysis.incremental.plan_executor -> contextor.core.analysis.refresh_planner; contextor.core.analysis.incremental.preparation -> contextor.core.symbol_engine.indexer; contextor.core.analysis.state_manager -> contextor.core.live_state.__init__; contextor.core.api.facade -> contextor.core.analysis.incremental.materialization; contextor.core.api.facade -> contextor.core.analysis.state_manager; contextor.core.api.facade -> contextor.core.live_state.store; contextor.core.api.facade -> contextor.core.reference.module_usage_reuse; contextor.core.live_state.hydration -> contextor.core.analysis.incremental_engine; contextor.core.live_state.hydration -> contextor.core.analysis.state_manager; contextor.core.live_state.hydration -> contextor.core.live_state.runtime; contextor.core.live_state.hydration -> contextor.core.live_state.store; contextor.core.live_state.ipc -> contextor.core.live_state.store; contextor.core.live_state.runtime -> contextor.core.analysis.full_analysis_coordinator; contextor.core.live_state.runtime -> contextor.core.analysis.incremental.materialization; contextor.core.live_state.runtime -> contextor.core.analysis.incremental_engine; contextor.core.live_state.runtime -> contextor.core.analysis.state_manager; contextor.core.live_state.store -> contextor.core.analysis.state_manager; contextor.core.live_state.watcher -> contextor.core.analysis.state_manager; contextor.core.live_state.watcher -> contextor.core.api.facade; contextor.core.live_state.watcher -> contextor.core.live_state.runtime; contextor.core.reporting_engine.pipeline -> contextor.core.analysis.state_manager; contextor.core.single_file.builders.layer0_builders -> contextor.core.analysis.state_manager; contextor.core.single_file.builders.layer2_builders -> contextor.core.analysis.state_manager
+UNRESOLVED=none
+MEMBERS:
+- contextor.core.analysis.full_analysis_coordinator
+- contextor.core.analysis.incremental.engine
+- contextor.core.analysis.incremental.materialization
+- contextor.core.analysis.incremental.plan_executor
+- contextor.core.analysis.incremental.preparation
+- contextor.core.analysis.incremental_engine
+- contextor.core.analysis.lineage_extraction
+- contextor.core.analysis.refresh_planner
+- contextor.core.analysis.state_manager
+- contextor.core.api.facade
+- contextor.core.lineage_query.live_query
+- contextor.core.live_state.__init__
+- contextor.core.live_state.hydration
+- contextor.core.live_state.ipc
+- contextor.core.live_state.runtime
+- contextor.core.live_state.store
+- contextor.core.live_state.watcher
+- contextor.core.reference.module_usage_reuse
+- contextor.core.reporting_engine.pipeline
+- contextor.core.single_file.builders.__init__
+- contextor.core.single_file.builders.layer0_builders
+- contextor.core.single_file.builders.layer2_builders
+- contextor.core.single_file.single_file_analysis
+- contextor.core.symbol_engine.indexer
+### SCC02
+MEMBER_COUNT=9; INTERNAL_STRUCTURAL_EDGE_COUNT=16; total_source_sites=39; module_top_level_direct_sites=16; function_scoped_sites=6; guarded_sites=0; other_scoped_sites=0; indirect_sites=21.
+CLASSIFICATION_COUNTS={"CALL_DEPENDENT_CANDIDATE": 0, "GUARDED_TOP_LEVEL_CANDIDATE": 0, "INDIRECT_TOP_LEVEL_CANDIDATE": 0, "OTHER_SCOPE_CANDIDATE": 0, "UNGUARDED_DIRECT_CANDIDATE": 16, "UNRECOGNIZED_SITE_SEMANTICS": 0, "UNRESOLVED_SOURCE_SITE": 0}
+BOTH_DIRECT_AND_FUNCTION=contextor.ui.exclude_gui -> contextor.ui.__init__; contextor.ui.gui -> contextor.ui.__init__; contextor.ui.gui -> contextor.ui.exclude_gui; contextor.ui.gui -> contextor.ui.gui_parser
+ONLY_FUNCTION_SCOPED=none
+UNRESOLVED=none
+MEMBERS:
+- contextor.repo_generator.__init__
+- contextor.repo_generator.filters
+- contextor.repo_generator.icons
+- contextor.repo_generator.main
+- contextor.ui.__init__
+- contextor.ui.exclude_gui
+- contextor.ui.gui
+- contextor.ui.gui_parser
+- contextor.ui.progress_widget
+## PER_SCC_DIRECT_CANDIDATE_TOPOLOGY
+SCC01: DIRECT_CANDIDATE_NODE_COUNT=24; DIRECT_CANDIDATE_EDGE_COUNT=30; DIRECT_CANDIDATE_SCC_COUNT=24; DIRECT_CANDIDATE_CYCLIC_SCC_COUNT=0.
+UNGUARDED_DIRECT_EDGES:
+- contextor.core.analysis.incremental.engine -> contextor.core.analysis.incremental.materialization
+- contextor.core.analysis.incremental.engine -> contextor.core.analysis.incremental.plan_executor
+- contextor.core.analysis.incremental.engine -> contextor.core.analysis.incremental.preparation
+- contextor.core.analysis.incremental.engine -> contextor.core.analysis.state_manager
+- contextor.core.analysis.incremental.materialization -> contextor.core.analysis.state_manager
+- contextor.core.analysis.incremental.plan_executor -> contextor.core.analysis.state_manager
+- contextor.core.analysis.incremental.preparation -> contextor.core.analysis.lineage_extraction
+- contextor.core.analysis.incremental.preparation -> contextor.core.analysis.state_manager
+- contextor.core.analysis.incremental_engine -> contextor.core.analysis.incremental.engine
+- contextor.core.analysis.lineage_extraction -> contextor.core.analysis.state_manager
+- contextor.core.analysis.refresh_planner -> contextor.core.analysis.state_manager
+- contextor.core.api.facade -> contextor.core.live_state.__init__
+- contextor.core.api.facade -> contextor.core.reporting_engine.pipeline
+- contextor.core.api.facade -> contextor.core.single_file.single_file_analysis
+- contextor.core.api.facade -> contextor.core.symbol_engine.indexer
+- contextor.core.lineage_query.live_query -> contextor.core.analysis.state_manager
+- contextor.core.live_state.__init__ -> contextor.core.live_state.hydration
+- contextor.core.live_state.__init__ -> contextor.core.live_state.ipc
+- contextor.core.live_state.__init__ -> contextor.core.live_state.runtime
+- contextor.core.live_state.__init__ -> contextor.core.live_state.store
+- contextor.core.live_state.__init__ -> contextor.core.live_state.watcher
+- contextor.core.live_state.runtime -> contextor.core.lineage_query.live_query
+- contextor.core.live_state.runtime -> contextor.core.live_state.ipc
+- contextor.core.live_state.runtime -> contextor.core.live_state.store
+- contextor.core.live_state.watcher -> contextor.core.live_state.ipc
+- contextor.core.reference.module_usage_reuse -> contextor.core.analysis.state_manager
+- contextor.core.single_file.builders.__init__ -> contextor.core.single_file.builders.layer0_builders
+- contextor.core.single_file.builders.__init__ -> contextor.core.single_file.builders.layer2_builders
+- contextor.core.single_file.single_file_analysis -> contextor.core.single_file.builders.__init__
+- contextor.core.symbol_engine.indexer -> contextor.core.analysis.lineage_extraction
+DIRECT_CANDIDATE_CYCLIC_MEMBERS:
+- none: ACYCLIC_DIRECT_PROJECTION only.
+SCC02: DIRECT_CANDIDATE_NODE_COUNT=9; DIRECT_CANDIDATE_EDGE_COUNT=16; DIRECT_CANDIDATE_SCC_COUNT=1; DIRECT_CANDIDATE_CYCLIC_SCC_COUNT=1.
+UNGUARDED_DIRECT_EDGES:
+- contextor.repo_generator.__init__ -> contextor.repo_generator.main
+- contextor.repo_generator.filters -> contextor.ui.__init__
+- contextor.repo_generator.icons -> contextor.ui.__init__
+- contextor.repo_generator.main -> contextor.repo_generator.filters
+- contextor.repo_generator.main -> contextor.repo_generator.icons
+- contextor.repo_generator.main -> contextor.ui.__init__
+- contextor.ui.__init__ -> contextor.ui.gui
+- contextor.ui.exclude_gui -> contextor.ui.__init__
+- contextor.ui.gui -> contextor.repo_generator.__init__
+- contextor.ui.gui -> contextor.ui.__init__
+- contextor.ui.gui -> contextor.ui.exclude_gui
+- contextor.ui.gui -> contextor.ui.gui_parser
+- contextor.ui.gui -> contextor.ui.progress_widget
+- contextor.ui.gui_parser -> contextor.ui.__init__
+- contextor.ui.gui_parser -> contextor.ui.progress_widget
+- contextor.ui.progress_widget -> contextor.ui.__init__
+DIRECT_CANDIDATE_CYCLIC_MEMBERS:
+- contextor.repo_generator.__init__, contextor.repo_generator.filters, contextor.repo_generator.icons, contextor.repo_generator.main, contextor.ui.__init__, contextor.ui.exclude_gui, contextor.ui.gui, contextor.ui.gui_parser, contextor.ui.progress_widget
+## DIRECT_CANDIDATE_CYCLIC_COMPONENTS
+SCC01: no direct-candidate cyclic SCC. Excluded structural edges:
+- contextor.core.analysis.full_analysis_coordinator -> contextor.core.api.facade [CALL_DEPENDENT_CANDIDATE]: [{"column": 12, "controls": [{"branch": "BODY", "expression": null, "kind": "TRY", "line": 68}, {"branch": "ELSE", "expression": "Compare(left=Name(id='analysis_fn', ctx=Load()), ops=[IsNot()], comparators=[Constant(value=None)])", "kind": "IF", "line": 77}], "form": "IMPORT_FROM", "line": 88, "match_kind": "FROM_BASE", "scope": "FUNCTION_SCOPED", "scopes": [{"kind": "FUNCTION", "line": 41, "name": "run_full_analysis_exclusive"}]}]
+- contextor.core.analysis.incremental.engine -> contextor.core.analysis.refresh_planner [CALL_DEPENDENT_CANDIDATE]: [{"column": 16, "controls": [{"branch": "BODY", "expression": null, "kind": "WITH", "line": 569}, {"branch": "BODY", "expression": "UnaryOp(op=Not(), operand=Name(id='current_state', ctx=Load()))", "kind": "IF", "line": 602}], "form": "IMPORT_FROM", "line": 615, "match_kind": "FROM_BASE", "scope": "FUNCTION_SCOPED", "scopes": [{"kind": "CLASS", "line": 150, "name": "IncrementalAnalysisEngine"}, {"kind": "FUNCTION", "line": 564, "name": "update_file"}]}, {"column": 12, "controls": [{"branch": "BODY", "expression": null, "kind": "WITH", "line": 569}], "form": "IMPORT_FROM", "line": 734, "match_kind": "FROM_BASE", "scope": "FUNCTION_SCOPED", "scopes": [{"kind": "CLASS", "line": 150, "name": "IncrementalAnalysisEngine"}, {"kind": "FUNCTION", "line": 564, "name": "update_file"}]}]
+- contextor.core.analysis.incremental.plan_executor -> contextor.core.analysis.incremental.materialization [CALL_DEPENDENT_CANDIDATE]: [{"column": 12, "controls": [{"branch": "BODY", "expression": "Attribute(value=Name(id='plan', ctx=Load()), attr='patch_families', ctx=Load())", "kind": "FOR", "line": 1342}, {"branch": "ELSE", "expression": "Compare(left=Name(id='family', ctx=Load()), ops=[Eq()], comparators=[Constant(value='modules')])", "kind": "IF", "line": 1343}, {"branch": "ELSE", "expression": "Compare(left=Name(id='family', ctx=Load()), ops=[Eq()], comparators=[Constant(value='definitions')])", "kind": "IF", "line": 1346}, {"branch": "ELSE", "expression": "Compare(left=Name(id='family', ctx=Load()), ops=[Eq()], comparators=[Constant(value='module_usages')])", "kind": "IF", "line": 1349}, {"branch": "ELSE", "expression": "Compare(left=Name(id='family', ctx=Load()), ops=[Eq()], comparators=[Constant(value='reexport_facts')])", "kind": "IF", "line": 1352}, {"branch": "ELSE", "expression": "Compare(left=Name(id='family', ctx=Load()), ops=[Eq()], comparators=[Constant(value='dependency_graph')])", "kind": "IF", "line": 1355}, {"branch": "ELSE", "expression": "Compare(left=Name(id='family', ctx=Load()), ops=[Eq()], comparators=[Constant(value='artifact_consumption')])", "kind": "IF", "line": 1394}, {"branch": "ELSE", "expression": "Compare(left=Name(id='family', ctx=Load()), ops=[Eq()], comparators=[Constant(value='identity_registry')])", "kind": "IF", "line": 1448}, {"branch": "ELSE", "expression": "Compare(left=Name(id='family', ctx=Load()), ops=[Eq()], comparators=[Constant(value='cached_analytics')])", "kind": "IF", "line": 1452}, {"branch": "ELSE", "expression": "Compare(left=Name(id='family', ctx=Load()), ops=[Eq()], comparators=[Constant(value='collision_facts')])", "kind": "IF", "line": 1463}, {"branch": "BODY", "expression": "Compare(left=Name(id='family', ctx=Load()), ops=[Eq()], comparators=[Constant(value='collisions')])", "kind": "IF", "line": 1474}], "form": "IMPORT_FROM", "line": 1475, "match_kind": "FROM_BASE", "scope": "FUNCTION_SCOPED", "scopes": [{"kind": "FUNCTION", "line": 1108, "name": "execute_refresh_plan"}]}]
+- contextor.core.analysis.incremental.plan_executor -> contextor.core.analysis.refresh_planner [CALL_DEPENDENT_CANDIDATE]: [{"column": 8, "controls": [{"branch": "BODY", "expression": "Attribute(value=Name(id='plan', ctx=Load()), attr='recompute_modules', ctx=Load())", "kind": "IF", "line": 1259}], "form": "IMPORT_FROM", "line": 1260, "match_kind": "FROM_BASE", "scope": "FUNCTION_SCOPED", "scopes": [{"kind": "FUNCTION", "line": 1108, "name": "execute_refresh_plan"}]}]
+- contextor.core.analysis.incremental.preparation -> contextor.core.symbol_engine.indexer [CALL_DEPENDENT_CANDIDATE]: [{"column": 8, "controls": [{"branch": "BODY", "expression": null, "kind": "TRY", "line": 228}], "form": "IMPORT_FROM", "line": 229, "match_kind": "FROM_BASE", "scope": "FUNCTION_SCOPED", "scopes": [{"kind": "FUNCTION", "line": 147, "name": "prepare_source_update"}]}]
+- contextor.core.analysis.state_manager -> contextor.core.live_state.__init__ [CALL_DEPENDENT_CANDIDATE]: [{"column": 4, "controls": [], "form": "IMPORT_FROM", "line": 517, "match_kind": "FROM_BASE", "scope": "FUNCTION_SCOPED", "scopes": [{"kind": "FUNCTION", "line": 506, "name": "save_engine_state"}]}, {"column": 4, "controls": [], "form": "IMPORT_FROM", "line": 541, "match_kind": "FROM_BASE", "scope": "FUNCTION_SCOPED", "scopes": [{"kind": "FUNCTION", "line": 534, "name": "load_engine_state"}]}]
+- contextor.core.api.facade -> contextor.core.analysis.incremental.materialization [CALL_DEPENDENT_CANDIDATE]: [{"column": 8, "controls": [{"branch": "BODY", "expression": "Compare(left=Name(id='state', ctx=Load()), ops=[IsNot()], comparators=[Constant(value=None)])", "kind": "IF", "line": 116}], "form": "IMPORT_FROM", "line": 117, "match_kind": "FROM_BASE", "scope": "FUNCTION_SCOPED", "scopes": [{"kind": "FUNCTION", "line": 102, "name": "_assemble_layer_collision_facts"}]}, {"column": 12, "controls": [{"branch": "BODY", "expression": "Name(id='analysis_result', ctx=Load())", "kind": "IF", "line": 811}], "form": "IMPORT_FROM", "line": 850, "match_kind": "FROM_BASE", "scope": "FUNCTION_SCOPED", "scopes": [{"kind": "CLASS", "line": 551, "name": "ContextorFacade"}, {"kind": "FUNCTION", "line": 559, "name": "analyze_project"}]}, {"column": 12, "controls": [{"branch": "BODY", "expression": "Name(id='analysis_result', ctx=Load())", "kind": "IF", "line": 811}], "form": "IMPORT_FROM", "line": 1010, "match_kind": "FROM_BASE", "scope": "FUNCTION_SCOPED", "scopes": [{"kind": "CLASS", "line": 551, "name": "ContextorFacade"}, {"kind": "FUNCTION", "line": 559, "name": "analyze_project"}]}]
+- contextor.core.api.facade -> contextor.core.analysis.state_manager [CALL_DEPENDENT_CANDIDATE]: [{"column": 12, "controls": [{"branch": "BODY", "expression": "Name(id='analysis_result', ctx=Load())", "kind": "IF", "line": 811}], "form": "IMPORT_FROM", "line": 812, "match_kind": "FROM_BASE", "scope": "FUNCTION_SCOPED", "scopes": [{"kind": "CLASS", "line": 551, "name": "ContextorFacade"}, {"kind": "FUNCTION", "line": 559, "name": "analyze_project"}]}, {"column": 16, "controls": [{"branch": "BODY", "expression": "Compare(left=Name(id='resolved', ctx=Load()), ops=[IsNot()], comparators=[Constant(value=None)])", "kind": "IF", "line": 1645}, {"branch": "BODY", "expression": "Name(id='state_only_candidate', ctx=Load())", "kind": "IF", "line": 1665}], "form": "IMPORT_FROM", "line": 1666, "match_kind": "FROM_BASE", "scope": "FUNCTION_SCOPED", "scopes": [{"kind": "CLASS", "line": 551, "name": "ContextorFacade"}, {"kind": "FUNCTION", "line": 1609, "name": "_analyze_single_file_uncoordinated"}]}]
+- contextor.core.api.facade -> contextor.core.live_state.store [CALL_DEPENDENT_CANDIDATE]: [{"column": 12, "controls": [{"branch": "BODY", "expression": "Name(id='analysis_result', ctx=Load())", "kind": "IF", "line": 811}], "form": "IMPORT_FROM", "line": 823, "match_kind": "FROM_BASE", "scope": "FUNCTION_SCOPED", "scopes": [{"kind": "CLASS", "line": 551, "name": "ContextorFacade"}, {"kind": "FUNCTION", "line": 559, "name": "analyze_project"}]}]
+- contextor.core.api.facade -> contextor.core.reference.module_usage_reuse [CALL_DEPENDENT_CANDIDATE]: [{"column": 12, "controls": [{"branch": "BODY", "expression": "Name(id='analysis_result', ctx=Load())", "kind": "IF", "line": 811}], "form": "IMPORT_FROM", "line": 878, "match_kind": "FROM_BASE", "scope": "FUNCTION_SCOPED", "scopes": [{"kind": "CLASS", "line": 551, "name": "ContextorFacade"}, {"kind": "FUNCTION", "line": 559, "name": "analyze_project"}]}]
+- contextor.core.live_state.hydration -> contextor.core.analysis.incremental_engine [CALL_DEPENDENT_CANDIDATE]: [{"column": 4, "controls": [], "form": "IMPORT_FROM", "line": 94, "match_kind": "FROM_BASE", "scope": "FUNCTION_SCOPED", "scopes": [{"kind": "FUNCTION", "line": 87, "name": "hydrate_repository_engine"}]}]
+- contextor.core.live_state.hydration -> contextor.core.analysis.state_manager [CALL_DEPENDENT_CANDIDATE]: [{"column": 4, "controls": [], "form": "IMPORT_FROM", "line": 36, "match_kind": "FROM_BASE", "scope": "FUNCTION_SCOPED", "scopes": [{"kind": "FUNCTION", "line": 29, "name": "resolve_authoritative_repository_state"}]}, {"column": 4, "controls": [], "form": "IMPORT_FROM", "line": 95, "match_kind": "FROM_BASE", "scope": "FUNCTION_SCOPED", "scopes": [{"kind": "FUNCTION", "line": 87, "name": "hydrate_repository_engine"}]}]
+- contextor.core.live_state.hydration -> contextor.core.live_state.runtime [CALL_DEPENDENT_CANDIDATE]: [{"column": 4, "controls": [], "form": "IMPORT_FROM", "line": 37, "match_kind": "FROM_BASE", "scope": "FUNCTION_SCOPED", "scopes": [{"kind": "FUNCTION", "line": 29, "name": "resolve_authoritative_repository_state"}]}]
+- contextor.core.live_state.hydration -> contextor.core.live_state.store [CALL_DEPENDENT_CANDIDATE]: [{"column": 4, "controls": [], "form": "IMPORT_FROM", "line": 38, "match_kind": "FROM_BASE", "scope": "FUNCTION_SCOPED", "scopes": [{"kind": "FUNCTION", "line": 29, "name": "resolve_authoritative_repository_state"}]}]
+- contextor.core.live_state.ipc -> contextor.core.live_state.store [CALL_DEPENDENT_CANDIDATE]: [{"column": 20, "controls": [{"branch": "BODY", "expression": null, "kind": "WITH", "line": 1896}, {"branch": "BODY", "expression": "Compare(left=Name(id='persister', ctx=Load()), ops=[IsNot()], comparators=[Constant(value=None)])", "kind": "IF", "line": 2026}, {"branch": "0", "expression": "Name(id='Exception', ctx=Load())", "kind": "EXCEPT", "line": 2031}], "form": "IMPORT_FROM", "line": 2032, "match_kind": "FROM_BASE", "scope": "FUNCTION_SCOPED", "scopes": [{"kind": "CLASS", "line": 728, "name": "CanonicalLiveServer"}, {"kind": "FUNCTION", "line": 1884, "name": "_execute_update_file"}]}]
+- contextor.core.live_state.runtime -> contextor.core.analysis.full_analysis_coordinator [CALL_DEPENDENT_CANDIDATE]: [{"column": 8, "controls": [], "form": "IMPORT_FROM", "line": 1266, "match_kind": "FROM_BASE", "scope": "FUNCTION_SCOPED", "scopes": [{"kind": "FUNCTION", "line": 1263, "name": "_repository_mutation_guard"}, {"kind": "FUNCTION", "line": 1265, "name": "guard"}]}, {"column": 8, "controls": [], "form": "IMPORT_FROM", "line": 1309, "match_kind": "FROM_BASE", "scope": "FUNCTION_SCOPED", "scopes": [{"kind": "FUNCTION", "line": 1306, "name": "_repository_recovery_verification_guard"}, {"kind": "FUNCTION", "line": 1308, "name": "guard"}]}]
+- contextor.core.live_state.runtime -> contextor.core.analysis.incremental.materialization [CALL_DEPENDENT_CANDIDATE]: [{"column": 12, "controls": [{"branch": "BODY", "expression": null, "kind": "TRY", "line": 1396}, {"branch": "BODY", "expression": "Compare(left=Name(id='state', ctx=Load()), ops=[IsNot()], comparators=[Constant(value=None)])", "kind": "IF", "line": 1447}], "form": "IMPORT_FROM", "line": 1449, "match_kind": "FROM_BASE", "scope": "FUNCTION_SCOPED", "scopes": [{"kind": "FUNCTION", "line": 1329, "name": "run_service"}]}]
+- contextor.core.live_state.runtime -> contextor.core.analysis.incremental_engine [CALL_DEPENDENT_CANDIDATE]: [{"column": 8, "controls": [], "form": "IMPORT_FROM", "line": 1116, "match_kind": "FROM_BASE", "scope": "FUNCTION_SCOPED", "scopes": [{"kind": "FUNCTION", "line": 1108, "name": "_repository_updater"}, {"kind": "FUNCTION", "line": 1112, "name": "update"}]}]
+- contextor.core.live_state.runtime -> contextor.core.analysis.state_manager [CALL_DEPENDENT_CANDIDATE]: [{"column": 8, "controls": [], "form": "IMPORT_FROM", "line": 1117, "match_kind": "FROM_BASE", "scope": "FUNCTION_SCOPED", "scopes": [{"kind": "FUNCTION", "line": 1108, "name": "_repository_updater"}, {"kind": "FUNCTION", "line": 1112, "name": "update"}]}, {"column": 12, "controls": [{"branch": "BODY", "expression": "Compare(left=Name(id='manager', ctx=Load()), ops=[Is()], comparators=[Constant(value=None)])", "kind": "IF", "line": 1171}], "form": "IMPORT_FROM", "line": 1172, "match_kind": "FROM_BASE", "scope": "FUNCTION_SCOPED", "scopes": [{"kind": "FUNCTION", "line": 1153, "name": "_repository_persister"}, {"kind": "FUNCTION", "line": 1163, "name": "persist"}]}, {"column": 24, "controls": [{"branch": "BODY", "expression": null, "kind": "TRY", "line": 1396}, {"branch": "BODY", "expression": "Compare(left=Name(id='state', ctx=Load()), ops=[IsNot()], comparators=[Constant(value=None)])", "kind": "IF", "line": 1447}, {"branch": "BODY", "expression": "Name(id='materialization_required', ctx=Load())", "kind": "IF", "line": 1467}, {"branch": "BODY", "expression": null, "kind": "TRY", "line": 1479}, {"branch": "BODY", "expression": "Name(id='materialization_required', ctx=Load())", "kind": "IF", "line": 1497}], "form": "IMPORT_FROM", "line": 1500, "match_kind": "FROM_BASE", "scope": "FUNCTION_SCOPED", "scopes": [{"kind": "FUNCTION", "line": 1329, "name": "run_service"}]}]
+- contextor.core.live_state.store -> contextor.core.analysis.state_manager [CALL_DEPENDENT_CANDIDATE]: [{"column": 4, "controls": [], "form": "IMPORT_FROM", "line": 128, "match_kind": "FROM_BASE", "scope": "FUNCTION_SCOPED", "scopes": [{"kind": "FUNCTION", "line": 122, "name": "_normalize_reexport_facts_state"}]}, {"column": 4, "controls": [], "form": "IMPORT_FROM", "line": 1524, "match_kind": "FROM_BASE", "scope": "FUNCTION_SCOPED", "scopes": [{"kind": "FUNCTION", "line": 1507, "name": "save_snapshot"}]}]
+- contextor.core.live_state.watcher -> contextor.core.analysis.state_manager [CALL_DEPENDENT_CANDIDATE]: [{"column": 8, "controls": [], "form": "IMPORT_FROM", "line": 514, "match_kind": "FROM_BASE", "scope": "FUNCTION_SCOPED", "scopes": [{"kind": "CLASS", "line": 110, "name": "DesktopLiveWatcher"}, {"kind": "FUNCTION", "line": 498, "name": "_startup_reconciliation_paths"}]}, {"column": 8, "controls": [], "form": "IMPORT_FROM", "line": 535, "match_kind": "FROM_BASE", "scope": "FUNCTION_SCOPED", "scopes": [{"kind": "CLASS", "line": 110, "name": "DesktopLiveWatcher"}, {"kind": "FUNCTION", "line": 533, "name": "_trusted_file_state"}]}]
+- contextor.core.live_state.watcher -> contextor.core.api.facade [CALL_DEPENDENT_CANDIDATE]: [{"column": 8, "controls": [], "form": "IMPORT_FROM", "line": 486, "match_kind": "FROM_BASE", "scope": "FUNCTION_SCOPED", "scopes": [{"kind": "CLASS", "line": 110, "name": "DesktopLiveWatcher"}, {"kind": "FUNCTION", "line": 485, "name": "_load_watch_filters"}]}]
+- contextor.core.live_state.watcher -> contextor.core.live_state.runtime [CALL_DEPENDENT_CANDIDATE]: [{"column": 12, "controls": [{"branch": "BODY", "expression": null, "kind": "TRY", "line": 371}], "form": "IMPORT_FROM", "line": 372, "match_kind": "FROM_BASE", "scope": "FUNCTION_SCOPED", "scopes": [{"kind": "CLASS", "line": 110, "name": "DesktopLiveWatcher"}, {"kind": "FUNCTION", "line": 350, "name": "_recover_client"}]}]
+- contextor.core.reporting_engine.pipeline -> contextor.core.analysis.state_manager [CALL_DEPENDENT_CANDIDATE]: [{"column": 4, "controls": [], "form": "IMPORT_FROM", "line": 106, "match_kind": "FROM_BASE", "scope": "FUNCTION_SCOPED", "scopes": [{"kind": "FUNCTION", "line": 34, "name": "execute_global_pipeline"}]}]
+- contextor.core.single_file.builders.layer0_builders -> contextor.core.analysis.state_manager [CALL_DEPENDENT_CANDIDATE]: [{"column": 4, "controls": [], "form": "IMPORT_FROM", "line": 26, "match_kind": "FROM_BASE", "scope": "FUNCTION_SCOPED", "scopes": [{"kind": "FUNCTION", "line": 18, "name": "_canonical_state_module_is_current"}]}]
+- contextor.core.single_file.builders.layer2_builders -> contextor.core.analysis.state_manager [CALL_DEPENDENT_CANDIDATE]: [{"column": 8, "controls": [], "form": "IMPORT_FROM", "line": 11, "match_kind": "FROM_BASE", "scope": "FUNCTION_SCOPED", "scopes": [{"kind": "CLASS", "line": 4, "name": "TestContextBuilder"}, {"kind": "FUNCTION", "line": 9, "name": "build"}]}]
+SCC02 direct cyclic component 1: MEMBERS=contextor.repo_generator.__init__, contextor.repo_generator.filters, contextor.repo_generator.icons, contextor.repo_generator.main, contextor.ui.__init__, contextor.ui.exclude_gui, contextor.ui.gui, contextor.ui.gui_parser, contextor.ui.progress_widget
+- contextor.repo_generator.__init__ -> contextor.repo_generator.main; source=C:\Temp\Contextor_Repo\contextor\repo_generator\__init__.py; direct sites=[{"column": 0, "form": "IMPORT_FROM", "line": 1, "match_kind": "FROM_BASE", "requested": "contextor.repo_generator.main", "scope": "MODULE_TOP_LEVEL"}]
+- contextor.repo_generator.filters -> contextor.ui.__init__; source=C:\Temp\Contextor_Repo\contextor\repo_generator\filters.py; direct sites=[{"column": 0, "form": "IMPORT_FROM", "line": 5, "match_kind": "FROM_BASE", "requested": "contextor.ui", "scope": "MODULE_TOP_LEVEL"}]
+- contextor.repo_generator.icons -> contextor.ui.__init__; source=C:\Temp\Contextor_Repo\contextor\repo_generator\icons.py; direct sites=[{"column": 0, "form": "IMPORT_FROM", "line": 4, "match_kind": "FROM_BASE", "requested": "contextor.ui", "scope": "MODULE_TOP_LEVEL"}]
+- contextor.repo_generator.main -> contextor.repo_generator.filters; source=C:\Temp\Contextor_Repo\contextor\repo_generator\main.py; direct sites=[{"column": 0, "form": "IMPORT_FROM", "line": 8, "match_kind": "FROM_BASE", "requested": "contextor.repo_generator.filters", "scope": "MODULE_TOP_LEVEL"}]
+- contextor.repo_generator.main -> contextor.repo_generator.icons; source=C:\Temp\Contextor_Repo\contextor\repo_generator\main.py; direct sites=[{"column": 0, "form": "IMPORT_FROM", "line": 9, "match_kind": "FROM_BASE", "requested": "contextor.repo_generator.icons", "scope": "MODULE_TOP_LEVEL"}]
+- contextor.repo_generator.main -> contextor.ui.__init__; source=C:\Temp\Contextor_Repo\contextor\repo_generator\main.py; direct sites=[{"column": 0, "form": "IMPORT_FROM", "line": 11, "match_kind": "FROM_BASE", "requested": "contextor.ui", "scope": "MODULE_TOP_LEVEL"}]
+- contextor.ui.__init__ -> contextor.ui.gui; source=C:\Temp\Contextor_Repo\contextor\ui\__init__.py; direct sites=[{"column": 0, "form": "IMPORT_FROM", "line": 5, "match_kind": "FROM_BASE", "requested": "contextor.ui.gui", "scope": "MODULE_TOP_LEVEL"}]
+- contextor.ui.exclude_gui -> contextor.ui.__init__; source=C:\Temp\Contextor_Repo\contextor\ui\exclude_gui.py; direct sites=[{"column": 0, "form": "IMPORT_FROM", "line": 16, "match_kind": "FROM_BASE", "requested": "contextor.ui", "scope": "MODULE_TOP_LEVEL"}]
+- contextor.ui.gui -> contextor.repo_generator.__init__; source=C:\Temp\Contextor_Repo\contextor\ui\gui.py; direct sites=[{"column": 0, "form": "IMPORT_FROM", "line": 43, "match_kind": "FROM_BASE", "requested": "contextor.repo_generator", "scope": "MODULE_TOP_LEVEL"}]
+- contextor.ui.gui -> contextor.ui.__init__; source=C:\Temp\Contextor_Repo\contextor\ui\gui.py; direct sites=[{"column": 0, "form": "IMPORT_FROM", "line": 52, "match_kind": "FROM_BASE", "requested": "contextor.ui", "scope": "MODULE_TOP_LEVEL"}]
+- contextor.ui.gui -> contextor.ui.exclude_gui; source=C:\Temp\Contextor_Repo\contextor\ui\gui.py; direct sites=[{"column": 0, "form": "IMPORT_FROM", "line": 54, "match_kind": "FROM_BASE", "requested": "contextor.ui.exclude_gui", "scope": "MODULE_TOP_LEVEL"}]
+- contextor.ui.gui -> contextor.ui.gui_parser; source=C:\Temp\Contextor_Repo\contextor\ui\gui.py; direct sites=[{"column": 0, "form": "IMPORT_FROM", "line": 55, "match_kind": "FROM_BASE", "requested": "contextor.ui.gui_parser", "scope": "MODULE_TOP_LEVEL"}]
+- contextor.ui.gui -> contextor.ui.progress_widget; source=C:\Temp\Contextor_Repo\contextor\ui\gui.py; direct sites=[{"column": 0, "form": "IMPORT_FROM", "line": 57, "match_kind": "FROM_BASE", "requested": "contextor.ui.progress_widget", "scope": "MODULE_TOP_LEVEL"}]
+- contextor.ui.gui_parser -> contextor.ui.__init__; source=C:\Temp\Contextor_Repo\contextor\ui\gui_parser.py; direct sites=[{"column": 0, "form": "IMPORT_FROM", "line": 20, "match_kind": "FROM_BASE", "requested": "contextor.ui", "scope": "MODULE_TOP_LEVEL"}]
+- contextor.ui.gui_parser -> contextor.ui.progress_widget; source=C:\Temp\Contextor_Repo\contextor\ui\gui_parser.py; direct sites=[{"column": 0, "form": "IMPORT_FROM", "line": 22, "match_kind": "FROM_BASE", "requested": "contextor.ui.progress_widget", "scope": "MODULE_TOP_LEVEL"}]
+- contextor.ui.progress_widget -> contextor.ui.__init__; source=C:\Temp\Contextor_Repo\contextor\ui\progress_widget.py; direct sites=[{"column": 0, "form": "IMPORT_FROM", "line": 15, "match_kind": "FROM_BASE", "requested": "contextor.ui", "scope": "MODULE_TOP_LEVEL"}]
+## COMPLETE_PER_EDGE_ACTIVATION_INVENTORY
+### SCC01
+- SCC_ID=SCC01; SOURCE=contextor.core.analysis.full_analysis_coordinator; TARGET=contextor.core.api.facade; SOURCE_STATUS=LEXICAL_CANDIDATES; ACTIVATION_CLASSIFICATION=CALL_DEPENDENT_CANDIDATE; LEXICAL_SITE_COUNT=1; UNGUARDED_DIRECT_COUNT=0; FUNCTION_SCOPED_COUNT=1; GUARDED_TOP_LEVEL_COUNT=0; OTHER_SCOPED_COUNT=0; INDIRECT_CANDIDATE_COUNT=0; IN_DIRECT_CANDIDATE_GRAPH=False; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\analysis\full_analysis_coordinator.py
+  - SITE={"activation_scope": "FUNCTION_SCOPED", "column": 12, "form": "IMPORT_FROM", "line": 88, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [{"branch": "BODY", "expression": null, "kind": "TRY", "line": 68}, {"branch": "ELSE", "expression": "Compare(left=Name(id='analysis_fn', ctx=Load()), ops=[IsNot()], comparators=[Constant(value=None)])", "kind": "IF", "line": 77}], "raw_scopes": [{"kind": "FUNCTION", "line": 41, "name": "run_full_analysis_exclusive"}], "requested_name": "contextor.core.api.facade"}
+- SCC_ID=SCC01; SOURCE=contextor.core.analysis.incremental.engine; TARGET=contextor.core.analysis.incremental.materialization; SOURCE_STATUS=LEXICAL_CANDIDATES; ACTIVATION_CLASSIFICATION=UNGUARDED_DIRECT_CANDIDATE; LEXICAL_SITE_COUNT=1; UNGUARDED_DIRECT_COUNT=1; FUNCTION_SCOPED_COUNT=0; GUARDED_TOP_LEVEL_COUNT=0; OTHER_SCOPED_COUNT=0; INDIRECT_CANDIDATE_COUNT=0; IN_DIRECT_CANDIDATE_GRAPH=True; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\analysis\incremental\engine.py
+  - SITE={"activation_scope": "MODULE_TOP_LEVEL", "column": 0, "form": "IMPORT_FROM", "line": 20, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [], "raw_scopes": [], "requested_name": "contextor.core.analysis.incremental.materialization"}
+- SCC_ID=SCC01; SOURCE=contextor.core.analysis.incremental.engine; TARGET=contextor.core.analysis.incremental.plan_executor; SOURCE_STATUS=LEXICAL_CANDIDATES; ACTIVATION_CLASSIFICATION=UNGUARDED_DIRECT_CANDIDATE; LEXICAL_SITE_COUNT=1; UNGUARDED_DIRECT_COUNT=1; FUNCTION_SCOPED_COUNT=0; GUARDED_TOP_LEVEL_COUNT=0; OTHER_SCOPED_COUNT=0; INDIRECT_CANDIDATE_COUNT=0; IN_DIRECT_CANDIDATE_GRAPH=True; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\analysis\incremental\engine.py
+  - SITE={"activation_scope": "MODULE_TOP_LEVEL", "column": 0, "form": "IMPORT_FROM", "line": 33, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [], "raw_scopes": [], "requested_name": "contextor.core.analysis.incremental.plan_executor"}
+- SCC_ID=SCC01; SOURCE=contextor.core.analysis.incremental.engine; TARGET=contextor.core.analysis.incremental.preparation; SOURCE_STATUS=LEXICAL_CANDIDATES; ACTIVATION_CLASSIFICATION=UNGUARDED_DIRECT_CANDIDATE; LEXICAL_SITE_COUNT=1; UNGUARDED_DIRECT_COUNT=1; FUNCTION_SCOPED_COUNT=0; GUARDED_TOP_LEVEL_COUNT=0; OTHER_SCOPED_COUNT=0; INDIRECT_CANDIDATE_COUNT=0; IN_DIRECT_CANDIDATE_GRAPH=True; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\analysis\incremental\engine.py
+  - SITE={"activation_scope": "MODULE_TOP_LEVEL", "column": 0, "form": "IMPORT_FROM", "line": 27, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [], "raw_scopes": [], "requested_name": "contextor.core.analysis.incremental.preparation"}
+- SCC_ID=SCC01; SOURCE=contextor.core.analysis.incremental.engine; TARGET=contextor.core.analysis.refresh_planner; SOURCE_STATUS=LEXICAL_CANDIDATES; ACTIVATION_CLASSIFICATION=CALL_DEPENDENT_CANDIDATE; LEXICAL_SITE_COUNT=2; UNGUARDED_DIRECT_COUNT=0; FUNCTION_SCOPED_COUNT=2; GUARDED_TOP_LEVEL_COUNT=0; OTHER_SCOPED_COUNT=0; INDIRECT_CANDIDATE_COUNT=0; IN_DIRECT_CANDIDATE_GRAPH=False; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\analysis\incremental\engine.py
+  - SITE={"activation_scope": "FUNCTION_SCOPED", "column": 16, "form": "IMPORT_FROM", "line": 615, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [{"branch": "BODY", "expression": null, "kind": "WITH", "line": 569}, {"branch": "BODY", "expression": "UnaryOp(op=Not(), operand=Name(id='current_state', ctx=Load()))", "kind": "IF", "line": 602}], "raw_scopes": [{"kind": "CLASS", "line": 150, "name": "IncrementalAnalysisEngine"}, {"kind": "FUNCTION", "line": 564, "name": "update_file"}], "requested_name": "contextor.core.analysis.refresh_planner"}
+  - SITE={"activation_scope": "FUNCTION_SCOPED", "column": 12, "form": "IMPORT_FROM", "line": 734, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [{"branch": "BODY", "expression": null, "kind": "WITH", "line": 569}], "raw_scopes": [{"kind": "CLASS", "line": 150, "name": "IncrementalAnalysisEngine"}, {"kind": "FUNCTION", "line": 564, "name": "update_file"}], "requested_name": "contextor.core.analysis.refresh_planner"}
+- SCC_ID=SCC01; SOURCE=contextor.core.analysis.incremental.engine; TARGET=contextor.core.analysis.state_manager; SOURCE_STATUS=LEXICAL_CANDIDATES; ACTIVATION_CLASSIFICATION=UNGUARDED_DIRECT_CANDIDATE; LEXICAL_SITE_COUNT=2; UNGUARDED_DIRECT_COUNT=2; FUNCTION_SCOPED_COUNT=0; GUARDED_TOP_LEVEL_COUNT=0; OTHER_SCOPED_COUNT=0; INDIRECT_CANDIDATE_COUNT=0; IN_DIRECT_CANDIDATE_GRAPH=True; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\analysis\incremental\engine.py
+  - SITE={"activation_scope": "MODULE_TOP_LEVEL", "column": 0, "form": "IMPORT_FROM", "line": 10, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [], "raw_scopes": [], "requested_name": "contextor.core.analysis.state_manager"}
+  - SITE={"activation_scope": "MODULE_TOP_LEVEL", "column": 0, "form": "IMPORT_FROM", "line": 37, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [], "raw_scopes": [], "requested_name": "contextor.core.analysis.state_manager"}
+- SCC_ID=SCC01; SOURCE=contextor.core.analysis.incremental.materialization; TARGET=contextor.core.analysis.state_manager; SOURCE_STATUS=LEXICAL_CANDIDATES; ACTIVATION_CLASSIFICATION=UNGUARDED_DIRECT_CANDIDATE; LEXICAL_SITE_COUNT=5; UNGUARDED_DIRECT_COUNT=1; FUNCTION_SCOPED_COUNT=4; GUARDED_TOP_LEVEL_COUNT=0; OTHER_SCOPED_COUNT=0; INDIRECT_CANDIDATE_COUNT=0; IN_DIRECT_CANDIDATE_GRAPH=True; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\analysis\incremental\materialization.py
+  - SITE={"activation_scope": "MODULE_TOP_LEVEL", "column": 0, "form": "IMPORT_FROM", "line": 12, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [], "raw_scopes": [], "requested_name": "contextor.core.analysis.state_manager"}
+  - SITE={"activation_scope": "FUNCTION_SCOPED", "column": 4, "form": "IMPORT_FROM", "line": 212, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [], "raw_scopes": [{"kind": "FUNCTION", "line": 201, "name": "ensure_cached_analytics"}], "requested_name": "contextor.core.analysis.state_manager"}
+  - SITE={"activation_scope": "FUNCTION_SCOPED", "column": 4, "form": "IMPORT_FROM", "line": 431, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [], "raw_scopes": [{"kind": "FUNCTION", "line": 414, "name": "ensure_artifact_consumption"}], "requested_name": "contextor.core.analysis.state_manager"}
+  - SITE={"activation_scope": "FUNCTION_SCOPED", "column": 4, "form": "IMPORT_FROM", "line": 496, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [], "raw_scopes": [{"kind": "FUNCTION", "line": 467, "name": "ensure_dependency_matrix"}], "requested_name": "contextor.core.analysis.state_manager"}
+  - SITE={"activation_scope": "FUNCTION_SCOPED", "column": 4, "form": "IMPORT_FROM", "line": 564, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [], "raw_scopes": [{"kind": "FUNCTION", "line": 537, "name": "ensure_shared_usage_clusters"}], "requested_name": "contextor.core.analysis.state_manager"}
+- SCC_ID=SCC01; SOURCE=contextor.core.analysis.incremental.plan_executor; TARGET=contextor.core.analysis.incremental.materialization; SOURCE_STATUS=LEXICAL_CANDIDATES; ACTIVATION_CLASSIFICATION=CALL_DEPENDENT_CANDIDATE; LEXICAL_SITE_COUNT=1; UNGUARDED_DIRECT_COUNT=0; FUNCTION_SCOPED_COUNT=1; GUARDED_TOP_LEVEL_COUNT=0; OTHER_SCOPED_COUNT=0; INDIRECT_CANDIDATE_COUNT=0; IN_DIRECT_CANDIDATE_GRAPH=False; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\analysis\incremental\plan_executor.py
+  - SITE={"activation_scope": "FUNCTION_SCOPED", "column": 12, "form": "IMPORT_FROM", "line": 1475, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [{"branch": "BODY", "expression": "Attribute(value=Name(id='plan', ctx=Load()), attr='patch_families', ctx=Load())", "kind": "FOR", "line": 1342}, {"branch": "ELSE", "expression": "Compare(left=Name(id='family', ctx=Load()), ops=[Eq()], comparators=[Constant(value='modules')])", "kind": "IF", "line": 1343}, {"branch": "ELSE", "expression": "Compare(left=Name(id='family', ctx=Load()), ops=[Eq()], comparators=[Constant(value='definitions')])", "kind": "IF", "line": 1346}, {"branch": "ELSE", "expression": "Compare(left=Name(id='family', ctx=Load()), ops=[Eq()], comparators=[Constant(value='module_usages')])", "kind": "IF", "line": 1349}, {"branch": "ELSE", "expression": "Compare(left=Name(id='family', ctx=Load()), ops=[Eq()], comparators=[Constant(value='reexport_facts')])", "kind": "IF", "line": 1352}, {"branch": "ELSE", "expression": "Compare(left=Name(id='family', ctx=Load()), ops=[Eq()], comparators=[Constant(value='dependency_graph')])", "kind": "IF", "line": 1355}, {"branch": "ELSE", "expression": "Compare(left=Name(id='family', ctx=Load()), ops=[Eq()], comparators=[Constant(value='artifact_consumption')])", "kind": "IF", "line": 1394}, {"branch": "ELSE", "expression": "Compare(left=Name(id='family', ctx=Load()), ops=[Eq()], comparators=[Constant(value='identity_registry')])", "kind": "IF", "line": 1448}, {"branch": "ELSE", "expression": "Compare(left=Name(id='family', ctx=Load()), ops=[Eq()], comparators=[Constant(value='cached_analytics')])", "kind": "IF", "line": 1452}, {"branch": "ELSE", "expression": "Compare(left=Name(id='family', ctx=Load()), ops=[Eq()], comparators=[Constant(value='collision_facts')])", "kind": "IF", "line": 1463}, {"branch": "BODY", "expression": "Compare(left=Name(id='family', ctx=Load()), ops=[Eq()], comparators=[Constant(value='collisions')])", "kind": "IF", "line": 1474}], "raw_scopes": [{"kind": "FUNCTION", "line": 1108, "name": "execute_refresh_plan"}], "requested_name": "contextor.core.analysis.incremental.materialization"}
+- SCC_ID=SCC01; SOURCE=contextor.core.analysis.incremental.plan_executor; TARGET=contextor.core.analysis.refresh_planner; SOURCE_STATUS=LEXICAL_CANDIDATES; ACTIVATION_CLASSIFICATION=CALL_DEPENDENT_CANDIDATE; LEXICAL_SITE_COUNT=1; UNGUARDED_DIRECT_COUNT=0; FUNCTION_SCOPED_COUNT=1; GUARDED_TOP_LEVEL_COUNT=0; OTHER_SCOPED_COUNT=0; INDIRECT_CANDIDATE_COUNT=0; IN_DIRECT_CANDIDATE_GRAPH=False; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\analysis\incremental\plan_executor.py
+  - SITE={"activation_scope": "FUNCTION_SCOPED", "column": 8, "form": "IMPORT_FROM", "line": 1260, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [{"branch": "BODY", "expression": "Attribute(value=Name(id='plan', ctx=Load()), attr='recompute_modules', ctx=Load())", "kind": "IF", "line": 1259}], "raw_scopes": [{"kind": "FUNCTION", "line": 1108, "name": "execute_refresh_plan"}], "requested_name": "contextor.core.analysis.refresh_planner"}
+- SCC_ID=SCC01; SOURCE=contextor.core.analysis.incremental.plan_executor; TARGET=contextor.core.analysis.state_manager; SOURCE_STATUS=LEXICAL_CANDIDATES; ACTIVATION_CLASSIFICATION=UNGUARDED_DIRECT_CANDIDATE; LEXICAL_SITE_COUNT=4; UNGUARDED_DIRECT_COUNT=1; FUNCTION_SCOPED_COUNT=3; GUARDED_TOP_LEVEL_COUNT=0; OTHER_SCOPED_COUNT=0; INDIRECT_CANDIDATE_COUNT=0; IN_DIRECT_CANDIDATE_GRAPH=True; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\analysis\incremental\plan_executor.py
+  - SITE={"activation_scope": "MODULE_TOP_LEVEL", "column": 0, "form": "IMPORT_FROM", "line": 18, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [], "raw_scopes": [], "requested_name": "contextor.core.analysis.state_manager"}
+  - SITE={"activation_scope": "FUNCTION_SCOPED", "column": 8, "form": "IMPORT_FROM", "line": 1598, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [{"branch": "BODY", "expression": "BoolOp(op=And(), values=[BoolOp(op=Or(), values=[Name(id='matrix_inputs_changed', ctx=Load()), Name(id='cluster_inputs_changed', ctx=Load())]), Compare(left=Attribute(value=Name(id='plan', ctx=Load()), attr='refresh_completeness', ctx=Load()), ops=[NotEq()], comparators=[Constant(value='requires_resync')]), UnaryOp(op=Not(), operand=Call(func=Name(id='getattr', ctx=Load()), args=[Name(id='state', ctx=Load()), Constant(value='resync_required'), Constant(value=False)], keywords=[]))])", "kind": "IF", "line": 1593}], "raw_scopes": [{"kind": "FUNCTION", "line": 1108, "name": "execute_refresh_plan"}], "requested_name": "contextor.core.analysis.state_manager"}
+  - SITE={"activation_scope": "FUNCTION_SCOPED", "column": 8, "form": "IMPORT_FROM", "line": 1614, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [{"branch": "ELSE", "expression": "BoolOp(op=Or(), values=[Compare(left=Attribute(value=Name(id='plan', ctx=Load()), attr='refresh_completeness', ctx=Load()), ops=[Eq()], comparators=[Constant(value='requires_resync')]), Call(func=Name(id='getattr', ctx=Load()), args=[Name(id='state', ctx=Load()), Constant(value='resync_required'), Constant(value=False)], keywords=[])])", "kind": "IF", "line": 1609}, {"branch": "BODY", "expression": "Name(id='matrix_inputs_changed', ctx=Load())", "kind": "IF", "line": 1613}], "raw_scopes": [{"kind": "FUNCTION", "line": 1108, "name": "execute_refresh_plan"}], "requested_name": "contextor.core.analysis.state_manager"}
+  - SITE={"activation_scope": "FUNCTION_SCOPED", "column": 8, "form": "IMPORT_FROM", "line": 1646, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [{"branch": "ELSE", "expression": "BoolOp(op=Or(), values=[Compare(left=Attribute(value=Name(id='plan', ctx=Load()), attr='refresh_completeness', ctx=Load()), ops=[Eq()], comparators=[Constant(value='requires_resync')]), Call(func=Name(id='getattr', ctx=Load()), args=[Name(id='state', ctx=Load()), Constant(value='resync_required'), Constant(value=False)], keywords=[])])", "kind": "IF", "line": 1641}, {"branch": "BODY", "expression": "Name(id='cluster_inputs_changed', ctx=Load())", "kind": "IF", "line": 1645}], "raw_scopes": [{"kind": "FUNCTION", "line": 1108, "name": "execute_refresh_plan"}], "requested_name": "contextor.core.analysis.state_manager"}
+- SCC_ID=SCC01; SOURCE=contextor.core.analysis.incremental.preparation; TARGET=contextor.core.analysis.lineage_extraction; SOURCE_STATUS=LEXICAL_CANDIDATES; ACTIVATION_CLASSIFICATION=UNGUARDED_DIRECT_CANDIDATE; LEXICAL_SITE_COUNT=1; UNGUARDED_DIRECT_COUNT=1; FUNCTION_SCOPED_COUNT=0; GUARDED_TOP_LEVEL_COUNT=0; OTHER_SCOPED_COUNT=0; INDIRECT_CANDIDATE_COUNT=0; IN_DIRECT_CANDIDATE_GRAPH=True; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\analysis\incremental\preparation.py
+  - SITE={"activation_scope": "MODULE_TOP_LEVEL", "column": 0, "form": "IMPORT_FROM", "line": 16, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [], "raw_scopes": [], "requested_name": "contextor.core.analysis.lineage_extraction"}
+- SCC_ID=SCC01; SOURCE=contextor.core.analysis.incremental.preparation; TARGET=contextor.core.analysis.state_manager; SOURCE_STATUS=LEXICAL_CANDIDATES; ACTIVATION_CLASSIFICATION=UNGUARDED_DIRECT_CANDIDATE; LEXICAL_SITE_COUNT=1; UNGUARDED_DIRECT_COUNT=1; FUNCTION_SCOPED_COUNT=0; GUARDED_TOP_LEVEL_COUNT=0; OTHER_SCOPED_COUNT=0; INDIRECT_CANDIDATE_COUNT=0; IN_DIRECT_CANDIDATE_GRAPH=True; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\analysis\incremental\preparation.py
+  - SITE={"activation_scope": "MODULE_TOP_LEVEL", "column": 0, "form": "IMPORT_FROM", "line": 15, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [], "raw_scopes": [], "requested_name": "contextor.core.analysis.state_manager"}
+- SCC_ID=SCC01; SOURCE=contextor.core.analysis.incremental.preparation; TARGET=contextor.core.symbol_engine.indexer; SOURCE_STATUS=LEXICAL_CANDIDATES; ACTIVATION_CLASSIFICATION=CALL_DEPENDENT_CANDIDATE; LEXICAL_SITE_COUNT=1; UNGUARDED_DIRECT_COUNT=0; FUNCTION_SCOPED_COUNT=1; GUARDED_TOP_LEVEL_COUNT=0; OTHER_SCOPED_COUNT=0; INDIRECT_CANDIDATE_COUNT=0; IN_DIRECT_CANDIDATE_GRAPH=False; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\analysis\incremental\preparation.py
+  - SITE={"activation_scope": "FUNCTION_SCOPED", "column": 8, "form": "IMPORT_FROM", "line": 229, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [{"branch": "BODY", "expression": null, "kind": "TRY", "line": 228}], "raw_scopes": [{"kind": "FUNCTION", "line": 147, "name": "prepare_source_update"}], "requested_name": "contextor.core.symbol_engine.indexer"}
+- SCC_ID=SCC01; SOURCE=contextor.core.analysis.incremental_engine; TARGET=contextor.core.analysis.incremental.engine; SOURCE_STATUS=LEXICAL_CANDIDATES; ACTIVATION_CLASSIFICATION=UNGUARDED_DIRECT_CANDIDATE; LEXICAL_SITE_COUNT=1; UNGUARDED_DIRECT_COUNT=1; FUNCTION_SCOPED_COUNT=0; GUARDED_TOP_LEVEL_COUNT=0; OTHER_SCOPED_COUNT=0; INDIRECT_CANDIDATE_COUNT=0; IN_DIRECT_CANDIDATE_GRAPH=True; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\analysis\incremental_engine.py
+  - SITE={"activation_scope": "MODULE_TOP_LEVEL", "column": 0, "form": "IMPORT_FROM", "line": 8, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [], "raw_scopes": [], "requested_name": "contextor.core.analysis.incremental.engine"}
+- SCC_ID=SCC01; SOURCE=contextor.core.analysis.lineage_extraction; TARGET=contextor.core.analysis.state_manager; SOURCE_STATUS=LEXICAL_CANDIDATES; ACTIVATION_CLASSIFICATION=UNGUARDED_DIRECT_CANDIDATE; LEXICAL_SITE_COUNT=1; UNGUARDED_DIRECT_COUNT=1; FUNCTION_SCOPED_COUNT=0; GUARDED_TOP_LEVEL_COUNT=0; OTHER_SCOPED_COUNT=0; INDIRECT_CANDIDATE_COUNT=0; IN_DIRECT_CANDIDATE_GRAPH=True; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\analysis\lineage_extraction.py
+  - SITE={"activation_scope": "MODULE_TOP_LEVEL", "column": 0, "form": "IMPORT_FROM", "line": 5, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [], "raw_scopes": [], "requested_name": "contextor.core.analysis.state_manager"}
+- SCC_ID=SCC01; SOURCE=contextor.core.analysis.refresh_planner; TARGET=contextor.core.analysis.state_manager; SOURCE_STATUS=LEXICAL_CANDIDATES; ACTIVATION_CLASSIFICATION=UNGUARDED_DIRECT_CANDIDATE; LEXICAL_SITE_COUNT=1; UNGUARDED_DIRECT_COUNT=1; FUNCTION_SCOPED_COUNT=0; GUARDED_TOP_LEVEL_COUNT=0; OTHER_SCOPED_COUNT=0; INDIRECT_CANDIDATE_COUNT=0; IN_DIRECT_CANDIDATE_GRAPH=True; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\analysis\refresh_planner.py
+  - SITE={"activation_scope": "MODULE_TOP_LEVEL", "column": 0, "form": "IMPORT_FROM", "line": 9, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [], "raw_scopes": [], "requested_name": "contextor.core.analysis.state_manager"}
+- SCC_ID=SCC01; SOURCE=contextor.core.analysis.state_manager; TARGET=contextor.core.live_state.__init__; SOURCE_STATUS=LEXICAL_CANDIDATES; ACTIVATION_CLASSIFICATION=CALL_DEPENDENT_CANDIDATE; LEXICAL_SITE_COUNT=2; UNGUARDED_DIRECT_COUNT=0; FUNCTION_SCOPED_COUNT=2; GUARDED_TOP_LEVEL_COUNT=0; OTHER_SCOPED_COUNT=0; INDIRECT_CANDIDATE_COUNT=0; IN_DIRECT_CANDIDATE_GRAPH=False; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\analysis\state_manager.py
+  - SITE={"activation_scope": "FUNCTION_SCOPED", "column": 4, "form": "IMPORT_FROM", "line": 517, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [], "raw_scopes": [{"kind": "FUNCTION", "line": 506, "name": "save_engine_state"}], "requested_name": "contextor.core.live_state"}
+  - SITE={"activation_scope": "FUNCTION_SCOPED", "column": 4, "form": "IMPORT_FROM", "line": 541, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [], "raw_scopes": [{"kind": "FUNCTION", "line": 534, "name": "load_engine_state"}], "requested_name": "contextor.core.live_state"}
+- SCC_ID=SCC01; SOURCE=contextor.core.api.facade; TARGET=contextor.core.analysis.incremental.materialization; SOURCE_STATUS=LEXICAL_CANDIDATES; ACTIVATION_CLASSIFICATION=CALL_DEPENDENT_CANDIDATE; LEXICAL_SITE_COUNT=3; UNGUARDED_DIRECT_COUNT=0; FUNCTION_SCOPED_COUNT=3; GUARDED_TOP_LEVEL_COUNT=0; OTHER_SCOPED_COUNT=0; INDIRECT_CANDIDATE_COUNT=0; IN_DIRECT_CANDIDATE_GRAPH=False; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\api\facade.py
+  - SITE={"activation_scope": "FUNCTION_SCOPED", "column": 8, "form": "IMPORT_FROM", "line": 117, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [{"branch": "BODY", "expression": "Compare(left=Name(id='state', ctx=Load()), ops=[IsNot()], comparators=[Constant(value=None)])", "kind": "IF", "line": 116}], "raw_scopes": [{"kind": "FUNCTION", "line": 102, "name": "_assemble_layer_collision_facts"}], "requested_name": "contextor.core.analysis.incremental.materialization"}
+  - SITE={"activation_scope": "FUNCTION_SCOPED", "column": 12, "form": "IMPORT_FROM", "line": 850, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [{"branch": "BODY", "expression": "Name(id='analysis_result', ctx=Load())", "kind": "IF", "line": 811}], "raw_scopes": [{"kind": "CLASS", "line": 551, "name": "ContextorFacade"}, {"kind": "FUNCTION", "line": 559, "name": "analyze_project"}], "requested_name": "contextor.core.analysis.incremental.materialization"}
+  - SITE={"activation_scope": "FUNCTION_SCOPED", "column": 12, "form": "IMPORT_FROM", "line": 1010, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [{"branch": "BODY", "expression": "Name(id='analysis_result', ctx=Load())", "kind": "IF", "line": 811}], "raw_scopes": [{"kind": "CLASS", "line": 551, "name": "ContextorFacade"}, {"kind": "FUNCTION", "line": 559, "name": "analyze_project"}], "requested_name": "contextor.core.analysis.incremental.materialization"}
+- SCC_ID=SCC01; SOURCE=contextor.core.api.facade; TARGET=contextor.core.analysis.state_manager; SOURCE_STATUS=LEXICAL_CANDIDATES; ACTIVATION_CLASSIFICATION=CALL_DEPENDENT_CANDIDATE; LEXICAL_SITE_COUNT=2; UNGUARDED_DIRECT_COUNT=0; FUNCTION_SCOPED_COUNT=2; GUARDED_TOP_LEVEL_COUNT=0; OTHER_SCOPED_COUNT=0; INDIRECT_CANDIDATE_COUNT=0; IN_DIRECT_CANDIDATE_GRAPH=False; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\api\facade.py
+  - SITE={"activation_scope": "FUNCTION_SCOPED", "column": 12, "form": "IMPORT_FROM", "line": 812, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [{"branch": "BODY", "expression": "Name(id='analysis_result', ctx=Load())", "kind": "IF", "line": 811}], "raw_scopes": [{"kind": "CLASS", "line": 551, "name": "ContextorFacade"}, {"kind": "FUNCTION", "line": 559, "name": "analyze_project"}], "requested_name": "contextor.core.analysis.state_manager"}
+  - SITE={"activation_scope": "FUNCTION_SCOPED", "column": 16, "form": "IMPORT_FROM", "line": 1666, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [{"branch": "BODY", "expression": "Compare(left=Name(id='resolved', ctx=Load()), ops=[IsNot()], comparators=[Constant(value=None)])", "kind": "IF", "line": 1645}, {"branch": "BODY", "expression": "Name(id='state_only_candidate', ctx=Load())", "kind": "IF", "line": 1665}], "raw_scopes": [{"kind": "CLASS", "line": 551, "name": "ContextorFacade"}, {"kind": "FUNCTION", "line": 1609, "name": "_analyze_single_file_uncoordinated"}], "requested_name": "contextor.core.analysis.state_manager"}
+- SCC_ID=SCC01; SOURCE=contextor.core.api.facade; TARGET=contextor.core.live_state.__init__; SOURCE_STATUS=LEXICAL_CANDIDATES; ACTIVATION_CLASSIFICATION=UNGUARDED_DIRECT_CANDIDATE; LEXICAL_SITE_COUNT=3; UNGUARDED_DIRECT_COUNT=1; FUNCTION_SCOPED_COUNT=2; GUARDED_TOP_LEVEL_COUNT=0; OTHER_SCOPED_COUNT=0; INDIRECT_CANDIDATE_COUNT=1; IN_DIRECT_CANDIDATE_GRAPH=True; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\api\facade.py
+  - SITE={"activation_scope": "MODULE_TOP_LEVEL", "column": 0, "form": "IMPORT_FROM", "line": 61, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [], "raw_scopes": [], "requested_name": "contextor.core.live_state"}
+  - SITE={"activation_scope": "FUNCTION_SCOPED", "column": 12, "form": "IMPORT_FROM", "line": 823, "match_kind": "PARENT_INITIALIZER", "matched_member": null, "raw_controls": [{"branch": "BODY", "expression": "Name(id='analysis_result', ctx=Load())", "kind": "IF", "line": 811}], "raw_scopes": [{"kind": "CLASS", "line": 551, "name": "ContextorFacade"}, {"kind": "FUNCTION", "line": 559, "name": "analyze_project"}], "requested_name": "contextor.core.live_state.store"}
+  - SITE={"activation_scope": "FUNCTION_SCOPED", "column": 16, "form": "IMPORT_FROM", "line": 1149, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [{"branch": "BODY", "expression": "Name(id='analysis_result', ctx=Load())", "kind": "IF", "line": 811}, {"branch": "BODY", "expression": "Compare(left=Name(id='meta', ctx=Load()), ops=[IsNot()], comparators=[Constant(value=None)])", "kind": "IF", "line": 1148}], "raw_scopes": [{"kind": "CLASS", "line": 551, "name": "ContextorFacade"}, {"kind": "FUNCTION", "line": 559, "name": "analyze_project"}], "requested_name": "contextor.core.live_state"}
+- SCC_ID=SCC01; SOURCE=contextor.core.api.facade; TARGET=contextor.core.live_state.store; SOURCE_STATUS=LEXICAL_CANDIDATES; ACTIVATION_CLASSIFICATION=CALL_DEPENDENT_CANDIDATE; LEXICAL_SITE_COUNT=1; UNGUARDED_DIRECT_COUNT=0; FUNCTION_SCOPED_COUNT=1; GUARDED_TOP_LEVEL_COUNT=0; OTHER_SCOPED_COUNT=0; INDIRECT_CANDIDATE_COUNT=0; IN_DIRECT_CANDIDATE_GRAPH=False; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\api\facade.py
+  - SITE={"activation_scope": "FUNCTION_SCOPED", "column": 12, "form": "IMPORT_FROM", "line": 823, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [{"branch": "BODY", "expression": "Name(id='analysis_result', ctx=Load())", "kind": "IF", "line": 811}], "raw_scopes": [{"kind": "CLASS", "line": 551, "name": "ContextorFacade"}, {"kind": "FUNCTION", "line": 559, "name": "analyze_project"}], "requested_name": "contextor.core.live_state.store"}
+- SCC_ID=SCC01; SOURCE=contextor.core.api.facade; TARGET=contextor.core.reference.module_usage_reuse; SOURCE_STATUS=LEXICAL_CANDIDATES; ACTIVATION_CLASSIFICATION=CALL_DEPENDENT_CANDIDATE; LEXICAL_SITE_COUNT=1; UNGUARDED_DIRECT_COUNT=0; FUNCTION_SCOPED_COUNT=1; GUARDED_TOP_LEVEL_COUNT=0; OTHER_SCOPED_COUNT=0; INDIRECT_CANDIDATE_COUNT=0; IN_DIRECT_CANDIDATE_GRAPH=False; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\api\facade.py
+  - SITE={"activation_scope": "FUNCTION_SCOPED", "column": 12, "form": "IMPORT_FROM", "line": 878, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [{"branch": "BODY", "expression": "Name(id='analysis_result', ctx=Load())", "kind": "IF", "line": 811}], "raw_scopes": [{"kind": "CLASS", "line": 551, "name": "ContextorFacade"}, {"kind": "FUNCTION", "line": 559, "name": "analyze_project"}], "requested_name": "contextor.core.reference.module_usage_reuse"}
+- SCC_ID=SCC01; SOURCE=contextor.core.api.facade; TARGET=contextor.core.reporting_engine.pipeline; SOURCE_STATUS=LEXICAL_CANDIDATES; ACTIVATION_CLASSIFICATION=UNGUARDED_DIRECT_CANDIDATE; LEXICAL_SITE_COUNT=1; UNGUARDED_DIRECT_COUNT=1; FUNCTION_SCOPED_COUNT=0; GUARDED_TOP_LEVEL_COUNT=0; OTHER_SCOPED_COUNT=0; INDIRECT_CANDIDATE_COUNT=0; IN_DIRECT_CANDIDATE_GRAPH=True; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\api\facade.py
+  - SITE={"activation_scope": "MODULE_TOP_LEVEL", "column": 0, "form": "IMPORT_FROM", "line": 36, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [], "raw_scopes": [], "requested_name": "contextor.core.reporting_engine.pipeline"}
+- SCC_ID=SCC01; SOURCE=contextor.core.api.facade; TARGET=contextor.core.single_file.single_file_analysis; SOURCE_STATUS=LEXICAL_CANDIDATES; ACTIVATION_CLASSIFICATION=UNGUARDED_DIRECT_CANDIDATE; LEXICAL_SITE_COUNT=1; UNGUARDED_DIRECT_COUNT=1; FUNCTION_SCOPED_COUNT=0; GUARDED_TOP_LEVEL_COUNT=0; OTHER_SCOPED_COUNT=0; INDIRECT_CANDIDATE_COUNT=0; IN_DIRECT_CANDIDATE_GRAPH=True; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\api\facade.py
+  - SITE={"activation_scope": "MODULE_TOP_LEVEL", "column": 0, "form": "IMPORT_FROM", "line": 48, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [], "raw_scopes": [], "requested_name": "contextor.core.single_file.single_file_analysis"}
+- SCC_ID=SCC01; SOURCE=contextor.core.api.facade; TARGET=contextor.core.symbol_engine.indexer; SOURCE_STATUS=LEXICAL_CANDIDATES; ACTIVATION_CLASSIFICATION=UNGUARDED_DIRECT_CANDIDATE; LEXICAL_SITE_COUNT=1; UNGUARDED_DIRECT_COUNT=1; FUNCTION_SCOPED_COUNT=0; GUARDED_TOP_LEVEL_COUNT=0; OTHER_SCOPED_COUNT=0; INDIRECT_CANDIDATE_COUNT=0; IN_DIRECT_CANDIDATE_GRAPH=True; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\api\facade.py
+  - SITE={"activation_scope": "MODULE_TOP_LEVEL", "column": 0, "form": "IMPORT_FROM", "line": 50, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [], "raw_scopes": [], "requested_name": "contextor.core.symbol_engine.indexer"}
+- SCC_ID=SCC01; SOURCE=contextor.core.lineage_query.live_query; TARGET=contextor.core.analysis.state_manager; SOURCE_STATUS=LEXICAL_CANDIDATES; ACTIVATION_CLASSIFICATION=UNGUARDED_DIRECT_CANDIDATE; LEXICAL_SITE_COUNT=1; UNGUARDED_DIRECT_COUNT=1; FUNCTION_SCOPED_COUNT=0; GUARDED_TOP_LEVEL_COUNT=0; OTHER_SCOPED_COUNT=0; INDIRECT_CANDIDATE_COUNT=0; IN_DIRECT_CANDIDATE_GRAPH=True; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\lineage_query\live_query.py
+  - SITE={"activation_scope": "MODULE_TOP_LEVEL", "column": 0, "form": "IMPORT_FROM", "line": 6, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [], "raw_scopes": [], "requested_name": "contextor.core.analysis.state_manager"}
+- SCC_ID=SCC01; SOURCE=contextor.core.live_state.__init__; TARGET=contextor.core.live_state.hydration; SOURCE_STATUS=LEXICAL_CANDIDATES; ACTIVATION_CLASSIFICATION=UNGUARDED_DIRECT_CANDIDATE; LEXICAL_SITE_COUNT=1; UNGUARDED_DIRECT_COUNT=1; FUNCTION_SCOPED_COUNT=0; GUARDED_TOP_LEVEL_COUNT=0; OTHER_SCOPED_COUNT=0; INDIRECT_CANDIDATE_COUNT=0; IN_DIRECT_CANDIDATE_GRAPH=True; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\live_state\__init__.py
+  - SITE={"activation_scope": "MODULE_TOP_LEVEL", "column": 0, "form": "IMPORT_FROM", "line": 20, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [], "raw_scopes": [], "requested_name": "contextor.core.live_state.hydration"}
+- SCC_ID=SCC01; SOURCE=contextor.core.live_state.__init__; TARGET=contextor.core.live_state.ipc; SOURCE_STATUS=LEXICAL_CANDIDATES; ACTIVATION_CLASSIFICATION=UNGUARDED_DIRECT_CANDIDATE; LEXICAL_SITE_COUNT=1; UNGUARDED_DIRECT_COUNT=1; FUNCTION_SCOPED_COUNT=0; GUARDED_TOP_LEVEL_COUNT=0; OTHER_SCOPED_COUNT=0; INDIRECT_CANDIDATE_COUNT=0; IN_DIRECT_CANDIDATE_GRAPH=True; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\live_state\__init__.py
+  - SITE={"activation_scope": "MODULE_TOP_LEVEL", "column": 0, "form": "IMPORT_FROM", "line": 11, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [], "raw_scopes": [], "requested_name": "contextor.core.live_state.ipc"}
+- SCC_ID=SCC01; SOURCE=contextor.core.live_state.__init__; TARGET=contextor.core.live_state.runtime; SOURCE_STATUS=LEXICAL_CANDIDATES; ACTIVATION_CLASSIFICATION=UNGUARDED_DIRECT_CANDIDATE; LEXICAL_SITE_COUNT=1; UNGUARDED_DIRECT_COUNT=1; FUNCTION_SCOPED_COUNT=0; GUARDED_TOP_LEVEL_COUNT=0; OTHER_SCOPED_COUNT=0; INDIRECT_CANDIDATE_COUNT=0; IN_DIRECT_CANDIDATE_GRAPH=True; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\live_state\__init__.py
+  - SITE={"activation_scope": "MODULE_TOP_LEVEL", "column": 0, "form": "IMPORT_FROM", "line": 12, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [], "raw_scopes": [], "requested_name": "contextor.core.live_state.runtime"}
+- SCC_ID=SCC01; SOURCE=contextor.core.live_state.__init__; TARGET=contextor.core.live_state.store; SOURCE_STATUS=LEXICAL_CANDIDATES; ACTIVATION_CLASSIFICATION=UNGUARDED_DIRECT_CANDIDATE; LEXICAL_SITE_COUNT=1; UNGUARDED_DIRECT_COUNT=1; FUNCTION_SCOPED_COUNT=0; GUARDED_TOP_LEVEL_COUNT=0; OTHER_SCOPED_COUNT=0; INDIRECT_CANDIDATE_COUNT=0; IN_DIRECT_CANDIDATE_GRAPH=True; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\live_state\__init__.py
+  - SITE={"activation_scope": "MODULE_TOP_LEVEL", "column": 0, "form": "IMPORT_FROM", "line": 3, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [], "raw_scopes": [], "requested_name": "contextor.core.live_state.store"}
+- SCC_ID=SCC01; SOURCE=contextor.core.live_state.__init__; TARGET=contextor.core.live_state.watcher; SOURCE_STATUS=LEXICAL_CANDIDATES; ACTIVATION_CLASSIFICATION=UNGUARDED_DIRECT_CANDIDATE; LEXICAL_SITE_COUNT=1; UNGUARDED_DIRECT_COUNT=1; FUNCTION_SCOPED_COUNT=0; GUARDED_TOP_LEVEL_COUNT=0; OTHER_SCOPED_COUNT=0; INDIRECT_CANDIDATE_COUNT=0; IN_DIRECT_CANDIDATE_GRAPH=True; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\live_state\__init__.py
+  - SITE={"activation_scope": "MODULE_TOP_LEVEL", "column": 0, "form": "IMPORT_FROM", "line": 19, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [], "raw_scopes": [], "requested_name": "contextor.core.live_state.watcher"}
+- SCC_ID=SCC01; SOURCE=contextor.core.live_state.hydration; TARGET=contextor.core.analysis.incremental_engine; SOURCE_STATUS=LEXICAL_CANDIDATES; ACTIVATION_CLASSIFICATION=CALL_DEPENDENT_CANDIDATE; LEXICAL_SITE_COUNT=1; UNGUARDED_DIRECT_COUNT=0; FUNCTION_SCOPED_COUNT=1; GUARDED_TOP_LEVEL_COUNT=0; OTHER_SCOPED_COUNT=0; INDIRECT_CANDIDATE_COUNT=0; IN_DIRECT_CANDIDATE_GRAPH=False; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\live_state\hydration.py
+  - SITE={"activation_scope": "FUNCTION_SCOPED", "column": 4, "form": "IMPORT_FROM", "line": 94, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [], "raw_scopes": [{"kind": "FUNCTION", "line": 87, "name": "hydrate_repository_engine"}], "requested_name": "contextor.core.analysis.incremental_engine"}
+- SCC_ID=SCC01; SOURCE=contextor.core.live_state.hydration; TARGET=contextor.core.analysis.state_manager; SOURCE_STATUS=LEXICAL_CANDIDATES; ACTIVATION_CLASSIFICATION=CALL_DEPENDENT_CANDIDATE; LEXICAL_SITE_COUNT=2; UNGUARDED_DIRECT_COUNT=0; FUNCTION_SCOPED_COUNT=2; GUARDED_TOP_LEVEL_COUNT=0; OTHER_SCOPED_COUNT=0; INDIRECT_CANDIDATE_COUNT=0; IN_DIRECT_CANDIDATE_GRAPH=False; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\live_state\hydration.py
+  - SITE={"activation_scope": "FUNCTION_SCOPED", "column": 4, "form": "IMPORT_FROM", "line": 36, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [], "raw_scopes": [{"kind": "FUNCTION", "line": 29, "name": "resolve_authoritative_repository_state"}], "requested_name": "contextor.core.analysis.state_manager"}
+  - SITE={"activation_scope": "FUNCTION_SCOPED", "column": 4, "form": "IMPORT_FROM", "line": 95, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [], "raw_scopes": [{"kind": "FUNCTION", "line": 87, "name": "hydrate_repository_engine"}], "requested_name": "contextor.core.analysis.state_manager"}
+- SCC_ID=SCC01; SOURCE=contextor.core.live_state.hydration; TARGET=contextor.core.live_state.runtime; SOURCE_STATUS=LEXICAL_CANDIDATES; ACTIVATION_CLASSIFICATION=CALL_DEPENDENT_CANDIDATE; LEXICAL_SITE_COUNT=1; UNGUARDED_DIRECT_COUNT=0; FUNCTION_SCOPED_COUNT=1; GUARDED_TOP_LEVEL_COUNT=0; OTHER_SCOPED_COUNT=0; INDIRECT_CANDIDATE_COUNT=0; IN_DIRECT_CANDIDATE_GRAPH=False; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\live_state\hydration.py
+  - SITE={"activation_scope": "FUNCTION_SCOPED", "column": 4, "form": "IMPORT_FROM", "line": 37, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [], "raw_scopes": [{"kind": "FUNCTION", "line": 29, "name": "resolve_authoritative_repository_state"}], "requested_name": "contextor.core.live_state.runtime"}
+- SCC_ID=SCC01; SOURCE=contextor.core.live_state.hydration; TARGET=contextor.core.live_state.store; SOURCE_STATUS=LEXICAL_CANDIDATES; ACTIVATION_CLASSIFICATION=CALL_DEPENDENT_CANDIDATE; LEXICAL_SITE_COUNT=1; UNGUARDED_DIRECT_COUNT=0; FUNCTION_SCOPED_COUNT=1; GUARDED_TOP_LEVEL_COUNT=0; OTHER_SCOPED_COUNT=0; INDIRECT_CANDIDATE_COUNT=0; IN_DIRECT_CANDIDATE_GRAPH=False; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\live_state\hydration.py
+  - SITE={"activation_scope": "FUNCTION_SCOPED", "column": 4, "form": "IMPORT_FROM", "line": 38, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [], "raw_scopes": [{"kind": "FUNCTION", "line": 29, "name": "resolve_authoritative_repository_state"}], "requested_name": "contextor.core.live_state.store"}
+- SCC_ID=SCC01; SOURCE=contextor.core.live_state.ipc; TARGET=contextor.core.live_state.store; SOURCE_STATUS=LEXICAL_CANDIDATES; ACTIVATION_CLASSIFICATION=CALL_DEPENDENT_CANDIDATE; LEXICAL_SITE_COUNT=1; UNGUARDED_DIRECT_COUNT=0; FUNCTION_SCOPED_COUNT=1; GUARDED_TOP_LEVEL_COUNT=0; OTHER_SCOPED_COUNT=0; INDIRECT_CANDIDATE_COUNT=0; IN_DIRECT_CANDIDATE_GRAPH=False; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\live_state\ipc.py
+  - SITE={"activation_scope": "FUNCTION_SCOPED", "column": 20, "form": "IMPORT_FROM", "line": 2032, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [{"branch": "BODY", "expression": null, "kind": "WITH", "line": 1896}, {"branch": "BODY", "expression": "Compare(left=Name(id='persister', ctx=Load()), ops=[IsNot()], comparators=[Constant(value=None)])", "kind": "IF", "line": 2026}, {"branch": "0", "expression": "Name(id='Exception', ctx=Load())", "kind": "EXCEPT", "line": 2031}], "raw_scopes": [{"kind": "CLASS", "line": 728, "name": "CanonicalLiveServer"}, {"kind": "FUNCTION", "line": 1884, "name": "_execute_update_file"}], "requested_name": "contextor.core.live_state.store"}
+- SCC_ID=SCC01; SOURCE=contextor.core.live_state.runtime; TARGET=contextor.core.analysis.full_analysis_coordinator; SOURCE_STATUS=LEXICAL_CANDIDATES; ACTIVATION_CLASSIFICATION=CALL_DEPENDENT_CANDIDATE; LEXICAL_SITE_COUNT=2; UNGUARDED_DIRECT_COUNT=0; FUNCTION_SCOPED_COUNT=2; GUARDED_TOP_LEVEL_COUNT=0; OTHER_SCOPED_COUNT=0; INDIRECT_CANDIDATE_COUNT=0; IN_DIRECT_CANDIDATE_GRAPH=False; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\live_state\runtime.py
+  - SITE={"activation_scope": "FUNCTION_SCOPED", "column": 8, "form": "IMPORT_FROM", "line": 1266, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [], "raw_scopes": [{"kind": "FUNCTION", "line": 1263, "name": "_repository_mutation_guard"}, {"kind": "FUNCTION", "line": 1265, "name": "guard"}], "requested_name": "contextor.core.analysis.full_analysis_coordinator"}
+  - SITE={"activation_scope": "FUNCTION_SCOPED", "column": 8, "form": "IMPORT_FROM", "line": 1309, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [], "raw_scopes": [{"kind": "FUNCTION", "line": 1306, "name": "_repository_recovery_verification_guard"}, {"kind": "FUNCTION", "line": 1308, "name": "guard"}], "requested_name": "contextor.core.analysis.full_analysis_coordinator"}
+- SCC_ID=SCC01; SOURCE=contextor.core.live_state.runtime; TARGET=contextor.core.analysis.incremental.materialization; SOURCE_STATUS=LEXICAL_CANDIDATES; ACTIVATION_CLASSIFICATION=CALL_DEPENDENT_CANDIDATE; LEXICAL_SITE_COUNT=1; UNGUARDED_DIRECT_COUNT=0; FUNCTION_SCOPED_COUNT=1; GUARDED_TOP_LEVEL_COUNT=0; OTHER_SCOPED_COUNT=0; INDIRECT_CANDIDATE_COUNT=0; IN_DIRECT_CANDIDATE_GRAPH=False; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\live_state\runtime.py
+  - SITE={"activation_scope": "FUNCTION_SCOPED", "column": 12, "form": "IMPORT_FROM", "line": 1449, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [{"branch": "BODY", "expression": null, "kind": "TRY", "line": 1396}, {"branch": "BODY", "expression": "Compare(left=Name(id='state', ctx=Load()), ops=[IsNot()], comparators=[Constant(value=None)])", "kind": "IF", "line": 1447}], "raw_scopes": [{"kind": "FUNCTION", "line": 1329, "name": "run_service"}], "requested_name": "contextor.core.analysis.incremental.materialization"}
+- SCC_ID=SCC01; SOURCE=contextor.core.live_state.runtime; TARGET=contextor.core.analysis.incremental_engine; SOURCE_STATUS=LEXICAL_CANDIDATES; ACTIVATION_CLASSIFICATION=CALL_DEPENDENT_CANDIDATE; LEXICAL_SITE_COUNT=1; UNGUARDED_DIRECT_COUNT=0; FUNCTION_SCOPED_COUNT=1; GUARDED_TOP_LEVEL_COUNT=0; OTHER_SCOPED_COUNT=0; INDIRECT_CANDIDATE_COUNT=0; IN_DIRECT_CANDIDATE_GRAPH=False; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\live_state\runtime.py
+  - SITE={"activation_scope": "FUNCTION_SCOPED", "column": 8, "form": "IMPORT_FROM", "line": 1116, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [], "raw_scopes": [{"kind": "FUNCTION", "line": 1108, "name": "_repository_updater"}, {"kind": "FUNCTION", "line": 1112, "name": "update"}], "requested_name": "contextor.core.analysis.incremental_engine"}
+- SCC_ID=SCC01; SOURCE=contextor.core.live_state.runtime; TARGET=contextor.core.analysis.state_manager; SOURCE_STATUS=LEXICAL_CANDIDATES; ACTIVATION_CLASSIFICATION=CALL_DEPENDENT_CANDIDATE; LEXICAL_SITE_COUNT=3; UNGUARDED_DIRECT_COUNT=0; FUNCTION_SCOPED_COUNT=3; GUARDED_TOP_LEVEL_COUNT=0; OTHER_SCOPED_COUNT=0; INDIRECT_CANDIDATE_COUNT=0; IN_DIRECT_CANDIDATE_GRAPH=False; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\live_state\runtime.py
+  - SITE={"activation_scope": "FUNCTION_SCOPED", "column": 8, "form": "IMPORT_FROM", "line": 1117, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [], "raw_scopes": [{"kind": "FUNCTION", "line": 1108, "name": "_repository_updater"}, {"kind": "FUNCTION", "line": 1112, "name": "update"}], "requested_name": "contextor.core.analysis.state_manager"}
+  - SITE={"activation_scope": "FUNCTION_SCOPED", "column": 12, "form": "IMPORT_FROM", "line": 1172, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [{"branch": "BODY", "expression": "Compare(left=Name(id='manager', ctx=Load()), ops=[Is()], comparators=[Constant(value=None)])", "kind": "IF", "line": 1171}], "raw_scopes": [{"kind": "FUNCTION", "line": 1153, "name": "_repository_persister"}, {"kind": "FUNCTION", "line": 1163, "name": "persist"}], "requested_name": "contextor.core.analysis.state_manager"}
+  - SITE={"activation_scope": "FUNCTION_SCOPED", "column": 24, "form": "IMPORT_FROM", "line": 1500, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [{"branch": "BODY", "expression": null, "kind": "TRY", "line": 1396}, {"branch": "BODY", "expression": "Compare(left=Name(id='state', ctx=Load()), ops=[IsNot()], comparators=[Constant(value=None)])", "kind": "IF", "line": 1447}, {"branch": "BODY", "expression": "Name(id='materialization_required', ctx=Load())", "kind": "IF", "line": 1467}, {"branch": "BODY", "expression": null, "kind": "TRY", "line": 1479}, {"branch": "BODY", "expression": "Name(id='materialization_required', ctx=Load())", "kind": "IF", "line": 1497}], "raw_scopes": [{"kind": "FUNCTION", "line": 1329, "name": "run_service"}], "requested_name": "contextor.core.analysis.state_manager"}
+- SCC_ID=SCC01; SOURCE=contextor.core.live_state.runtime; TARGET=contextor.core.lineage_query.live_query; SOURCE_STATUS=LEXICAL_CANDIDATES; ACTIVATION_CLASSIFICATION=UNGUARDED_DIRECT_CANDIDATE; LEXICAL_SITE_COUNT=1; UNGUARDED_DIRECT_COUNT=1; FUNCTION_SCOPED_COUNT=0; GUARDED_TOP_LEVEL_COUNT=0; OTHER_SCOPED_COUNT=0; INDIRECT_CANDIDATE_COUNT=0; IN_DIRECT_CANDIDATE_GRAPH=True; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\live_state\runtime.py
+  - SITE={"activation_scope": "MODULE_TOP_LEVEL", "column": 0, "form": "IMPORT_FROM", "line": 19, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [], "raw_scopes": [], "requested_name": "contextor.core.lineage_query.live_query"}
+- SCC_ID=SCC01; SOURCE=contextor.core.live_state.runtime; TARGET=contextor.core.live_state.ipc; SOURCE_STATUS=LEXICAL_CANDIDATES; ACTIVATION_CLASSIFICATION=UNGUARDED_DIRECT_CANDIDATE; LEXICAL_SITE_COUNT=1; UNGUARDED_DIRECT_COUNT=1; FUNCTION_SCOPED_COUNT=0; GUARDED_TOP_LEVEL_COUNT=0; OTHER_SCOPED_COUNT=0; INDIRECT_CANDIDATE_COUNT=0; IN_DIRECT_CANDIDATE_GRAPH=True; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\live_state\runtime.py
+  - SITE={"activation_scope": "MODULE_TOP_LEVEL", "column": 0, "form": "IMPORT_FROM", "line": 39, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [], "raw_scopes": [], "requested_name": "contextor.core.live_state.ipc"}
+- SCC_ID=SCC01; SOURCE=contextor.core.live_state.runtime; TARGET=contextor.core.live_state.store; SOURCE_STATUS=LEXICAL_CANDIDATES; ACTIVATION_CLASSIFICATION=UNGUARDED_DIRECT_CANDIDATE; LEXICAL_SITE_COUNT=2; UNGUARDED_DIRECT_COUNT=1; FUNCTION_SCOPED_COUNT=1; GUARDED_TOP_LEVEL_COUNT=0; OTHER_SCOPED_COUNT=0; INDIRECT_CANDIDATE_COUNT=0; IN_DIRECT_CANDIDATE_GRAPH=True; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\live_state\runtime.py
+  - SITE={"activation_scope": "MODULE_TOP_LEVEL", "column": 0, "form": "IMPORT_FROM", "line": 47, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [], "raw_scopes": [], "requested_name": "contextor.core.live_state.store"}
+  - SITE={"activation_scope": "FUNCTION_SCOPED", "column": 12, "form": "IMPORT_FROM", "line": 1218, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [{"branch": "0", "expression": "Name(id='Exception', ctx=Load())", "kind": "EXCEPT", "line": 1206}], "raw_scopes": [{"kind": "FUNCTION", "line": 1153, "name": "_repository_persister"}, {"kind": "FUNCTION", "line": 1163, "name": "persist"}], "requested_name": "contextor.core.live_state.store"}
+- SCC_ID=SCC01; SOURCE=contextor.core.live_state.store; TARGET=contextor.core.analysis.state_manager; SOURCE_STATUS=LEXICAL_CANDIDATES; ACTIVATION_CLASSIFICATION=CALL_DEPENDENT_CANDIDATE; LEXICAL_SITE_COUNT=2; UNGUARDED_DIRECT_COUNT=0; FUNCTION_SCOPED_COUNT=2; GUARDED_TOP_LEVEL_COUNT=0; OTHER_SCOPED_COUNT=0; INDIRECT_CANDIDATE_COUNT=0; IN_DIRECT_CANDIDATE_GRAPH=False; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\live_state\store.py
+  - SITE={"activation_scope": "FUNCTION_SCOPED", "column": 4, "form": "IMPORT_FROM", "line": 128, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [], "raw_scopes": [{"kind": "FUNCTION", "line": 122, "name": "_normalize_reexport_facts_state"}], "requested_name": "contextor.core.analysis.state_manager"}
+  - SITE={"activation_scope": "FUNCTION_SCOPED", "column": 4, "form": "IMPORT_FROM", "line": 1524, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [], "raw_scopes": [{"kind": "FUNCTION", "line": 1507, "name": "save_snapshot"}], "requested_name": "contextor.core.analysis.state_manager"}
+- SCC_ID=SCC01; SOURCE=contextor.core.live_state.watcher; TARGET=contextor.core.analysis.state_manager; SOURCE_STATUS=LEXICAL_CANDIDATES; ACTIVATION_CLASSIFICATION=CALL_DEPENDENT_CANDIDATE; LEXICAL_SITE_COUNT=2; UNGUARDED_DIRECT_COUNT=0; FUNCTION_SCOPED_COUNT=2; GUARDED_TOP_LEVEL_COUNT=0; OTHER_SCOPED_COUNT=0; INDIRECT_CANDIDATE_COUNT=0; IN_DIRECT_CANDIDATE_GRAPH=False; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\live_state\watcher.py
+  - SITE={"activation_scope": "FUNCTION_SCOPED", "column": 8, "form": "IMPORT_FROM", "line": 514, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [], "raw_scopes": [{"kind": "CLASS", "line": 110, "name": "DesktopLiveWatcher"}, {"kind": "FUNCTION", "line": 498, "name": "_startup_reconciliation_paths"}], "requested_name": "contextor.core.analysis.state_manager"}
+  - SITE={"activation_scope": "FUNCTION_SCOPED", "column": 8, "form": "IMPORT_FROM", "line": 535, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [], "raw_scopes": [{"kind": "CLASS", "line": 110, "name": "DesktopLiveWatcher"}, {"kind": "FUNCTION", "line": 533, "name": "_trusted_file_state"}], "requested_name": "contextor.core.analysis.state_manager"}
+- SCC_ID=SCC01; SOURCE=contextor.core.live_state.watcher; TARGET=contextor.core.api.facade; SOURCE_STATUS=LEXICAL_CANDIDATES; ACTIVATION_CLASSIFICATION=CALL_DEPENDENT_CANDIDATE; LEXICAL_SITE_COUNT=1; UNGUARDED_DIRECT_COUNT=0; FUNCTION_SCOPED_COUNT=1; GUARDED_TOP_LEVEL_COUNT=0; OTHER_SCOPED_COUNT=0; INDIRECT_CANDIDATE_COUNT=0; IN_DIRECT_CANDIDATE_GRAPH=False; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\live_state\watcher.py
+  - SITE={"activation_scope": "FUNCTION_SCOPED", "column": 8, "form": "IMPORT_FROM", "line": 486, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [], "raw_scopes": [{"kind": "CLASS", "line": 110, "name": "DesktopLiveWatcher"}, {"kind": "FUNCTION", "line": 485, "name": "_load_watch_filters"}], "requested_name": "contextor.core.api.facade"}
+- SCC_ID=SCC01; SOURCE=contextor.core.live_state.watcher; TARGET=contextor.core.live_state.ipc; SOURCE_STATUS=LEXICAL_CANDIDATES; ACTIVATION_CLASSIFICATION=UNGUARDED_DIRECT_CANDIDATE; LEXICAL_SITE_COUNT=1; UNGUARDED_DIRECT_COUNT=1; FUNCTION_SCOPED_COUNT=0; GUARDED_TOP_LEVEL_COUNT=0; OTHER_SCOPED_COUNT=0; INDIRECT_CANDIDATE_COUNT=0; IN_DIRECT_CANDIDATE_GRAPH=True; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\live_state\watcher.py
+  - SITE={"activation_scope": "MODULE_TOP_LEVEL", "column": 0, "form": "IMPORT_FROM", "line": 18, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [], "raw_scopes": [], "requested_name": "contextor.core.live_state.ipc"}
+- SCC_ID=SCC01; SOURCE=contextor.core.live_state.watcher; TARGET=contextor.core.live_state.runtime; SOURCE_STATUS=LEXICAL_CANDIDATES; ACTIVATION_CLASSIFICATION=CALL_DEPENDENT_CANDIDATE; LEXICAL_SITE_COUNT=1; UNGUARDED_DIRECT_COUNT=0; FUNCTION_SCOPED_COUNT=1; GUARDED_TOP_LEVEL_COUNT=0; OTHER_SCOPED_COUNT=0; INDIRECT_CANDIDATE_COUNT=0; IN_DIRECT_CANDIDATE_GRAPH=False; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\live_state\watcher.py
+  - SITE={"activation_scope": "FUNCTION_SCOPED", "column": 12, "form": "IMPORT_FROM", "line": 372, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [{"branch": "BODY", "expression": null, "kind": "TRY", "line": 371}], "raw_scopes": [{"kind": "CLASS", "line": 110, "name": "DesktopLiveWatcher"}, {"kind": "FUNCTION", "line": 350, "name": "_recover_client"}], "requested_name": "contextor.core.live_state.runtime"}
+- SCC_ID=SCC01; SOURCE=contextor.core.reference.module_usage_reuse; TARGET=contextor.core.analysis.state_manager; SOURCE_STATUS=LEXICAL_CANDIDATES; ACTIVATION_CLASSIFICATION=UNGUARDED_DIRECT_CANDIDATE; LEXICAL_SITE_COUNT=1; UNGUARDED_DIRECT_COUNT=1; FUNCTION_SCOPED_COUNT=0; GUARDED_TOP_LEVEL_COUNT=0; OTHER_SCOPED_COUNT=0; INDIRECT_CANDIDATE_COUNT=0; IN_DIRECT_CANDIDATE_GRAPH=True; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\reference\module_usage_reuse.py
+  - SITE={"activation_scope": "MODULE_TOP_LEVEL", "column": 0, "form": "IMPORT_FROM", "line": 4, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [], "raw_scopes": [], "requested_name": "contextor.core.analysis.state_manager"}
+- SCC_ID=SCC01; SOURCE=contextor.core.reporting_engine.pipeline; TARGET=contextor.core.analysis.state_manager; SOURCE_STATUS=LEXICAL_CANDIDATES; ACTIVATION_CLASSIFICATION=CALL_DEPENDENT_CANDIDATE; LEXICAL_SITE_COUNT=1; UNGUARDED_DIRECT_COUNT=0; FUNCTION_SCOPED_COUNT=1; GUARDED_TOP_LEVEL_COUNT=0; OTHER_SCOPED_COUNT=0; INDIRECT_CANDIDATE_COUNT=0; IN_DIRECT_CANDIDATE_GRAPH=False; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\reporting_engine\pipeline.py
+  - SITE={"activation_scope": "FUNCTION_SCOPED", "column": 4, "form": "IMPORT_FROM", "line": 106, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [], "raw_scopes": [{"kind": "FUNCTION", "line": 34, "name": "execute_global_pipeline"}], "requested_name": "contextor.core.analysis.state_manager"}
+- SCC_ID=SCC01; SOURCE=contextor.core.single_file.builders.__init__; TARGET=contextor.core.single_file.builders.layer0_builders; SOURCE_STATUS=LEXICAL_CANDIDATES; ACTIVATION_CLASSIFICATION=UNGUARDED_DIRECT_CANDIDATE; LEXICAL_SITE_COUNT=1; UNGUARDED_DIRECT_COUNT=1; FUNCTION_SCOPED_COUNT=0; GUARDED_TOP_LEVEL_COUNT=0; OTHER_SCOPED_COUNT=0; INDIRECT_CANDIDATE_COUNT=0; IN_DIRECT_CANDIDATE_GRAPH=True; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\single_file\builders\__init__.py
+  - SITE={"activation_scope": "MODULE_TOP_LEVEL", "column": 0, "form": "IMPORT_FROM", "line": 3, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [], "raw_scopes": [], "requested_name": "contextor.core.single_file.builders.layer0_builders"}
+- SCC_ID=SCC01; SOURCE=contextor.core.single_file.builders.__init__; TARGET=contextor.core.single_file.builders.layer2_builders; SOURCE_STATUS=LEXICAL_CANDIDATES; ACTIVATION_CLASSIFICATION=UNGUARDED_DIRECT_CANDIDATE; LEXICAL_SITE_COUNT=1; UNGUARDED_DIRECT_COUNT=1; FUNCTION_SCOPED_COUNT=0; GUARDED_TOP_LEVEL_COUNT=0; OTHER_SCOPED_COUNT=0; INDIRECT_CANDIDATE_COUNT=0; IN_DIRECT_CANDIDATE_GRAPH=True; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\single_file\builders\__init__.py
+  - SITE={"activation_scope": "MODULE_TOP_LEVEL", "column": 0, "form": "IMPORT_FROM", "line": 10, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [], "raw_scopes": [], "requested_name": "contextor.core.single_file.builders.layer2_builders"}
+- SCC_ID=SCC01; SOURCE=contextor.core.single_file.builders.layer0_builders; TARGET=contextor.core.analysis.state_manager; SOURCE_STATUS=LEXICAL_CANDIDATES; ACTIVATION_CLASSIFICATION=CALL_DEPENDENT_CANDIDATE; LEXICAL_SITE_COUNT=1; UNGUARDED_DIRECT_COUNT=0; FUNCTION_SCOPED_COUNT=1; GUARDED_TOP_LEVEL_COUNT=0; OTHER_SCOPED_COUNT=0; INDIRECT_CANDIDATE_COUNT=0; IN_DIRECT_CANDIDATE_GRAPH=False; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\single_file\builders\layer0_builders.py
+  - SITE={"activation_scope": "FUNCTION_SCOPED", "column": 4, "form": "IMPORT_FROM", "line": 26, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [], "raw_scopes": [{"kind": "FUNCTION", "line": 18, "name": "_canonical_state_module_is_current"}], "requested_name": "contextor.core.analysis.state_manager"}
+- SCC_ID=SCC01; SOURCE=contextor.core.single_file.builders.layer2_builders; TARGET=contextor.core.analysis.state_manager; SOURCE_STATUS=LEXICAL_CANDIDATES; ACTIVATION_CLASSIFICATION=CALL_DEPENDENT_CANDIDATE; LEXICAL_SITE_COUNT=1; UNGUARDED_DIRECT_COUNT=0; FUNCTION_SCOPED_COUNT=1; GUARDED_TOP_LEVEL_COUNT=0; OTHER_SCOPED_COUNT=0; INDIRECT_CANDIDATE_COUNT=0; IN_DIRECT_CANDIDATE_GRAPH=False; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\single_file\builders\layer2_builders.py
+  - SITE={"activation_scope": "FUNCTION_SCOPED", "column": 8, "form": "IMPORT_FROM", "line": 11, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [], "raw_scopes": [{"kind": "CLASS", "line": 4, "name": "TestContextBuilder"}, {"kind": "FUNCTION", "line": 9, "name": "build"}], "requested_name": "contextor.core.analysis.state_manager"}
+- SCC_ID=SCC01; SOURCE=contextor.core.single_file.single_file_analysis; TARGET=contextor.core.single_file.builders.__init__; SOURCE_STATUS=LEXICAL_CANDIDATES; ACTIVATION_CLASSIFICATION=UNGUARDED_DIRECT_CANDIDATE; LEXICAL_SITE_COUNT=1; UNGUARDED_DIRECT_COUNT=1; FUNCTION_SCOPED_COUNT=0; GUARDED_TOP_LEVEL_COUNT=0; OTHER_SCOPED_COUNT=0; INDIRECT_CANDIDATE_COUNT=0; IN_DIRECT_CANDIDATE_GRAPH=True; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\single_file\single_file_analysis.py
+  - SITE={"activation_scope": "MODULE_TOP_LEVEL", "column": 0, "form": "IMPORT_FROM", "line": 14, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [], "raw_scopes": [], "requested_name": "contextor.core.single_file.builders"}
+- SCC_ID=SCC01; SOURCE=contextor.core.symbol_engine.indexer; TARGET=contextor.core.analysis.lineage_extraction; SOURCE_STATUS=LEXICAL_CANDIDATES; ACTIVATION_CLASSIFICATION=UNGUARDED_DIRECT_CANDIDATE; LEXICAL_SITE_COUNT=1; UNGUARDED_DIRECT_COUNT=1; FUNCTION_SCOPED_COUNT=0; GUARDED_TOP_LEVEL_COUNT=0; OTHER_SCOPED_COUNT=0; INDIRECT_CANDIDATE_COUNT=0; IN_DIRECT_CANDIDATE_GRAPH=True; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\core\symbol_engine\indexer.py
+  - SITE={"activation_scope": "MODULE_TOP_LEVEL", "column": 0, "form": "IMPORT_FROM", "line": 25, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [], "raw_scopes": [], "requested_name": "contextor.core.analysis.lineage_extraction"}
+### SCC02
+- SCC_ID=SCC02; SOURCE=contextor.repo_generator.__init__; TARGET=contextor.repo_generator.main; SOURCE_STATUS=LEXICAL_CANDIDATES; ACTIVATION_CLASSIFICATION=UNGUARDED_DIRECT_CANDIDATE; LEXICAL_SITE_COUNT=1; UNGUARDED_DIRECT_COUNT=1; FUNCTION_SCOPED_COUNT=0; GUARDED_TOP_LEVEL_COUNT=0; OTHER_SCOPED_COUNT=0; INDIRECT_CANDIDATE_COUNT=0; IN_DIRECT_CANDIDATE_GRAPH=True; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\repo_generator\__init__.py
+  - SITE={"activation_scope": "MODULE_TOP_LEVEL", "column": 0, "form": "IMPORT_FROM", "line": 1, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [], "raw_scopes": [], "requested_name": "contextor.repo_generator.main"}
+- SCC_ID=SCC02; SOURCE=contextor.repo_generator.filters; TARGET=contextor.ui.__init__; SOURCE_STATUS=LEXICAL_CANDIDATES; ACTIVATION_CLASSIFICATION=UNGUARDED_DIRECT_CANDIDATE; LEXICAL_SITE_COUNT=3; UNGUARDED_DIRECT_COUNT=1; FUNCTION_SCOPED_COUNT=0; GUARDED_TOP_LEVEL_COUNT=0; OTHER_SCOPED_COUNT=0; INDIRECT_CANDIDATE_COUNT=2; IN_DIRECT_CANDIDATE_GRAPH=True; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\repo_generator\filters.py
+  - SITE={"activation_scope": "MODULE_TOP_LEVEL", "column": 0, "form": "IMPORT_FROM", "line": 5, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [], "raw_scopes": [], "requested_name": "contextor.ui"}
+  - SITE={"activation_scope": "MODULE_TOP_LEVEL", "column": 0, "form": "IMPORT_FROM", "line": 6, "match_kind": "PARENT_INITIALIZER", "matched_member": null, "raw_controls": [], "raw_scopes": [], "requested_name": "contextor.ui.path_memory"}
+  - SITE={"activation_scope": "MODULE_TOP_LEVEL", "column": 0, "form": "IMPORT_FROM", "line": 7, "match_kind": "PARENT_INITIALIZER", "matched_member": null, "raw_controls": [], "raw_scopes": [], "requested_name": "contextor.ui.theme"}
+- SCC_ID=SCC02; SOURCE=contextor.repo_generator.icons; TARGET=contextor.ui.__init__; SOURCE_STATUS=LEXICAL_CANDIDATES; ACTIVATION_CLASSIFICATION=UNGUARDED_DIRECT_CANDIDATE; LEXICAL_SITE_COUNT=2; UNGUARDED_DIRECT_COUNT=1; FUNCTION_SCOPED_COUNT=0; GUARDED_TOP_LEVEL_COUNT=0; OTHER_SCOPED_COUNT=0; INDIRECT_CANDIDATE_COUNT=1; IN_DIRECT_CANDIDATE_GRAPH=True; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\repo_generator\icons.py
+  - SITE={"activation_scope": "MODULE_TOP_LEVEL", "column": 0, "form": "IMPORT_FROM", "line": 4, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [], "raw_scopes": [], "requested_name": "contextor.ui"}
+  - SITE={"activation_scope": "MODULE_TOP_LEVEL", "column": 0, "form": "IMPORT_FROM", "line": 5, "match_kind": "PARENT_INITIALIZER", "matched_member": null, "raw_controls": [], "raw_scopes": [], "requested_name": "contextor.ui.theme"}
+- SCC_ID=SCC02; SOURCE=contextor.repo_generator.main; TARGET=contextor.repo_generator.filters; SOURCE_STATUS=LEXICAL_CANDIDATES; ACTIVATION_CLASSIFICATION=UNGUARDED_DIRECT_CANDIDATE; LEXICAL_SITE_COUNT=1; UNGUARDED_DIRECT_COUNT=1; FUNCTION_SCOPED_COUNT=0; GUARDED_TOP_LEVEL_COUNT=0; OTHER_SCOPED_COUNT=0; INDIRECT_CANDIDATE_COUNT=0; IN_DIRECT_CANDIDATE_GRAPH=True; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\repo_generator\main.py
+  - SITE={"activation_scope": "MODULE_TOP_LEVEL", "column": 0, "form": "IMPORT_FROM", "line": 8, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [], "raw_scopes": [], "requested_name": "contextor.repo_generator.filters"}
+- SCC_ID=SCC02; SOURCE=contextor.repo_generator.main; TARGET=contextor.repo_generator.icons; SOURCE_STATUS=LEXICAL_CANDIDATES; ACTIVATION_CLASSIFICATION=UNGUARDED_DIRECT_CANDIDATE; LEXICAL_SITE_COUNT=1; UNGUARDED_DIRECT_COUNT=1; FUNCTION_SCOPED_COUNT=0; GUARDED_TOP_LEVEL_COUNT=0; OTHER_SCOPED_COUNT=0; INDIRECT_CANDIDATE_COUNT=0; IN_DIRECT_CANDIDATE_GRAPH=True; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\repo_generator\main.py
+  - SITE={"activation_scope": "MODULE_TOP_LEVEL", "column": 0, "form": "IMPORT_FROM", "line": 9, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [], "raw_scopes": [], "requested_name": "contextor.repo_generator.icons"}
+- SCC_ID=SCC02; SOURCE=contextor.repo_generator.main; TARGET=contextor.ui.__init__; SOURCE_STATUS=LEXICAL_CANDIDATES; ACTIVATION_CLASSIFICATION=UNGUARDED_DIRECT_CANDIDATE; LEXICAL_SITE_COUNT=3; UNGUARDED_DIRECT_COUNT=1; FUNCTION_SCOPED_COUNT=0; GUARDED_TOP_LEVEL_COUNT=0; OTHER_SCOPED_COUNT=0; INDIRECT_CANDIDATE_COUNT=2; IN_DIRECT_CANDIDATE_GRAPH=True; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\repo_generator\main.py
+  - SITE={"activation_scope": "MODULE_TOP_LEVEL", "column": 0, "form": "IMPORT_FROM", "line": 11, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [], "raw_scopes": [], "requested_name": "contextor.ui"}
+  - SITE={"activation_scope": "MODULE_TOP_LEVEL", "column": 0, "form": "IMPORT_FROM", "line": 12, "match_kind": "PARENT_INITIALIZER", "matched_member": null, "raw_controls": [], "raw_scopes": [], "requested_name": "contextor.ui.path_memory"}
+  - SITE={"activation_scope": "MODULE_TOP_LEVEL", "column": 0, "form": "IMPORT_FROM", "line": 13, "match_kind": "PARENT_INITIALIZER", "matched_member": null, "raw_controls": [], "raw_scopes": [], "requested_name": "contextor.ui.theme"}
+- SCC_ID=SCC02; SOURCE=contextor.ui.__init__; TARGET=contextor.ui.gui; SOURCE_STATUS=LEXICAL_CANDIDATES; ACTIVATION_CLASSIFICATION=UNGUARDED_DIRECT_CANDIDATE; LEXICAL_SITE_COUNT=1; UNGUARDED_DIRECT_COUNT=1; FUNCTION_SCOPED_COUNT=0; GUARDED_TOP_LEVEL_COUNT=0; OTHER_SCOPED_COUNT=0; INDIRECT_CANDIDATE_COUNT=0; IN_DIRECT_CANDIDATE_GRAPH=True; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\ui\__init__.py
+  - SITE={"activation_scope": "MODULE_TOP_LEVEL", "column": 0, "form": "IMPORT_FROM", "line": 5, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [], "raw_scopes": [], "requested_name": "contextor.ui.gui"}
+- SCC_ID=SCC02; SOURCE=contextor.ui.exclude_gui; TARGET=contextor.ui.__init__; SOURCE_STATUS=LEXICAL_CANDIDATES; ACTIVATION_CLASSIFICATION=UNGUARDED_DIRECT_CANDIDATE; LEXICAL_SITE_COUNT=4; UNGUARDED_DIRECT_COUNT=1; FUNCTION_SCOPED_COUNT=2; GUARDED_TOP_LEVEL_COUNT=0; OTHER_SCOPED_COUNT=0; INDIRECT_CANDIDATE_COUNT=3; IN_DIRECT_CANDIDATE_GRAPH=True; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\ui\exclude_gui.py
+  - SITE={"activation_scope": "MODULE_TOP_LEVEL", "column": 0, "form": "IMPORT_FROM", "line": 16, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [], "raw_scopes": [], "requested_name": "contextor.ui"}
+  - SITE={"activation_scope": "MODULE_TOP_LEVEL", "column": 0, "form": "IMPORT_FROM", "line": 17, "match_kind": "PARENT_INITIALIZER", "matched_member": null, "raw_controls": [], "raw_scopes": [], "requested_name": "contextor.ui.theme"}
+  - SITE={"activation_scope": "FUNCTION_SCOPED", "column": 4, "form": "IMPORT_FROM", "line": 127, "match_kind": "PARENT_INITIALIZER", "matched_member": null, "raw_controls": [], "raw_scopes": [{"kind": "FUNCTION", "line": 125, "name": "find_repo_root"}], "requested_name": "contextor.ui.path_memory"}
+  - SITE={"activation_scope": "FUNCTION_SCOPED", "column": 4, "form": "IMPORT_FROM", "line": 148, "match_kind": "PARENT_INITIALIZER", "matched_member": null, "raw_controls": [], "raw_scopes": [{"kind": "FUNCTION", "line": 142, "name": "run_exclude_window"}], "requested_name": "contextor.ui.path_memory"}
+- SCC_ID=SCC02; SOURCE=contextor.ui.gui; TARGET=contextor.repo_generator.__init__; SOURCE_STATUS=LEXICAL_CANDIDATES; ACTIVATION_CLASSIFICATION=UNGUARDED_DIRECT_CANDIDATE; LEXICAL_SITE_COUNT=1; UNGUARDED_DIRECT_COUNT=1; FUNCTION_SCOPED_COUNT=0; GUARDED_TOP_LEVEL_COUNT=0; OTHER_SCOPED_COUNT=0; INDIRECT_CANDIDATE_COUNT=0; IN_DIRECT_CANDIDATE_GRAPH=True; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\ui\gui.py
+  - SITE={"activation_scope": "MODULE_TOP_LEVEL", "column": 0, "form": "IMPORT_FROM", "line": 43, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [], "raw_scopes": [], "requested_name": "contextor.repo_generator"}
+- SCC_ID=SCC02; SOURCE=contextor.ui.gui; TARGET=contextor.ui.__init__; SOURCE_STATUS=LEXICAL_CANDIDATES; ACTIVATION_CLASSIFICATION=UNGUARDED_DIRECT_CANDIDATE; LEXICAL_SITE_COUNT=11; UNGUARDED_DIRECT_COUNT=1; FUNCTION_SCOPED_COUNT=2; GUARDED_TOP_LEVEL_COUNT=0; OTHER_SCOPED_COUNT=0; INDIRECT_CANDIDATE_COUNT=10; IN_DIRECT_CANDIDATE_GRAPH=True; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\ui\gui.py
+  - SITE={"activation_scope": "MODULE_TOP_LEVEL", "column": 0, "form": "IMPORT_FROM", "line": 52, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [], "raw_scopes": [], "requested_name": "contextor.ui"}
+  - SITE={"activation_scope": "MODULE_TOP_LEVEL", "column": 0, "form": "IMPORT_FROM", "line": 53, "match_kind": "PARENT_INITIALIZER", "matched_member": null, "raw_controls": [], "raw_scopes": [], "requested_name": "contextor.ui.exclude_check"}
+  - SITE={"activation_scope": "MODULE_TOP_LEVEL", "column": 0, "form": "IMPORT_FROM", "line": 54, "match_kind": "PARENT_INITIALIZER", "matched_member": null, "raw_controls": [], "raw_scopes": [], "requested_name": "contextor.ui.exclude_gui"}
+  - SITE={"activation_scope": "MODULE_TOP_LEVEL", "column": 0, "form": "IMPORT_FROM", "line": 55, "match_kind": "PARENT_INITIALIZER", "matched_member": null, "raw_controls": [], "raw_scopes": [], "requested_name": "contextor.ui.gui_parser"}
+  - SITE={"activation_scope": "MODULE_TOP_LEVEL", "column": 0, "form": "IMPORT_FROM", "line": 56, "match_kind": "PARENT_INITIALIZER", "matched_member": null, "raw_controls": [], "raw_scopes": [], "requested_name": "contextor.ui.path_memory"}
+  - SITE={"activation_scope": "MODULE_TOP_LEVEL", "column": 0, "form": "IMPORT_FROM", "line": 57, "match_kind": "PARENT_INITIALIZER", "matched_member": null, "raw_controls": [], "raw_scopes": [], "requested_name": "contextor.ui.progress_widget"}
+  - SITE={"activation_scope": "MODULE_TOP_LEVEL", "column": 0, "form": "IMPORT_FROM", "line": 64, "match_kind": "PARENT_INITIALIZER", "matched_member": null, "raw_controls": [], "raw_scopes": [], "requested_name": "contextor.ui.system_actions"}
+  - SITE={"activation_scope": "MODULE_TOP_LEVEL", "column": 0, "form": "IMPORT_FROM", "line": 69, "match_kind": "PARENT_INITIALIZER", "matched_member": null, "raw_controls": [], "raw_scopes": [], "requested_name": "contextor.ui.test_runner"}
+  - SITE={"activation_scope": "MODULE_TOP_LEVEL", "column": 0, "form": "IMPORT_FROM", "line": 74, "match_kind": "PARENT_INITIALIZER", "matched_member": null, "raw_controls": [], "raw_scopes": [], "requested_name": "contextor.ui.theme"}
+  - SITE={"activation_scope": "FUNCTION_SCOPED", "column": 12, "form": "IMPORT_FROM", "line": 411, "match_kind": "PARENT_INITIALIZER", "matched_member": null, "raw_controls": [{"branch": "BODY", "expression": "Name(id='json_path', ctx=Load())", "kind": "IF", "line": 410}], "raw_scopes": [{"kind": "CLASS", "line": 91, "name": "ContextorGUI"}, {"kind": "FUNCTION", "line": 399, "name": "open_rewrite_tool"}], "requested_name": "contextor.ui.gui_parser"}
+  - SITE={"activation_scope": "FUNCTION_SCOPED", "column": 20, "form": "IMPORT_FROM", "line": 440, "match_kind": "PARENT_INITIALIZER", "matched_member": null, "raw_controls": [{"branch": "BODY", "expression": "Name(id='answer', ctx=Load())", "kind": "IF", "line": 439}], "raw_scopes": [{"kind": "CLASS", "line": 91, "name": "ContextorGUI"}, {"kind": "FUNCTION", "line": 418, "name": "_check_stale_excludes"}, {"kind": "FUNCTION", "line": 426, "name": "worker"}, {"kind": "FUNCTION", "line": 433, "name": "prompt"}], "requested_name": "contextor.ui.exclude_gui"}
+- SCC_ID=SCC02; SOURCE=contextor.ui.gui; TARGET=contextor.ui.exclude_gui; SOURCE_STATUS=LEXICAL_CANDIDATES; ACTIVATION_CLASSIFICATION=UNGUARDED_DIRECT_CANDIDATE; LEXICAL_SITE_COUNT=2; UNGUARDED_DIRECT_COUNT=1; FUNCTION_SCOPED_COUNT=1; GUARDED_TOP_LEVEL_COUNT=0; OTHER_SCOPED_COUNT=0; INDIRECT_CANDIDATE_COUNT=0; IN_DIRECT_CANDIDATE_GRAPH=True; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\ui\gui.py
+  - SITE={"activation_scope": "MODULE_TOP_LEVEL", "column": 0, "form": "IMPORT_FROM", "line": 54, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [], "raw_scopes": [], "requested_name": "contextor.ui.exclude_gui"}
+  - SITE={"activation_scope": "FUNCTION_SCOPED", "column": 20, "form": "IMPORT_FROM", "line": 440, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [{"branch": "BODY", "expression": "Name(id='answer', ctx=Load())", "kind": "IF", "line": 439}], "raw_scopes": [{"kind": "CLASS", "line": 91, "name": "ContextorGUI"}, {"kind": "FUNCTION", "line": 418, "name": "_check_stale_excludes"}, {"kind": "FUNCTION", "line": 426, "name": "worker"}, {"kind": "FUNCTION", "line": 433, "name": "prompt"}], "requested_name": "contextor.ui.exclude_gui"}
+- SCC_ID=SCC02; SOURCE=contextor.ui.gui; TARGET=contextor.ui.gui_parser; SOURCE_STATUS=LEXICAL_CANDIDATES; ACTIVATION_CLASSIFICATION=UNGUARDED_DIRECT_CANDIDATE; LEXICAL_SITE_COUNT=2; UNGUARDED_DIRECT_COUNT=1; FUNCTION_SCOPED_COUNT=1; GUARDED_TOP_LEVEL_COUNT=0; OTHER_SCOPED_COUNT=0; INDIRECT_CANDIDATE_COUNT=0; IN_DIRECT_CANDIDATE_GRAPH=True; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\ui\gui.py
+  - SITE={"activation_scope": "MODULE_TOP_LEVEL", "column": 0, "form": "IMPORT_FROM", "line": 55, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [], "raw_scopes": [], "requested_name": "contextor.ui.gui_parser"}
+  - SITE={"activation_scope": "FUNCTION_SCOPED", "column": 12, "form": "IMPORT_FROM", "line": 411, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [{"branch": "BODY", "expression": "Name(id='json_path', ctx=Load())", "kind": "IF", "line": 410}], "raw_scopes": [{"kind": "CLASS", "line": 91, "name": "ContextorGUI"}, {"kind": "FUNCTION", "line": 399, "name": "open_rewrite_tool"}], "requested_name": "contextor.ui.gui_parser"}
+- SCC_ID=SCC02; SOURCE=contextor.ui.gui; TARGET=contextor.ui.progress_widget; SOURCE_STATUS=LEXICAL_CANDIDATES; ACTIVATION_CLASSIFICATION=UNGUARDED_DIRECT_CANDIDATE; LEXICAL_SITE_COUNT=1; UNGUARDED_DIRECT_COUNT=1; FUNCTION_SCOPED_COUNT=0; GUARDED_TOP_LEVEL_COUNT=0; OTHER_SCOPED_COUNT=0; INDIRECT_CANDIDATE_COUNT=0; IN_DIRECT_CANDIDATE_GRAPH=True; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\ui\gui.py
+  - SITE={"activation_scope": "MODULE_TOP_LEVEL", "column": 0, "form": "IMPORT_FROM", "line": 57, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [], "raw_scopes": [], "requested_name": "contextor.ui.progress_widget"}
+- SCC_ID=SCC02; SOURCE=contextor.ui.gui_parser; TARGET=contextor.ui.__init__; SOURCE_STATUS=LEXICAL_CANDIDATES; ACTIVATION_CLASSIFICATION=UNGUARDED_DIRECT_CANDIDATE; LEXICAL_SITE_COUNT=4; UNGUARDED_DIRECT_COUNT=1; FUNCTION_SCOPED_COUNT=0; GUARDED_TOP_LEVEL_COUNT=0; OTHER_SCOPED_COUNT=0; INDIRECT_CANDIDATE_COUNT=3; IN_DIRECT_CANDIDATE_GRAPH=True; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\ui\gui_parser.py
+  - SITE={"activation_scope": "MODULE_TOP_LEVEL", "column": 0, "form": "IMPORT_FROM", "line": 20, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [], "raw_scopes": [], "requested_name": "contextor.ui"}
+  - SITE={"activation_scope": "MODULE_TOP_LEVEL", "column": 0, "form": "IMPORT_FROM", "line": 21, "match_kind": "PARENT_INITIALIZER", "matched_member": null, "raw_controls": [], "raw_scopes": [], "requested_name": "contextor.ui.path_memory"}
+  - SITE={"activation_scope": "MODULE_TOP_LEVEL", "column": 0, "form": "IMPORT_FROM", "line": 22, "match_kind": "PARENT_INITIALIZER", "matched_member": null, "raw_controls": [], "raw_scopes": [], "requested_name": "contextor.ui.progress_widget"}
+  - SITE={"activation_scope": "MODULE_TOP_LEVEL", "column": 0, "form": "IMPORT_FROM", "line": 23, "match_kind": "PARENT_INITIALIZER", "matched_member": null, "raw_controls": [], "raw_scopes": [], "requested_name": "contextor.ui.theme"}
+- SCC_ID=SCC02; SOURCE=contextor.ui.gui_parser; TARGET=contextor.ui.progress_widget; SOURCE_STATUS=LEXICAL_CANDIDATES; ACTIVATION_CLASSIFICATION=UNGUARDED_DIRECT_CANDIDATE; LEXICAL_SITE_COUNT=1; UNGUARDED_DIRECT_COUNT=1; FUNCTION_SCOPED_COUNT=0; GUARDED_TOP_LEVEL_COUNT=0; OTHER_SCOPED_COUNT=0; INDIRECT_CANDIDATE_COUNT=0; IN_DIRECT_CANDIDATE_GRAPH=True; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\ui\gui_parser.py
+  - SITE={"activation_scope": "MODULE_TOP_LEVEL", "column": 0, "form": "IMPORT_FROM", "line": 22, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [], "raw_scopes": [], "requested_name": "contextor.ui.progress_widget"}
+- SCC_ID=SCC02; SOURCE=contextor.ui.progress_widget; TARGET=contextor.ui.__init__; SOURCE_STATUS=LEXICAL_CANDIDATES; ACTIVATION_CLASSIFICATION=UNGUARDED_DIRECT_CANDIDATE; LEXICAL_SITE_COUNT=1; UNGUARDED_DIRECT_COUNT=1; FUNCTION_SCOPED_COUNT=0; GUARDED_TOP_LEVEL_COUNT=0; OTHER_SCOPED_COUNT=0; INDIRECT_CANDIDATE_COUNT=0; IN_DIRECT_CANDIDATE_GRAPH=True; SOURCE_ABSOLUTE_PATH=C:\Temp\Contextor_Repo\contextor\ui\progress_widget.py
+  - SITE={"activation_scope": "MODULE_TOP_LEVEL", "column": 0, "form": "IMPORT_FROM", "line": 15, "match_kind": "FROM_BASE", "matched_member": null, "raw_controls": [], "raw_scopes": [], "requested_name": "contextor.ui"}
+## SCC01_FUNCTION_DEPENDENCY_FINDINGS
+SCC01 structural members=24, edges=56, direct edges=30, direct cyclic SCCs=0. Canonical reported paths wholly within SCC01=15.
+- CORE_PATH_01: non-direct edges=contextor.core.analysis.full_analysis_coordinator -> contextor.core.api.facade; contextor.core.api.facade -> contextor.core.analysis.incremental.materialization; contextor.core.analysis.state_manager -> contextor.core.live_state.__init__; contextor.core.live_state.hydration -> contextor.core.live_state.runtime; contextor.core.live_state.runtime -> contextor.core.analysis.full_analysis_coordinator
+- CORE_PATH_02: non-direct edges=contextor.core.analysis.state_manager -> contextor.core.live_state.__init__; contextor.core.live_state.hydration -> contextor.core.analysis.incremental_engine
+- CORE_PATH_03: non-direct edges=contextor.core.analysis.incremental.plan_executor -> contextor.core.analysis.incremental.materialization; contextor.core.analysis.state_manager -> contextor.core.live_state.__init__; contextor.core.live_state.hydration -> contextor.core.analysis.incremental_engine
+- CORE_PATH_04: non-direct edges=contextor.core.analysis.incremental.plan_executor -> contextor.core.analysis.refresh_planner; contextor.core.analysis.state_manager -> contextor.core.live_state.__init__; contextor.core.live_state.hydration -> contextor.core.analysis.incremental_engine
+- CORE_PATH_05: non-direct edges=contextor.core.analysis.state_manager -> contextor.core.live_state.__init__; contextor.core.live_state.hydration -> contextor.core.analysis.incremental_engine
+- CORE_PATH_06: non-direct edges=contextor.core.analysis.state_manager -> contextor.core.live_state.__init__; contextor.core.live_state.hydration -> contextor.core.analysis.incremental_engine
+- CORE_PATH_07: non-direct edges=contextor.core.analysis.state_manager -> contextor.core.live_state.__init__; contextor.core.live_state.hydration -> contextor.core.analysis.incremental_engine
+- CORE_PATH_08: non-direct edges=contextor.core.analysis.state_manager -> contextor.core.live_state.__init__; contextor.core.live_state.hydration -> contextor.core.analysis.incremental_engine
+- CORE_PATH_09: non-direct edges=contextor.core.analysis.state_manager -> contextor.core.live_state.__init__; contextor.core.live_state.hydration -> contextor.core.live_state.runtime; contextor.core.live_state.runtime -> contextor.core.analysis.incremental.materialization
+- CORE_PATH_10: non-direct edges=contextor.core.analysis.state_manager -> contextor.core.live_state.__init__; contextor.core.live_state.watcher -> contextor.core.api.facade; contextor.core.api.facade -> contextor.core.analysis.incremental.materialization
+- CORE_PATH_11: non-direct edges=contextor.core.analysis.state_manager -> contextor.core.live_state.__init__; contextor.core.live_state.hydration -> contextor.core.analysis.state_manager
+- CORE_PATH_12: non-direct edges=contextor.core.analysis.state_manager -> contextor.core.live_state.__init__; contextor.core.live_state.hydration -> contextor.core.live_state.runtime; contextor.core.live_state.runtime -> contextor.core.analysis.state_manager
+- CORE_PATH_13: non-direct edges=contextor.core.analysis.state_manager -> contextor.core.live_state.__init__; contextor.core.live_state.hydration -> contextor.core.live_state.runtime
+- CORE_PATH_14: non-direct edges=contextor.core.analysis.state_manager -> contextor.core.live_state.__init__; contextor.core.live_state.hydration -> contextor.core.live_state.runtime; contextor.core.live_state.ipc -> contextor.core.live_state.store; contextor.core.live_state.store -> contextor.core.analysis.state_manager
+- CORE_PATH_15: non-direct edges=contextor.core.analysis.state_manager -> contextor.core.live_state.__init__; contextor.core.live_state.watcher -> contextor.core.analysis.state_manager
+If direct topology is acyclic, every reported path has at least one non-direct edge: True
+Function-scoped edges remain call-dependent candidates and may activate during initialization; no safety inference.
+## SCC02_DIRECT_IMPORT_CHAIN_FINDINGS
+- contextor.repo_generator.__init__ -> contextor.repo_generator.main; in direct graph=True; direct sites=[{"column": 0, "form": "IMPORT_FROM", "line": 1, "match_kind": "FROM_BASE", "path": "C:\\Temp\\Contextor_Repo\\contextor\\repo_generator\\__init__.py", "requested": "contextor.repo_generator.main"}]
+- contextor.repo_generator.main -> contextor.repo_generator.filters; in direct graph=True; direct sites=[{"column": 0, "form": "IMPORT_FROM", "line": 8, "match_kind": "FROM_BASE", "path": "C:\\Temp\\Contextor_Repo\\contextor\\repo_generator\\main.py", "requested": "contextor.repo_generator.filters"}]
+- contextor.repo_generator.filters -> contextor.ui.__init__; in direct graph=True; direct sites=[{"column": 0, "form": "IMPORT_FROM", "line": 5, "match_kind": "FROM_BASE", "path": "C:\\Temp\\Contextor_Repo\\contextor\\repo_generator\\filters.py", "requested": "contextor.ui"}]
+- contextor.ui.__init__ -> contextor.ui.gui; in direct graph=True; direct sites=[{"column": 0, "form": "IMPORT_FROM", "line": 5, "match_kind": "FROM_BASE", "path": "C:\\Temp\\Contextor_Repo\\contextor\\ui\\__init__.py", "requested": "contextor.ui.gui"}]
+- contextor.ui.gui -> contextor.repo_generator.__init__; in direct graph=True; direct sites=[{"column": 0, "form": "IMPORT_FROM", "line": 43, "match_kind": "FROM_BASE", "path": "C:\\Temp\\Contextor_Repo\\contextor\\ui\\gui.py", "requested": "contextor.repo_generator"}]
+DIRECT_IMPORT_CYCLE_CANDIDATE_CONFIRMED
+## B0G4C9_SYNTHETIC_PROJECTION_CONTEXT
+Prior B0G4C9 targeted tests: 212 passed; repo_generator-first synthetic projection hazardous, ui-first synthetic projection passed. Production GUI import sequence was not executed here. Real runtime import state remains UNKNOWN.
+## INPUT_IMMUTABILITY_CROSS_CHECK
+DIRECT_EVIDENCE: A second read-only execution at revision 437 compared the complete copied graph before/after and ast.dump(include_attributes=True) for all 33 parsed source ASTs before/after both production function calls. Graph unchanged; all 33 ASTs unchanged. Final MCP recheck still revision 437 with no events, fresh diagnostics and resync_required=false.
+## REMAINING_RUNTIME_UNCERTAINTIES
+Direct candidate means lexical unguarded MODULE_TOP_LEVEL DIRECT_MODULE/FROM_BASE evidence only. Function-local imports may be called during initialization; class-body/guard/package-resolution behavior is not certified. Current source snapshots are individually fingerprint-stable; canonical file-state SHA unavailable and all 33 are not proven one atomic source revision.
 ## NO_SAFETY_CERTIFICATION
-The result evidence_scope is ACTIVATION_CANDIDATES_NOT_RUNTIME_SAFETY. Even an acyclic direct-candidate projection does not classify the original SCC as SAFE, FALSE_POSITIVE or RESOLVED.
-
+No SAFE, FALSE_POSITIVE, RESOLVED or NO_RUNTIME_CYCLE verdict. Structural diagnostics remain authoritative.
 ## NO_WARNING_SUPPRESSION
-No diagnostic policy, warning suppression, resolver or cycle detection change.
-
-## UNRESOLVED_LIMITATIONS
-UNKNOWN: Runtime activation and actual Python import resolution remain outside this view. Guard truth, call timing and class-body execution are not determined. The view was verified by focused tests; it was not run over the current 72-edge real SCC snapshot in this stage.
-
+No warning policy, graph or canonical state mutation.
+## FILES_CHANGED
+NONE, except walkthrough.md report. ACTUAL_DIFF=DIFFS=NONE.
 ## FINAL_VERDICT
-B0G4C10_PASS
-
-## FULL_DIFFS
-
-```diff
-diff --git a/contextor/core/cycle_semantics/activation_view.py b/contextor/core/cycle_semantics/activation_view.py
-new file mode 100644
---- /dev/null
-+++ b/contextor/core/cycle_semantics/activation_view.py
-@@ -0,0 +1,165 @@
-+"""Candidate import activation topology for source-attributed cyclic SCCs.
-+
-+Retains every canonical hard edge. Top-level lexical sites can only support
-+candidate import activation, never runtime reachability or safety decisions.
-+"""
-+
-+from __future__ import annotations
-+
-+from dataclasses import dataclass
-+
-+from .edge_sites import CyclicImportSiteReport
-+from .scc import ImportCycleTopology, analyze_import_cycle_topology
-+
-+_DIRECT = frozenset({"DIRECT_MODULE", "FROM_BASE"})
-+_INDIRECT = frozenset({"OPTIONAL_FROM_CHILD", "PARENT_INITIALIZER"})
-+
-+
-+@dataclass(frozen=True)
-+class EdgeActivationView:
-+    source: str
-+    target: str
-+    source_status: str
-+    classification: str
-+    site_count: int
-+    unguarded_direct_count: int
-+    function_scoped_count: int
-+    guarded_top_level_count: int
-+    other_scoped_count: int
-+    indirect_candidate_count: int
-+
-+
-+@dataclass(frozen=True)
-+class SCCActivationView:
-+    members: tuple[str, ...]
-+    edges: tuple[EdgeActivationView, ...]
-+    unguarded_direct_edges: tuple[tuple[str, str], ...]
-+    unguarded_direct_topology: ImportCycleTopology
-+    unresolved_edges: int
-+    evidence_scope: str = "INTERNAL_UNGUARDED_LEXICAL_SUBGRAPH_ONLY"
-+
-+
-+@dataclass(frozen=True)
-+class CycleActivationViewReport:
-+    structural_topology: ImportCycleTopology
-+    components: tuple[SCCActivationView, ...]
-+    evidence_scope: str = "ACTIVATION_CANDIDATES_NOT_RUNTIME_SAFETY"
-+
-+
-+def analyze_cycle_activation_view(
-+    import_sites: CyclicImportSiteReport,
-+) -> CycleActivationViewReport:
-+    """Project each retained internal edge onto candidate activation classes.
-+
-+    Even a cycle-free unguarded subset cannot certify the original SCC as safe:
-+    a function-scoped import may execute during module initialization.
-+    """
-+    if not isinstance(import_sites, CyclicImportSiteReport):
-+        raise TypeError("import_sites must be CyclicImportSiteReport")
-+
-+    views: list[SCCActivationView] = []
-+
-+    for component in import_sites.components:
-+        edge_views: list[EdgeActivationView] = []
-+        selected: dict[str, set[str]] = {
-+            member: set() for member in component.members
-+        }
-+
-+        for edge in component.internal_edges:
-+            sites = edge.sites
-+
-+            direct = sum(
-+                site.activation_scope == "MODULE_TOP_LEVEL"
-+                and site.match_kind in _DIRECT
-+                for site in sites
-+            )
-+
-+            functions = sum(
-+                site.activation_scope == "FUNCTION_SCOPED"
-+                for site in sites
-+            )
-+
-+            guarded = sum(
-+                site.activation_scope == "GUARDED_TOP_LEVEL"
-+                for site in sites
-+            )
-+
-+            other = sum(
-+                site.activation_scope == "OTHER_SCOPED"
-+                for site in sites
-+            )
-+
-+            indirect = sum(
-+                site.match_kind in _INDIRECT
-+                for site in sites
-+            )
-+
-+            unguarded_indirect = any(
-+                site.activation_scope == "MODULE_TOP_LEVEL"
-+                and site.match_kind in _INDIRECT
-+                for site in sites
-+            )
-+
-+            if edge.status != "LEXICAL_CANDIDATES" or not sites:
-+                classification = "UNRESOLVED_SOURCE_SITE"
-+
-+            elif direct:
-+                classification = "UNGUARDED_DIRECT_CANDIDATE"
-+                selected[edge.source].add(edge.target)
-+
-+            elif unguarded_indirect:
-+                classification = "INDIRECT_TOP_LEVEL_CANDIDATE"
-+
-+            elif guarded:
-+                classification = "GUARDED_TOP_LEVEL_CANDIDATE"
-+
-+            elif other:
-+                classification = "OTHER_SCOPE_CANDIDATE"
-+
-+            elif functions:
-+                classification = "CALL_DEPENDENT_CANDIDATE"
-+
-+            else:
-+                classification = "UNRECOGNIZED_SITE_SEMANTICS"
-+
-+            edge_views.append(
-+                EdgeActivationView(
-+                    edge.source,
-+                    edge.target,
-+                    edge.status,
-+                    classification,
-+                    len(sites),
-+                    direct,
-+                    functions,
-+                    guarded,
-+                    other,
-+                    indirect,
-+                )
-+            )
-+
-+        direct_edges = tuple(
-+            (source, target)
-+            for source in sorted(selected)
-+            for target in sorted(selected[source])
-+        )
-+
-+        views.append(
-+            SCCActivationView(
-+                component.members,
-+                tuple(edge_views),
-+                direct_edges,
-+                analyze_import_cycle_topology(selected),
-+                sum(
-+                    edge.classification in {
-+                        "UNRESOLVED_SOURCE_SITE",
-+                        "UNRECOGNIZED_SITE_SEMANTICS",
-+                    }
-+                    for edge in edge_views
-+                ),
-+            )
-+        )
-+
-+    return CycleActivationViewReport(
-+        structural_topology=import_sites.topology,
-+        components=tuple(views),
-+    )
-
-diff --git a/tests/test_cycle_semantics_activation_view.py b/tests/test_cycle_semantics_activation_view.py
-new file mode 100644
---- /dev/null
-+++ b/tests/test_cycle_semantics_activation_view.py
-@@ -0,0 +1,444 @@
-+from dataclasses import asdict, FrozenInstanceError
-+import json
-+
-+import pytest
-+
-+from contextor.core.cycle_semantics.scc import (
-+    analyze_import_cycle_topology,
-+)
-+from contextor.core.cycle_semantics.edge_sites import (
-+    CyclicImportSiteReport,
-+    SCCImportSiteEvidence,
-+    HardEdgeSiteEvidence,
-+    LexicalEdgeSite,
-+)
-+from contextor.core.cycle_semantics.activation_view import (
-+    analyze_cycle_activation_view as analyze,
-+)
-+
-+
-+def _site(
-+    activation="MODULE_TOP_LEVEL",
-+    kind="FROM_BASE",
-+    ordinal=0,
-+):
-+    return LexicalEdgeSite(
-+        ordinal,
-+        ordinal + 1,
-+        0,
-+        "IMPORT_FROM",
-+        kind,
-+        "b",
-+        None,
-+        (),
-+        (),
-+        activation,
-+    )
-+
-+
-+def _report(graph, data):
-+    topology = analyze_import_cycle_topology(graph)
-+    components = []
-+
-+    for scc in topology.cyclic_components:
-+        edges = []
-+
-+        for src, dst in scc.internal_edges:
-+            specs = data.get((src, dst))
-+
-+            if specs is None:
-+                edges.append(
-+                    HardEdgeSiteEvidence(
-+                        src,
-+                        dst,
-+                        "SOURCE_MISSING_OR_INVALID",
-+                        (),
-+                    )
-+                )
-+
-+            elif specs:
-+                sites = tuple(
-+                    _site(*item)
-+                    for item in specs
-+                )
-+
-+                edges.append(
-+                    HardEdgeSiteEvidence(
-+                        src,
-+                        dst,
-+                        "LEXICAL_CANDIDATES",
-+                        sites,
-+                    )
-+                )
-+
-+            else:
-+                edges.append(
-+                    HardEdgeSiteEvidence(
-+                        src,
-+                        dst,
-+                        "NO_MATCHING_LEXICAL_SITE",
-+                        (),
-+                    )
-+                )
-+
-+        components.append(
-+            SCCImportSiteEvidence(
-+                scc.members,
-+                tuple(edges),
-+                sum(
-+                    x.status == "LEXICAL_CANDIDATES"
-+                    for x in edges
-+                ),
-+                sum(
-+                    x.status != "LEXICAL_CANDIDATES"
-+                    for x in edges
-+                ),
-+            )
-+        )
-+
-+    return CyclicImportSiteReport(
-+        topology,
-+        tuple(components),
-+    )
-+
-+
-+def test_direct_two_node_cycle_remains_candidate():
-+    result = analyze(
-+        _report(
-+            {"a": {"b"}, "b": {"a"}},
-+            {
-+                ("a", "b"): [()],
-+                ("b", "a"): [()],
-+            },
-+        )
-+    )
-+
-+    component = result.components[0]
-+
-+    assert len(
-+        component.unguarded_direct_topology.cyclic_components
-+    ) == 1
-+
-+    assert component.unguarded_direct_edges == (
-+        ("a", "b"),
-+        ("b", "a"),
-+    )
-+
-+    assert all(
-+        edge.classification == "UNGUARDED_DIRECT_CANDIDATE"
-+        for edge in component.edges
-+    )
-+
-+
-+def test_function_scoped_reverse_does_not_enter_direct_subgraph():
-+    result = analyze(
-+        _report(
-+            {"a": {"b"}, "b": {"a"}},
-+            {
-+                ("a", "b"): [
-+                    ("FUNCTION_SCOPED", "FROM_BASE", 0)
-+                ],
-+                ("b", "a"): [()],
-+            },
-+        )
-+    )
-+
-+    component = result.components[0]
-+
-+    assert len(result.structural_topology.cyclic_components) == 1
-+
-+    assert len(
-+        component.unguarded_direct_topology.cyclic_components
-+    ) == 0
-+
-+    assert (
-+        component.edges[0].classification
-+        == "CALL_DEPENDENT_CANDIDATE"
-+    )
-+
-+    assert result.evidence_scope.endswith(
-+        "NOT_RUNTIME_SAFETY"
-+    )
-+
-+
-+def test_call_dependent_cycle_not_certified_safe():
-+    result = analyze(
-+        _report(
-+            {"a": {"b"}, "b": {"a"}},
-+            {
-+                ("a", "b"): [
-+                    ("FUNCTION_SCOPED", "FROM_BASE", 0)
-+                ],
-+                ("b", "a"): [()],
-+            },
-+        )
-+    )
-+
-+    assert "SAFE" not in [
-+        edge.classification
-+        for edge in result.components[0].edges
-+    ]
-+
-+    assert len(result.components[0].edges) == 2
-+
-+
-+def test_indirect_parent_candidate_is_not_unguarded_direct():
-+    result = analyze(
-+        _report(
-+            {"p": {"c"}, "c": {"p"}},
-+            {
-+                ("p", "c"): [
-+                    ("MODULE_TOP_LEVEL", "OPTIONAL_FROM_CHILD", 0)
-+                ],
-+                ("c", "p"): [
-+                    ("MODULE_TOP_LEVEL", "PARENT_INITIALIZER", 0)
-+                ],
-+            },
-+        )
-+    )
-+
-+    component = result.components[0]
-+
-+    assert all(
-+        edge.classification == "INDIRECT_TOP_LEVEL_CANDIDATE"
-+        for edge in component.edges
-+    )
-+
-+    assert not component.unguarded_direct_edges
-+
-+    assert all(
-+        edge.indirect_candidate_count == 1
-+        for edge in component.edges
-+    )
-+
-+
-+def test_guarded_top_level_not_promoted():
-+    result = analyze(
-+        _report(
-+            {"a": {"b"}, "b": {"a"}},
-+            {
-+                ("a", "b"): [
-+                    ("GUARDED_TOP_LEVEL", "FROM_BASE", 0)
-+                ],
-+                ("b", "a"): [()],
-+            },
-+        )
-+    )
-+
-+    assert (
-+        result.components[0].edges[0].classification
-+        == "GUARDED_TOP_LEVEL_CANDIDATE"
-+    )
-+
-+    assert len(
-+        result.components[0]
-+        .unguarded_direct_topology.cyclic_components
-+    ) == 0
-+
-+
-+def test_other_scoped_class_body_not_mistaken_for_deferral():
-+    result = analyze(
-+        _report(
-+            {"a": {"b"}, "b": {"a"}},
-+            {
-+                ("a", "b"): [
-+                    ("OTHER_SCOPED", "FROM_BASE", 0)
-+                ],
-+                ("b", "a"): [()],
-+            },
-+        )
-+    )
-+
-+    assert (
-+        result.components[0].edges[0].classification
-+        == "OTHER_SCOPE_CANDIDATE"
-+    )
-+
-+
-+def test_mixed_eager_and_function_sites_preserved():
-+    result = analyze(
-+        _report(
-+            {"a": {"b"}, "b": {"a"}},
-+            {
-+                ("a", "b"): [
-+                    (),
-+                    ("FUNCTION_SCOPED", "FROM_BASE", 1),
-+                ],
-+                ("b", "a"): [()],
-+            },
-+        )
-+    )
-+
-+    component = result.components[0]
-+    edge = component.edges[0]
-+
-+    assert (
-+        edge.site_count,
-+        edge.unguarded_direct_count,
-+        edge.function_scoped_count,
-+    ) == (2, 1, 1)
-+
-+    assert (
-+        edge.classification
-+        == "UNGUARDED_DIRECT_CANDIDATE"
-+    )
-+
-+    assert len(
-+        component.unguarded_direct_topology.cyclic_components
-+    ) == 1
-+
-+
-+def test_missing_source_and_unmatched_remain_explicit():
-+    result = analyze(
-+        _report(
-+            {"a": {"b"}, "b": {"a"}},
-+            {
-+                ("a", "b"): [],
-+                ("b", "a"): None,
-+            },
-+        )
-+    )
-+
-+    component = result.components[0]
-+
-+    assert len(component.edges) == 2
-+    assert component.unresolved_edges == 2
-+
-+    assert {
-+        edge.source_status
-+        for edge in component.edges
-+    } == {
-+        "NO_MATCHING_LEXICAL_SITE",
-+        "SOURCE_MISSING_OR_INVALID",
-+    }
-+
-+
-+def test_indirect_function_counts_as_call_dependent():
-+    result = analyze(
-+        _report(
-+            {"a": {"b"}, "b": {"a"}},
-+            {
-+                ("a", "b"): [
-+                    ("FUNCTION_SCOPED", "PARENT_INITIALIZER", 0)
-+                ],
-+                ("b", "a"): [()],
-+            },
-+        )
-+    )
-+
-+    edge = result.components[0].edges[0]
-+
-+    assert (
-+        edge.function_scoped_count,
-+        edge.indirect_candidate_count,
-+    ) == (1, 1)
-+
-+    assert (
-+        edge.classification
-+        == "CALL_DEPENDENT_CANDIDATE"
-+    )
-+
-+
-+def test_multiple_sccs_preserved_separately():
-+    graph = {
-+        "a": {"b"},
-+        "b": {"a"},
-+        "x": {"y"},
-+        "y": {"x"},
-+    }
-+
-+    data = {
-+        ("a", "b"): [()],
-+        ("b", "a"): [
-+            ("FUNCTION_SCOPED", "FROM_BASE", 0)
-+        ],
-+        ("x", "y"): [()],
-+        ("y", "x"): [()],
-+    }
-+
-+    result = analyze(_report(graph, data))
-+
-+    assert len(result.components) == 2
-+
-+    assert tuple(
-+        component.members
-+        for component in result.components
-+    ) == (
-+        ("a", "b"),
-+        ("x", "y"),
-+    )
-+
-+    assert [
-+        len(
-+            component.unguarded_direct_topology.cyclic_components
-+        )
-+        for component in result.components
-+    ] == [0, 1]
-+
-+
-+def test_self_loop_supported():
-+    result = analyze(
-+        _report(
-+            {"a": {"a"}},
-+            {("a", "a"): [()]},
-+        )
-+    )
-+
-+    assert len(
-+        result.components[0]
-+        .unguarded_direct_topology.cyclic_components
-+    ) == 1
-+
-+
-+def test_empty_no_cycles():
-+    result = analyze(
-+        _report(
-+            {"a": {"b"}, "b": set()},
-+            {},
-+        )
-+    )
-+
-+    assert result.components == ()
-+
-+
-+def test_deterministic_serializable_immutable_input_unchanged():
-+    graph = {
-+        "a": {"b"},
-+        "b": {"a"},
-+    }
-+
-+    projection = _report(
-+        graph,
-+        {
-+            ("a", "b"): [()],
-+            ("b", "a"): [()],
-+        },
-+    )
-+
-+    first = analyze(projection)
-+    second = analyze(projection)
-+
-+    assert first == second
-+
-+    json.dumps(asdict(first))
-+
-+    with pytest.raises(FrozenInstanceError):
-+        first.components[0].unresolved_edges = 99
-+
-+    assert graph == {
-+        "a": {"b"},
-+        "b": {"a"},
-+    }
-+
-+    assert projection == _report(
-+        graph,
-+        {
-+            ("a", "b"): [()],
-+            ("b", "a"): [()],
-+        },
-+    )
-+
-+
-+def test_invalid_input():
-+    with pytest.raises(TypeError):
-+        analyze(None)
-```
+B0G4C11_DOGFOOD_PASS
