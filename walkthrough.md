@@ -1,132 +1,696 @@
-# TASK
-CONTEXTOR_B0G4C27_AUTOMATIC_CONDITIONAL_WITNESS_DISCOVERY — strict read-only architectural discovery. No implementation or API design.
+# CONTEXTOR_B0G4C28_AUTOMATIC_CONDITIONAL_REEXPORT_SELECTOR
 
-# HEAD
-521ece6d75bbf220f1ed6ca0211ab98b6dea06fa before and after.
+TASK: Controlled literal implementation of standalone conditional delayed-reexport candidate discovery.
+HEAD_BEFORE: 2795a193809a0b42926df5d9bb72371cde01b4d7
+HEAD_AFTER: 2795a193809a0b42926df5d9bb72371cde01b4d7
+GIT_STATUS:
+```text
+?? contextor/core/cycle_semantics/conditional_discovery.py
+?? tests/test_cycle_semantics_conditional_discovery.py
+```
+FILES_CHANGED:
+- contextor\core\cycle_semantics\conditional_discovery.py (new production file)
+- tests\test_cycle_semantics_conditional_discovery.py (new focused test file)
 
-# GIT_STATUS
-Before and after: `M walkthrough.md`; `?? contextor/core/cycle_semantics/conditional_export.py`; `?? tests/test_cycle_semantics_conditional_export.py`. The two untracked C26F files predate C27. This task changed no production, test or docs source.
+MODEL_CONTRACT_PRECHECK: DIRECT_EVIDENCE — Contextor MCP at revision 462 reported canonical_state=fresh, workspace_sync=verified for conditional_export.py, edge_sites.py, package_layout.py and source.py. Complete implementations of analyze_conditional_reexport_order, _exact_hop, analyze_cyclic_import_sites, build_package_layout and ParsedSourceInput were fetched. Canonical owner of source-order assessment is conditional_export; edge_sites owns lexical SCC attribution; package_layout owns package identity. Existing direct consumer of conditional_export was its focused test module; new selector has only its new test as current consumer. Blast radius of conditional_export had one direct test consumer and no downstream consumers before edits. Symbol lineage was inspected in preview. No existing equivalent selector was found in the verified contract.
+EXACT_PRODUCTION_IMPLEMENTATION: CONTRACT_PROVED — production file byte-for-byte matches the attachment's authorized CONTENT block after its final newline. No package reexport or integration was added.
+CANONICAL_SCC_INPUT: CODE_PATH_PROVED — consumes CyclicImportSiteReport components and internal edges; no simple-cycle enumeration or repository analysis.
+PACKAGE_LAYOUT_FILTERING: CODE_PATH_PROVED — build_package_layout requires unique REGULAR_PACKAGE or MODULE_FILE identity, rejecting ambiguous layout.
+LEXICAL_SOURCE_SITE_VALIDATION: CODE_PATH_PROVED — requires LEXICAL_CANDIDATES, unique _exact_hop and matching source location, IMPORT_FROM, FROM_BASE, MODULE_TOP_LEVEL and unguarded site.
+PROVIDER_EXPORT_MATCHING: CODE_PATH_PROVED — matching unique FunctionDef must follow provider outgoing import; closing lookup must request same export; C26F validates complete selected chain.
+BOUNDED_BFS_SELECTION: CODE_PATH_PROVED — iterative BFS selects one shortest validated return path per provider outgoing, max_searches 1..4096. No recursive unbounded traversal.
+DETERMINISM_AND_DEDUPLICATION: TEST_COVERED — reversed graph/source insertion yields equal report; ordered SCC/edge traversal and seen chain/export identities.
+AMBIGUOUS_SOURCE_HANDLING: TEST_COVERED — missing source, invalid fingerprint, invalid CPython compilation and ambiguous package layout fail closed; unmatched structural edges remain reported.
+SOURCE_SNAPSHOT_BINDING_LIMITATION: CONTRACT_PROVED — NOT_ATOMICALLY_VERIFIED_BY_DISCOVERY. Supplied AST/fingerprint collection is not atomically tied to canonical LIVE revision.
+SEARCH_COVERAGE_STATUS: TEST_COVERED — BOUNDED_SELECTION_COMPLETE, PARTIAL_SOURCE_OR_LEXICAL_EVIDENCE and PARTIAL_SEARCH_LIMIT exercised.
+RUNTIME_EXECUTION_UNKNOWN: CONTRACT_PROVED — UNKNOWN_NOT_EVALUATED; no runtime ImportError or safety claim.
 
-# LIVE_AUTHORITY
-Read-only authority_status first returned a transient ConnectionRefusedError while the endpoint file and PID were present; a passive listener check found PID 11632 listening on 127.0.0.1:49902. A subsequent read-only authority_status succeeded and matched the endpoint. At final check the same nonsecret identity matched: repo_id `ctx_8efc50d8`; root `C:\Temp\Contextor_Repo`; runtime_domain_id `rd1_4bb21e833272147f29727f8174356b437bdb3dbcba1b2d4965637b97183f8654`; service_instance_id `6f13273feccb46cb9c23fbbfee03afe1`; lease_generation 31; service_pid 11632; process_start_identity `134367226998365614`; endpoint_fingerprint `1367eadf1a11448d1a74eec69518da568d80ee42be8f16ce15e54998e989fcbd`. No ownership claim or mutation request. The cause of the initial refusal is UNKNOWN; it is not called a restart or watcher failure.
+ISOLATED_TEST_RESULTS: 13 passed in 1.53s after final test edit; 13 passed before test constant rename as well.
+FOCUSED_TEST_RESULTS: 23 files, 376 passed in 31.31s after final edit; prior run 376 passed in 50.75s. Full repository suite was not run. A preliminary invocation with an unexpanded PowerShell glob collected no tests; corrected with explicit file paths.
+GIT_DIFF_CHECK: git diff --check and no-index --check for both new files produced no whitespace diagnostics. The combined shell's final exit code was 1 because git diff --no-index reports file differences.
 
-# ACTIVITY_EPOCH
-`bbd40ce1942841df94718acedc12561f` at initial and final MCP reads; no observed epoch change in C27.
+LIVE_AUTHORITY_BEFORE_AFTER: DIRECT_EVIDENCE — identical complete nonsecret identity before/after: repo_id=ctx_8efc50d8; root_path=C:\Temp\Contextor_Repo; runtime_domain_id=rd1_4bb21e833272147f29727f8174356b437bdb3dbcba1b2d4965637b97183f8654; service_instance_id=6f13273feccb46cb9c23fbbfee03afe1; lease_generation=31; service_pid=11632; process_start_identity=134367226998365614; endpoint_fingerprint=1367eadf1a11448d1a74eec69518da568d80ee42be8f16ce15e54998e989fcbd. Read-only LiveStateClient(is_owner=False), _read_endpoint and _status_matches_endpoint were used; no owner request.
+ACTIVITY_EPOCH_BEFORE_AFTER: bbd40ce1942841df94718acedc12561f -> bbd40ce1942841df94718acedc12561f.
+LIVE_REVISION_BEFORE_AFTER: 462 -> 465.
+LIVE_EVENT_CONTINUITY: DIRECT_EVIDENCE — continuous; 463 desktop_watcher UPDATED production file, 464 desktop_watcher UPDATED test file, 465 desktop_watcher UPDATED test file after a local test-constant rename. resync_required=false. At 464 Contextor detected a name collision for SOURCES; 465 resolved it after rename.
+WORKSPACE_SYNC: DIRECT_EVIDENCE — both new files verified at canonical revision 465.
+CANONICAL_FRESHNESS: DIRECT_EVIDENCE — canonical_state=fresh, graph/cycles/collisions fresh, syntax diagnostics checked_and_none for both files, 0 syntax errors.
+COLLISION_COUNT_BEFORE_AFTER: 0 -> 0, fresh. Transient 1 at revision 464 was resolved by revision 465; current canonical name collision query reports 0.
+STRUCTURAL_CYCLE_COUNT_BEFORE_AFTER: 16 -> 16, fresh.
+NO_RUNTIME_IMPORT_EXECUTION: DIRECT_EVIDENCE — only synthetic AST fixtures were parsed/compiled; no real GUI or Repo Generator module was imported by the test file.
+NO_WARNING_SUPPRESSION: CODE_PATH_PROVED — no graph, detector, classification or diagnostics changes; structural cycles remained 16.
+NO_RUNTIME_SAFETY_CERTIFICATION: CONTRACT_PROVED — selector explicitly reports runtime UNKNOWN.
+FINAL_VERDICT: B0G4C28_PASS.
 
-# LIVE_REVISION_BEFORE_AFTER
-462 → 462. A single read-only IPC snapshot was checked with matching before/snapshot/after ping revisions and stable authority identity; it contained 479 graph nodes, 1811 distinct hard edges, 16 reported cycle paths, and two cyclic SCCs (24 and 9 members). Further in-memory source-evidence queries used revision 462. No FULL analysis.
+FULL_DIFFS:
 
-# EVENT_CONTINUITY
-`get_live_events(after_revision=462)` returned continuous, zero newer canonical events, resync_required=false at start and finish. Continuity is only within the observed activity epoch.
+## contextor\core\cycle_semantics\conditional_discovery.py
 
-# CANONICAL_FRESHNESS
-LIVE syntax errors 0 fresh, name collisions 0 fresh, structural cycle paths 16 fresh. All nine primary owner files returned canonical_state=fresh, workspace_sync=verified, revision 462. Five SCC02 chain files, SCC01 package initializers, state_manager, facade and selected SCC01 providers also returned verified/fresh at 462. Source reads and exact symbol implementations came from these verified files. `get_symbol_lineage` for the C26 witness resolved a fresh canonical target but auto-selected preview because complete lineage exceeds its limit; blast radius identified only the focused test as direct consumer.
+```diff
+diff --git "a/contextor\\core\\cycle_semantics\\conditional_discovery.py" "b/contextor\\core\\cycle_semantics\\conditional_discovery.py"
+new file mode 100644
+index 0000000..00232fe
+--- /dev/null
++++ "b/contextor\\core\\cycle_semantics\\conditional_discovery.py"
+@@ -0,0 +1,424 @@
++"""Bounded discovery of conditional delayed-reexport candidates.
++
++Structural and lexical evidence is not execution evidence.
++Inputs do not authenticate an atomic canonical source snapshot.
++"""
++
++from __future__ import annotations
++
++import ast
++from collections import deque
++from collections.abc import Iterable, Mapping
++from dataclasses import dataclass
++
++from contextor.core.source import ParsedSourceInput
++
++from .conditional_export import (
++    ConditionalReexportAssessment,
++    _exact_hop,
++    _logical_module,
++    analyze_conditional_reexport_order,
++)
++from .edge_sites import CyclicImportSiteReport
++from .package_layout import build_package_layout
++
++
++@dataclass(frozen=True)
++class DiscoveredConditionalReexport:
++    package_initializer: str
++    provider: str
++    export_name: str
++    outgoing_target: str
++    assessment: ConditionalReexportAssessment
++
++
++@dataclass(frozen=True)
++class ConditionalDiscoveryReport:
++    candidates: tuple[DiscoveredConditionalReexport, ...]
++    examined_outgoing_count: int
++    unavailable_source_modules: tuple[str, ...]
++    unresolved_lexical_edge_count: int
++    coverage_status: str
++    search_scope: str = (
++        "ONE_SHORTEST_VALIDATED_PATH_PER_PROVIDER_OUTGOING"
++    )
++    source_snapshot_binding: str = (
++        "NOT_ATOMICALLY_VERIFIED_BY_DISCOVERY"
++    )
++    runtime_execution_status: str = (
++        "UNKNOWN_NOT_EVALUATED"
++    )
++
++
++def _usable_source(
++    source: object,
++) -> ast.Module | None:
++    if (
++        not isinstance(source, ParsedSourceInput)
++        or not isinstance(source.tree, ast.Module)
++        or not isinstance(source.source_fingerprint, str)
++        or len(source.source_fingerprint) != 64
++        or any(
++            char not in "0123456789abcdef"
++            for char in source.source_fingerprint
++        )
++    ):
++        return None
++
++    count = 0
++
++    for _ in ast.walk(source.tree):
++        count += 1
++
++        if count > 100_000:
++            return None
++
++    try:
++        compile(
++            source.tree,
++            "<conditional_discovery>",
++            "exec",
++            dont_inherit=True,
++        )
++    except (
++        SyntaxError,
++        TypeError,
++        ValueError,
++        RecursionError,
++        OverflowError,
++    ):
++        return None
++
++    return source.tree
++
++
++def _shortest_return_path(
++    start: str,
++    package: str,
++    provider: str,
++    export_name: str,
++    adjacency: Mapping[str, tuple[str, ...]],
++    hops: Mapping[tuple[str, str], object],
++) -> tuple[str, ...] | None:
++    """Iterative BFS with deterministic lexical tie resolution."""
++    if start in {package, provider}:
++        return None
++
++    queue = deque([start])
++    previous: dict[str, str | None] = {
++        start: None,
++    }
++
++    while queue:
++        current = queue.popleft()
++
++        if current == package:
++            break
++
++        for target in adjacency.get(current, ()):
++            if target == provider:
++                continue
++
++            if (
++                target == package
++                and hops[(current, target)].requested_member
++                != export_name
++            ):
++                continue
++
++            if target in previous:
++                continue
++
++            previous[target] = current
++            queue.append(target)
++
++    if package not in previous:
++        return None
++
++    reverse_path = []
++    current: str | None = package
++
++    while current is not None:
++        reverse_path.append(current)
++        current = previous[current]
++
++    return tuple(reversed(reverse_path))
++
++
++def discover_conditional_reexports(
++    import_sites: CyclicImportSiteReport,
++    parsed_sources: Mapping[str, ParsedSourceInput],
++    indexed_module_ids: Iterable[str],
++    *,
++    max_searches: int = 256,
++) -> ConditionalDiscoveryReport:
++    """Discover bounded candidate chains, then validate with C26F.
++
++    The caller must supply a coherent candidate graph and source
++    collection. This function cannot establish LIVE revision
++    atomicity or runtime execution.
++    """
++
++    if not isinstance(import_sites, CyclicImportSiteReport):
++        raise TypeError(
++            "import_sites must be CyclicImportSiteReport"
++        )
++
++    if not isinstance(parsed_sources, Mapping):
++        raise TypeError(
++            "parsed_sources must be a mapping"
++        )
++
++    if (
++        type(max_searches) is not int
++        or not 1 <= max_searches <= 4096
++    ):
++        raise ValueError(
++            "max_searches must be in range 1..4096"
++        )
++
++    layout = build_package_layout(indexed_module_ids)
++
++    layout_by_name = {
++        node.name: node
++        for node in layout.nodes
++    }
++
++    candidates = []
++    seen = set()
++    unavailable = set()
++    unresolved = 0
++    examined = 0
++    truncated = False
++
++    for component in sorted(
++        import_sites.components,
++        key=lambda item: item.members,
++    ):
++        members = set(component.members)
++
++        trees = {}
++
++        for member in sorted(members):
++            tree = _usable_source(
++                parsed_sources.get(member)
++            )
++
++            if tree is None:
++                unavailable.add(member)
++            else:
++                trees[member] = tree
++
++        edge_records = {
++            (edge.source, edge.target): edge
++            for edge in component.internal_edges
++        }
++
++        eligible_hops = {}
++
++        for source, target in sorted(edge_records):
++            edge = edge_records[(source, target)]
++
++            if edge.status != "LEXICAL_CANDIDATES":
++                unresolved += 1
++                continue
++
++            if source not in trees or target not in trees:
++                continue
++
++            source_layout = layout_by_name.get(
++                _logical_module(source)
++            )
++            target_layout = layout_by_name.get(
++                _logical_module(target)
++            )
++
++            if (
++                source_layout is None
++                or target_layout is None
++                or source_layout.kind not in {
++                    "REGULAR_PACKAGE",
++                    "MODULE_FILE",
++                }
++                or target_layout.kind not in {
++                    "REGULAR_PACKAGE",
++                    "MODULE_FILE",
++                }
++                or source_layout.indexed_module_ids
++                != (source,)
++                or target_layout.indexed_module_ids
++                != (target,)
++            ):
++                continue
++
++            hop = _exact_hop(
++                trees,
++                source,
++                target,
++            )
++
++            if hop is None:
++                continue
++
++            if not any(
++                site.line == hop.line
++                and site.column == hop.column
++                and site.form == "IMPORT_FROM"
++                and site.match_kind == "FROM_BASE"
++                and site.activation_scope
++                == "MODULE_TOP_LEVEL"
++                and not site.controls
++                for site in edge.sites
++            ):
++                continue
++
++            eligible_hops[(source, target)] = hop
++
++        adjacency_dict: dict[str, list[str]] = {}
++
++        for source, target in sorted(eligible_hops):
++            adjacency_dict.setdefault(
++                source, []
++            ).append(target)
++
++        adjacency = {
++            source: tuple(sorted(set(targets)))
++            for source, targets
++            in adjacency_dict.items()
++        }
++
++        package_initializers = sorted(
++            member
++            for member in members
++            if member.endswith(".__init__")
++            and member in trees
++            and (
++                node := layout_by_name.get(
++                    _logical_module(member)
++                )
++            ) is not None
++            and node.kind == "REGULAR_PACKAGE"
++            and node.indexed_module_ids == (member,)
++        )
++
++        for package in package_initializers:
++            for provider in adjacency.get(package, ()):
++                first_hop = eligible_hops[
++                    (package, provider)
++                ]
++
++                export_name = first_hop.requested_member
++
++                provider_tree = trees[provider]
++
++                definitions = [
++                    statement
++                    for statement in provider_tree.body
++                    if isinstance(
++                        statement,
++                        ast.FunctionDef,
++                    )
++                    and statement.name == export_name
++                ]
++
++                if len(definitions) != 1:
++                    continue
++
++                definition_line = definitions[0].lineno
++
++                for outgoing in adjacency.get(provider, ()):
++                    outgoing_hop = eligible_hops[
++                        (provider, outgoing)
++                    ]
++
++                    if outgoing_hop.line >= definition_line:
++                        continue
++
++                    if examined >= max_searches:
++                        truncated = True
++                        break
++
++                    examined += 1
++
++                    return_path = _shortest_return_path(
++                        outgoing,
++                        package,
++                        provider,
++                        export_name,
++                        adjacency,
++                        eligible_hops,
++                    )
++
++                    if return_path is None:
++                        continue
++
++                    chain = (
++                        package,
++                        provider,
++                    ) + return_path
++
++                    if (
++                        len(chain) < 4
++                        or len(set(chain[:-1]))
++                        != len(chain) - 1
++                    ):
++                        continue
++
++                    identity = (
++                        chain,
++                        export_name,
++                    )
++
++                    if identity in seen:
++                        continue
++
++                    seen.add(identity)
++
++                    assessment = (
++                        analyze_conditional_reexport_order(
++                            trees,
++                            chain,
++                            export_name,
++                        )
++                    )
++
++                    if assessment.status != (
++                        "CONDITIONAL_DELAYED_REEXPORT"
++                    ):
++                        continue
++
++                    candidates.append(
++                        DiscoveredConditionalReexport(
++                            package_initializer=package,
++                            provider=provider,
++                            export_name=export_name,
++                            outgoing_target=outgoing,
++                            assessment=assessment,
++                        )
++                    )
++
++                if truncated:
++                    break
++
++            if truncated:
++                break
++
++        if truncated:
++            break
++
++    if truncated:
++        coverage = "PARTIAL_SEARCH_LIMIT"
++    elif unavailable or unresolved:
++        coverage = "PARTIAL_SOURCE_OR_LEXICAL_EVIDENCE"
++    else:
++        coverage = "BOUNDED_SELECTION_COMPLETE"
++
++    return ConditionalDiscoveryReport(
++        candidates=tuple(candidates),
++        examined_outgoing_count=examined,
++        unavailable_source_modules=tuple(
++            sorted(unavailable)
++        ),
++        unresolved_lexical_edge_count=unresolved,
++        coverage_status=coverage,
++    )
+```
 
-# EXISTING_ARCHITECTURAL_OWNERS
-All paths below are complete and current. Contextor `get_file_edit_context` established module owners; complete implementation bodies were fetched through `get_symbol_implementation` before AST/text inspection. Dataclasses are frozen unless otherwise noted.
+## tests\test_cycle_semantics_conditional_discovery.py
 
-| Absolute file path | Owner role and direct consumers |
-|---|---|
-| `C:\Temp\Contextor_Repo\contextor\core\cycle_semantics\scc.py` | Structural hard-graph SCC owner; direct consumers include scenarios, edge_sites and SCC tests. |
-| `C:\Temp\Contextor_Repo\contextor\core\cycle_semantics\edge_sites.py` | Joins SCC internal hard edges to lexical AST candidates; activation_view and tests consume it. |
-| `C:\Temp\Contextor_Repo\contextor\core\cycle_semantics\provenance.py` | Exact import occurrences, aliases, scope/control frames and source fingerprint; execution_context and edge_sites consume it. |
-| `C:\Temp\Contextor_Repo\contextor\core\cycle_semantics\activation_view.py` | Counts direct, function, guarded, other and indirect sites; closure_witness and tests consume it. |
-| `C:\Temp\Contextor_Repo\contextor\core\cycle_semantics\diagnostic_view.py` | Validates consistent immutable report projections and assembles edge digest; weighted_closures and tests consume it. |
-| `C:\Temp\Contextor_Repo\contextor\core\cycle_semantics\weighted_closures.py` | Deterministic minimum non-direct structural return walks; direct consumer is its focused test. |
-| `C:\Temp\Contextor_Repo\contextor\core\cycle_semantics\conditional_export.py` | C26F caller-supplied exact chain witness; only direct consumer is its focused test; no public package reexport. |
-| `C:\Temp\Contextor_Repo\contextor\core\cycle_semantics\package_layout.py` | Indexed regular-package/module/namespace candidate layout and lexical import plan; package_model and tests consume it. |
-| `C:\Temp\Contextor_Repo\contextor\core\source.py` | One-byte-snapshot source read, SHA-256 fingerprint and AST parse; analysis and MCP source tools consume it. |
-
-# EXACT_SYMBOL_CONTRACTS
-Signatures and fields are literal current source contracts; they do not imply runtime execution proof.
-
-- `C:\Temp\Contextor_Repo\contextor\core\cycle_semantics\scc.py`: `analyze_import_cycle_topology(hard_edges: Mapping[str, set[str] | frozenset[str] | list[str] | tuple[str, ...]]) -> ImportCycleTopology`. `CyclicImportComponent(members, internal_edges, kind)`; `ImportCycleTopology(node_count, hard_edge_count, total_scc_count, cyclic_components, evidence_scope='STRUCTURAL_HARD_IMPORT_GRAPH')`. Iterative Kosaraju, sorted adjacency, target-only nodes, self-loops; no simple-cycle enumeration or input mutation.
-- `C:\Temp\Contextor_Repo\contextor\core\cycle_semantics\edge_sites.py`: `analyze_cyclic_import_sites(hard_edges: Mapping[...], parsed_sources: Mapping[str, ParsedSourceInput]) -> CyclicImportSiteReport`. `LexicalEdgeSite(ordinal,line,column,form,match_kind,requested_name,matched_member,scopes,controls,activation_scope)`; `HardEdgeSiteEvidence(source,target,status,sites)`; `SCCImportSiteEvidence(members,internal_edges,matched_edge_count,unresolved_edge_count,evidence_scope='LEXICAL_IMPORT_CANDIDATES_NOT_EXECUTION')`; `CyclicImportSiteReport(topology,components,evidence_scope='SNAPSHOT_LEXICAL_EVIDENCE_NOT_RUNTIME_CERTIFICATION')`. Missing/invalid source yields SOURCE_MISSING_OR_INVALID; unmatched graph edge yields NO_MATCHING_LEXICAL_SITE; all graph edges remain. Valid source requires ast.Module, 64 lowercase hex fingerprint, at most 100000 AST nodes. Important: FROM_BASE `LexicalEdgeSite.matched_member=None`; its `requested_name` is the base module, not the imported member.
-- `C:\Temp\Contextor_Repo\contextor\core\cycle_semantics\provenance.py`: `extract_import_provenance(tree: ast.AST, *, module_id: str, source_key: str, source_path: str, source_fingerprint: str) -> ImportProvenance`. `ScopeFrame(kind,name,line)`; `ControlFrame(kind,branch,line,expression=None)`; `ImportOccurrence(ordinal,line,column,end_line,end_column,form,module,level,aliases,scopes,controls)`; `ImportProvenance(module_id,source_key,source_path,source_fingerprint,occurrences)`. Aliases are `(requested, asname)` pairs; lexical import statements are sorted by line/column/original visit order. Function-local and guarded sites remain lexical facts, not deferred/executed proof.
-- `C:\Temp\Contextor_Repo\contextor\core\cycle_semantics\activation_view.py`: `analyze_cycle_activation_view(import_sites: CyclicImportSiteReport) -> CycleActivationViewReport`. `EdgeActivationView(source,target,source_status,classification,site_count,unguarded_direct_count,function_scoped_count,guarded_top_level_count,other_scoped_count,indirect_candidate_count)`; `SCCActivationView(members,edges,unguarded_direct_edges,unguarded_direct_topology,unresolved_edges,evidence_scope='INTERNAL_UNGUARDED_LEXICAL_SUBGRAPH_ONLY')`; `CycleActivationViewReport(structural_topology,components,evidence_scope='ACTIVATION_CANDIDATES_NOT_RUNTIME_SAFETY')`. Direct match kinds are DIRECT_MODULE/FROM_BASE at MODULE_TOP_LEVEL; PARENT_INITIALIZER/OPTIONAL_FROM_CHILD are indirect. A function-scoped import may still execute during initialization if called.
-- `C:\Temp\Contextor_Repo\contextor\core\cycle_semantics\diagnostic_view.py`: `build_cycle_evidence_digest(sites: CyclicImportSiteReport, activation: CycleActivationViewReport, closures: SingleEdgeClosureReport) -> CycleEvidenceDigest`. `CycleDiagnosticEdge(source,target,lexical,activation,in_direct_candidate_graph,single_edge_closure)`; `SCCCycleDiagnosis(members,structural_kind,category,structural_edge_count,matched_edge_count,unresolved_edge_count,direct_candidate_edge_count,non_direct_candidate_edge_count,direct_cyclic_components,single_edge_closures,non_direct_without_direct_return,edges,runtime_execution_status='UNKNOWN_NOT_EVALUATED')`; `CycleEvidenceDigest(structural_topology,components,evidence_scope='STRUCTURAL_AND_LEXICAL_NOT_RUNTIME',source_snapshot_binding='NOT_VERIFIED_BY_DIGEST')`. Recomputes and rejects mismatched reports; cannot authenticate LIVE revision/fingerprint linkage.
-- `C:\Temp\Contextor_Repo\contextor\core\cycle_semantics\weighted_closures.py`: `analyze_weighted_cycle_closures(digest: CycleEvidenceDigest) -> WeightedCycleClosureReport`. `WeightedNonDirectCycleWitness(closing_edge,closing_classification,minimum_non_direct_edge_count,total_cycle_edge_count,return_path,closed_walk,non_direct_edges,direct_edges,unresolved_source_edges,evidence_coverage)`; `SCCWeightedCycleClosures(members,structural_edge_count,direct_candidate_edge_count,non_direct_candidate_edge_count,direct_cyclic_component_count,single_non_direct_witness_count,multiple_non_direct_witness_count,witnesses,evidence_scope='MINIMUM_NON_DIRECT_STRUCTURAL_CYCLE_COST')`; `WeightedCycleClosureReport(components,evidence_scope='WEIGHTED_STRUCTURAL_WITNESSES_NOT_RUNTIME_EXECUTION')`. `_minimum_return_path` uses a deterministic heap ordered by non-direct cost, hops and lexical path; structural cost does not imply execution likelihood.
-- `C:\Temp\Contextor_Repo\contextor\core\cycle_semantics\conditional_export.py`: `analyze_conditional_reexport_order(indexed_sources: Mapping[str, ast.Module], chain: tuple[str, ...], export_name: str) -> ConditionalReexportAssessment`. `ConditionalImportHop(source_id,target_id,line,column,requested_member)`; `ConditionalReexportAssessment(status,reason,chain,export_name,package_reexport_line,provider_definition_line,hops,evidence_scope='CONDITIONAL_SOURCE_ORDER_ONLY',prefix_execution_status='UNVERIFIED_TRANSITIVE_PREFIX',runtime_execution_status='UNKNOWN_NOT_EVALUATED')`. Validates a caller-supplied simple closed chain of single-member top-level ImportFrom sites, compiled ASTs, package earlier effects, one provider FunctionDef and delayed definition. Invalid/missing/ambiguous evidence returns UNKNOWN; it does not discover a chain or execute modules.
-- `C:\Temp\Contextor_Repo\contextor\core\cycle_semantics\package_layout.py`: `build_package_layout(indexed_modules: Iterable[str]) -> PackageLayout` and `plan_package_import(module_id: str, occurrence: ImportOccurrence, layout: PackageLayout) -> ImportSitePlan`. `PackageLayoutNode(name,kind,indexed_module_ids)`; `PackageLayout(nodes,authority='REPOSITORY_LAYOUT_CANDIDATES_ONLY')`; `ImportNamePlan(requested_name,local_binding,load_chain,member_name,possible_child_module,resolution)`; `ImportSitePlan(module_id,occurrence_ordinal,line,status,entries,authority='STATIC_LAYOUT_NOT_RUNTIME_PROOF')`. Maps `pkg.__init__` to regular package `pkg`, detects ambiguous file/package layouts and namespace candidates, retains member-vs-child ambiguity; neither function proves runtime import resolution.
-- `C:\Temp\Contextor_Repo\contextor\core\source.py`: `read_source_snapshot(path: str | Path) -> SourceSnapshot`, `parse_source_snapshot(snapshot: SourceSnapshot,path: str | Path) -> ParsedSourceInput`, `parse_source_with_fingerprint(path: str | Path) -> ParsedSourceInput`. `SourceSnapshot(raw,source_fingerprint)` and `ParsedSourceInput(tree,source_fingerprint)`; SHA-256 is over one exact raw-byte read before AST parse. It authenticates the AST to that byte snapshot, not to a canonical graph revision.
-
-# SOURCE_AST_AND_FINGERPRINT_ACCESS
-`parse_source_with_fingerprint` supplies ast.Module and 64-character SHA-256 from a single disk read; `extract_import_provenance` retains the same fingerprint; `analyze_cyclic_import_sites` validates shape/node bound but does not compare it to canonical FileState. In a read-only experiment all 33 members of the two cyclic SCCs parsed and every internal graph edge had at least one lexical candidate (SCC01 56/56; SCC02 16/16). This is a separate disk-source read after a revision-462 graph snapshot, not one atomic graph+source generation. Individual Contextor file contexts verified relevant paths, but not every one of those 33 at one instant.
-
-# GENERIC_CANDIDATE_PREREQUISITES
-A: cyclic SCC + regular-package initializer can be identified from `ImportCycleTopology.cyclic_components` and `PackageLayoutNode.kind`; do not treat namespace candidates or ambiguous layouts as regular packages.
-B: initializer eager module-level ImportFrom and requested reexport member require exact `ImportOccurrence.aliases` or top-level AST; the hard edge and FROM_BASE LexicalEdgeSite alone omit member identity. Eager is lexical MODULE_TOP_LEVEL, not proof of successful execution.
-C: provider top-level matching FunctionDef requires its verified AST. The current C26 witness does not accept a ClassDef or assignment as provider definition.
-D: provider outgoing import before that definition requires statement line/order from the same AST and an exact matching lexical site; structural edge alone has no order or activation status.
-E: SCC internal hard edges support a finite directed return reachability search. The path must be checked edge-by-edge, not assumed from SCC membership or an enumerated cycle path.
-F: select one exact lexical import occurrence per path edge, preserving aliases, scopes, controls and FROM_BASE vs PARENT_INITIALIZER status; missing/multiple sites remain explicit.
-G: closing top-level single-member ImportFrom must request the same package member as the initializer reexport. The graph edge itself does not carry that member.
-The C26 analyzer remains the final source-order validator once a candidate chain and export_name are supplied. Its positive result is conditional, not a proof that any transitive prefix executes.
-
-# SCC02_AUTOMATIC_SELECTION_EVIDENCE
-DIRECT_EVIDENCE at revision 462: SCC02 has nine members and sixteen internal hard edges. For the known C26 path, all five structural edges are present: `contextor.repo_generator.__init__ → contextor.repo_generator.main → contextor.repo_generator.filters → contextor.ui.__init__ → contextor.ui.gui → contextor.repo_generator.__init__`. The lexical projection has exact MODULE_TOP_LEVEL FROM_BASE sites at lines 1, 8, 5, 5 and 43. The initializer line 1 requests `run_repo_generator`; provider main defines it at line 522, after outgoing line 8; gui line 43 requests the same member. Current real-source C26F assessment, using AST parsing only, returned CONDITIONAL_DELAYED_REEXPORT, package_reexport_line=1, provider_definition_line=522, hop lines=(1,8,5,5,43), UNVERIFIED_TRANSITIVE_PREFIX and UNKNOWN_NOT_EVALUATED.
-DISCOVERY_BOUNDARY: the canonical graph can locate the SCC and return path; lexical report locates source sites and activation scope. To choose the actual five sites generically, inspect ImportOccurrence/AST names because `LexicalEdgeSite` for FROM_BASE does not retain imported member. `filters → ui.__init__` has three lexical candidates (line 5 direct FROM_BASE; lines 6/7 indirect PARENT_INITIALIZER); selecting the hard edge alone would be ambiguous. `repo_generator.main` also has other outgoing return options through icons and ui initializer; C26 chain is one candidate, not a unique or exhaustive runtime path. The other regular initializer `contextor.ui.__init__:5` reexports `run` from gui:2283, but observed SCC return imports request `theme` or other members, not `run`; this pattern is not an exact matching-member candidate on inspected paths.
-
-# SCC01_ELIGIBILITY_EVIDENCE
-DIRECT_EVIDENCE at revision 462: SCC01 has 24 members and 56 internal hard edges; 30 edges are unguarded direct lexical candidates, and that direct subgraph has zero cyclic SCCs. Its two regular-package initializer IDs are `contextor.core.live_state.__init__` and `contextor.core.single_file.builders.__init__`. No fully matched eager C26-style candidate was established in SCC01.
-- `live_state.__init__:3` reexports store functions including `save_snapshot` (store definition :1507) and `load_snapshot` (:1970); initializer import has six members. The structural store→state_manager→initializer return exists, and state_manager requests `save_snapshot` at :517 and `load_snapshot` at :541. But store→state_manager sites :128/:1524 and both closing state_manager sites are FUNCTION_SCOPED. These are plausible call-activated structural matches, not an eager direct path; C26 exact single-member hop would also reject the six-member initializer import.
-- `live_state.__init__:12` reexports runtime `connect` (:622) and `connect_or_start` (:865) within a five-member import. Runtime has earlier top-level imports into ipc/store/lineage_query, but every direct-only return to the initializer is absent. A facade `connect` request at :1149 is function-local. `live_state.__init__:20` reexports hydration functions `resolve_authoritative_repository_state` (:29) and `hydrate_repository_engine` (:87) in a four-member import; hydration→state_manager sites :36/:95 are function-scoped. Facade:61 requests both hydration names at top level, yet an entirely direct return path from hydration is absent. These remain UNKNOWN for call activation, not SAFE.
-- `single_file.builders.__init__:3,10` imports layer0/layer2 builder classes, not matching provider top-level FunctionDefs; `_setup_default_registry` is defined locally at :13 and `default_registry` is assigned at :41. It is not the C26 reexport pattern. Its provider direct return paths to initializer were absent in the current activation projection.
-Thus SCC01 has structural reexport/order preconditions worth recording, but zero EXACT_CANDIDATE under the existing single-member, matching FunctionDef, all-selected-eager-site C26 subset. This does not dismiss its structural cycles or function-local activation risk.
-
-# NEGATIVE_AND_AMBIGUOUS_CASES
-| Case | Discovery classification and exact boundary |
-|---|---|
-| Canonical hard edge with no matching lexical occurrence | UNKNOWN; edge_sites retains it as NO_MATCHING_LEXICAL_SITE rather than deleting it. |
-| Only function-local import | UNKNOWN for runtime activation; NOT_ELIGIBLE as an eager lexical hop without call evidence. SCC01 state_manager/store examples are concrete. |
-| Canonical package `.__init__` ID | EXACT_CANDIDATE only if regular package layout resolves it; namespace/ambiguous layout is UNKNOWN. FROM_BASE and PARENT_INITIALIZER must remain distinct. |
-| Multiple lexical sites per graph edge | UNKNOWN until a specific occurrence is selected and its member/scope is checked; filters→ui initializer has three sites. C26 `_exact_hop` returns UNKNOWN on duplicate matching source statements. |
-| Ambiguous module/file identity | UNKNOWN; package_layout marks AMBIGUOUS_LAYOUT and does not guess. |
-| Package member mismatch | NOT_ELIGIBLE for that candidate chain; ui.run versus theme illustrates it. C26 returns REEXPORT_AND_LOOKUP_NOT_MATCHED. |
-| Alias `asname` | Requested member remains original alias.name; local binding differs. Need ImportOccurrence.aliases/AST; LexicalEdgeSite lacks alias spelling. Exact only after that check. |
-| Plain import instead of single-member from-import | NOT_ELIGIBLE for current C26 exact-hop subset; it can still be a structural graph edge. |
-| Multiple intermediate return paths | UNKNOWN until a deterministic path/site selection is source-validated; SCC02 main has filters/icons/ui options. No implication that any path executes. |
-| Earlier initializer binding or effects | UNKNOWN unless the allowed prior statements are only docstring/Pass; C26 returns EARLIER_PACKAGE_EFFECT_UNSUPPORTED for other statements. A confirmed earlier binding defeats delayed-reexport inference for that member. |
-| Unsupported or compile-invalid syntax | UNKNOWN / SOURCE_NOT_COMPILABLE in C26F; do not skip statements. |
-| Missing AST or stale/unverified canonical source | UNKNOWN; no authoritative source-backed witness. |
-| Structural SCC without matching export pattern | NOT_ELIGIBLE for conditional-export witness; SCC remains structural and visible. |
-
-# DETERMINISM_AND_COMPLEXITY_BOUNDARY
-The existing SCC owner sorts adjacency and computes SCCs iteratively without recursion or simple-cycle enumeration. edge_sites sorts members/internal edges and lexical sites by ordinal/match kind/member; input AST is bounded to 100000 nodes per member. A finite traversal of SCC internal hard edges can establish whether a directed return path exists; sorted adjacency and a defined occurrence order are needed for reproducible candidate order and duplicate handling. Graph reachability is O(V+E) per starting candidate after adjacency construction; inspecting every possible simple cycle would be unbounded/exponential and is unnecessary. weighted_closures' deterministic Dijkstra orders structural paths by non-direct count, hop count and lexical path, but its cost is not runtime likelihood or a substitute for matching import members. Deduplication must distinguish same module chain with different export names or exact lexical sites; collapsing only by hard-edge pair would lose evidence.
-
-# SOURCE_SNAPSHOT_AUTHORITY_LIMITATIONS
-The read-only IPC snapshot provided a coherent revision-462 hard graph and canonical cycle family; before/snapshot/after pings matched. Its `RepositoryAnalysisState.file_state` mapping contained zero entries in this runtime snapshot, so it did not supply per-file hashes for binding the later disk ASTs to that graph object. `parse_source_with_fingerprint` binds each AST to one raw-byte read, and Contextor `workspace_sync=verified` separately verifies selected disk files against canonical FileState at revision 462. Those calls are independent and may span time; revision equality alone is not an atomic graph+AST transaction. `CycleEvidenceDigest.source_snapshot_binding` is explicitly NOT_VERIFIED_BY_DIGEST. No current inspected interface was proved to return graph, all import occurrences and ASTs as one atomically source-bound snapshot. A coherent source-generation guarantee is MISSING_EVIDENCE; no such guarantee is claimed from hashes or matching revision alone.
-
-# IMPLEMENTATION_INPUT_INVENTORY
-| EXISTING_OWNER / EXACT_REUSABLE_SYMBOL | REQUIRED_INPUT | AVAILABLE_OUTPUT | MISSING_EVIDENCE / SEMANTIC_FAILURE_MODE | RELEVANT_TARGETED_TESTS |
-|---|---|---|---|---|
-| scc.py / analyze_import_cycle_topology | Complete canonical hard_edges | Sorted cyclic SCCs and internal hard edges | Structural only; no source site/order | test_cycle_semantics_scc.py |
-| package_layout.py / build_package_layout, plan_package_import | Indexed module IDs; exact occurrence | Regular/ambiguous package candidates and member-vs-child plan | Namespace/file conflict and dynamic imports unresolved | test_cycle_semantics_package_layout.py |
-| source.py / parse_source_with_fingerprint | Exact source file bytes | AST + raw SHA-256 | No same-transaction graph revision binding | tests/analysis/test_lineage_extraction.py:test_parsed_source_fingerprint_is_exact_raw_sha256_and_encoding_safe |
-| provenance.py / extract_import_provenance | AST and fingerprint | Ordered aliases, scopes and controls | Lexical, not executed import; no automatic graph join | test_cycle_semantics_provenance.py |
-| edge_sites.py / analyze_cyclic_import_sites | hard_edges + ParsedSourceInput map | Per-hard-edge lexical candidate sites; missing sites retained | FROM_BASE member/alias omitted from LexicalEdgeSite; missing/stale source UNKNOWN | test_cycle_semantics_edge_sites.py |
-| activation_view.py / analyze_cycle_activation_view | CyclicImportSiteReport | Direct/function/guarded/indirect counts and direct-only subgraph | Function-local can be call-activated; no runtime safety | test_cycle_semantics_activation_view.py |
-| diagnostic_view.py / build_cycle_evidence_digest | Coherent sites/activation/closures | Per-edge joined immutable digest | source_snapshot_binding=NOT_VERIFIED_BY_DIGEST | test_cycle_semantics_diagnostic_view.py |
-| weighted_closures.py / analyze_weighted_cycle_closures | Digest | Deterministic minimum-cost structural return walks | Cost does not establish execution or exact export names | test_cycle_semantics_weighted_closures.py |
-| conditional_export.py / analyze_conditional_reexport_order | Caller-supplied chain, export_name and ASTs | ConditionalImportHop and assessment with explicit UNKNOWN runtime | No candidate discovery; multi-member/duplicate/invalid source fails closed | test_cycle_semantics_conditional_export.py |
-
-# RELEVANT_TARGETED_TESTS
-Exact existing nodes include `tests/test_cycle_semantics_scc.py::test_b0g4b5_deep_cycle_no_recursion`, `::test_b0g4b5_order_independent_and_deduplicated`; `tests/test_cycle_semantics_edge_sites.py::test_parent_initializer_candidate`, `::test_missing_and_unmatched_not_dropped`, `::test_invalid_fingerprint_is_not_treated_as_source`; `tests/test_cycle_semantics_provenance.py::test_individual_statements_and_aliases`, `::test_multiple_origins_not_deduplicated`; `tests/test_cycle_semantics_activation_view.py::test_function_scoped_reverse_does_not_enter_direct_subgraph`, `::test_indirect_parent_candidate_is_not_unguarded_direct`, `::test_mixed_eager_and_function_sites_preserved`; `tests/test_cycle_semantics_diagnostic_view.py::test_mismatched_activation_rejected`, `::test_determinism_immutability_and_json`; `tests/test_cycle_semantics_weighted_closures.py::test_lexical_order_breaks_equal_cost_and_hop_ties`; `tests/test_cycle_semantics_conditional_export.py::test_c26_real_contextor_sources_without_import`, `::test_c26_duplicate_import_hop_unknown`, `::test_c26f_invalid_opaque_provider_unknown`; `tests/test_cycle_semantics_package_layout.py::test_from_package_member_remains_ambiguous`; `tests/test_cycle_semantics_scc02_entry_order.py::test_scc02_source_chain_still_exists`. These tests were inventoried only; none was run in C27.
-
-# UNRESOLVED_EVIDENCE
-No atomic graph+AST+canonical fingerprint binding API proved; no runtime execution path or ImportError observation; no complete verification of all 33 parsed SCC member files at one instant; transient first authority connection refusal has no proven root cause. Existing lexical graph rows cannot alone recover requested FROM_BASE member names. No automatic generic discovery implementation exists yet.
-
-# NO_RUNTIME_EXECUTION
-PASS: no GUI/Repo Generator or other real SCC module import, Tkinter execution, backend/watcher startup, service restart or new process. Read-only one-shot Python processes used existing cycle-semantics/source libraries and IPC snapshot; AST files were parsed, never executed. No pytest or FULL project analysis.
-
-# NO_RUNTIME_SAFETY_CERTIFICATION
-PASS: structural, lexical and conditional findings are not SAFE, ImportError or runtime reachability proof.
-
-# NO_WARNING_SUPPRESSION
-PASS: no diagnostic policy, graph, resolver or warning changes.
-
-# FILES_CHANGED
-NONE for source/test/docs. `walkthrough.md` alone is overwritten for C27. ACTUAL_DIFF=FULL_DIFFS=NONE for this task.
-
-# FINAL_VERDICT
-B0G4C27_DISCOVERY_COMPLETE. Existing owners, exact contracts, SCC02 discoverability, SCC01 eligibility and failure/authority boundaries are documented with current revision-462 evidence. No design or implementation selected. STOP; await `proceduj`.
+```diff
+diff --git "a/tests\\test_cycle_semantics_conditional_discovery.py" "b/tests\\test_cycle_semantics_conditional_discovery.py"
+new file mode 100644
+index 0000000..e22a028
+--- /dev/null
++++ "b/tests\\test_cycle_semantics_conditional_discovery.py"
+@@ -0,0 +1,205 @@
++"""Focused synthetic contracts for conditional reexport discovery."""
++
++import ast
++from dataclasses import asdict
++from hashlib import sha256
++import json
++
++import pytest
++
++from contextor.core.cycle_semantics.conditional_discovery import (
++    discover_conditional_reexports,
++)
++from contextor.core.cycle_semantics.edge_sites import analyze_cyclic_import_sites
++from contextor.core.source import ParsedSourceInput
++
++
++GRAPH = {
++    "repo.__init__": ("repo.main",),
++    "repo.main": ("repo.filters", "ui.__init__"),
++    "repo.filters": ("ui.__init__",),
++    "ui.__init__": ("ui.gui",),
++    "ui.gui": ("repo.__init__",),
++}
++
++C28_FIXTURE_SOURCES = {
++    "repo.__init__": "from repo.main import run_repo_generator\n",
++    "repo.main": (
++        "from repo.filters import FilterWindow\n"
++        "from ui import theme\n"
++        "\n"
++        "def run_repo_generator(parent=None):\n"
++        "    pass\n"
++    ),
++    "repo.filters": "from ui import theme\n",
++    "ui.__init__": "from .gui import run\n",
++    "ui.gui": (
++        "from repo import run_repo_generator\n"
++        "\n"
++        "def run(*, single_instance=None):\n"
++        "    pass\n"
++    ),
++}
++
++
++def _inputs(*, sources=None, graph=None, indexed=None):
++    source_text = C28_FIXTURE_SOURCES if sources is None else sources
++    edges = GRAPH if graph is None else graph
++    parsed = {
++        module: ParsedSourceInput(
++            tree=ast.parse(text),
++            source_fingerprint=sha256(text.encode("utf-8")).hexdigest(),
++        )
++        for module, text in source_text.items()
++    }
++    sites = analyze_cyclic_import_sites(edges, parsed)
++    module_ids = tuple(GRAPH) if indexed is None else indexed
++    return sites, parsed, module_ids
++
++
++def _discover(*, sources=None, graph=None, indexed=None, max_searches=256):
++    sites, parsed, module_ids = _inputs(
++        sources=sources, graph=graph, indexed=indexed
++    )
++    return discover_conditional_reexports(
++        sites, parsed, module_ids, max_searches=max_searches
++    )
++
++
++def _chains(report):
++    return {candidate.assessment.chain for candidate in report.candidates}
++
++
++VIA_FILTERS = (
++    "repo.__init__", "repo.main", "repo.filters",
++    "ui.__init__", "ui.gui", "repo.__init__",
++)
++DIRECT = (
++    "repo.__init__", "repo.main", "ui.__init__",
++    "ui.gui", "repo.__init__",
++)
++
++
++def test_c28_discovers_two_distinct_outgoing_paths():
++    report = _discover()
++    assert len(report.candidates) == 2
++    assert _chains(report) == {VIA_FILTERS, DIRECT}
++    assert {item.export_name for item in report.candidates} == {
++        "run_repo_generator"
++    }
++    assert {item.assessment.status for item in report.candidates} == {
++        "CONDITIONAL_DELAYED_REEXPORT"
++    }
++    assert report.runtime_execution_status == "UNKNOWN_NOT_EVALUATED"
++    assert report.source_snapshot_binding == "NOT_ATOMICALLY_VERIFIED_BY_DISCOVERY"
++    assert report.coverage_status == "BOUNDED_SELECTION_COMPLETE"
++
++
++def test_c28_determinism_independent_graph_order():
++    graph = dict(reversed(list(GRAPH.items())))
++    sources = dict(reversed(list(C28_FIXTURE_SOURCES.items())))
++    assert _discover() == _discover(graph=graph, sources=sources)
++
++
++def test_c28_function_scoped_return_is_not_eager():
++    sources = dict(C28_FIXTURE_SOURCES)
++    sources["repo.filters"] = "def later():\n    from ui import theme\n"
++    report = _discover(sources=sources)
++    assert _chains(report) == {DIRECT}
++
++
++def test_c28_mismatched_closing_export():
++    sources = dict(C28_FIXTURE_SOURCES)
++    sources["ui.gui"] = "from repo import other_name\n"
++    report = _discover(sources=sources)
++    assert report.candidates == ()
++    assert report.runtime_execution_status == "UNKNOWN_NOT_EVALUATED"
++
++
++def test_c28_duplicate_exact_source_hop_rejected():
++    sources = dict(C28_FIXTURE_SOURCES)
++    sources["repo.filters"] = "from ui import theme\nfrom ui import theme\n"
++    report = _discover(sources=sources)
++    assert _chains(report) == {DIRECT}
++
++
++def test_c28_ambiguous_layout_rejected():
++    report = _discover(indexed=tuple(GRAPH) + ("repo",))
++    assert report.candidates == ()
++
++
++def test_c28_missing_source_partial():
++    sources = dict(C28_FIXTURE_SOURCES)
++    del sources["repo.filters"]
++    report = _discover(sources=sources)
++    assert "repo.filters" in report.unavailable_source_modules
++    assert report.coverage_status == "PARTIAL_SOURCE_OR_LEXICAL_EVIDENCE"
++    assert _chains(report) == {DIRECT}
++    assert report.runtime_execution_status == "UNKNOWN_NOT_EVALUATED"
++
++
++def test_c28_invalid_fingerprint_is_not_trusted():
++    sites, parsed, indexed = _inputs()
++    parsed["ui.gui"] = ParsedSourceInput(parsed["ui.gui"].tree, "invalid")
++    report = discover_conditional_reexports(
++        analyze_cyclic_import_sites(GRAPH, parsed), parsed, indexed
++    )
++    assert report.candidates == ()
++    assert "ui.gui" in report.unavailable_source_modules
++    assert report.coverage_status == "PARTIAL_SOURCE_OR_LEXICAL_EVIDENCE"
++
++
++def test_c28_bounded_search_limit():
++    report = _discover(max_searches=1)
++    assert report.examined_outgoing_count == 1
++    assert report.coverage_status == "PARTIAL_SEARCH_LIMIT"
++    assert len(report.candidates) < 2
++
++
++def test_c28_source_ast_immutability_and_json():
++    sites, parsed, indexed = _inputs()
++    before = {
++        module: ast.dump(source.tree, include_attributes=True)
++        for module, source in parsed.items()
++    }
++    first = discover_conditional_reexports(sites, parsed, indexed)
++    second = discover_conditional_reexports(sites, parsed, indexed)
++    after = {
++        module: ast.dump(source.tree, include_attributes=True)
++        for module, source in parsed.items()
++    }
++    assert first == second
++    assert before == after
++    json.dumps(asdict(first))
++
++
++def test_c28_unresolved_lexical_edges_preserved():
++    graph = dict(GRAPH)
++    graph["repo.filters"] = ("ui.__init__", "repo.__init__")
++    report = _discover(graph=graph)
++    assert report.unresolved_lexical_edge_count >= 1
++    assert report.coverage_status == "PARTIAL_SOURCE_OR_LEXICAL_EVIDENCE"
++    assert _chains(report) == {VIA_FILTERS, DIRECT}
++
++
++def test_c28_rejects_invalid_search_limits():
++    sites, parsed, indexed = _inputs()
++    for limit in (0, -1, 4097, True):
++        with pytest.raises(ValueError):
++            discover_conditional_reexports(
++                sites, parsed, indexed, max_searches=limit
++            )
++
++
++def test_c28_invalid_cpython_module_fails_closed():
++    sources = dict(C28_FIXTURE_SOURCES)
++    sources["ui.gui"] = (
++        "from repo import run_repo_generator\n"
++        "def invalid():\n"
++        "    from repo import *\n"
++    )
++    assert isinstance(ast.parse(sources["ui.gui"]), ast.Module)
++    report = _discover(sources=sources)
++    assert report.candidates == ()
++    assert "ui.gui" in report.unavailable_source_modules
++    assert report.runtime_execution_status == "UNKNOWN_NOT_EVALUATED"
+```
