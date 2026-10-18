@@ -94,6 +94,273 @@ def _status_response(root: Path, job: dict) -> dict:
     return json.loads(get_analysis_status(str(root), job_id=job["job_id"]))
 
 
+def _r3_reconcile(
+    tmp_path, monkeypatch, *,
+    authority_sequence, receipt_state="completed", response=None,
+    durable_job_id="mu-exact", lookup_job_id="mu-exact",
+):
+    from types import SimpleNamespace
+    import contextor.core.live_state as live_state_module
+
+    _patch_reconciliation_diagnostics(monkeypatch)
+    job = _pending_publication_job(tmp_path)
+    job["live_publish_job_id"] = durable_job_id
+    analysis_jobs._write_analysis_job(tmp_path, job)
+    calls = []
+    replies = iter(authority_sequence)
+    expected_authority = {
+        "status": "ok", "service_instance_id": "service",
+        "process_start_identity": "process", "repo_id": "repo-id",
+    }
+
+    class Client:
+        endpoint = SimpleNamespace(
+            service_instance_id="service", process_start_identity="process"
+        )
+
+        def authority_status(self):
+            calls.append("authority")
+            reply = next(replies)
+            if isinstance(reply, BaseException):
+                raise reply
+            return expected_authority if reply == "same" else reply
+
+        def lookup_committed_publish(self, **kwargs):
+            calls.append("lookup")
+            assert kwargs == {
+                "idempotency_key": job["live_publish_idempotency_key"],
+                "state_id": "sid", "revision": 7,
+            }
+            return {
+                "status": "ok", "job_id": lookup_job_id,
+                "requested_state_id": "sid", "requested_revision": 7,
+            }
+
+        def mutation_status(self, mutation_job_id):
+            calls.append("mutation")
+            assert mutation_job_id == "mu-exact"
+            return {
+                "status": "ok", "job_id": mutation_job_id,
+                "requested_state_id": "sid", "requested_revision": 7,
+                "state": receipt_state,
+                "response": response if response is not None else {
+                    "status": "ok", "revision": 7,
+                },
+            }
+
+        def submit_committed_publish(self, **kwargs):
+            raise AssertionError("read-only reconciliation must not publish")
+
+    monkeypatch.setattr(
+        live_state_module, "connect",
+        lambda _root, *, reconcile_missing_endpoint_binding=False: Client(),
+    )
+    result = _status_response(tmp_path, job)
+    stored = analysis_jobs._read_analysis_job(tmp_path, job["job_id"])
+    return job, result, stored, calls
+
+
+def _r3_assert_identity_preserved(job, stored):
+    assert stored["live_publish_idempotency_key"] == job["live_publish_idempotency_key"]
+    assert stored["live_publish_service_instance_id"] == "service"
+    assert stored["live_publish_process_start_identity"] == "process"
+    assert stored["live_publish_expected_state_id"] == "sid"
+    assert stored["live_publish_expected_revision"] == 7
+
+
+def test_r3_t01_matching_final_authority_allows_success(tmp_path, monkeypatch):
+    job, result, stored, calls = _r3_reconcile(
+        tmp_path, monkeypatch, authority_sequence=["same", "same"]
+    )
+    assert calls == ["authority", "mutation", "authority"]
+    assert result["live_publish_status"] == stored["live_publish_status"] == "success"
+    assert result["live_publish_revision"] == stored["live_publish_revision"] == 7
+    _r3_assert_identity_preserved(job, stored)
+
+
+def test_r3_t02_final_service_replacement_fences_success(tmp_path, monkeypatch):
+    replacement = {
+        "status": "ok", "service_instance_id": "other",
+        "process_start_identity": "process",
+    }
+    job, result, stored, calls = _r3_reconcile(
+        tmp_path, monkeypatch, authority_sequence=["same", replacement]
+    )
+    assert calls == ["authority", "mutation", "authority"]
+    assert result["live_publish_status"] == "unverified_authority_changed"
+    assert result["live_publish_revision"] is None
+    assert stored["live_publish_status"] == "pending_verification"
+    assert stored["live_publish_revision"] is None
+    _r3_assert_identity_preserved(job, stored)
+
+
+def test_r3_t03_final_process_replacement_fences_success(tmp_path, monkeypatch):
+    replacement = {
+        "status": "ok", "service_instance_id": "service",
+        "process_start_identity": "other",
+    }
+    job, result, stored, calls = _r3_reconcile(
+        tmp_path, monkeypatch, authority_sequence=["same", replacement]
+    )
+    assert calls == ["authority", "mutation", "authority"]
+    assert result["live_publish_status"] == "unverified_authority_changed"
+    assert result["live_publish_revision"] is None
+    assert stored["live_publish_status"] == "pending_verification"
+    assert stored["live_publish_revision"] is None
+    _r3_assert_identity_preserved(job, stored)
+
+
+def test_r3_t04_final_authority_timeout_stays_pending(tmp_path, monkeypatch):
+    job, result, stored, calls = _r3_reconcile(
+        tmp_path, monkeypatch, authority_sequence=["same", TimeoutError("timeout")]
+    )
+    assert calls == ["authority", "mutation", "authority"]
+    assert result["live_publish_status"] == stored["live_publish_status"] == "pending_verification"
+    assert result["live_publish_revision"] is None
+    assert stored["live_publish_revision"] is None
+    _r3_assert_identity_preserved(job, stored)
+
+
+@pytest.mark.parametrize("final_authority", [
+    None, "malformed", {"status": "ok", "service_instance_id": "service"},
+    {"status": "unavailable"},
+], ids=["none", "malformed", "missing-identity", "not-ok"])
+def test_r3_t05_unknown_final_authority_stays_pending(
+    tmp_path, monkeypatch, final_authority
+):
+    job, result, stored, calls = _r3_reconcile(
+        tmp_path, monkeypatch, authority_sequence=["same", final_authority]
+    )
+    assert calls == ["authority", "mutation", "authority"]
+    assert result["live_publish_status"] == stored["live_publish_status"] == "pending_verification"
+    assert result["live_publish_revision"] is None
+    assert stored["live_publish_revision"] is None
+    _r3_assert_identity_preserved(job, stored)
+
+
+@pytest.mark.parametrize("receipt_state,response,expected", [
+    ("failed", None, "failed"),
+    ("completed", {"status": "ok", "revision": 7, "resync_required": True}, "recovery_required"),
+])
+@pytest.mark.parametrize("final_authority,accepted", [
+    ("same", True),
+    ({"status": "ok", "service_instance_id": "other",
+      "process_start_identity": "process"}, False),
+    (None, False),
+])
+def test_r3_t06_other_terminal_states_require_final_authority(
+    tmp_path, monkeypatch, receipt_state, response, expected, final_authority, accepted
+):
+    job, result, stored, calls = _r3_reconcile(
+        tmp_path, monkeypatch, authority_sequence=["same", final_authority],
+        receipt_state=receipt_state, response=response,
+    )
+    assert calls == ["authority", "mutation", "authority"]
+    if accepted:
+        assert result["live_publish_status"] == stored["live_publish_status"] == expected
+    else:
+        assert result["live_publish_status"] == (
+            "pending_verification" if final_authority is None
+            else "unverified_authority_changed"
+        )
+        assert stored["live_publish_status"] == "pending_verification"
+        assert stored["live_publish_revision"] is None
+    _r3_assert_identity_preserved(job, stored)
+
+
+def test_r3_t07_empty_durable_job_id_recovers_by_lookup(tmp_path, monkeypatch):
+    job, result, stored, calls = _r3_reconcile(
+        tmp_path, monkeypatch, authority_sequence=["same", "same"], durable_job_id=""
+    )
+    assert calls == ["authority", "lookup", "mutation", "authority"]
+    assert result["live_publish_status"] == stored["live_publish_status"] == "success"
+    assert result["live_publish_job_id"] == stored["live_publish_job_id"] == "mu-exact"
+    _r3_assert_identity_preserved(job, stored)
+
+
+def test_r3_t08_whitespace_durable_job_id_recovers_by_lookup(tmp_path, monkeypatch):
+    job, result, stored, calls = _r3_reconcile(
+        tmp_path, monkeypatch, authority_sequence=["same", "same"], durable_job_id="  "
+    )
+    assert calls == ["authority", "lookup", "mutation", "authority"]
+    assert result["live_publish_status"] == stored["live_publish_status"] == "success"
+    assert result["live_publish_job_id"] == stored["live_publish_job_id"] == "mu-exact"
+    _r3_assert_identity_preserved(job, stored)
+
+
+@pytest.mark.parametrize("lookup_job_id", ["", "  "], ids=["empty", "whitespace"])
+def test_r3_t09_invalid_lookup_job_id_is_not_persisted(
+    tmp_path, monkeypatch, lookup_job_id
+):
+    job, result, stored, calls = _r3_reconcile(
+        tmp_path, monkeypatch, authority_sequence=["same"],
+        durable_job_id="", lookup_job_id=lookup_job_id,
+    )
+    assert calls == ["authority", "lookup"]
+    assert result["live_publish_status"] == stored["live_publish_status"] == "pending_verification"
+    assert result["live_publish_job_id"] == stored["live_publish_job_id"] == ""
+    _r3_assert_identity_preserved(job, stored)
+
+
+def test_r3_t10_later_read_only_recovery_after_final_timeout(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    import contextor.core.live_state as live_state_module
+
+    _patch_reconciliation_diagnostics(monkeypatch)
+    job = _pending_publication_job(tmp_path)
+    job["live_publish_job_id"] = "mu-exact"
+    analysis_jobs._write_analysis_job(tmp_path, job)
+    calls = []
+    replies = iter(["same", TimeoutError("timeout"), "same", "same"])
+
+    class Client:
+        endpoint = SimpleNamespace(
+            service_instance_id="service", process_start_identity="process"
+        )
+
+        def authority_status(self):
+            calls.append("authority")
+            reply = next(replies)
+            if isinstance(reply, BaseException):
+                raise reply
+            return {
+                "status": "ok", "service_instance_id": "service",
+                "process_start_identity": "process", "repo_id": "repo-id",
+            }
+
+        def mutation_status(self, mutation_job_id):
+            calls.append("mutation")
+            assert mutation_job_id == "mu-exact"
+            return {
+                "status": "ok", "job_id": mutation_job_id, "state": "completed",
+                "requested_state_id": "sid", "requested_revision": 7,
+                "response": {"status": "ok", "revision": 7},
+            }
+
+        def submit_committed_publish(self, **kwargs):
+            raise AssertionError("status must never publish")
+
+        def lookup_committed_publish(self, **kwargs):
+            raise AssertionError("valid durable job ID needs no lookup")
+
+    monkeypatch.setattr(
+        live_state_module, "connect",
+        lambda _root, *, reconcile_missing_endpoint_binding=False: Client(),
+    )
+    first = _status_response(tmp_path, job)
+    first_stored = analysis_jobs._read_analysis_job(tmp_path, job["job_id"])
+    assert first["live_publish_status"] == first_stored["live_publish_status"] == "pending_verification"
+    assert first["live_publish_revision"] is None
+    _r3_assert_identity_preserved(job, first_stored)
+
+    second = _status_response(tmp_path, job)
+    stored = analysis_jobs._read_analysis_job(tmp_path, job["job_id"])
+    assert calls == ["authority", "mutation", "authority", "authority", "mutation", "authority"]
+    assert second["live_publish_status"] == stored["live_publish_status"] == "success"
+    assert second["live_publish_revision"] == stored["live_publish_revision"] == 7
+    _r3_assert_identity_preserved(job, stored)
+
+
 @pytest.mark.parametrize(
     "authority_result",
     [

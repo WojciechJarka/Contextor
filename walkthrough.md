@@ -1,246 +1,158 @@
-TASK=CONTEXTOR_C38E2Q_R2_STATUS_RECOVERY_INVARIANTS
-MODE=FOCUSED CORRECTION
+TASK=CONTEXTOR_C38E2Q_R3_FINAL_AUTHORITY_VERIFICATION
+MODE=CONTROLLED IMPLEMENTATION CONTINUATION
 
-HEAD_BEFORE=cca8b8aa035fafbd373ddbf3f86133eeed1aaa58
-HEAD_AFTER=cca8b8aa035fafbd373ddbf3f86133eeed1aaa58
+HEAD_BEFORE=b99a20a27f6210061bdf082e9081fcf1f5657de1
+HEAD_AFTER=b99a20a27f6210061bdf082e9081fcf1f5657de1
 
-FILES_CHANGED
-- C:\Temp\Contextor_Repo\contextor\mcp\tools\get_analysis_status.py
-- C:\Temp\Contextor_Repo\tests\mcp\tools\test_analysis_status_concurrency.py
+FILES_CHANGED:
+- contextor/mcp/tools/get_analysis_status.py
+- tests/mcp/tools/test_analysis_status_concurrency.py
+walkthrough.md jest wyłącznie raportem.
 
-AUTHORITY_TRI_STATE_CLASSIFICATION
-- connect(...) returning None: retains pending_verification and skips authority and mutation lookup.
-- Endpoint identity explicitly different from the durable service/process identity: returns unverified_authority_changed and skips receipt lookup.
-- authority_status transport exceptions, non-object, unavailable/error status, or missing identity fields: retains pending_verification and skips mutation lookup. Missing evidence is not classified as replacement.
-- Explicit authority service/process mismatch: returns unverified_authority_changed and skips mutation lookup.
-- Matching endpoint and authority service/process identities with status=ok: continues existing receipt reconciliation.
-- The caller uses connect(root, reconcile_missing_endpoint_binding=False); the LIVE connection implementation and normal caller defaults are unchanged.
+ROOT_CAUSE:
+CODE_PATH_PROVED: dotychczasowa ścieżka utrwalała terminalny wynik classify_publication_receipt po mutation_status bez drugiego authority_status. Warunek isinstance(job_id, str) oraz bool(lookup_job_id) akceptował pusty/whitespace-only identyfikator w niewłaściwych punktach.
 
-LOOKUP_IDENTITY_VALIDATION
-Before accepting a recovered job ID, the handler requires a dict, status=ok, a nonempty string job_id, exact requested_state_id, and requested_revision whose exact type is int and whose value equals the expected revision. Persistence occurs only after these checks.
+IMPLEMENTATION_DETAILS:
+- Po terminalnej klasyfikacji wykonywany jest drugi read-only authority_status. Trwały status terminalny jest zapisany tylko przy status=ok oraz pełnej, niepustej i dokładnie zgodnej tożsamości authority, endpointu i durable expected identity.
+- Jawny mismatch po receipt zwraca unverified_authority_changed z revision=None bez utrwalenia terminalnego rozstrzygnięcia. Niedostępna/niewłaściwie ukształtowana authority pozostawia pending_verification.
+- Brakujący, pusty i whitespace-only durable job_id kieruje do dotychczasowego lookup. Lookup job_id musi być niepusty po strip. Oryginalne poprawne identyfikatory pozostają niezmienione.
 
-INVALID_LOOKUP_NON_PERSISTENCE
-Targeted regressions prove wrong state ID, wrong revision, and boolean revision leave live_publish_job_id unset, preserve the canonical idempotency key, remain pending_verification, and do not call mutation_status. The handler performs no submit, publication, update_file, or FULL request.
+AUTHORITY_RACE_PROOF:
+CONTRACT_PROVED przez kontrolowane sekwencje testów R3-T01–T06: authority zgodna przed i po terminalnym receipt zezwala na zapis. Zmiana service_instance_id albo process_start_identity po receipt blokuje terminalny success. Timeout, None, malformed, missing identity i status!=ok pozostawiają pending. To samo fence obejmuje failed i recovery_required. Każdy test odczytuje także trwały rekord.
 
-RECOVERY_RETRY_PROOF
-A first invalid lookup leaves the pending durable record unchanged. A later read-only lookup for the same canonical key returns the exact generation; the handler persists that job ID and accepts the matching successful terminal receipt. The test asserts reconciliation connects with reconciliation disabled on both calls.
+EMPTY_JOB_ID_PROOF:
+CONTRACT_PROVED R3-T07–T09: pusty i whitespace-only durable job_id uruchamiają canonical-key lookup; poprawne lookup job_id prowadzi do terminalnego success. Pusty i whitespace-only wynik lookup nie jest utrwalany ani przekazywany do mutation_status. Walidacja exact requested_state_id/revision oraz canonical idempotency key pozostała aktywna.
 
-TARGETED_TEST_RESULTS
-- Isolated file: & .\.venv\Scripts\python.exe -m pytest tests/mcp/tools/test_analysis_status_concurrency.py -q — 36 passed, 1 existing AuthlibDeprecationWarning, 6.42s.
-- Required named C38E2Q focused selection: tests/test_live_mutation_coordinator.py tests/test_durable_verified_publish.py tests/test_live_state_ipc.py tests/mcp/tools/test_analysis_status_concurrency.py tests/test_full_analysis_coordination.py tests/test_async_publication_receipt.py — 243 passed, 1 existing AuthlibDeprecationWarning, 130.13s.
-- Full repository pytest suite was not run.
+LATER_RECOVERY_PROOF:
+CONTRACT_PROVED R3-T10: pierwszy odczyt kończy się pending_verification po timeout drugiej authority; trwały expected identity/key pozostaje; drugi odczyt uzyskuje zgodną authority i ten sam terminalny receipt, zapisuje success bez submit/publish i bez lookup dla prawidłowego durable job_id.
 
-PREVIOUS_FAILURE_REPRODUCTION_STATUS
-The previously recorded failure `tests/test_live_state_ipc.py::test_normal_service_shutdown_preserves_authority_event_chronology` with `RuntimeDomainError: lock_root must be owned by cache_root for this runtime layout` did not reproduce in the required six-file selection; that run completed with 243 passed and 0 failed. No failing test order or traceback exists in this run.
+RESULTS R3-T01–R3-T10:
+R3-T01 PASS; R3-T02 PASS; R3-T03 PASS; R3-T04 PASS; R3-T05 PASS (4 warianty); R3-T06 PASS (6 wariantów); R3-T07 PASS; R3-T08 PASS; R3-T09 PASS (2 warianty); R3-T10 PASS.
 
-WATCHER_EVENTS
-- Revision 603: desktop_watcher / update_file / UPDATED / C:\Temp\Contextor_Repo\contextor\mcp\tools\get_analysis_status.py
-- Revision 604: desktop_watcher / update_file / UPDATED / C:\Temp\Contextor_Repo\tests\mcp\tools\test_analysis_status_concurrency.py
-- Event query after revision 603 returned continuity=continuous, resync_required=false; latest_revision=604.
+TARGETED_TEST_RESULTS:
+- .venv/Scripts/python.exe -m pytest tests/mcp/tools/test_analysis_status_concurrency.py -q: 55 passed, 1 unrelated AuthlibDeprecationWarning, 7.22s. Obejmuje istniejące testy R2.
+- .venv/Scripts/python.exe -m pytest tests/test_async_publication_receipt.py tests/test_live_mutation_coordinator.py::test_duplicate_idempotency_key_reuses_job_and_executes_once tests/test_live_mutation_coordinator.py::test_unknown_and_invalid_mutation_job_status_fail_closed tests/test_durable_verified_publish.py::test_opt_in_ack_confirms_exact_installed_generation_without_mutation tests/test_durable_verified_publish.py::test_opt_in_ack_rejects_nonmatching_or_unavailable_generation -q: 18 passed, 4.00s.
+- git diff --check: bez błędów. Nie uruchamiano pełnego suite.
 
-WORKSPACE_SYNC
-- contextor/mcp/tools/get_analysis_status.py: verified at canonical LIVE revision 604; syntax diagnostics checked_and_none, 0 errors.
-- tests/mcp/tools/test_analysis_status_concurrency.py: verified at canonical LIVE revision 604; syntax diagnostics checked_and_none, 0 errors.
+CANONICAL_INVARIANTS:
+Nie wywołano FULL, publish ani update_file. Read-only reconciliation zachowuje canonical idempotency key i expected identity. Nie zmieniono classify_publication_receipt. Contextor pokazuje niezmienione 6 importów modułu produkcyjnego, 5 bezpośrednich konsumentów i brak świeżych błędów składni. Cycle semantics pozostaje stale jako odrębna istniejąca rodzina i nie jest objęta R3.
 
-LIVE_REVISION_BEFORE_AFTER=602 -> 604
-MCP_BACKEND_RESTART_REQUIRED=YES
-LIVE_SERVICE_RESTART_REQUIRED=YES
-RESTARTS_PERFORMED=NO
+WATCHER_EVENTS:
+DIRECT_EVIDENCE: desktop_watcher update_file revision 605 UPDATED dla get_analysis_status.py; revision 606 UPDATED dla test_analysis_status_concurrency.py; revision 607 UNCHANGED dla pliku testowego. Eventy po cursor 604 mają continuity=continuous, resync_required=false, truncated=false.
+LIVE_REVISION_BEFORE_AFTER=604/607
+LIVE_VERIFICATION:
+Contextor get_file_edit_context dla modułu produkcyjnego: canonical revision 607, canonical_state=fresh, workspace_sync=verified, syntax_diagnostics=checked_and_none; testowego: canonical revision 607, workspace_sync=verified, syntax_diagnostics=checked_and_none. Brak nieoczekiwanej zmiany zależności w zakresie obserwowanych importów/consumerów. Event blast_radius_state=deferred; nie stanowi dowodu pełnego materializowanego blast radius.
 
-FINAL_VERDICT=C38E2Q_R2_SOURCE_PASS_PENDING_RUNTIME
+MCP_BACKEND_RESTART_REQUIRED=YES — zmieniono kod publicznego narzędzia MCP ładowany przez proces MCP; testy Python importują nowy kod, ale nie dowodzą reloadu działającego procesu. Restartu nie wykonano.
+LIVE_SERVICE_RESTART_REQUIRED=NO dla tej zmiany — zmieniono moduł adaptera MCP oraz testy, bez kodu serwera LIVE. Nie wykonano restartu.
+RUNTIME_CERTIFICATION=UNKNOWN do manualnego reloadu MCP i sprawdzenia świeżości nowego procesu.
 
-FULL_DIFFS
-The following are complete unified diffs for every changed source/test file. This report is excluded from FILES_CHANGED.
+FINAL_VERDICT=PARTIAL — kod i focused gates PASS; runtime MCP nie został przeładowany ani certyfikowany. Brak podstaw do FINAL PASS runtime.
+
+FULL_DIFFS:
 diff --git a/contextor/mcp/tools/get_analysis_status.py b/contextor/mcp/tools/get_analysis_status.py
-index eecd05f..2d6d115 100644
+index 2d6d115..42d13de 100644
 --- a/contextor/mcp/tools/get_analysis_status.py
 +++ b/contextor/mcp/tools/get_analysis_status.py
-@@ -124,28 +124,55 @@ def get_analysis_status(
-             client = None
-         expected_service = job.get("live_publish_service_instance_id")
-         expected_process = job.get("live_publish_process_start_identity")
--        if client is None:
--            pass  # Retain the durable pending status.
--        else:
--            try:
--                authority = client.authority_status()
--            except (OSError, EOFError, ConnectionError, TimeoutError, RuntimeError):
-+        if client is not None:
-+            endpoint_service = client.endpoint.service_instance_id
-+            endpoint_process = client.endpoint.process_start_identity
-+            endpoint_identity_available = (
-+                isinstance(endpoint_service, str) and bool(endpoint_service)
-+                and isinstance(endpoint_process, str) and bool(endpoint_process)
-+            )
-+            if endpoint_identity_available and (
-+                endpoint_service != expected_service
-+                or endpoint_process != expected_process
-+            ):
-+                job = {
-+                    **job,
-+                    "live_publish_status": "unverified_authority_changed",
-+                    "live_publish_revision": None,
-+                    "live_publish_warning": "LIVE authority identity changed before receipt verification.",
-+                }
-+                endpoint_identity_available = False
-+            if endpoint_identity_available:
-+                try:
-+                    authority = client.authority_status()
-+                except (OSError, EOFError, ConnectionError, TimeoutError, RuntimeError):
-+                    authority = None
-+            else:
-                 authority = None
--        if client is not None and (
--            client.endpoint.service_instance_id != expected_service
--            or client.endpoint.process_start_identity != expected_process
--            or not isinstance(authority, dict)
--            or authority.get("status") != "ok"
--            or authority.get("service_instance_id") != expected_service
--            or authority.get("process_start_identity") != expected_process
--        ):
--            job = {
--                **job,
--                "live_publish_status": "unverified_authority_changed",
--                "live_publish_revision": None,
--                "live_publish_warning": "LIVE authority identity changed before receipt verification.",
--            }
--        elif client is not None:
-+        if client is not None and authority is not None:
-+            if not isinstance(authority, dict) or authority.get("status") != "ok":
-+                authority = None
-+            else:
-+                authority_service = authority.get("service_instance_id")
-+                authority_process = authority.get("process_start_identity")
-+                authority_identity_available = (
-+                    isinstance(authority_service, str) and bool(authority_service)
-+                    and isinstance(authority_process, str) and bool(authority_process)
-+                )
-+                if authority_identity_available and (
-+                    authority_service != expected_service
-+                    or authority_process != expected_process
-+                ):
-+                    job = {
-+                        **job,
-+                        "live_publish_status": "unverified_authority_changed",
-+                        "live_publish_revision": None,
-+                        "live_publish_warning": "LIVE authority identity changed before receipt verification.",
-+                    }
-+                    authority = None
-+                elif not authority_identity_available:
-+                    authority = None
-+        if client is not None and isinstance(authority, dict) and authority.get("status") == "ok":
+@@ -174,7 +174,7 @@ def get_analysis_status(
+                     authority = None
+         if client is not None and isinstance(authority, dict) and authority.get("status") == "ok":
              mutation_job_id = job.get("live_publish_job_id")
-             if not isinstance(mutation_job_id, str):
+-            if not isinstance(mutation_job_id, str):
++            if not isinstance(mutation_job_id, str) or not mutation_job_id.strip():
                  state_id = job["live_publish_expected_state_id"]
-@@ -158,9 +185,7 @@ def get_analysis_status(
-                         expected_key = committed_publication_key(repo_id, state_id, revision)
-                     except ValueError:
-                         expected_key = None
--                if not isinstance(stored_key, str) or stored_key != expected_key:
--                    authority = None
--                else:
-+                if isinstance(stored_key, str) and stored_key == expected_key:
-                     try:
-                         lookup = client.lookup_committed_publish(
-                             idempotency_key=stored_key, state_id=state_id,
-@@ -168,16 +193,21 @@ def get_analysis_status(
-                         )
-                     except (OSError, EOFError, ConnectionError, TimeoutError, RuntimeError):
-                         lookup = None
--                    if isinstance(lookup, dict) and lookup.get("status") == "ok":
--                        mutation_job_id = lookup.get("job_id")
--                        if isinstance(mutation_job_id, str) and mutation_job_id:
--                            job = {**job, "live_publish_job_id": mutation_job_id}
--                            try:
--                                analysis_jobs._write_analysis_job(root, job)
--                            except OSError:
--                                pass
--                    else:
--                        mutation_job_id = None
-+                    if (
-+                        isinstance(lookup, dict)
-+                        and lookup.get("status") == "ok"
-+                        and isinstance(lookup.get("job_id"), str)
-+                        and bool(lookup.get("job_id"))
-+                        and lookup.get("requested_state_id") == state_id
-+                        and type(lookup.get("requested_revision")) is int
-+                        and lookup.get("requested_revision") == revision
-+                    ):
-+                        mutation_job_id = lookup["job_id"]
-+                        job = {**job, "live_publish_job_id": mutation_job_id}
-+                        try:
-+                            analysis_jobs._write_analysis_job(root, job)
-+                        except OSError:
-+                            pass
-             if isinstance(mutation_job_id, str) and mutation_job_id:
+                 revision = job["live_publish_expected_revision"]
+                 stored_key = job.get("live_publish_idempotency_key")
+@@ -197,7 +197,7 @@ def get_analysis_status(
+                         isinstance(lookup, dict)
+                         and lookup.get("status") == "ok"
+                         and isinstance(lookup.get("job_id"), str)
+-                        and bool(lookup.get("job_id"))
++                        and bool(lookup.get("job_id").strip())
+                         and lookup.get("requested_state_id") == state_id
+                         and type(lookup.get("requested_revision")) is int
+                         and lookup.get("requested_revision") == revision
+@@ -208,7 +208,7 @@ def get_analysis_status(
+                             analysis_jobs._write_analysis_job(root, job)
+                         except OSError:
+                             pass
+-            if isinstance(mutation_job_id, str) and mutation_job_id:
++            if isinstance(mutation_job_id, str) and mutation_job_id.strip():
                  try:
                      receipt = client.mutation_status(mutation_job_id)
+                 except (OSError, EOFError, ConnectionError, TimeoutError, RuntimeError):
+@@ -223,8 +223,43 @@ def get_analysis_status(
+                     idempotency_key=job.get("live_publish_idempotency_key"),
+                 )
+                 if classified["live_publish_status"] in {"success", "failed", "recovery_required"}:
+-                    job = {**job, **classified}
+-                    analysis_jobs._write_analysis_job(root, job)
++                    try:
++                        final_authority = client.authority_status()
++                    except (OSError, EOFError, ConnectionError, TimeoutError, RuntimeError):
++                        final_authority = None
++                    final_endpoint_service = client.endpoint.service_instance_id
++                    final_endpoint_process = client.endpoint.process_start_identity
++                    final_service = (
++                        final_authority.get("service_instance_id")
++                        if isinstance(final_authority, dict) and final_authority.get("status") == "ok"
++                        else None
++                    )
++                    final_process = (
++                        final_authority.get("process_start_identity")
++                        if isinstance(final_authority, dict) and final_authority.get("status") == "ok"
++                        else None
++                    )
++                    final_identity_available = (
++                        isinstance(final_service, str) and bool(final_service)
++                        and isinstance(final_process, str) and bool(final_process)
++                        and isinstance(final_endpoint_service, str) and bool(final_endpoint_service)
++                        and isinstance(final_endpoint_process, str) and bool(final_endpoint_process)
++                    )
++                    if final_identity_available and (
++                        final_service != expected_service
++                        or final_process != expected_process
++                        or final_service != final_endpoint_service
++                        or final_process != final_endpoint_process
++                    ):
++                        job = {
++                            **job,
++                            "live_publish_status": "unverified_authority_changed",
++                            "live_publish_revision": None,
++                            "live_publish_warning": "LIVE authority identity changed after receipt verification.",
++                        }
++                    elif final_identity_available:
++                        job = {**job, **classified}
++                        analysis_jobs._write_analysis_job(root, job)
+     public_job = analysis_jobs._public_job(job, max_skipped_files=max_skipped_files)
+     if public_job.get("status") == "completed":
+         diag = diagnostics_summary_for_completed_job(diagnostics_summary(root), job)
 diff --git a/tests/mcp/tools/test_analysis_status_concurrency.py b/tests/mcp/tools/test_analysis_status_concurrency.py
-index 9d7e7ef..4ab3c0e 100644
+index 4ab3c0e..4f65224 100644
 --- a/tests/mcp/tools/test_analysis_status_concurrency.py
 +++ b/tests/mcp/tools/test_analysis_status_concurrency.py
-@@ -56,6 +56,336 @@ def _create_job(
-     return payload
+@@ -94,6 +94,273 @@ def _status_response(root: Path, job: dict) -> dict:
+     return json.loads(get_analysis_status(str(root), job_id=job["job_id"]))
  
  
-+def _pending_publication_job(root: Path, suffix: int = 980) -> dict:
-+    from contextor.core.live_state.publication_receipt import committed_publication_key
-+
-+    job = _create_job(
-+        root,
-+        suffix,
-+        live_publish_status="pending_verification",
-+        live_publish_revision=None,
-+    )
-+    job.update({
-+        "live_publish_job_id": None,
-+        "live_publish_idempotency_key": committed_publication_key(
-+            "repo-id", "sid", 7
-+        ),
-+        "live_publish_service_instance_id": "service",
-+        "live_publish_process_start_identity": "process",
-+        "live_publish_expected_state_id": "sid",
-+        "live_publish_expected_revision": 7,
-+    })
-+    analysis_jobs._write_analysis_job(root, job)
-+    return job
-+
-+
-+def _patch_reconciliation_diagnostics(monkeypatch) -> None:
-+    import contextor.mcp.tools.get_analysis_status as status_module
-+
-+    monkeypatch.setattr(status_module, "diagnostics_summary", lambda _root: {})
-+    monkeypatch.setattr(
-+        status_module,
-+        "diagnostics_summary_for_completed_job",
-+        lambda _summary, _job: {"attention_required": False},
-+    )
-+
-+
-+def _status_response(root: Path, job: dict) -> dict:
-+    return json.loads(get_analysis_status(str(root), job_id=job["job_id"]))
-+
-+
-+@pytest.mark.parametrize(
-+    "authority_result",
-+    [
-+        TimeoutError("authority timeout"),
-+        ConnectionError("authority transport failed"),
-+        None,
-+        {"status": "unavailable"},
-+        {"status": "error", "error": "authority_unavailable"},
-+    ],
-+    ids=["timeout", "transport-error", "non-object", "unavailable", "error-status"],
-+)
-+def test_authority_status_uncertainty_retains_pending_without_lookup(
-+    tmp_path, monkeypatch, authority_result
++def _r3_reconcile(
++    tmp_path, monkeypatch, *,
++    authority_sequence, receipt_state="completed", response=None,
++    durable_job_id="mu-exact", lookup_job_id="mu-exact",
 +):
 +    from types import SimpleNamespace
 +    import contextor.core.live_state as live_state_module
 +
 +    _patch_reconciliation_diagnostics(monkeypatch)
 +    job = _pending_publication_job(tmp_path)
++    job["live_publish_job_id"] = durable_job_id
++    analysis_jobs._write_analysis_job(tmp_path, job)
 +    calls = []
++    replies = iter(authority_sequence)
++    expected_authority = {
++        "status": "ok", "service_instance_id": "service",
++        "process_start_identity": "process", "repo_id": "repo-id",
++    }
 +
 +    class Client:
 +        endpoint = SimpleNamespace(
@@ -248,228 +160,218 @@ index 9d7e7ef..4ab3c0e 100644
 +        )
 +
 +        def authority_status(self):
-+            if isinstance(authority_result, BaseException):
-+                raise authority_result
-+            return authority_result
++            calls.append("authority")
++            reply = next(replies)
++            if isinstance(reply, BaseException):
++                raise reply
++            return expected_authority if reply == "same" else reply
 +
 +        def lookup_committed_publish(self, **kwargs):
-+            calls.append(("lookup", kwargs))
-+            raise AssertionError("uncertain authority must not trigger lookup")
-+
-+        def mutation_status(self, job_id):
-+            calls.append(("status", job_id))
-+            raise AssertionError("uncertain authority must not trigger status")
-+
-+    monkeypatch.setattr(
-+        live_state_module,
-+        "connect",
-+        lambda _root, *, reconcile_missing_endpoint_binding=True: Client(),
-+    )
-+
-+    result = _status_response(tmp_path, job)
-+    stored = analysis_jobs._read_analysis_job(tmp_path, job["job_id"])
-+    assert result["live_publish_status"] == "pending_verification"
-+    assert stored["live_publish_status"] == "pending_verification"
-+    assert stored["live_publish_job_id"] is None
-+    assert calls == []
-+
-+
-+def test_missing_client_retains_pending_without_mutation_lookup(tmp_path, monkeypatch):
-+    import contextor.core.live_state as live_state_module
-+
-+    _patch_reconciliation_diagnostics(monkeypatch)
-+    job = _pending_publication_job(tmp_path)
-+    connect_calls = []
-+
-+    def connect(_root, *, reconcile_missing_endpoint_binding=True):
-+        connect_calls.append(reconcile_missing_endpoint_binding)
-+        return None
-+
-+    monkeypatch.setattr(live_state_module, "connect", connect)
-+    result = _status_response(tmp_path, job)
-+    stored = analysis_jobs._read_analysis_job(tmp_path, job["job_id"])
-+    assert connect_calls == [False]
-+    assert result["live_publish_status"] == "pending_verification"
-+    assert stored["live_publish_status"] == "pending_verification"
-+    assert stored["live_publish_job_id"] is None
-+
-+
-+def test_missing_authority_identity_is_uncertain_not_replacement(tmp_path, monkeypatch):
-+    from types import SimpleNamespace
-+    import contextor.core.live_state as live_state_module
-+
-+    _patch_reconciliation_diagnostics(monkeypatch)
-+    job = _pending_publication_job(tmp_path)
-+    lookup_calls = []
-+
-+    class Client:
-+        endpoint = SimpleNamespace(
-+            service_instance_id="service", process_start_identity="process"
-+        )
-+
-+        def authority_status(self):
-+            return {"status": "ok", "repo_id": "repo-id"}
-+
-+        def lookup_committed_publish(self, **kwargs):
-+            lookup_calls.append(kwargs)
-+
-+    monkeypatch.setattr(
-+        live_state_module,
-+        "connect",
-+        lambda _root, *, reconcile_missing_endpoint_binding=True: Client(),
-+    )
-+    result = _status_response(tmp_path, job)
-+    assert result["live_publish_status"] == "pending_verification"
-+    assert lookup_calls == []
-+
-+
-+def test_explicit_authority_service_mismatch_is_unverified(tmp_path, monkeypatch):
-+    from types import SimpleNamespace
-+    import contextor.core.live_state as live_state_module
-+
-+    _patch_reconciliation_diagnostics(monkeypatch)
-+    job = _pending_publication_job(tmp_path)
-+    lookup_calls = []
-+
-+    class Client:
-+        endpoint = SimpleNamespace(
-+            service_instance_id="service", process_start_identity="process"
-+        )
-+
-+        def authority_status(self):
-+            return {
-+                "status": "ok",
-+                "service_instance_id": "replacement",
-+                "process_start_identity": "process",
-+                "repo_id": "repo-id",
++            calls.append("lookup")
++            assert kwargs == {
++                "idempotency_key": job["live_publish_idempotency_key"],
++                "state_id": "sid", "revision": 7,
 +            }
-+
-+        def lookup_committed_publish(self, **kwargs):
-+            lookup_calls.append(kwargs)
-+
-+    monkeypatch.setattr(
-+        live_state_module,
-+        "connect",
-+        lambda _root, *, reconcile_missing_endpoint_binding=True: Client(),
-+    )
-+    result = _status_response(tmp_path, job)
-+    assert result["live_publish_status"] == "unverified_authority_changed"
-+    assert lookup_calls == []
-+
-+
-+@pytest.mark.parametrize(
-+    "lookup_result",
-+    [
-+        {"status": "ok", "job_id": "mu-bad", "requested_state_id": "other",
-+         "requested_revision": 7},
-+        {"status": "ok", "job_id": "mu-bad", "requested_state_id": "sid",
-+         "requested_revision": 8},
-+        {"status": "ok", "job_id": "mu-bad", "requested_state_id": "sid",
-+         "requested_revision": True},
-+    ],
-+    ids=["wrong-state-id", "wrong-revision", "boolean-revision"],
-+)
-+def test_invalid_lookup_identity_is_not_persisted(
-+    tmp_path, monkeypatch, lookup_result
-+):
-+    from types import SimpleNamespace
-+    import contextor.core.live_state as live_state_module
-+
-+    _patch_reconciliation_diagnostics(monkeypatch)
-+    job = _pending_publication_job(tmp_path)
-+    calls = []
-+
-+    class Client:
-+        endpoint = SimpleNamespace(
-+            service_instance_id="service", process_start_identity="process"
-+        )
-+
-+        def authority_status(self):
 +            return {
-+                "status": "ok",
-+                "service_instance_id": "service",
-+                "process_start_identity": "process",
-+                "repo_id": "repo-id",
-+            }
-+
-+        def lookup_committed_publish(self, **kwargs):
-+            calls.append(("lookup", kwargs))
-+            return lookup_result
-+
-+        def mutation_status(self, mutation_job_id):
-+            calls.append(("status", mutation_job_id))
-+            raise AssertionError("invalid lookup must not reach mutation status")
-+
-+        def submit_committed_publish(self, **kwargs):
-+            calls.append(("submit", kwargs))
-+            raise AssertionError("status recovery must never submit")
-+
-+        def publish(self, **kwargs):
-+            calls.append(("publish", kwargs))
-+            raise AssertionError("status recovery must never publish")
-+
-+        def update_file(self, **kwargs):
-+            calls.append(("update_file", kwargs))
-+            raise AssertionError("status recovery must never update_file")
-+
-+        def analyze_project(self, **kwargs):
-+            calls.append(("full", kwargs))
-+            raise AssertionError("status recovery must never run FULL")
-+
-+    monkeypatch.setattr(
-+        live_state_module,
-+        "connect",
-+        lambda _root, *, reconcile_missing_endpoint_binding=True: Client(),
-+    )
-+    result = _status_response(tmp_path, job)
-+    stored = analysis_jobs._read_analysis_job(tmp_path, job["job_id"])
-+    assert result["live_publish_status"] == "pending_verification"
-+    assert result["live_publish_job_id"] is None
-+    assert stored["live_publish_status"] == "pending_verification"
-+    assert stored["live_publish_job_id"] is None
-+    assert stored["live_publish_idempotency_key"] == job[
-+        "live_publish_idempotency_key"
-+    ]
-+    assert [name for name, _ in calls] == ["lookup"]
-+
-+
-+def test_invalid_lookup_then_valid_lookup_recovers_original_publication(
-+    tmp_path, monkeypatch
-+):
-+    from types import SimpleNamespace
-+    import contextor.core.live_state as live_state_module
-+
-+    _patch_reconciliation_diagnostics(monkeypatch)
-+    job = _pending_publication_job(tmp_path)
-+    calls = []
-+
-+    class Client:
-+        endpoint = SimpleNamespace(
-+            service_instance_id="service", process_start_identity="process"
-+        )
-+
-+        def authority_status(self):
-+            return {
-+                "status": "ok",
-+                "service_instance_id": "service",
-+                "process_start_identity": "process",
-+                "repo_id": "repo-id",
-+            }
-+
-+        def lookup_committed_publish(self, **kwargs):
-+            calls.append(("lookup", kwargs))
-+            if sum(name == "lookup" for name, _ in calls) == 1:
-+                return {
-+                    "status": "ok", "job_id": "mu-wrong",
-+                    "requested_state_id": "other", "requested_revision": 7,
-+                }
-+            return {
-+                "status": "ok", "job_id": "mu-exact",
++                "status": "ok", "job_id": lookup_job_id,
 +                "requested_state_id": "sid", "requested_revision": 7,
 +            }
 +
 +        def mutation_status(self, mutation_job_id):
-+            calls.append(("status", mutation_job_id))
++            calls.append("mutation")
++            assert mutation_job_id == "mu-exact"
++            return {
++                "status": "ok", "job_id": mutation_job_id,
++                "requested_state_id": "sid", "requested_revision": 7,
++                "state": receipt_state,
++                "response": response if response is not None else {
++                    "status": "ok", "revision": 7,
++                },
++            }
++
++        def submit_committed_publish(self, **kwargs):
++            raise AssertionError("read-only reconciliation must not publish")
++
++    monkeypatch.setattr(
++        live_state_module, "connect",
++        lambda _root, *, reconcile_missing_endpoint_binding=False: Client(),
++    )
++    result = _status_response(tmp_path, job)
++    stored = analysis_jobs._read_analysis_job(tmp_path, job["job_id"])
++    return job, result, stored, calls
++
++
++def _r3_assert_identity_preserved(job, stored):
++    assert stored["live_publish_idempotency_key"] == job["live_publish_idempotency_key"]
++    assert stored["live_publish_service_instance_id"] == "service"
++    assert stored["live_publish_process_start_identity"] == "process"
++    assert stored["live_publish_expected_state_id"] == "sid"
++    assert stored["live_publish_expected_revision"] == 7
++
++
++def test_r3_t01_matching_final_authority_allows_success(tmp_path, monkeypatch):
++    job, result, stored, calls = _r3_reconcile(
++        tmp_path, monkeypatch, authority_sequence=["same", "same"]
++    )
++    assert calls == ["authority", "mutation", "authority"]
++    assert result["live_publish_status"] == stored["live_publish_status"] == "success"
++    assert result["live_publish_revision"] == stored["live_publish_revision"] == 7
++    _r3_assert_identity_preserved(job, stored)
++
++
++def test_r3_t02_final_service_replacement_fences_success(tmp_path, monkeypatch):
++    replacement = {
++        "status": "ok", "service_instance_id": "other",
++        "process_start_identity": "process",
++    }
++    job, result, stored, calls = _r3_reconcile(
++        tmp_path, monkeypatch, authority_sequence=["same", replacement]
++    )
++    assert calls == ["authority", "mutation", "authority"]
++    assert result["live_publish_status"] == "unverified_authority_changed"
++    assert result["live_publish_revision"] is None
++    assert stored["live_publish_status"] == "pending_verification"
++    assert stored["live_publish_revision"] is None
++    _r3_assert_identity_preserved(job, stored)
++
++
++def test_r3_t03_final_process_replacement_fences_success(tmp_path, monkeypatch):
++    replacement = {
++        "status": "ok", "service_instance_id": "service",
++        "process_start_identity": "other",
++    }
++    job, result, stored, calls = _r3_reconcile(
++        tmp_path, monkeypatch, authority_sequence=["same", replacement]
++    )
++    assert calls == ["authority", "mutation", "authority"]
++    assert result["live_publish_status"] == "unverified_authority_changed"
++    assert result["live_publish_revision"] is None
++    assert stored["live_publish_status"] == "pending_verification"
++    assert stored["live_publish_revision"] is None
++    _r3_assert_identity_preserved(job, stored)
++
++
++def test_r3_t04_final_authority_timeout_stays_pending(tmp_path, monkeypatch):
++    job, result, stored, calls = _r3_reconcile(
++        tmp_path, monkeypatch, authority_sequence=["same", TimeoutError("timeout")]
++    )
++    assert calls == ["authority", "mutation", "authority"]
++    assert result["live_publish_status"] == stored["live_publish_status"] == "pending_verification"
++    assert result["live_publish_revision"] is None
++    assert stored["live_publish_revision"] is None
++    _r3_assert_identity_preserved(job, stored)
++
++
++@pytest.mark.parametrize("final_authority", [
++    None, "malformed", {"status": "ok", "service_instance_id": "service"},
++    {"status": "unavailable"},
++], ids=["none", "malformed", "missing-identity", "not-ok"])
++def test_r3_t05_unknown_final_authority_stays_pending(
++    tmp_path, monkeypatch, final_authority
++):
++    job, result, stored, calls = _r3_reconcile(
++        tmp_path, monkeypatch, authority_sequence=["same", final_authority]
++    )
++    assert calls == ["authority", "mutation", "authority"]
++    assert result["live_publish_status"] == stored["live_publish_status"] == "pending_verification"
++    assert result["live_publish_revision"] is None
++    assert stored["live_publish_revision"] is None
++    _r3_assert_identity_preserved(job, stored)
++
++
++@pytest.mark.parametrize("receipt_state,response,expected", [
++    ("failed", None, "failed"),
++    ("completed", {"status": "ok", "revision": 7, "resync_required": True}, "recovery_required"),
++])
++@pytest.mark.parametrize("final_authority,accepted", [
++    ("same", True),
++    ({"status": "ok", "service_instance_id": "other",
++      "process_start_identity": "process"}, False),
++    (None, False),
++])
++def test_r3_t06_other_terminal_states_require_final_authority(
++    tmp_path, monkeypatch, receipt_state, response, expected, final_authority, accepted
++):
++    job, result, stored, calls = _r3_reconcile(
++        tmp_path, monkeypatch, authority_sequence=["same", final_authority],
++        receipt_state=receipt_state, response=response,
++    )
++    assert calls == ["authority", "mutation", "authority"]
++    if accepted:
++        assert result["live_publish_status"] == stored["live_publish_status"] == expected
++    else:
++        assert result["live_publish_status"] == (
++            "pending_verification" if final_authority is None
++            else "unverified_authority_changed"
++        )
++        assert stored["live_publish_status"] == "pending_verification"
++        assert stored["live_publish_revision"] is None
++    _r3_assert_identity_preserved(job, stored)
++
++
++def test_r3_t07_empty_durable_job_id_recovers_by_lookup(tmp_path, monkeypatch):
++    job, result, stored, calls = _r3_reconcile(
++        tmp_path, monkeypatch, authority_sequence=["same", "same"], durable_job_id=""
++    )
++    assert calls == ["authority", "lookup", "mutation", "authority"]
++    assert result["live_publish_status"] == stored["live_publish_status"] == "success"
++    assert result["live_publish_job_id"] == stored["live_publish_job_id"] == "mu-exact"
++    _r3_assert_identity_preserved(job, stored)
++
++
++def test_r3_t08_whitespace_durable_job_id_recovers_by_lookup(tmp_path, monkeypatch):
++    job, result, stored, calls = _r3_reconcile(
++        tmp_path, monkeypatch, authority_sequence=["same", "same"], durable_job_id="  "
++    )
++    assert calls == ["authority", "lookup", "mutation", "authority"]
++    assert result["live_publish_status"] == stored["live_publish_status"] == "success"
++    assert result["live_publish_job_id"] == stored["live_publish_job_id"] == "mu-exact"
++    _r3_assert_identity_preserved(job, stored)
++
++
++@pytest.mark.parametrize("lookup_job_id", ["", "  "], ids=["empty", "whitespace"])
++def test_r3_t09_invalid_lookup_job_id_is_not_persisted(
++    tmp_path, monkeypatch, lookup_job_id
++):
++    job, result, stored, calls = _r3_reconcile(
++        tmp_path, monkeypatch, authority_sequence=["same"],
++        durable_job_id="", lookup_job_id=lookup_job_id,
++    )
++    assert calls == ["authority", "lookup"]
++    assert result["live_publish_status"] == stored["live_publish_status"] == "pending_verification"
++    assert result["live_publish_job_id"] == stored["live_publish_job_id"] == ""
++    _r3_assert_identity_preserved(job, stored)
++
++
++def test_r3_t10_later_read_only_recovery_after_final_timeout(tmp_path, monkeypatch):
++    from types import SimpleNamespace
++    import contextor.core.live_state as live_state_module
++
++    _patch_reconciliation_diagnostics(monkeypatch)
++    job = _pending_publication_job(tmp_path)
++    job["live_publish_job_id"] = "mu-exact"
++    analysis_jobs._write_analysis_job(tmp_path, job)
++    calls = []
++    replies = iter(["same", TimeoutError("timeout"), "same", "same"])
++
++    class Client:
++        endpoint = SimpleNamespace(
++            service_instance_id="service", process_start_identity="process"
++        )
++
++        def authority_status(self):
++            calls.append("authority")
++            reply = next(replies)
++            if isinstance(reply, BaseException):
++                raise reply
++            return {
++                "status": "ok", "service_instance_id": "service",
++                "process_start_identity": "process", "repo_id": "repo-id",
++            }
++
++        def mutation_status(self, mutation_job_id):
++            calls.append("mutation")
++            assert mutation_job_id == "mu-exact"
 +            return {
 +                "status": "ok", "job_id": mutation_job_id, "state": "completed",
 +                "requested_state_id": "sid", "requested_revision": 7,
@@ -477,43 +379,29 @@ index 9d7e7ef..4ab3c0e 100644
 +            }
 +
 +        def submit_committed_publish(self, **kwargs):
-+            raise AssertionError("recovery retry must never submit")
++            raise AssertionError("status must never publish")
 +
-+        def publish(self, **kwargs):
-+            raise AssertionError("recovery retry must never publish")
++        def lookup_committed_publish(self, **kwargs):
++            raise AssertionError("valid durable job ID needs no lookup")
 +
-+        def update_file(self, **kwargs):
-+            raise AssertionError("recovery retry must never update_file")
-+
-+        def analyze_project(self, **kwargs):
-+            raise AssertionError("recovery retry must never run FULL")
-+
-+    connect_flags = []
-+
-+    def connect(_root, *, reconcile_missing_endpoint_binding=True):
-+        connect_flags.append(reconcile_missing_endpoint_binding)
-+        return Client()
-+
-+    monkeypatch.setattr(live_state_module, "connect", connect)
++    monkeypatch.setattr(
++        live_state_module, "connect",
++        lambda _root, *, reconcile_missing_endpoint_binding=False: Client(),
++    )
 +    first = _status_response(tmp_path, job)
-+    after_invalid = analysis_jobs._read_analysis_job(tmp_path, job["job_id"])
-+    assert first["live_publish_status"] == "pending_verification"
-+    assert after_invalid["live_publish_job_id"] is None
-+    assert after_invalid["live_publish_idempotency_key"] == job[
-+        "live_publish_idempotency_key"
-+    ]
++    first_stored = analysis_jobs._read_analysis_job(tmp_path, job["job_id"])
++    assert first["live_publish_status"] == first_stored["live_publish_status"] == "pending_verification"
++    assert first["live_publish_revision"] is None
++    _r3_assert_identity_preserved(job, first_stored)
 +
 +    second = _status_response(tmp_path, job)
 +    stored = analysis_jobs._read_analysis_job(tmp_path, job["job_id"])
-+    assert second["live_publish_status"] == "success"
-+    assert second["live_publish_job_id"] == "mu-exact"
-+    assert stored["live_publish_status"] == "success"
-+    assert stored["live_publish_job_id"] == "mu-exact"
-+    assert [name for name, _ in calls] == ["lookup", "lookup", "status"]
-+    assert connect_flags == [False, False]
++    assert calls == ["authority", "mutation", "authority", "authority", "mutation", "authority"]
++    assert second["live_publish_status"] == stored["live_publish_status"] == "success"
++    assert second["live_publish_revision"] == stored["live_publish_revision"] == 7
++    _r3_assert_identity_preserved(job, stored)
 +
 +
- def test_pending_publication_reconciles_only_exact_job_on_same_authority(tmp_path, monkeypatch):
-     from types import SimpleNamespace
-     import contextor.core.live_state as live_state_module
-
+ @pytest.mark.parametrize(
+     "authority_result",
+     [

@@ -174,7 +174,7 @@ def get_analysis_status(
                     authority = None
         if client is not None and isinstance(authority, dict) and authority.get("status") == "ok":
             mutation_job_id = job.get("live_publish_job_id")
-            if not isinstance(mutation_job_id, str):
+            if not isinstance(mutation_job_id, str) or not mutation_job_id.strip():
                 state_id = job["live_publish_expected_state_id"]
                 revision = job["live_publish_expected_revision"]
                 stored_key = job.get("live_publish_idempotency_key")
@@ -197,7 +197,7 @@ def get_analysis_status(
                         isinstance(lookup, dict)
                         and lookup.get("status") == "ok"
                         and isinstance(lookup.get("job_id"), str)
-                        and bool(lookup.get("job_id"))
+                        and bool(lookup.get("job_id").strip())
                         and lookup.get("requested_state_id") == state_id
                         and type(lookup.get("requested_revision")) is int
                         and lookup.get("requested_revision") == revision
@@ -208,7 +208,7 @@ def get_analysis_status(
                             analysis_jobs._write_analysis_job(root, job)
                         except OSError:
                             pass
-            if isinstance(mutation_job_id, str) and mutation_job_id:
+            if isinstance(mutation_job_id, str) and mutation_job_id.strip():
                 try:
                     receipt = client.mutation_status(mutation_job_id)
                 except (OSError, EOFError, ConnectionError, TimeoutError, RuntimeError):
@@ -223,8 +223,43 @@ def get_analysis_status(
                     idempotency_key=job.get("live_publish_idempotency_key"),
                 )
                 if classified["live_publish_status"] in {"success", "failed", "recovery_required"}:
-                    job = {**job, **classified}
-                    analysis_jobs._write_analysis_job(root, job)
+                    try:
+                        final_authority = client.authority_status()
+                    except (OSError, EOFError, ConnectionError, TimeoutError, RuntimeError):
+                        final_authority = None
+                    final_endpoint_service = client.endpoint.service_instance_id
+                    final_endpoint_process = client.endpoint.process_start_identity
+                    final_service = (
+                        final_authority.get("service_instance_id")
+                        if isinstance(final_authority, dict) and final_authority.get("status") == "ok"
+                        else None
+                    )
+                    final_process = (
+                        final_authority.get("process_start_identity")
+                        if isinstance(final_authority, dict) and final_authority.get("status") == "ok"
+                        else None
+                    )
+                    final_identity_available = (
+                        isinstance(final_service, str) and bool(final_service)
+                        and isinstance(final_process, str) and bool(final_process)
+                        and isinstance(final_endpoint_service, str) and bool(final_endpoint_service)
+                        and isinstance(final_endpoint_process, str) and bool(final_endpoint_process)
+                    )
+                    if final_identity_available and (
+                        final_service != expected_service
+                        or final_process != expected_process
+                        or final_service != final_endpoint_service
+                        or final_process != final_endpoint_process
+                    ):
+                        job = {
+                            **job,
+                            "live_publish_status": "unverified_authority_changed",
+                            "live_publish_revision": None,
+                            "live_publish_warning": "LIVE authority identity changed after receipt verification.",
+                        }
+                    elif final_identity_available:
+                        job = {**job, **classified}
+                        analysis_jobs._write_analysis_job(root, job)
     public_job = analysis_jobs._public_job(job, max_skipped_files=max_skipped_files)
     if public_job.get("status") == "completed":
         diag = diagnostics_summary_for_completed_job(diagnostics_summary(root), job)
