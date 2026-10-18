@@ -1117,6 +1117,46 @@ def test_project_worker_carries_indexer_skips_into_durable_job_status(
         "live_publish_status": "not_attempted",
         "live_publish_revision": None,
         "live_publish_warning": None,
+        "live_publish_idempotency_key": None,
+        "live_publish_job_id": None,
+        "live_publish_service_instance_id": None,
+        "live_publish_process_start_identity": None,
+        "live_publish_expected_state_id": None,
+        "live_publish_expected_revision": None,
+    }
+
+
+def test_project_worker_preserves_live_publication_correlation_metadata(
+    tmp_path, monkeypatch
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    correlation = {
+        "live_publish_idempotency_key": "canonical-key-123",
+        "live_publish_job_id": "exact-mutation-job-456",
+        "live_publish_service_instance_id": "service-instance-789",
+        "live_publish_process_start_identity": "process-start-012",
+        "live_publish_expected_state_id": "state-345",
+        "live_publish_expected_revision": 67,
+    }
+
+    def fake_analyze_project(*_args, **_kwargs):
+        return [], SimpleNamespace(summary_data={"skipped_files": []}, **correlation)
+
+    monkeypatch.setattr(
+        analysis_jobs.ContextorFacade,
+        "analyze_project",
+        staticmethod(fake_analyze_project),
+    )
+
+    outcome = asyncio.run(analysis_jobs._run_analysis_worker("project", repo))
+
+    assert outcome == {
+        "skipped_python_files": [],
+        "live_publish_status": "not_attempted",
+        "live_publish_revision": None,
+        "live_publish_warning": None,
+        **correlation,
     }
 
 
