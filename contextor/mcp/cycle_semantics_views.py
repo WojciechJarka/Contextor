@@ -43,6 +43,8 @@ _OVERVIEW_EVIDENCE_FIELDS = (
     "observed_source_count",
     "unobserved_source_count",
     "source_issues",
+    "snapshot_schema_version",
+    "invalidation_reason",
     "source_snapshot_binding",
     "runtime_execution_status",
 )
@@ -249,12 +251,12 @@ def project_historical_cycle_semantics(
     overview_projection = None
     if projection is not None:
         overview_projection = {
-            field: projection[field]
+            field: deepcopy(projection[field])
             for field in _OVERVIEW_PROJECTION_FIELDS
             if field in projection
         }
         overview_projection["summary"] = {
-            field: summary[field]
+            field: deepcopy(summary[field])
             for field in (
                 "cyclic_scc_total",
                 "cyclic_scc_returned",
@@ -294,10 +296,10 @@ def project_historical_cycle_semantics(
         "materialized_projection_components_truncated": original_truncated,
     }
     if component is not None:
-        presentation["component_selection"] = selection_metadata
+        presentation["component_selection"] = deepcopy(selection_metadata)
 
     result = {
-        key: report[key]
+        key: deepcopy(report[key])
         for key in (
             "schema_version",
             "status",
@@ -308,7 +310,7 @@ def project_historical_cycle_semantics(
         if key in report
     }
     result["semantic_evidence"] = {
-        key: evidence[key]
+        key: deepcopy(evidence[key])
         for key in _OVERVIEW_EVIDENCE_FIELDS
         if key in evidence
     }
@@ -489,19 +491,37 @@ def live_cycle_semantic_diagnostics(
         raise ValueError("Unresolved lexical edge count is invalid")
 
     complete = snapshot.coverage_status == "FILESYSTEM_STABLE_NON_ATOMIC"
+    lexical_complete = (
+        unresolved == 0
+        and all(
+            component.unresolved_edges == 0
+            for component in activation.components
+        )
+        and all(
+            component.unresolved_edge_count == 0
+            for component in components
+        )
+    )
     status = "fresh" if complete else "partial"
     attention = (
         True
         if direct_count > 0
         else False
-        if complete
+        if complete and lexical_complete
         else None
     )
-    reason = (
-        None
-        if complete
-        else "Canonical semantic evidence has partial source coverage; absence of direct cycles is unproven."
-    )
+    if not complete:
+        reason = (
+            "Canonical semantic evidence has partial source coverage; "
+            "absence of direct cycles is unproven."
+        )
+    elif not lexical_complete and direct_count == 0:
+        reason = (
+            "Canonical semantic evidence has unresolved lexical activation "
+            "classifications; absence of direct cycles is unproven."
+        )
+    else:
+        reason = None
 
     return {
         "status": status,

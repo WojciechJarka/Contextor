@@ -9,6 +9,7 @@ import pytest
 from contextor import mcp_server
 from contextor.core.analysis.state_manager import RepositoryAnalysisState
 from contextor.core.cycle_semantics.contracts import fingerprint_hard_edges
+from contextor.core.cycle_semantics.edge_sites import LexicalEdgeSite
 from contextor.core.domain.graph import ProjectGraph
 from contextor.mcp.query_helpers import build_state_freshness
 from contextor.mcp import query_helpers
@@ -495,6 +496,10 @@ def test_cycle_semantics_overview_omits_edges_and_witness_chains(tmp_path, monke
     assert projected["semantic_evidence"]["observed_source_count"] == report[
         "semantic_evidence"
     ]["observed_source_count"]
+    assert projected["semantic_evidence"]["snapshot_schema_version"] == report[
+        "semantic_evidence"
+    ]["snapshot_schema_version"]
+    assert projected["semantic_evidence"]["invalidation_reason"] is None
     assert projected["projection"]["summary"] == report["projection"]["summary"]
     assert "source_fingerprints" not in projected["semantic_evidence"]
     component = projected["projection"]["components"][0]
@@ -519,6 +524,46 @@ def test_reduced_historical_views_do_not_mutate_loaded_report():
         assert error is None
         assert projected is not report
         assert report == original
+
+
+def test_overview_mutable_values_are_independent_of_historical_report():
+    report = _historical_report()
+    report["report_header"]["nested"] = {"items": ["original"]}
+    report["publication_binding"]["nested"] = {"items": ["original"]}
+    report["semantic_evidence"]["source_issues"] = [
+        {"module": "pkg.a", "details": ["original"]}
+    ]
+    report["projection"]["selection_scope"] = {"items": ["original"]}
+    report["projection"]["summary"]["cyclic_scc_total"] = {
+        "items": ["original"]
+    }
+    original = deepcopy(report)
+
+    overview, error = project_historical_cycle_semantics(
+        report, view="overview", component=None,
+    )
+    assert error is None
+    overview["report_header"]["nested"]["items"].append("changed")
+    overview["publication_binding"]["nested"]["items"].append("changed")
+    overview["semantic_evidence"]["source_issues"][0]["details"].append("changed")
+    overview["projection"]["selection_scope"]["items"].append("changed")
+    overview["projection"]["summary"]["cyclic_scc_total"]["items"].append("changed")
+    overview["projection"]["components"][0]["members"].append("changed")
+
+    assert report == original
+
+
+def test_historical_overview_preserves_invalidation_reason():
+    report = _historical_report()
+    report["semantic_evidence"]["invalidation_reason"] = "GRAPH_CHANGED"
+    overview, error = project_historical_cycle_semantics(
+        report, view="overview", component=None,
+    )
+    assert error is None
+    assert overview["semantic_evidence"]["invalidation_reason"] == "GRAPH_CHANGED"
+    assert overview["semantic_evidence"]["snapshot_schema_version"] == report[
+        "semantic_evidence"
+    ]["snapshot_schema_version"]
 
 
 def test_cycle_semantics_component_selection_is_bounded_and_preserves_total(
@@ -812,6 +857,44 @@ def _semantic_state(*, marker="fresh"):
     return state
 
 
+def _snapshot_with_lexical_sites(*, activation_scope):
+    snapshot = _snapshot()
+    component = snapshot.import_sites.components[0]
+    edges = tuple(
+        replace(
+            edge,
+            status="LEXICAL_CANDIDATES",
+            sites=(LexicalEdgeSite(
+                ordinal=index,
+                line=index + 1,
+                column=0,
+                form="IMPORT",
+                match_kind="DIRECT_MODULE",
+                requested_name=edge.target,
+                matched_member=None,
+                scopes=(),
+                controls=(),
+                activation_scope=activation_scope,
+            ),),
+        )
+        for index, edge in enumerate(component.internal_edges)
+    )
+    sites = replace(
+        snapshot.import_sites,
+        components=(replace(
+            component,
+            internal_edges=edges,
+            matched_edge_count=len(edges),
+            unresolved_edge_count=0,
+        ),),
+    )
+    discovery = replace(
+        snapshot.conditional_discovery,
+        unresolved_lexical_edge_count=0,
+    )
+    return replace(snapshot, import_sites=sites, conditional_discovery=discovery)
+
+
 def _install_real_freshness(tmp_path, monkeypatch, state):
     engine = architecture_tool.mcp_runtime.get_or_init_engine(tmp_path)
     engine.state = state
@@ -931,9 +1014,52 @@ def test_live_semantic_diagnostics_uses_positive_current_snapshot_gate(
     assert semantic["cyclic_scc_count"] == 1
     assert semantic["cyclic_module_count"] == 2
     assert semantic["unresolved_lexical_edge_count"] == 2
-    assert semantic["direct_candidate_attention_required"] is False
+    assert semantic["direct_candidate_attention_required"] is None
+    assert "unresolved lexical activation" in semantic["reason"]
     assert semantic["runtime_execution_status"] == "UNKNOWN_NOT_EVALUATED"
     assert result["live_state"]["diagnostics_attention_required"] is False
+
+
+def test_live_semantic_diagnostics_resolved_lexical_absence_allows_false(
+    tmp_path, monkeypatch,
+):
+    _install_runtime(tmp_path, monkeypatch, _small_bundle())
+    state = _semantic_state()
+    state.cycle_semantics = _snapshot_with_lexical_sites(
+        activation_scope="FUNCTION_SCOPED",
+    )
+    _install_real_freshness(tmp_path, monkeypatch, state)
+
+    semantic = _read_architecture(tmp_path)["live_state"][
+        "cycle_semantic_diagnostics"
+    ]
+    assert semantic["status"] == "fresh"
+    assert semantic["unguarded_direct_cyclic_scc_count"] == 0
+    assert semantic["unresolved_lexical_edge_count"] == 0
+    assert semantic["direct_candidate_attention_required"] is False
+    assert semantic["reason"] is None
+    assert semantic["runtime_execution_status"] == "UNKNOWN_NOT_EVALUATED"
+
+
+def test_live_semantic_diagnostics_unrecognized_activation_blocks_false(
+    tmp_path, monkeypatch,
+):
+    _install_runtime(tmp_path, monkeypatch, _small_bundle())
+    state = _semantic_state()
+    state.cycle_semantics = _snapshot_with_lexical_sites(
+        activation_scope="UNKNOWN_SCOPE",
+    )
+    _install_real_freshness(tmp_path, monkeypatch, state)
+
+    semantic = _read_architecture(tmp_path)["live_state"][
+        "cycle_semantic_diagnostics"
+    ]
+    assert semantic["status"] == "fresh"
+    assert semantic["unguarded_direct_cyclic_scc_count"] == 0
+    assert semantic["unresolved_lexical_edge_count"] == 0
+    assert semantic["direct_candidate_attention_required"] is None
+    assert "unresolved lexical activation" in semantic["reason"]
+    assert semantic["runtime_execution_status"] == "UNKNOWN_NOT_EVALUATED"
 
 
 def test_live_semantic_diagnostics_partial_coverage_never_infers_absence(
@@ -967,7 +1093,7 @@ def test_live_semantic_diagnostics_retains_positive_partial_evidence(
     monkeypatch,
 ):
     _install_runtime(tmp_path, monkeypatch, _small_bundle())
-    snapshot = _snapshot()
+    snapshot = _snapshot_with_lexical_sites(activation_scope="MODULE_TOP_LEVEL")
     partial_snapshot = replace(
         snapshot,
         observed_source_fingerprints=snapshot.observed_source_fingerprints[:1],
@@ -977,20 +1103,13 @@ def test_live_semantic_diagnostics_retains_positive_partial_evidence(
     state = _semantic_state()
     state.cycle_semantics = partial_snapshot
     _install_real_freshness(tmp_path, monkeypatch, state)
-    monkeypatch.setattr(
-        "contextor.mcp.cycle_semantics_views.build_cycle_evidence_digest",
-        lambda *_args: SimpleNamespace(components=(SimpleNamespace(
-            members=partial_snapshot.cyclic_modules,
-            category="UNGUARDED_DIRECT_CYCLIC_SUBGRAPH",
-        ),)),
-    )
-
     semantic = _read_architecture(tmp_path)["live_state"][
         "cycle_semantic_diagnostics"
     ]
     assert semantic["status"] == "partial"
     assert semantic["unguarded_direct_cyclic_scc_count"] == 1
     assert semantic["direct_candidate_attention_required"] is True
+    assert semantic["runtime_execution_status"] == "UNKNOWN_NOT_EVALUATED"
 
 
 @pytest.mark.parametrize(
