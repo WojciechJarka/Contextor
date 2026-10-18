@@ -21,6 +21,9 @@ from contextor.core.analysis.state_manager import (
     canonical_artifact_consumption_targets,
     validate_canonical_artifact_consumption_coverage,
 )
+from contextor.core.cycle_semantics.contracts import (
+    CycleSemanticsSnapshot,
+)
 from contextor.core.domain.graph import ProjectGraph
 from contextor.core.domain.lineage_facts import MaterializedLineageSourceFacts
 from contextor.core.domain.module import Module
@@ -79,6 +82,9 @@ class CandidateState:
     collisions: list
     collisions_state: str
     artifact_consumption_state: str = "deferred"
+    cycle_semantics: CycleSemanticsSnapshot | None = None
+    cycle_semantics_state: str = "deferred"
+    cycle_semantics_invalidation_reason: str | None = None
 
 
 @dataclass(frozen=True)
@@ -766,6 +772,21 @@ def _prepare_candidate_state(state: RepositoryAnalysisState) -> CandidateState:
         collisions=list(getattr(state, "collisions", []) or []),
         collisions_state=getattr(state, "collisions_state", "deferred"),
         artifact_consumption_state=getattr(state, "artifact_consumption_state", "deferred"),
+        cycle_semantics=getattr(
+            state,
+            "cycle_semantics",
+            None,
+        ),
+        cycle_semantics_state=getattr(
+            state,
+            "cycle_semantics_state",
+            "deferred",
+        ),
+        cycle_semantics_invalidation_reason=getattr(
+            state,
+            "cycle_semantics_invalidation_reason",
+            None,
+        ),
     )
 
 

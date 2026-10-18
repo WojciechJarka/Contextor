@@ -8,6 +8,9 @@ from typing import Optional, List, Set, Dict, Iterable, Tuple, Any
 
 from contextor.core.domain.graph import ProjectGraph
 from contextor.core.analysis.state_manager import FileStateManager, RepositoryAnalysisState, FileDelta
+from contextor.core.cycle_semantics.lifecycle import (
+    invalidate_cycle_semantics,
+)
 from contextor.core.domain.usage_facts import ModuleUsageFacts
 from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
 from contextor.core.runtime_trace import trace_event
@@ -245,6 +248,7 @@ class IncrementalAnalysisEngine:
         degrade_syntax_family: bool = False,
         extracted_lineage_facts: Any | None = None,
         invalidate_lineage: bool = False,
+        invalidate_cycle_semantics_reason: str | None = None,
     ) -> None:
         """Commit syntax, parse-freshness, and lineage changes through one COW candidate."""
         candidate = _prepare_candidate_state(self.state)
@@ -301,6 +305,11 @@ class IncrementalAnalysisEngine:
             )
         elif clear_parse_module is not None:
             clear_module_parse_failure(candidate, clear_parse_module)
+        if invalidate_cycle_semantics_reason is not None:
+            invalidate_cycle_semantics(
+                candidate,
+                invalidate_cycle_semantics_reason,
+            )
         self.state.syntax_diagnostics_by_path = candidate.syntax_diagnostics_by_path
         self.state.syntax_diagnostics_state = candidate.syntax_diagnostics_state
         self.state.module_parse_freshness = candidate.module_parse_freshness
@@ -314,6 +323,15 @@ class IncrementalAnalysisEngine:
         self.state.lineage_query_index_state = candidate.lineage_query_index_state
         self.state.lineage_semantic_anchor_bindings_complete = (
             candidate.lineage_semantic_anchor_bindings_complete
+        )
+        self.state.cycle_semantics = (
+            candidate.cycle_semantics
+        )
+        self.state.cycle_semantics_state = (
+            candidate.cycle_semantics_state
+        )
+        self.state.cycle_semantics_invalidation_reason = (
+            candidate.cycle_semantics_invalidation_reason
         )
 
     def _update_candidate_lineage_slice(
@@ -571,6 +589,10 @@ class IncrementalAnalysisEngine:
                 # Every exit path, including a semantic no-op, must expose the
                 # already-lost incremental continuity as fail-closed.
                 self.state.artifact_consumption_state = "stale"
+                invalidate_cycle_semantics(
+                    self.state,
+                    "CANONICAL_RESYNC_REQUIRED",
+                )
             path = Path(file_path)
             rel_path = path.relative_to(self.root_path)
             module_path = ".".join(rel_path.with_suffix("").parts)
@@ -696,18 +718,22 @@ class IncrementalAnalysisEngine:
                     if prep.error_status == "SYNTAX_ERROR"
                     else None
                 )
-                self._commit_syntax_candidate(
-                    source_path=source_path,
-                    syntax_fact=syntax_fact,
-                    mark_parse_error=(
-                        prep.error_message,
-                        prep.line_number,
-                        prep.column_number,
-                    ),
-                    clear_parse_module=module_path,
-                    degrade_syntax_family=prep.error_status != "SYNTAX_ERROR",
-                    invalidate_lineage=True,
-                )
+                with self._failed_commit_guard():
+                    self._commit_syntax_candidate(
+                        source_path=source_path,
+                        syntax_fact=syntax_fact,
+                        mark_parse_error=(
+                            prep.error_message,
+                            prep.line_number,
+                            prep.column_number,
+                        ),
+                        clear_parse_module=module_path,
+                        degrade_syntax_family=prep.error_status != "SYNTAX_ERROR",
+                        invalidate_lineage=True,
+                        invalidate_cycle_semantics_reason=(
+                            "SOURCE_PARSE_FAILED"
+                        ),
+                    )
                 return IncrementalUpdateResult(
                     status=prep.error_status,
                     file_path=file_path,
@@ -750,6 +776,9 @@ class IncrementalAnalysisEngine:
                         syntax_fact=checked_and_none,
                         clear_parse_module=module_path,
                         extracted_lineage_facts=prep.extracted_lineage_facts,
+                        invalidate_cycle_semantics_reason=(
+                            "SOURCE_CHANGED"
+                        ),
                     )
                     self.state_manager.update_state(file_path)
                     self.state.module_usages_manifest = _updated_module_usage_manifest(
@@ -939,6 +968,27 @@ class IncrementalAnalysisEngine:
         )
 
         candidate = outcome.candidate_state
+        if (
+            resync_required
+            or plan.refresh_completeness
+            == "requires_resync"
+        ):
+            semantic_invalidation_reason = (
+                "CANONICAL_RESYNC_REQUIRED"
+            )
+        elif delta.is_deleted:
+            semantic_invalidation_reason = (
+                "SOURCE_DELETED"
+            )
+        else:
+            semantic_invalidation_reason = (
+                "SOURCE_CHANGED"
+            )
+
+        invalidate_cycle_semantics(
+            candidate,
+            semantic_invalidation_reason,
+        )
 
         # Persistent identity sync and lineage materialization share one registry view.
         if outcome.identity_sync_required:
@@ -1093,6 +1143,15 @@ class IncrementalAnalysisEngine:
         self.state.cached_analytics_state = candidate.cached_analytics_state
         self.state.cycles = candidate.cycles
         self.state.cycles_state = candidate.cycles_state
+        self.state.cycle_semantics = (
+            candidate.cycle_semantics
+        )
+        self.state.cycle_semantics_state = (
+            candidate.cycle_semantics_state
+        )
+        self.state.cycle_semantics_invalidation_reason = (
+            candidate.cycle_semantics_invalidation_reason
+        )
         self.state.collision_facts = candidate.collision_facts
         self.state.collisions = candidate.collisions
         self.state.collisions_state = candidate.collisions_state
