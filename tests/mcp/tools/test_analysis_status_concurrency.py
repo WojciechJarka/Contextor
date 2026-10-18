@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+import threading
 from pathlib import Path
 
 import pytest
@@ -1394,3 +1395,110 @@ def test_active_analysis_jobs__excludes_dead_same_process_worker(
     active = analysis_jobs._active_analysis_jobs(tmp_path)
 
     assert [job["job_id"] for job in active] == [foreign["job_id"]]
+
+
+def test_durable_read_t01_completed_job(tmp_path):
+    job = _create_job(tmp_path, 201)
+    assert analysis_jobs._read_analysis_job(tmp_path, job["job_id"])["status"] == "completed"
+    assert analysis_jobs._read_analysis_job(tmp_path, job["job_id"])["operation"] == "project"
+
+
+def test_durable_read_t02_missing_job(tmp_path):
+    job_id = f"{202:032x}"
+    assert analysis_jobs._read_analysis_job(tmp_path, job_id) is None
+    assert json.loads(get_analysis_status(str(tmp_path), job_id=job_id))["status"] == "not_found"
+
+
+def test_durable_read_t03_malformed_json(tmp_path):
+    job_id = f"{203:032x}"
+    path = analysis_jobs._job_path(tmp_path, job_id)
+    path.parent.mkdir(parents=True)
+    path.write_text("{malformed", encoding="utf-8")
+    assert analysis_jobs._read_analysis_job(tmp_path, job_id) is None
+    assert json.loads(get_analysis_status(str(tmp_path), job_id=job_id))["status"] == "not_found"
+
+
+def _read_during_replace(tmp_path, monkeypatch, job, next_status):
+    target = analysis_jobs._job_path(tmp_path, job["job_id"])
+    replace_entered = threading.Event()
+    allow_replace = threading.Event()
+    read_entered = threading.Event()
+    reader_started = threading.Event()
+    original_replace = analysis_jobs.os.replace
+    original_read_text = Path.read_text
+    results = {}
+
+    def held_replace(source, destination):
+        if Path(destination) == target:
+            replace_entered.set()
+            assert allow_replace.wait(5), "writer was not released"
+        return original_replace(source, destination)
+
+    def observed_read_text(path, *args, **kwargs):
+        if path == target:
+            read_entered.set()
+        return original_read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(analysis_jobs.os, "replace", held_replace)
+    monkeypatch.setattr(Path, "read_text", observed_read_text)
+    updated = {**job, "status": next_status}
+
+    def write_job():
+        try:
+            analysis_jobs._write_analysis_job(tmp_path, updated)
+        except BaseException as exc:
+            results["writer_error"] = exc
+
+    def read_job():
+        reader_started.set()
+        try:
+            results["read"] = analysis_jobs._read_analysis_job(tmp_path, job["job_id"])
+        except BaseException as exc:
+            results["reader_error"] = exc
+
+    writer = threading.Thread(target=write_job)
+    reader = threading.Thread(target=read_job)
+    writer.start()
+    try:
+        assert replace_entered.wait(5), "writer did not enter replacement"
+        reader.start()
+        assert reader_started.wait(5)
+        assert not read_entered.wait(0.3), "filesystem read entered writer critical section"
+    finally:
+        allow_replace.set()
+        writer.join(timeout=5)
+        if reader.ident is not None:
+            reader.join(timeout=5)
+    assert not writer.is_alive() and not reader.is_alive()
+    assert "writer_error" not in results and "reader_error" not in results, results
+    assert read_entered.is_set()
+    assert results["read"]["status"] == next_status
+    assert results["read"]["job_id"] == job["job_id"]
+    return updated
+
+
+def test_durable_read_t04_waits_for_writer_critical_section(tmp_path, monkeypatch):
+    job = _create_job(tmp_path, 204, status="queued")
+    _read_during_replace(tmp_path, monkeypatch, job, "completed")
+
+
+def test_durable_read_t05_reentrant_under_existing_job_lock(tmp_path):
+    job = _create_job(tmp_path, 205)
+    result = {}
+
+    def nested_read():
+        with analysis_jobs._analysis_job_lock:
+            result["job"] = analysis_jobs._read_analysis_job(tmp_path, job["job_id"])
+
+    thread = threading.Thread(target=nested_read, daemon=True)
+    thread.start()
+    thread.join(timeout=5)
+    assert not thread.is_alive(), "nested read deadlocked"
+    assert result["job"]["job_id"] == job["job_id"]
+
+
+def test_durable_read_t06_successive_writes_never_not_found(tmp_path, monkeypatch):
+    job = _create_job(tmp_path, 206, status="queued")
+    for status in ("running", "completed"):
+        job = _read_during_replace(tmp_path, monkeypatch, job, status)
+        assert analysis_jobs._read_analysis_job(tmp_path, job["job_id"])["status"] == status

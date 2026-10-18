@@ -147,6 +147,38 @@ def _assert_equal_state(
         )
 
 
+def _assert_incremental_vs_full(
+    initial_full,
+    incremental,
+    fresh_full,
+    *,
+    label: str,
+    tmp_path: Path,
+    captures: dict[str, object],
+) -> None:
+    try:
+        full_parity._assert_incremental_full_cycle_parity(
+            initial_full.state,
+            incremental.state,
+            fresh_full.state,
+            expected_invalidation_reason="SOURCE_CHANGED",
+        )
+    except AssertionError as exc:
+        left_projection = full_parity._state_projection(
+            incremental.state, normalize_report_timestamps=True
+        )
+        right_projection = full_parity._state_projection(
+            fresh_full.state, normalize_report_timestamps=True
+        )
+        difference = full_parity._first_difference(left_projection, right_projection)
+        evidence = _preserve_failure(tmp_path, captures)
+        pytest.fail(
+            f"{label} canonical mismatch: contract={exc}; "
+            f"first_difference={difference!r}; evidence={evidence}",
+            pytrace=False,
+        )
+
+
 def _assert_file_states(
     left,
     right,
@@ -293,8 +325,8 @@ def test_real_desktop_watcher_and_public_mcp_incremental_match_fresh_full(
         assert modified_sources["pkg/__init__.py"] == _CHANGED_INIT
         oracle_a = _full_capture(root, identity.repo_id, modified_sources)
         captures["fresh_full_a"] = oracle_a
-        _assert_equal_state(
-            desktop_incremental, oracle_a,
+        _assert_incremental_vs_full(
+            baseline, desktop_incremental, oracle_a,
             label="Desktop incremental vs fresh FULL A",
             tmp_path=tmp_path, captures=captures,
         )
@@ -355,8 +387,12 @@ def test_real_desktop_watcher_and_public_mcp_incremental_match_fresh_full(
 
         oracle_b = _full_capture(root, identity.repo_id, modified_sources)
         captures["fresh_full_b"] = oracle_b
+        _assert_incremental_vs_full(
+            baseline_two, mcp_incremental, oracle_b,
+            label="mcp_incremental vs fresh_full_b",
+            tmp_path=tmp_path, captures=captures,
+        )
         for left_name, right_name in (
-            ("mcp_incremental", "fresh_full_b"),
             ("desktop_incremental", "mcp_incremental"),
             ("fresh_full_a", "fresh_full_b"),
         ):

@@ -108,7 +108,8 @@ def _read_analysis_job(root: Path, job_id: str) -> dict | None:
     except ValueError:
         return None
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        with _analysis_job_lock:
+            return json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
 

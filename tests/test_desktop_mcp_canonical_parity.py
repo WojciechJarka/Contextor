@@ -11,7 +11,7 @@ import pickle
 import threading
 import time
 from collections.abc import Mapping
-from dataclasses import fields, is_dataclass
+from dataclasses import fields, is_dataclass, replace
 from datetime import datetime
 from enum import Enum
 from pathlib import Path, PurePath
@@ -28,6 +28,9 @@ from contextor.core.analysis.state_manager import (
     load_engine_state,
 )
 from contextor.core.api import facade
+from contextor.core.cycle_semantics.contracts import fingerprint_hard_edges
+from contextor.core.cycle_semantics.materialization import materialize_cycle_semantics
+from contextor.core.domain.graph import ProjectGraph
 from contextor.core.graph.resolver import TrieNode
 from contextor.core.live_state import connect
 from contextor.core.live_state.runtime import _read_endpoint
@@ -493,6 +496,106 @@ def _state_projection(
         _normalize_proved_report_timestamps(projection)
 
     return projection
+
+
+def _assert_incremental_full_cycle_parity(
+    initial_full: RepositoryAnalysisState,
+    incremental: RepositoryAnalysisState,
+    fresh_full: RepositoryAnalysisState,
+    *,
+    expected_invalidation_reason: str,
+) -> None:
+    """Compare current architecture and verify each semantic evidence generation."""
+    initial_projection = _state_projection(initial_full, normalize_report_timestamps=True)
+    incremental_projection = _state_projection(incremental, normalize_report_timestamps=True)
+    fresh_projection = _state_projection(fresh_full, normalize_report_timestamps=True)
+    semantic_fields = {
+        "cycle_semantics",
+        "cycle_semantics_state",
+        "cycle_semantics_invalidation_reason",
+    }
+    for field in fields(RepositoryAnalysisState):
+        name = field.name
+        if name in semantic_fields:
+            continue
+        difference = _first_difference(
+            incremental_projection["fields"][name],
+            fresh_projection["fields"][name],
+            f"state.{name}",
+        )
+        assert difference is None, f"Current canonical field mismatch: {difference!r}"
+
+    initial_snapshot = initial_full.cycle_semantics
+    incremental_snapshot = incremental.cycle_semantics
+    fresh_snapshot = fresh_full.cycle_semantics
+    assert initial_snapshot is not None, "Initial FULL semantic snapshot missing"
+    assert incremental_snapshot is not None, "Historical incremental snapshot missing"
+    assert fresh_snapshot is not None, "Fresh FULL semantic snapshot missing"
+    assert initial_full.cycle_semantics_state == "fresh"
+    assert initial_full.cycle_semantics_invalidation_reason is None
+    assert incremental_projection["fields"]["cycle_semantics"] == (
+        initial_projection["fields"]["cycle_semantics"]
+    ), "Historical semantic snapshot changed"
+    assert incremental.cycle_semantics_state == "stale", "Incremental evidence must remain stale"
+    assert incremental.cycle_semantics_invalidation_reason == (
+        expected_invalidation_reason
+    ), "Wrong incremental semantic invalidation reason"
+    assert fresh_full.cycle_semantics_state == "fresh"
+    assert fresh_full.cycle_semantics_invalidation_reason is None
+
+    before_sha = fingerprint_hard_edges(initial_full.dependency_graph.hard_edges)
+    incremental_sha = fingerprint_hard_edges(incremental.dependency_graph.hard_edges)
+    full_sha = fingerprint_hard_edges(fresh_full.dependency_graph.hard_edges)
+    assert initial_snapshot.graph_sha256 == before_sha, "Initial snapshot graph identity mismatch"
+    assert incremental_snapshot.graph_sha256 == before_sha, "Historical graph SHA was rewritten"
+    assert incremental_sha == full_sha, "Current incremental hard graph differs from FULL"
+    assert fresh_snapshot.graph_sha256 == full_sha, "Fresh FULL snapshot graph identity mismatch"
+
+
+@pytest.mark.parametrize("fault,expected", [
+    ("current_graph", "Current canonical field mismatch"),
+    ("historical_snapshot", "Historical semantic snapshot changed"),
+    ("false_fresh", "Incremental evidence must remain stale"),
+    ("wrong_reason", "Wrong incremental semantic invalidation reason"),
+    ("other_canonical_field", "Current canonical field mismatch"),
+])
+def test_incremental_full_cycle_parity_rejects_contract_violations(
+    tmp_path, fault, expected
+):
+    source = tmp_path / "pkg.py"
+    source.write_bytes(b"VALUE = 1\n")
+    graph = ProjectGraph(hard_edges={"pkg": set()}, soft_edges={"pkg": set()})
+    snapshot = materialize_cycle_semantics(
+        tmp_path, graph.hard_edges, {"pkg": source},
+        {"pkg": hashlib.sha256(source.read_bytes()).hexdigest()},
+    )
+    initial = _report_timestamp_state()
+    initial.dependency_graph = graph
+    initial.cycle_semantics = snapshot
+    initial.cycle_semantics_state = "fresh"
+    incremental = copy.deepcopy(initial)
+    incremental.cycle_semantics_state = "stale"
+    incremental.cycle_semantics_invalidation_reason = "SOURCE_CHANGED"
+    fresh_full = copy.deepcopy(initial)
+
+    if fault == "current_graph":
+        incremental.dependency_graph = graph.with_module_edges("pkg", {"other"}, set())
+    elif fault == "historical_snapshot":
+        incremental.cycle_semantics = replace(
+            snapshot, graph_sha256=fingerprint_hard_edges({"pkg": {"other"}}),
+        )
+    elif fault == "false_fresh":
+        incremental.cycle_semantics_state = "fresh"
+    elif fault == "wrong_reason":
+        incremental.cycle_semantics_invalidation_reason = "SOURCE_DELETED"
+    elif fault == "other_canonical_field":
+        incremental.artifacts["unexpected"] = {}
+
+    with pytest.raises(AssertionError, match=expected):
+        _assert_incremental_full_cycle_parity(
+            initial, incremental, fresh_full,
+            expected_invalidation_reason="SOURCE_CHANGED",
+        )
 
 
 def _report_timestamp_state(

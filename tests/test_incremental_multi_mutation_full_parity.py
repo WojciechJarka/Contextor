@@ -22,6 +22,7 @@ from contextor.core.live_state.hydration import hydrate_repository_engine
 from contextor.core.live_state.store import read_metadata
 from contextor.core.paths import repo_cache_dir
 from test_desktop_mcp_canonical_parity import (
+    _assert_incremental_full_cycle_parity,
     _first_difference,
     _state_projection,
 )
@@ -288,6 +289,16 @@ def _run_mutation_case(
         normalize_report_timestamps=True,
     )
     state_difference = _first_difference(incremental_projection, fresh_projection)
+    parity_error = None
+    try:
+        _assert_incremental_full_cycle_parity(
+            initial_payload["state"], incremental_state, fresh_state,
+            expected_invalidation_reason=(
+                "SOURCE_DELETED" if mutation_bytes is None else "SOURCE_CHANGED"
+            ),
+        )
+    except AssertionError as exc:
+        parity_error = str(exc)
     full_coverage = _file_state_coverage(root, fresh_file_states)
 
     mismatch_kind = None
@@ -295,7 +306,7 @@ def _run_mutation_case(
         mismatch_kind = "UPDATE_EXCEPTION"
     elif actual_status != expected_status:
         mismatch_kind = "UPDATE_STATUS"
-    elif state_difference is not None:
+    elif parity_error is not None:
         mismatch_kind = "CANONICAL_STATE"
     elif any(
         incremental_coverage[key]
@@ -329,12 +340,18 @@ def _run_mutation_case(
             f"{scenario_id} {mismatch_kind}: expected_status={expected_status!r}; "
             f"actual_status={actual_status!r}; update_exception={update_exception!r}; "
             f"first_difference={state_difference!r}; "
+            f"parity_error={parity_error!r}; "
             f"incremental_file_coverage={incremental_coverage!r}; "
             f"fresh_full_file_coverage={full_coverage!r}; evidence={evidence_dir}"
         )
 
     if scenario_id == "F":
         source_sha = hashlib.sha256(incremental_source_bytes["loose.py"]).hexdigest()
+        baseline_sha = hashlib.sha256(initial_source_bytes["loose.py"]).hexdigest()
+        assert actual_status == "UNCHANGED"
+        assert source_sha != baseline_sha
+        assert incremental_state.cycle_semantics_state == "stale"
+        assert incremental_state.cycle_semantics_invalidation_reason == "SOURCE_CHANGED"
         tracked_path = str((root / "loose.py").resolve())
         assert incremental_file_states[tracked_path].sha256 == source_sha
         assert incremental_state.module_usages_manifest["loose"]["sha256"] == source_sha
