@@ -1,12 +1,12 @@
 {
-  "version": "1.0.0",
+  "version": "1.1.0",
   "tool": "get_project_architecture",
   "purpose": [
-    "[OPTIMIZED] Return the complete persisted global project-analysis report bundle with an explicit current canonical LIVE freshness overlay. The report bundle contains summary, structure, name_collisions, artifacts_compact, graph_analytics, and report_diff. Report bodies are returned losslessly; the tool does not replace them with top-N summaries."
+    "[OPTIMIZED] Return the complete persisted global project-analysis report bundle with an explicit current canonical LIVE freshness overlay. The default bundle contains summary, structure, name_collisions, artifacts_compact, graph_analytics, and report_diff. The optional cycle_semantics field exposes a historical FULL evidence report only when explicitly selected. Report bodies are returned losslessly."
   ],
   "parameters": [
     "repo_path (string, required): canonical repository root.",
-    "fields (array of strings or null, default null): optional selection of global report sections. Allowed values are summary, structure, name_collisions, artifacts_compact, graph_analytics, and report_diff. Null selects all sections.",
+    "fields (array of strings or null, default null): optional selection of global report sections. Allowed values are summary, structure, name_collisions, artifacts_compact, graph_analytics, report_diff, and cycle_semantics. Null selects only the original six required sections; use fields=[\"cycle_semantics\"] for the optional historical FULL evidence report.",
     "allow_large_output (boolean, default false): approve returning the complete selected report payload when it exceeds the 51200-byte (50 KiB) direct-response threshold."
   ],
   "behavior": [
@@ -15,13 +15,16 @@
     "3. When the complete selected response is at most 51200 UTF-8 JSON bytes it is returned directly.",
     "4. Above 51200 bytes, unless allow_large_output=true, the tool returns confirmation_required with the exact complete selected response size plus report_catalog containing each report section's serialized byte/KiB size. The agent can then narrow fields or explicitly approve the same selection.",
     "5. Missing or unreadable report sections remain explicit available=false/state/reason entries. They are never fabricated as empty successful reports.",
-    "6. fields controls retrieval width only; it never changes the semantic contents of a selected report."
+    "6. fields controls retrieval width only; it never changes the semantic contents of a selected report.",
+    "7. cycle_semantics is optional and never changes the six-section report_bundle_state. When explicitly selected, a missing or invalid historical report is returned as unavailable or invalid and makes overall status partial.",
+    "8. cycle_semantics freshness_at_report_generation describes historical FULL generation only. Its publication_binding is unverified against current canonical LIVE; no report/LIVE revision equality or runtime import safety is certified."
   ],
   "freshness": [
     "Persisted reports describe the latest completed full-analysis report write and may be older than the current incremental LIVE revision.",
     "live_state.state_freshness reports the current canonical revision, provenance, family states, workspace-sync status, and advisory warning independently from the report snapshot.",
     "A newer LIVE revision does not relabel persisted report-only analytics as fresh LIVE facts.",
-    "If one or more modules are parse-stale, live_state.state_freshness.canonical_state is stale and live_state.parse_stale_modules identifies the affected last-known-good module truths; persisted completed-analysis reports remain independently retrievable."
+    "If one or more modules are parse-stale, live_state.state_freshness.canonical_state is stale and live_state.parse_stale_modules identifies the affected last-known-good module truths; persisted completed-analysis reports remain independently retrievable.",
+    "The explicitly selected cycle_semantics report remains historical even when current LIVE revision is newer or structural diagnostics are fresh. Missing optional files do not affect default six-section completeness."
   ],
   "errors": [
     "unsupported_fields: one or more requested fields are not global project report sections.",
@@ -32,7 +35,8 @@
   "usage_notes": [
     "Call with the default fields=null first. If the complete bundle is over 50 KiB, inspect report_catalog before choosing the report sections worth loading.",
     "Use fields to fetch one or more exact report sections without semantic truncation. Use allow_large_output=true only after deciding that the complete selected payload is worth the context cost.",
-    "For targeted extraction from a very large indexed report, prefer the existing specialized indexed/report-context tools rather than loading hundreds of KiB unnecessarily."
+    "For targeted extraction from a very large indexed report, prefer the existing specialized indexed/report-context tools rather than loading hundreds of KiB unnecessarily.",
+    "Use fields=[\"cycle_semantics\"] to read only the historical semantic report. The existing 50 KiB guard includes this selected payload; retry the same fields with allow_large_output=true only when the complete body is needed."
   ],
   "examples": []
 }

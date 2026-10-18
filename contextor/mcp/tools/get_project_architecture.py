@@ -1,4 +1,5 @@
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +21,10 @@ _REPORT_FILES: tuple[tuple[str, str], ...] = (
     ("artifacts_compact", "artifacts_compact.json"),
     ("graph_analytics", "graph_analytics.json"),
     ("report_diff", "report_diff.json"),
+)
+
+_OPTIONAL_REPORT_FILES: tuple[tuple[str, str], ...] = (
+    ("cycle_semantics", "cycle_semantics.json"),
 )
 
 
@@ -159,6 +164,98 @@ def _load_report_bundle(
     return reports, catalog
 
 
+def _cycle_semantics_report_validation_error(payload: Any) -> str | None:
+    if not isinstance(payload, dict):
+        return "cycle_semantics payload must be a dictionary"
+    if payload.get("schema_version") != "1.0.0":
+        return "unsupported cycle_semantics schema_version"
+    if not isinstance(payload.get("report_header"), dict):
+        return "cycle_semantics report_header must be a dictionary"
+    if payload.get("publication_binding") != {
+        "status": "UNVERIFIED_REPORT_VS_CANONICAL_LIVE",
+        "canonical_revision": None,
+        "live_revision": None,
+    }:
+        return "cycle_semantics publication_binding is invalid"
+    evidence = payload.get("semantic_evidence")
+    if not isinstance(evidence, dict):
+        return "cycle_semantics semantic_evidence must be a dictionary"
+    available = evidence.get("available")
+    if type(available) is not bool:
+        return "cycle_semantics evidence.available must be boolean"
+    freshness = evidence.get("freshness_at_report_generation")
+    if not isinstance(freshness, str) or freshness not in {"fresh", "stale", "deferred"}:
+        return "cycle_semantics evidence freshness is invalid"
+    status = payload.get("status")
+    if not isinstance(status, str) or status not in {
+        "ok", "partial", "stale", "deferred", "unavailable",
+        "projection_unavailable",
+    }:
+        return "cycle_semantics status is invalid"
+    projection = payload.get("projection")
+    if not available:
+        if status != "unavailable" or freshness != "deferred" or projection is not None:
+            return "cycle_semantics unavailable evidence is inconsistent"
+        return None
+    if status == "unavailable":
+        return "cycle_semantics available evidence cannot be unavailable"
+    if not isinstance(evidence.get("graph_sha256"), str) or not re.fullmatch(
+        r"[0-9a-f]{64}", evidence["graph_sha256"]
+    ):
+        return "cycle_semantics graph_sha256 is invalid"
+    coverage = evidence.get("coverage_status")
+    if not isinstance(coverage, str) or coverage not in {
+        "FILESYSTEM_STABLE_NON_ATOMIC", "PARTIAL_SOURCE_EVIDENCE",
+    }:
+        return "cycle_semantics coverage_status is invalid"
+    if status == "ok" and (
+        freshness != "fresh"
+        or coverage != "FILESYSTEM_STABLE_NON_ATOMIC"
+        or not isinstance(projection, dict)
+    ):
+        return "cycle_semantics ok status is inconsistent"
+    if status == "partial" and (
+        freshness != "fresh"
+        or coverage != "PARTIAL_SOURCE_EVIDENCE"
+        or not isinstance(projection, dict)
+    ):
+        return "cycle_semantics partial status is inconsistent"
+    if status == "stale" and (
+        freshness != "stale" or not isinstance(projection, dict)
+    ):
+        return "cycle_semantics stale status is inconsistent"
+    if status == "deferred" and freshness != "deferred":
+        return "cycle_semantics deferred status is inconsistent"
+    if status == "projection_unavailable" and (
+        projection is not None
+        or not isinstance(payload.get("projection_error"), str)
+        or not payload["projection_error"]
+    ):
+        return "cycle_semantics projection failure is inconsistent"
+    return None
+
+
+def _load_cycle_semantics_report(root: Path) -> tuple[Any, dict[str, Any]]:
+    payload, metadata = _load_report(
+        root, "cycle_semantics", "cycle_semantics.json"
+    )
+    metadata = dict(metadata)
+    metadata["historical_only"] = True
+    metadata["report_live_binding_verified"] = False
+    if metadata.get("available") is not True:
+        return payload, metadata
+    validation_error = _cycle_semantics_report_validation_error(payload)
+    if validation_error is None:
+        return payload, metadata
+    invalid = {
+        "available": False,
+        "state": "invalid",
+        "reason": validation_error,
+    }
+    metadata.update(invalid)
+    return invalid, metadata
+
+
 def _live_state_overlay(root: Path) -> dict[str, Any]:
     try:
         engine = mcp_runtime.get_or_init_engine(root)
@@ -272,13 +369,22 @@ def _build_payload(
     catalog: dict[str, dict[str, Any]],
     live_state: dict[str, Any],
 ) -> dict[str, Any]:
-    bundle_state = _bundle_state(catalog)
+    bundle_state = _bundle_state({
+        field: catalog[field]
+        for field, _ in _REPORT_FILES
+    })
+    selected_available = all(
+        catalog[field].get("available") is True
+        for field in selected_fields
+    )
     return {
-        "status": "ok" if bundle_state == "complete" else "partial",
+        "status": "ok" if bundle_state == "complete" and selected_available else "partial",
         "scope": "project",
         "data_source": "completed_analysis_report_bundle",
         "report_bundle_state": bundle_state,
-        "available_fields": [field for field, _ in _REPORT_FILES],
+        "available_fields": [field for field, _ in _REPORT_FILES] + [
+            field for field, _ in _OPTIONAL_REPORT_FILES
+        ],
         "selected_fields": selected_fields,
         "reports": {
             field: reports[field]
@@ -309,10 +415,12 @@ def get_project_architecture(
         )
 
     root = Path(repo_path).expanduser().resolve()
-    allowed_fields = [field for field, _ in _REPORT_FILES]
+    allowed_fields = [field for field, _ in _REPORT_FILES] + [
+        field for field, _ in _OPTIONAL_REPORT_FILES
+    ]
 
     if fields is None:
-        selected_fields = list(allowed_fields)
+        selected_fields = [field for field, _ in _REPORT_FILES]
     else:
         selected_fields = list(dict.fromkeys(fields))
         unknown_fields = sorted(set(selected_fields) - set(allowed_fields))
@@ -325,6 +433,10 @@ def get_project_architecture(
 
     try:
         reports, catalog = _load_report_bundle(root)
+        if "cycle_semantics" in selected_fields:
+            semantic_report, semantic_metadata = _load_cycle_semantics_report(root)
+            reports["cycle_semantics"] = semantic_report
+            catalog["cycle_semantics"] = semantic_metadata
         live_state = _live_state_overlay(root)
         result = _build_payload(
             selected_fields=selected_fields,
