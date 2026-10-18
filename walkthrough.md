@@ -1,94 +1,92 @@
-# CONTEXTOR_REGRESSION_26_H3A_Y_FINAL_SEMANTIC_FIX
+# CONTEXTOR_REGRESSION_26_MCP_ARCHITECTURE_CONTRACT_3_FIX
 
 ## TASK
-Controlled test-only correction of H3A Y so the unknown top-level mutation status is classified after valid job and generation identity checks.
+Controlled test-only repair of three stale get_project_architecture contract regressions. No production or documentation changes.
 
 ## HEAD_BEFORE
-28ade1b96bd3b8f2dbc8e86be8a64c4a168fa857
+2c8184c12be6837045931c05e133b1010690f583
 
 ## HEAD_AFTER
-28ade1b96bd3b8f2dbc8e86be8a64c4a168fa857 (no commit)
+2c8184c12be6837045931c05e133b1010690f583
 
 ## FILES_CHANGED
-- tests/test_h3a_workspace_canonical_freshness.py
+- tests/mcp/tools/test_architecture_context_contracts.py
+- tests/test_mcp_split_s2d.py
 
-Only test_h3a_case_y_unknown_status_facade_fail_closed changed. walkthrough.md is this report, excluded from code/test diffs. Production and cases U/V/Recovery unchanged.
+## PUBLIC_SIGNATURE_PROOF
+DIRECT_EVIDENCE: Python 3.10 inspect.signature of the current implementation returned:
+`(repo_path: str, fields: list[str] | None = None, allow_large_output: bool = False, cycle_semantics_view: str = 'full', cycle_semantics_component: str | None = None) -> str`.
+The two exact signature expectations now match this result, including argument order, annotations, defaults, and return type. Contextor identified the canonical implementation in contextor/mcp/tools/get_project_architecture.py and direct static consumers in contextor.mcp_server and tests.test_mcp_split_s2d.
 
-## RECEIPT_IDENTITY_PROOF
-unknown_status asserts job_id == h3a-y-synthetic and exactly one synthetic submit. It copies state_id and revision from that saved submit into requested_state_id/requested_revision of the receipt, alongside the matching job_id. After analysis the test asserts exactly one receipt and compares its three identity fields with the submit. Existing assertions also compare the result's expected state/revision, idempotency key and service/process identity. No real submit occurs for the synthetic job.
+## DOCS_THRESHOLD_PROOF
+DIRECT_EVIDENCE: contextor/mcp/docs/get_project_architecture.json declares the 51200-byte threshold under parameters.allow_large_output. The docs test now includes parameters in its combined semantic text and retains the literal `assert "51200" in combined`. It also checks the documented defaults, overview/diagnostic/full views, and component restriction, while keeping historical parameter and report_catalog/live_state assertions. The existing full-file tests continue checking historical cycle_semantics and separate LIVE diagnostics.
 
-## UNKNOWN_STATUS_BRANCH_PROOF
-The receipt retains status=rejected and revision=999 while job_id and requested generation pass the first two classifier guards. Current classify_publication_receipt then takes its status != ok branch, returning pending_verification and exact warning "Mutation status unavailable." The test asserts that warning, published revision=None, matching synthetic job ID, result/summary parity, one status call, disk/FileState=P1 and daemon=P0. CONFIRMATION_SECONDS=0.0 remains test-local.
+## THREE_REGRESSION_RESULTS
+`python -m pytest -q` on the three exact requested node IDs: **3 passed, 1 warning in 6.38s**, exit 0. Warning: third-party FastMCP AuthlibDeprecationWarning.
 
-## FOUR_H3A_RESULTS
-Exact Y alone: 1 passed in 10.50 s.
-Four exact H3A cases U, V, Recovery, Y: 4 passed in 29.17 s.
+## FOCUSED_NON_REGRESSION_RESULTS
+`python -m pytest -q tests/mcp/tools/test_architecture_context_contracts.py tests/test_mcp_split_s2d.py`: **29 passed, 1 warning in 5.57s**, exit 0. Same third-party warning. Full repository suite was not run. `git diff --check`: exit 0, with Git LF-to-CRLF working-copy notices only.
 
-## ASYNC_RECEIPT_RESULTS
-tests/test_async_publication_receipt.py: 9 passed in 0.90 s. No full repository pytest suite. git diff --check passed.
+## REGISTRATION_AND_OWNERSHIP_INVARIANTS
+CONTRACT_PROVED by passing test_s2d_registration_order_bindings_signatures_and_descriptions and full test_mcp_split_s2d.py: registration order, wrapper identity, implementation binding, descriptions, ownership, and all other signature expectations remain checked. Only the approved get_project_architecture signature entry changed. Contextor blast-radius result confirmed direct static consumers; dynamic Python usage is outside that tool's evidence scope.
 
-## LIVE_REVISION
-Before 619; after 620, same activity epoch 5d758bf9339c4ac5a5816ab056e7f84b, continuity=continuous, resync_required=false. Contextor test symbol source: canonical_state=fresh, workspace_sync=verified, canonical_revision=620. File edit context: syntax diagnostics checked_and_none, zero errors. Contextor pre-edit blast radius identified classify_publication_receipt in the adapter layer with public status tool and async receipt test consumers.
+## LIVE_REVISION_BEFORE_AFTER
+Before: canonical revision 620, workspace_sync=verified. After: revision 622, canonical_state=fresh, workspace_sync=verified, provenance=live (Contextor blast-radius response). No manual update_file was called.
 
 ## WATCHER_EVENTS
-Revision 620: desktop_watcher update_file UPDATED tests/test_h3a_workspace_canonical_freshness.py. No manual update_file.
+Contextor get_live_events(after_revision=620): continuity=continuous, resync_required=false, activity epoch 5d758bf9339c4ac5a5816ab056e7f84b. Revision 621: desktop_watcher UPDATED tests/mcp/tools/test_architecture_context_contracts.py. Revision 622: desktop_watcher UNCHANGED tests/test_mcp_split_s2d.py. The latter event confirms watcher observation but does not claim an UPDATED classification. Contextor file-edit context returned fresh syntax diagnostics, zero errors, for both files at revisions 621 and 622 respectively.
 
 ## RESTART_REQUIREMENTS
-MCP_BACKEND_RESTART_REQUIRED=NO. LIVE_SERVICE_RESTART_REQUIRED=NO. Test-only change; no restart performed.
+MCP_BACKEND_RESTART_REQUIRED=NO. LIVE_SERVICE_RESTART_REQUIRED=NO. Only test code changed; no restart performed.
 
-## EXACT_DIFF
-Complete actual unified diff of the sole task-changed file follows.
+## FULL_DIFFS
 ```diff
-diff --git a/tests/test_h3a_workspace_canonical_freshness.py b/tests/test_h3a_workspace_canonical_freshness.py
-index c09d9ef..3688c5b 100644
---- a/tests/test_h3a_workspace_canonical_freshness.py
-+++ b/tests/test_h3a_workspace_canonical_freshness.py
-@@ -1383,14 +1383,26 @@ def test_h3a_case_y_unknown_status_facade_fail_closed(tmp_path, monkeypatch):
- 
-         submissions = []
-         status_calls = []
-+        receipts = []
- 
-         def synthetic_submit(self, **kwargs):
-             submissions.append(kwargs)
-             return {"status": "accepted", "accepted": True, "job_id": "h3a-y-synthetic"}
- 
-         def unknown_status(self, job_id):
-+            assert job_id == "h3a-y-synthetic"
-+            assert len(submissions) == 1
-+            submitted = submissions[0]
-             status_calls.append(job_id)
--            return {"status": "rejected", "revision": 999}
-+            receipt = {
-+                "status": "rejected",
-+                "revision": 999,
-+                "job_id": job_id,
-+                "requested_state_id": submitted["state_id"],
-+                "requested_revision": submitted["revision"],
-+            }
-+            receipts.append(receipt)
-+            return receipt
- 
-         monkeypatch.setattr(LiveStateClient, "submit_committed_publish", synthetic_submit)
-         monkeypatch.setattr(LiveStateClient, "mutation_status", unknown_status)
-@@ -1406,10 +1418,14 @@ def test_h3a_case_y_unknown_status_facade_fail_closed(tmp_path, monkeypatch):
-         assert client.snapshot()["state"].revision == p0
-         assert len(submissions) == 1
-         assert status_calls == ["h3a-y-synthetic"]
-+        assert len(receipts) == 1
-+        assert receipts[0]["job_id"] == "h3a-y-synthetic"
-+        assert receipts[0]["requested_state_id"] == submissions[0]["state_id"]
-+        assert receipts[0]["requested_revision"] == submissions[0]["revision"]
-         assert res.live_publish_status == "pending_verification"
-         assert res.live_publish_revision is None
-         assert res.live_publish_job_id == "h3a-y-synthetic"
--        assert res.live_publish_warning == "Exact mutation job status unavailable."
-+        assert res.live_publish_warning == "Mutation status unavailable."
-         assert res.live_publish_idempotency_key == committed_publication_key(
-             identity.repo_id, res.live_publish_expected_state_id, p1
-         )
-```
-## FINAL_VERDICT
-FINAL PASS. The Y receipt now passes exact identity and generation guards before exercising the unknown-status fail-closed branch; every named targeted gate passed.
 
-STOP. Await `proceduj`.
+diff --git a/tests/mcp/tools/test_architecture_context_contracts.py b/tests/mcp/tools/test_architecture_context_contracts.py
+index b5647f0..887e3a0 100644
+--- a/tests/mcp/tools/test_architecture_context_contracts.py
++++ b/tests/mcp/tools/test_architecture_context_contracts.py
+@@ -14,7 +14,7 @@ def _load_doc(tool_name: str) -> dict:
+ def test_architecture_context_contracts__get_project_architecture_signature():
+     tools = mcp_server.mcp._tool_manager._tools
+     sig = str(inspect.signature(tools["get_project_architecture"].fn))
+-    assert sig == "(repo_path: str, fields: list[str] | None = None, allow_large_output: bool = False) -> str"
++    assert sig == "(repo_path: str, fields: list[str] | None = None, allow_large_output: bool = False, cycle_semantics_view: str = 'full', cycle_semantics_component: str | None = None) -> str"
+ 
+ 
+ def test_architecture_context_contracts__get_file_edit_context_signature():
+@@ -47,8 +47,14 @@ def test_architecture_context_contracts__get_project_architecture_docs_complete(
+     assert "repo_path (string, required)" in params_text
+     assert "fields (array of strings or null, default null)" in params_text
+     assert "allow_large_output (boolean, default false)" in params_text
++    assert 'cycle_semantics_view (string, default "full")' in params_text
++    assert "one of overview, diagnostic, or full" in params_text
++    assert "cycle_semantics_component (string or null, default null)" in params_text
++    assert "in overview or diagnostic view" in params_text
++    assert "invalid with full view" in params_text
+     combined = "\n".join(
+-        doc.get("behavior", [])
++        doc.get("parameters", [])
++        + doc.get("behavior", [])
+         + doc.get("freshness", [])
+         + doc.get("usage_notes", [])
+     )
+diff --git a/tests/test_mcp_split_s2d.py b/tests/test_mcp_split_s2d.py
+index e61a52f..173cecb 100644
+--- a/tests/test_mcp_split_s2d.py
++++ b/tests/test_mcp_split_s2d.py
+@@ -33,7 +33,7 @@ _IMPLEMENTATIONS = {
+ }
+ 
+ _EXPECTED_SIGNATURES = {
+-    "get_project_architecture": "(repo_path: str, fields: list[str] | None = None, allow_large_output: bool = False) -> str",
++    "get_project_architecture": "(repo_path: str, fields: list[str] | None = None, allow_large_output: bool = False, cycle_semantics_view: str = 'full', cycle_semantics_component: str | None = None) -> str",
+     "get_module_context": "(repo_path: str, module_name: str = '', max_items: int | None = 30, compact: bool = True, fields: list[str] | None = None, module: str | None = None) -> str",
+     "get_symbol_implementation": "(repo_path: str, symbol: str, file_paths: list[str] | None = None, mode: str = 'auto', include: list[str] | None = None, methods: list[str] | None = None, member_limit: int | None = 50, file_path: str | None = None) -> str",
+     "get_file_edit_context": "(repo_path: str, file_path: str = '', max_items: int | None = 30, compact: bool = True, fields: list[str] | None = None, mode: str | None = None, target: str | None = None) -> str",
+
+```
+
+## FINAL_VERDICT
+FINAL PASS for this controlled test-only task: requested signature and documentation contract assertions are updated; all exact and focused gates pass; LIVE continuity and workspace sync are verified. No production or docs files changed.
+

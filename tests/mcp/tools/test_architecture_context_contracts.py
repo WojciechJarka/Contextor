@@ -14,7 +14,7 @@ def _load_doc(tool_name: str) -> dict:
 def test_architecture_context_contracts__get_project_architecture_signature():
     tools = mcp_server.mcp._tool_manager._tools
     sig = str(inspect.signature(tools["get_project_architecture"].fn))
-    assert sig == "(repo_path: str, fields: list[str] | None = None, allow_large_output: bool = False) -> str"
+    assert sig == "(repo_path: str, fields: list[str] | None = None, allow_large_output: bool = False, cycle_semantics_view: str = 'full', cycle_semantics_component: str | None = None) -> str"
 
 
 def test_architecture_context_contracts__get_file_edit_context_signature():
@@ -47,8 +47,14 @@ def test_architecture_context_contracts__get_project_architecture_docs_complete(
     assert "repo_path (string, required)" in params_text
     assert "fields (array of strings or null, default null)" in params_text
     assert "allow_large_output (boolean, default false)" in params_text
+    assert 'cycle_semantics_view (string, default "full")' in params_text
+    assert "one of overview, diagnostic, or full" in params_text
+    assert "cycle_semantics_component (string or null, default null)" in params_text
+    assert "in overview or diagnostic view" in params_text
+    assert "invalid with full view" in params_text
     combined = "\n".join(
-        doc.get("behavior", [])
+        doc.get("parameters", [])
+        + doc.get("behavior", [])
         + doc.get("freshness", [])
         + doc.get("usage_notes", [])
     )
