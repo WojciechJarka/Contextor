@@ -660,13 +660,9 @@ def test_full_facade_acknowledges_already_installed_under_writer_lease(
     observed = []
 
     class AlreadyInstalledClient:
-        def publish(
-            self,
-            state,
-            *,
-            origin="unknown",
-            acknowledge_installed=False,
-        ):
+        endpoint = SimpleNamespace(service_instance_id="service", process_start_identity="process")
+
+        def submit_committed_publish(self, *, state_id, revision, origin, idempotency_key, trace_op=None):
             try:
                 probe_lease = acquire_full_analysis(
                     repo,
@@ -678,23 +674,33 @@ def test_full_facade_acknowledges_already_installed_under_writer_lease(
             else:
                 release_full_analysis(probe_lease)
                 lease_held = False
-            revision = int(state.revision)
             observed.append(
                 {
                     "origin": origin,
-                    "acknowledge_installed": acknowledge_installed,
+                    "state_id": state_id,
                     "lease_held": lease_held,
                     "revision": revision,
                 }
             )
+            return {"status": "accepted", "accepted": True, "job_id": "mu-test"}
+
+        def mutation_status(self, job_id):
+            assert job_id == "mu-test"
             return {
                 "status": "ok",
-                "revision": revision,
-                "seq": 9,
-                "source": "committed_snapshot",
-                "already_installed": True,
-                "origin_verified": False,
+                "job_id": job_id,
+                "state": "completed",
+                "requested_state_id": observed[0]["state_id"],
+                "requested_revision": observed[0]["revision"],
+                "response": {
+                    "status": "ok", "revision": observed[0]["revision"],
+                    "already_installed": True,
+                },
             }
+
+        def authority_status(self):
+            return {"status": "ok", "service_instance_id": "service",
+                    "process_start_identity": "process"}
 
     client = AlreadyInstalledClient()
     monkeypatch.setattr(
@@ -712,7 +718,7 @@ def test_full_facade_acknowledges_already_installed_under_writer_lease(
     assert isinstance(analysis_result, AnalysisResult)
     assert len(observed) == 1
     assert observed[0]["origin"] == "mcp_analysis"
-    assert observed[0]["acknowledge_installed"] is True
+    assert observed[0]["state_id"] == analysis_result.live_publish_expected_state_id
     assert observed[0]["lease_held"] is True
     assert analysis_result.live_publish_status == "success"
     assert analysis_result.live_publish_revision == observed[0]["revision"]

@@ -578,6 +578,11 @@ class ContextorFacade:
             list: List of architectural validation errors, if any.
         """
         facade_started = time.monotonic()
+        live_publish_job_id = None
+        live_publish_service_instance_id = None
+        live_publish_process_start_identity = None
+        live_publish_expected_state_id = None
+        live_publish_expected_revision = None
 
         def emit_stage_end(stage: str, started: float) -> None:
             elapsed_ms = (time.monotonic() - started) * 1000.0
@@ -1160,6 +1165,11 @@ class ContextorFacade:
             live_publish_status = "not_attempted"
             live_publish_revision = None
             live_publish_warning = None
+            live_publish_job_id = None
+            live_publish_service_instance_id = None
+            live_publish_process_start_identity = None
+            live_publish_expected_state_id = None
+            live_publish_expected_revision = None
 
             writer = "mcp" if "mcp" in str(owner) else "desktop"
             origin = str(owner) if str(owner) in {"desktop_analysis", "mcp_analysis", "cli_analysis"} else "desktop_analysis"
@@ -1246,40 +1256,25 @@ class ContextorFacade:
                     if client is not None:
                         component_started = time.monotonic()
                         try:
-                            published = client.publish(
-                                state,
+                            from contextor.core.live_state.publication_receipt import publish_committed_and_wait
+                            published = publish_committed_and_wait(
+                                client,
+                                repo_id=registry.repo_id,
+                                state_id=meta.state_id,
+                                revision=meta.revision,
                                 origin=origin,
-                                acknowledge_installed=True,
                             )
                         finally:
                             publish_ms = (time.monotonic() - component_started) * 1000.0
                         component_started = time.monotonic()
-                        if (
-                            isinstance(published, dict)
-                            and published.get("status") == "ok"
-                            and published.get("revision") is not None
-                        ):
-                            live_publish_revision = int(published["revision"])
-                            if published.get("resync_required") is True:
-                                live_publish_status = "recovery_required"
-                                live_publish_warning = (
-                                    published.get("warning")
-                                    or "LIVE recovery verification required."
-                                )
-                            else:
-                                live_publish_status = "success"
-                                live_publish_warning = (
-                                    "LIVE generation was already installed; "
-                                    "event origin is not verified."
-                                    if published.get("already_installed") is True
-                                    else None
-                                )
-                        else:
-                            live_publish_status = "failed"
-                            live_publish_revision = None
-                            err = published.get("error") if isinstance(published, dict) else None
-                            status_val = published.get("status") if isinstance(published, dict) else None
-                            live_publish_warning = err or (f"LIVE service returned status '{status_val}'." if status_val else "Canonical LIVE service rejected publication.")
+                        live_publish_status = published["live_publish_status"]
+                        live_publish_revision = published["live_publish_revision"]
+                        live_publish_warning = published["live_publish_warning"]
+                        live_publish_job_id = published["live_publish_job_id"]
+                        live_publish_service_instance_id = published["live_publish_service_instance_id"]
+                        live_publish_process_start_identity = published["live_publish_process_start_identity"]
+                        live_publish_expected_state_id = published["live_publish_expected_state_id"]
+                        live_publish_expected_revision = published["live_publish_expected_revision"]
                         status_handling_ms = (time.monotonic() - component_started) * 1000.0
                         if live_publish_status == "failed" and log:
                             log(f"Warning: Failed to publish canonical state to live daemon: {live_publish_warning}")
@@ -1289,7 +1284,7 @@ class ContextorFacade:
                         status_handling_ms = (time.monotonic() - component_started) * 1000.0
                 except Exception as e:
                     component_started = time.monotonic()
-                    live_publish_status = "timed_out" if isinstance(e, TimeoutError) else "failed"
+                    live_publish_status = "pending_verification" if isinstance(e, TimeoutError) else "failed"
                     live_publish_revision = None
                     live_publish_warning = f"{type(e).__name__}: {e}"
                     status_handling_ms = (time.monotonic() - component_started) * 1000.0
@@ -1389,10 +1384,20 @@ class ContextorFacade:
             analysis_result.live_publish_status = live_publish_status
             analysis_result.live_publish_revision = live_publish_revision
             analysis_result.live_publish_warning = live_publish_warning
+            analysis_result.live_publish_job_id = live_publish_job_id
+            analysis_result.live_publish_service_instance_id = live_publish_service_instance_id
+            analysis_result.live_publish_process_start_identity = live_publish_process_start_identity
+            analysis_result.live_publish_expected_state_id = live_publish_expected_state_id
+            analysis_result.live_publish_expected_revision = live_publish_expected_revision
             if hasattr(analysis_result, "summary_data") and isinstance(analysis_result.summary_data, dict):
                 analysis_result.summary_data["live_publish_status"] = live_publish_status
                 analysis_result.summary_data["live_publish_revision"] = live_publish_revision
                 analysis_result.summary_data["live_publish_warning"] = live_publish_warning
+                analysis_result.summary_data["live_publish_job_id"] = live_publish_job_id
+                analysis_result.summary_data["live_publish_service_instance_id"] = live_publish_service_instance_id
+                analysis_result.summary_data["live_publish_process_start_identity"] = live_publish_process_start_identity
+                analysis_result.summary_data["live_publish_expected_state_id"] = live_publish_expected_state_id
+                analysis_result.summary_data["live_publish_expected_revision"] = live_publish_expected_revision
 
         progress.begin("Finalizing analysis")
         progress.finish()

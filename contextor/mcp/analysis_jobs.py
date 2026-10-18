@@ -197,6 +197,9 @@ def _public_job(
             "created_at", "started_at", "completed_at", "updated_at",
             "message", "error", "live_publish_status",
             "live_publish_revision", "live_publish_warning",
+            "live_publish_job_id", "live_publish_service_instance_id",
+            "live_publish_process_start_identity",
+            "live_publish_expected_state_id", "live_publish_expected_revision",
         )
     }
     if "skipped_python_files" in job:
@@ -273,6 +276,11 @@ async def _run_analysis_worker(
                             "live_publish_warning",
                             None,
                         ),
+                        "live_publish_job_id": getattr(result, "live_publish_job_id", None),
+                        "live_publish_service_instance_id": getattr(result, "live_publish_service_instance_id", None),
+                        "live_publish_process_start_identity": getattr(result, "live_publish_process_start_identity", None),
+                        "live_publish_expected_state_id": getattr(result, "live_publish_expected_state_id", None),
+                        "live_publish_expected_revision": getattr(result, "live_publish_expected_revision", None),
                     }
                 if operation == "layer":
                     ContextorFacade.analyze_layer(
@@ -380,6 +388,16 @@ async def _execute_analysis_job(
                 "live_publish_status": pub_status or "failed",
                 "live_publish_revision": pub_rev,
                 "live_publish_warning": pub_warn,
+                **{
+                    key: (analysis_outcome or {}).get(key)
+                    for key in (
+                        "live_publish_job_id",
+                        "live_publish_service_instance_id",
+                        "live_publish_process_start_identity",
+                        "live_publish_expected_state_id",
+                        "live_publish_expected_revision",
+                    )
+                },
             }
 
             cold_migration = False
@@ -461,6 +479,11 @@ def _start_analysis_job(
                 "pending" if operation == "project" else "not_applicable"
             ),
             "live_publish_revision": None, "live_publish_warning": None,
+            "live_publish_job_id": None,
+            "live_publish_service_instance_id": None,
+            "live_publish_process_start_identity": None,
+            "live_publish_expected_state_id": None,
+            "live_publish_expected_revision": None,
             "owner_pid": os.getpid(),
         }
         _write_analysis_job(root, job)

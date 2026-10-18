@@ -2,6 +2,7 @@
 
 import copy
 import threading
+import time
 from contextlib import contextmanager
 from multiprocessing import get_context
 from pathlib import Path
@@ -200,6 +201,33 @@ def _publish(server, revision, *, state_id="sid", **request_fields):
         "state": SimpleNamespace(state_id=state_id, revision=revision),
         **request_fields,
     })
+
+
+def test_queued_committed_publish_reuses_existing_worker_and_loads_committed_state(durable_harness):
+    committed, _ = durable_harness.commit(1)
+    server = durable_harness.server(state=None, revision=0)
+    server._repository_identity_reader = lambda: durable_harness.identity
+    request = {
+        "operation": "submit_committed_publish", "state_id": "sid",
+        "revision": 1, "origin": "mcp_analysis", "idempotency_key": "cp-test",
+        "trace_op": None,
+    }
+    accepted = server._dispatch(request)
+    assert accepted["status"] == "accepted"
+    assert server._dispatch(request)["job_id"] == accepted["job_id"]
+    assert server._dispatch({**request, "state_id": "other"})["error"] == "publication_idempotency_conflict"
+    deadline = time.monotonic() + 3
+    while time.monotonic() < deadline:
+        receipt = server._dispatch({"operation": "mutation_status", "job_id": accepted["job_id"]})
+        if receipt.get("state") in {"completed", "failed"}:
+            break
+        time.sleep(0.01)
+    assert receipt["state"] == "completed"
+    assert receipt["requested_state_id"] == "sid"
+    assert receipt["requested_revision"] == 1
+    assert receipt["response"]["revision"] == 1
+    assert server._state.state_id == committed.state_id
+    assert server._state.value == committed.value
 
 
 def _unchanged(server):

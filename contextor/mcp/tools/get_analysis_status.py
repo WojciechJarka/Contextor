@@ -101,6 +101,51 @@ def get_analysis_status(
                         f"{type(exc).__name__}: {exc}"
                     ),
                 }
+    if (
+        job_id is not None
+        and job.get("status") == "completed"
+        and job.get("live_publish_status") == "pending_verification"
+        and isinstance(job.get("live_publish_job_id"), str)
+        and isinstance(job.get("live_publish_expected_state_id"), str)
+        and type(job.get("live_publish_expected_revision")) is int
+    ):
+        from contextor.core.live_state import connect
+        from contextor.core.live_state.publication_receipt import classify_publication_receipt
+
+        try:
+            client = connect(root, reconcile_missing_endpoint_binding=False)
+        except (OSError, ValueError, RuntimeError):
+            client = None
+        expected_service = job.get("live_publish_service_instance_id")
+        expected_process = job.get("live_publish_process_start_identity")
+        if client is None:
+            pass  # Retain the durable pending status.
+        elif (
+            client.endpoint.service_instance_id != expected_service
+            or client.endpoint.process_start_identity != expected_process
+        ):
+            job = {
+                **job,
+                "live_publish_status": "unverified_authority_changed",
+                "live_publish_revision": None,
+                "live_publish_warning": "LIVE authority identity changed before receipt verification.",
+            }
+        else:
+            try:
+                receipt = client.mutation_status(job["live_publish_job_id"])
+            except (OSError, EOFError, ConnectionError, TimeoutError, RuntimeError):
+                receipt = None
+            classified = classify_publication_receipt(
+                receipt,
+                job_id=job["live_publish_job_id"],
+                service_instance_id=expected_service,
+                process_start_identity=expected_process,
+                state_id=job["live_publish_expected_state_id"],
+                revision=job["live_publish_expected_revision"],
+            )
+            if classified["live_publish_status"] in {"success", "failed", "recovery_required"}:
+                job = {**job, **classified}
+                analysis_jobs._write_analysis_job(root, job)
     public_job = analysis_jobs._public_job(job, max_skipped_files=max_skipped_files)
     if public_job.get("status") == "completed":
         diag = diagnostics_summary_for_completed_job(diagnostics_summary(root), job)

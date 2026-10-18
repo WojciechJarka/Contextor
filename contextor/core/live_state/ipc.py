@@ -15,6 +15,7 @@ import uuid
 from dataclasses import dataclass
 from multiprocessing.connection import Client, Listener
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Callable, Mapping
 
 from contextor.core.live_state.runtime_lease import ProcessIdentity
@@ -159,9 +160,23 @@ class CanonicalMutationCoordinator:
             request_dict = dict(request)
         except (TypeError, ValueError):
             request_dict = {}
-        file_path = request_dict.get("file_path")
-        if not isinstance(file_path, str) or not file_path:
-            return {"status": "error", "error": "invalid_file_path"}
+        operation = request_dict.get("operation", "submit_update_file")
+        if operation == "submit_committed_publish":
+            state_id = request_dict.get("state_id")
+            revision = request_dict.get("revision")
+            repo_id = request_dict.get("repo_id")
+            if (
+                not isinstance(repo_id, str) or not repo_id
+                or not isinstance(state_id, str) or not state_id
+                or type(revision) is not int or revision < 1
+            ):
+                return {"status": "error", "error": "invalid_publication_identity"}
+        elif operation == "submit_update_file":
+            file_path = request_dict.get("file_path")
+            if not isinstance(file_path, str) or not file_path:
+                return {"status": "error", "error": "invalid_file_path"}
+        else:
+            return {"status": "error", "error": "invalid_mutation_operation"}
         idempotency_key = request_dict.get("idempotency_key")
         if not isinstance(idempotency_key, str) or not idempotency_key:
             return {"status": "error", "error": "invalid_idempotency_key"}
@@ -177,6 +192,15 @@ class CanonicalMutationCoordinator:
             if existing_job_id is not None:
                 existing_job = self._jobs.get(existing_job_id)
                 if existing_job is not None:
+                    if operation == "submit_committed_publish":
+                        existing_request = existing_job.request
+                        if (
+                            existing_request.get("operation") != operation
+                            or existing_request.get("repo_id") != repo_id
+                            or existing_request.get("state_id") != state_id
+                            or existing_request.get("revision") != revision
+                        ):
+                            return {"status": "error", "error": "publication_idempotency_conflict"}
                     return {
                         "status": "accepted",
                         "accepted": True,
@@ -267,6 +291,9 @@ class CanonicalMutationCoordinator:
                 response["error"] = job.error
             if job.response is not None:
                 response["response"] = copy.deepcopy(job.response)
+            if job.request.get("operation") == "submit_committed_publish":
+                response["requested_state_id"] = job.request["state_id"]
+                response["requested_revision"] = job.request["revision"]
             return response
 
     def _prune_terminal_locked(self) -> None:
@@ -817,7 +844,7 @@ class CanonicalLiveServer:
         self._service_cleanup_ok = True
         self._service_wakeup_token = secrets.token_hex(32)
         self._mutation_coordinator = CanonicalMutationCoordinator(
-            self._execute_queued_update_file,
+            self._execute_queued_mutation,
             self._read_revision,
         )
         self._stop = threading.Event()
@@ -1881,6 +1908,57 @@ class CanonicalLiveServer:
         with self._mutation_guard(request, self._stop):
             return self._execute_update_file(request, allow_recovery_fence=True)
 
+    def _execute_queued_mutation(self, request: dict[str, Any]) -> dict[str, Any]:
+        if request.get("operation", "submit_update_file") == "submit_update_file":
+            return self._execute_queued_update_file(request)
+        if request.get("operation") == "submit_committed_publish":
+            candidate = SimpleNamespace(
+                state_id=request["state_id"],
+                revision=request["revision"],
+            )
+            return self._execute_publish({
+                "state": candidate,
+                "origin": request["origin"],
+                "trace_op": request.get("trace_op"),
+                "acknowledge_installed": True,
+            })
+        return {"status": "error", "error": "invalid_mutation_operation"}
+
+    def _submit_committed_publish(self, request: dict[str, Any]) -> dict[str, Any]:
+        if self._committed_snapshot_reader is None:
+            return {"status": "error", "error": "committed_snapshot_reader_unavailable"}
+        if not {"operation", "state_id", "revision", "origin", "idempotency_key"} <= set(request) or set(request) - {
+            "operation", "state_id", "revision", "origin", "idempotency_key", "trace_op",
+        }:
+            return {"status": "error", "error": "invalid_committed_publish_request"}
+        state_id = request["state_id"]
+        revision = request["revision"]
+        origin = request["origin"]
+        key = request["idempotency_key"]
+        trace_op = request.get("trace_op")
+        if not isinstance(state_id, str) or not state_id or len(state_id) > 256:
+            return {"status": "error", "error": "invalid_state_id"}
+        if type(revision) is not int or revision < 1:
+            return {"status": "error", "error": "invalid_canonical_revision"}
+        if not isinstance(origin, str) or origin not in {"desktop_analysis", "mcp_analysis", "cli_analysis"}:
+            return {"status": "error", "error": "invalid_publish_origin"}
+        if not isinstance(key, str) or not key or len(key) > 256:
+            return {"status": "error", "error": "invalid_idempotency_key"}
+        if trace_op is not None and (
+            not isinstance(trace_op, str) or not trace_op or len(trace_op) > 256
+        ):
+            return {"status": "error", "error": "invalid_publish_trace_op"}
+        if self._repository_identity_reader is None:
+            return {"status": "error", "error": "repository_identity_unavailable"}
+        try:
+            identity = self._repository_identity_reader()
+        except Exception:
+            return {"status": "error", "error": "repository_identity_unavailable"}
+        repo_id = getattr(identity, "repo_id", None)
+        if not isinstance(repo_id, str) or not repo_id:
+            return {"status": "error", "error": "repository_identity_unavailable"}
+        return self._mutation_coordinator.submit({**request, "repo_id": repo_id})
+
     def _execute_update_file(
         self, request: dict[str, Any], *, allow_recovery_fence: bool = False
     ) -> dict[str, Any]:
@@ -2172,6 +2250,8 @@ class CanonicalLiveServer:
             return self._dispatch_release_desktop_claim(request)
         if operation == "submit_update_file":
             return self._mutation_coordinator.submit(request)
+        if operation == "submit_committed_publish":
+            return self._submit_committed_publish(request)
         if operation == "mutation_status":
             return self._mutation_coordinator.status(request.get("job_id"))
         if operation == "verify_recovery":
@@ -2608,6 +2688,24 @@ class LiveStateClient:
             origin=origin,
             trace_op=trace_op,
             idempotency_key=idempotency_key,
+        )
+
+    def submit_committed_publish(
+        self,
+        *,
+        state_id: str,
+        revision: int,
+        origin: str,
+        idempotency_key: str,
+        trace_op: str | None = None,
+    ) -> dict[str, Any]:
+        return self.request(
+            "submit_committed_publish",
+            state_id=state_id,
+            revision=revision,
+            origin=origin,
+            idempotency_key=idempotency_key,
+            trace_op=trace_op,
         )
 
     def mutation_status(self, job_id: str) -> dict[str, Any]:

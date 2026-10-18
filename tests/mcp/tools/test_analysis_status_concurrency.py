@@ -56,6 +56,53 @@ def _create_job(
     return payload
 
 
+def test_pending_publication_reconciles_only_exact_job_on_same_authority(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    import contextor.core.live_state as live_state_module
+
+    root = tmp_path
+    job = _create_job(root, 990, live_publish_status="pending_verification",
+                      live_publish_revision=None)
+    job.update({
+        "live_publish_job_id": "mu-exact",
+        "live_publish_service_instance_id": "service",
+        "live_publish_process_start_identity": "process",
+        "live_publish_expected_state_id": "sid",
+        "live_publish_expected_revision": 7,
+    })
+    analysis_jobs._write_analysis_job(root, job)
+    calls = []
+
+    class Client:
+        endpoint = SimpleNamespace(service_instance_id="replacement",
+                                   process_start_identity="process")
+
+        def mutation_status(self, job_id):
+            calls.append(job_id)
+            return {"status": "ok", "job_id": job_id, "state": "completed",
+                    "requested_state_id": "sid", "requested_revision": 7,
+                    "response": {"status": "ok", "revision": 7}}
+
+    def connect(_root, *, reconcile_missing_endpoint_binding=True):
+        if reconcile_missing_endpoint_binding:
+            return None
+        return Client()
+
+    monkeypatch.setattr(live_state_module, "connect", connect)
+    result = json.loads(get_analysis_status(str(root), job_id=job["job_id"]))
+    assert result["live_publish_status"] == "unverified_authority_changed"
+    assert result["live_publish_revision"] is None
+    assert calls == []
+    assert analysis_jobs._read_analysis_job(root, job["job_id"])["live_publish_status"] == "pending_verification"
+
+    Client.endpoint.service_instance_id = "service"
+    result = json.loads(get_analysis_status(str(root), job_id=job["job_id"]))
+    assert result["live_publish_status"] == "success"
+    assert result["live_publish_revision"] == 7
+    assert calls == ["mu-exact"]
+    assert analysis_jobs._read_analysis_job(root, job["job_id"])["live_publish_status"] == "success"
+
+
 def test_analysis_status_concurrency__multiple_active_without_job_id_returns_ambiguity(tmp_path):
     root = tmp_path
     foreign_owner = os.getpid() + 100000
