@@ -5,6 +5,9 @@ from dataclasses import dataclass, field, fields
 from typing import Dict, Any, Optional
 from pathlib import Path
 
+from contextor.core.cycle_semantics.contracts import (
+    CycleSemanticsSnapshot,
+)
 from contextor.core.domain.lineage_facts import MaterializedLineageSourceFacts
 
 
@@ -127,6 +130,9 @@ class RepositoryAnalysisState:
 
     trie: Optional[Any] = None
     package_root: str = ""
+    cycle_semantics: CycleSemanticsSnapshot | None = None
+    cycle_semantics_state: str = "deferred"
+    cycle_semantics_invalidation_reason: str | None = None
 
     def clone_for_update(self) -> "RepositoryAnalysisState":
         """
