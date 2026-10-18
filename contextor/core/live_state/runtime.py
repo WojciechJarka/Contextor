@@ -529,6 +529,7 @@ def _verified_existing_client(
     *,
     desktop_instance_id: str | None = None,
     owner_token: str | None = None,
+    reconcile_missing_endpoint_binding: bool = True,
 ) -> LiveStateClient | None:
     started = time.monotonic()
 
@@ -559,7 +560,8 @@ def _verified_existing_client(
         live = manager.read_live_lease()
         record = manager.read_generation()
         if (
-            live is not None
+            reconcile_missing_endpoint_binding
+            and live is not None
             and record.status == "active"
             and live.service_instance_id == endpoint.service_instance_id
             and live.lease_generation == endpoint.lease_generation
@@ -619,7 +621,11 @@ def _verified_existing_client(
     return client
 
 
-def connect(repo_path: str | Path) -> LiveStateClient | None:
+def connect(
+    repo_path: str | Path,
+    *,
+    reconcile_missing_endpoint_binding: bool = True,
+) -> LiveStateClient | None:
     root = Path(repo_path).resolve()
     identity = read_repository_identity(root)
     if identity is None:
@@ -630,7 +636,13 @@ def connect(repo_path: str | Path) -> LiveStateClient | None:
         liveness_verifier=AuthorityLivenessVerifier(domain),
     )
     try:
-        return _verified_existing_client(root, identity, domain, manager)
+        return _verified_existing_client(
+            root,
+            identity,
+            domain,
+            manager,
+            reconcile_missing_endpoint_binding=reconcile_missing_endpoint_binding,
+        )
     except EndpointSchemaError:
         return None
 

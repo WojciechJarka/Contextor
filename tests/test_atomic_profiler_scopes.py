@@ -84,10 +84,15 @@ def test_reports_missing_and_invalid(tmp_path, monkeypatch):
 
 def test_live_uses_existing_connect_and_only_ping(tmp_path, monkeypatch):
     calls = []
-    monkeypatch.setattr(live_ipc, "connect", lambda root: calls.append("connect") or SimpleNamespace(
-        ping=lambda: calls.append("ping") or {"status": "ok", "revision": 2}))
+    def strict_connect(root, *, reconcile_missing_endpoint_binding):
+        assert reconcile_missing_endpoint_binding is False
+        calls.append("connect")
+        return SimpleNamespace(
+            ping=lambda: calls.append("ping") or {"status": "ok", "revision": 2}
+        )
+    monkeypatch.setattr(live_ipc, "connect", strict_connect)
     result = live_ipc.run_scope(tmp_path, _recorder("live.ping"))
     assert calls == ["connect", "ping"]
     assert result["observed_revision"] == 2
-    monkeypatch.setattr(live_ipc, "connect", lambda root: None)
+    monkeypatch.setattr(live_ipc, "connect", lambda root, *, reconcile_missing_endpoint_binding: None)
     assert live_ipc.run_scope(tmp_path, _recorder("live.ping"))["status"] == "unavailable"

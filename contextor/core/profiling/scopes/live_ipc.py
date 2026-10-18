@@ -9,7 +9,7 @@ PRESETS = ("connect", "ping")
 
 def run_scope(root: Path, recorder) -> dict[str, object]:
     with recorder.span("connect"):
-        client = connect(root)
+        client = connect(root, reconcile_missing_endpoint_binding=False)
     if client is None:
         return {"status": "unavailable", "reason": "live_authority_unavailable"}
     with recorder.span("ping"):

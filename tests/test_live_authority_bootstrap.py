@@ -5,6 +5,7 @@ import os
 import threading
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -32,6 +33,92 @@ from contextor.core.live_state.runtime_lease import (
 )
 from contextor.core.repository_identity import read_repository_identity
 from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
+
+
+def test_connect_preserves_default_reconciliation_and_forwards_strict_opt_out(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    observed = []
+    monkeypatch.setattr(runtime_module, "read_repository_identity", lambda _: object())
+    monkeypatch.setattr(runtime_module, "_production_domain", lambda _: object())
+    monkeypatch.setattr(runtime_module, "RuntimeLeaseManager", lambda *a, **k: object())
+    monkeypatch.setattr(runtime_module, "AuthorityLivenessVerifier", lambda _: object())
+    def verified(*args, **kwargs):
+        observed.append(kwargs["reconcile_missing_endpoint_binding"])
+        return object()
+    monkeypatch.setattr(runtime_module, "_verified_existing_client", verified)
+    assert runtime_module.connect(tmp_path) is not None
+    assert runtime_module.connect(tmp_path, reconcile_missing_endpoint_binding=False) is not None
+    assert observed == [True, False]
+
+
+def test_verified_existing_read_only_rejects_missing_binding_without_generation_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    fingerprint = "fingerprint"
+    endpoint = SimpleNamespace(
+        service_instance_id="service", lease_generation=3, pid=123,
+        process_start_identity="start", owner_pid=None, owner_token=None,
+        fingerprint=lambda: fingerprint,
+    )
+    lease = SimpleNamespace(
+        service_instance_id="service", lease_generation=3, service_pid=123,
+        process_start_identity="start", endpoint_fingerprint=fingerprint,
+    )
+    record = SimpleNamespace(
+        status="active", endpoint_fingerprint=None,
+        last_service_instance_id="service", last_lease_generation=3,
+    )
+    generation_file = tmp_path / "generation.write"
+    reconciliations = []
+    class Manager:
+        def read_live_lease(self):
+            return lease
+        def read_generation(self):
+            return record
+        def reconcile_endpoint_binding(self, current_lease, current_fingerprint):
+            reconciliations.append((current_lease, current_fingerprint))
+            record.endpoint_fingerprint = current_fingerprint
+            generation_file.write_text("written")
+    class Client:
+        def __init__(self, endpoint, **kwargs):
+            self.endpoint = endpoint
+        def authority_status(self):
+            return {"status": "ok"}
+        def ping(self):
+            return {"status": "ok", "revision": 4}
+    monkeypatch.setattr(runtime_module, "_read_endpoint", lambda *a, **k: endpoint)
+    monkeypatch.setattr(runtime_module, "_endpoint_matches_domain", lambda *a: True)
+    monkeypatch.setattr(runtime_module, "_process_identity", lambda _: ("image", "start", True))
+    monkeypatch.setattr(runtime_module, "_status_matches_endpoint", lambda *a: True)
+    monkeypatch.setattr(runtime_module, "_safe_trace_event", lambda *a, **k: None)
+    monkeypatch.setattr(runtime_module, "LiveStateClient", Client)
+    manager = Manager()
+    strict = runtime_module._verified_existing_client(
+        tmp_path, object(), object(), manager,
+        reconcile_missing_endpoint_binding=False,
+    )
+    assert strict is None
+    assert reconciliations == []
+    assert not generation_file.exists()
+    assert record.endpoint_fingerprint is None
+
+    normal = runtime_module._verified_existing_client(tmp_path, object(), object(), manager)
+    assert normal is not None
+    assert normal.ping()["revision"] == 4
+    assert reconciliations == [(lease, fingerprint)]
+    assert generation_file.read_text() == "written"
+
+    reconciliations.clear()
+    generation_file.unlink()
+    complete = runtime_module._verified_existing_client(
+        tmp_path, object(), object(), manager,
+        reconcile_missing_endpoint_binding=False,
+    )
+    assert complete is not None
+    assert complete.ping()["status"] == "ok"
+    assert reconciliations == []
+    assert not generation_file.exists()
 
 
 def _repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str = "repo") -> Path:
