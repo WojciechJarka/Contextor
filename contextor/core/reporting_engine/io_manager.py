@@ -149,3 +149,29 @@ def write_global_reports(
         if snapshot_prefix:
             save_json(reports_data["summary"], f"{snapshot_prefix}_summary.json", log=log, label="summary snapshot")
             _save_markdown(_summary_markdown(f"Project report: {repo_name}", reports_data["summary"]), f"{snapshot_prefix}_summary.md")
+
+    if "cycle_semantics" in reports_data:
+        try:
+            save_json(
+                reports_data["cycle_semantics"],
+                f"output/{repo_name}_cycle_semantics.json",
+                log=log,
+                label="cycle semantics report",
+            )
+
+            if snapshot_prefix:
+                save_json(
+                    reports_data["cycle_semantics"],
+                    f"{snapshot_prefix}_cycle_semantics.json",
+                    log=log,
+                    label="cycle semantics snapshot",
+                )
+
+        except Exception as exc:
+            if log:
+                log(
+                    "Warning: cycle semantics report "
+                    "write failed ("
+                    + type(exc).__name__
+                    + ")."
+                )

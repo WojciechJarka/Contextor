@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from dataclasses import replace
 from pathlib import Path
 from time import perf_counter_ns
@@ -295,4 +296,143 @@ def test_d3_report_contract_unchanged(pair_repo) -> None:
     assert reports
     assert state.cycles_state == "fresh" and state.cycles
     assert result.cycles == state.cycles
-    assert all("cycle_semantics" not in report.read_text(encoding="utf-8") for report in reports)
+    legacy_reports = [
+        report for report in reports
+        if not report.name.endswith("_cycle_semantics.json")
+    ]
+    assert legacy_reports
+    assert all(
+        "cycle_semantics" not in report.read_text(encoding="utf-8")
+        for report in legacy_reports
+    )
+    assert (output / "repo_cycle_semantics.json").is_file()
+    assert (output / "repo_structure.json").is_file()
+    assert (output / "repo_name_collisions.json").is_file()
+    assert (output / "repo_summary.json").is_file()
+
+
+def _semantic_report_paths(root: Path) -> tuple[Path, Path]:
+    output = root.parent / "output"
+    canonical = output / "repo_cycle_semantics.json"
+    dated = list(output.glob("repo_*/repo_cycle_semantics.json"))
+    assert len(dated) == 1
+    return canonical, dated[0]
+
+
+def test_d4a_full_writes_semantic_report(pair_repo) -> None:
+    state, _ = _run_full(pair_repo)
+    canonical, dated = _semantic_report_paths(pair_repo)
+    assert canonical.is_file() and dated.is_file()
+    report = json.loads(canonical.read_text(encoding="utf-8"))
+    snapshot_report = json.loads(dated.read_text(encoding="utf-8"))
+    assert report["semantic_evidence"] == snapshot_report["semantic_evidence"]
+    assert report["projection"] == snapshot_report["projection"]
+    assert report["report_header"]
+    assert report["semantic_evidence"]["graph_sha256"] == state.cycle_semantics.graph_sha256
+    assert report["semantic_evidence"]["source_fingerprints"] == [
+        {"module_id": module, "sha256": digest}
+        for module, digest in state.cycle_semantics.observed_source_fingerprints
+    ]
+    assert report["projection"]["summary"]["cyclic_scc_total"] == 1
+    assert report["publication_binding"] == {
+        "status": "UNVERIFIED_REPORT_VS_CANONICAL_LIVE",
+        "canonical_revision": None,
+        "live_revision": None,
+    }
+
+
+def test_d4a_materialization_failure_report_is_unavailable(pair_repo, monkeypatch) -> None:
+    def fail(*args, **kwargs):
+        raise ValueError("synthetic materialization failure")
+    monkeypatch.setattr(
+        "contextor.core.cycle_semantics.materialization.materialize_cycle_semantics", fail,
+    )
+    state, _ = _run_full(pair_repo)
+    canonical, _ = _semantic_report_paths(pair_repo)
+    report = json.loads(canonical.read_text(encoding="utf-8"))
+    assert state.cycles_state == "fresh" and state.cycles
+    assert state.cycle_semantics is None
+    assert report["status"] == "unavailable"
+    assert report["semantic_evidence"]["available"] is False
+    assert report["projection"] is None
+
+
+def test_d4a_report_does_not_rematerialize(pair_repo, monkeypatch) -> None:
+    import contextor.core.cycle_semantics.materialization as materialization
+    original = materialization.materialize_cycle_semantics
+    calls = []
+    def counted(*args, **kwargs):
+        calls.append(1)
+        return original(*args, **kwargs)
+    monkeypatch.setattr(materialization, "materialize_cycle_semantics", counted)
+    state, _ = _run_full(pair_repo)
+    canonical, _ = _semantic_report_paths(pair_repo)
+    assert len(calls) == 1
+    assert state.cycle_semantics is not None
+    assert json.loads(canonical.read_text(encoding="utf-8"))["status"] == "ok"
+
+
+def test_d4a_report_is_historical_after_incremental_edit(pair_repo) -> None:
+    state, _ = _run_full(pair_repo)
+    assert state.cycle_semantics_state == "fresh"
+    canonical, _ = _semantic_report_paths(pair_repo)
+    before = canonical.read_bytes()
+    hydrated = hydrate_repository_engine(pair_repo)
+    assert hydrated is not None
+    engine = hydrated.engine
+    source = pair_repo / "pkg" / "a.py"
+    source.write_text("import pkg.b\ndef fa():\n    return 10\n", encoding="utf-8")
+    engine.update_file(str(source.resolve()))
+    assert engine.state.cycle_semantics_state == "stale"
+    assert canonical.read_bytes() == before
+    report = json.loads(before)
+    assert report["semantic_evidence"]["freshness_at_report_generation"] == "fresh"
+    assert report["publication_binding"]["status"] == "UNVERIFIED_REPORT_VS_CANONICAL_LIVE"
+
+
+def test_d4a_optional_report_projection_failure(pair_repo, monkeypatch) -> None:
+    import contextor.core.cycle_semantics.materialization as materialization
+    original = materialization.materialize_cycle_semantics
+    calls = []
+    def counted(*args, **kwargs):
+        calls.append(1)
+        return original(*args, **kwargs)
+    def fail_projection(*args, **kwargs):
+        raise RuntimeError("synthetic projection failure")
+    monkeypatch.setattr(materialization, "materialize_cycle_semantics", counted)
+    monkeypatch.setattr(
+        "contextor.core.cycle_semantics.report_projection.project_cycle_semantics",
+        fail_projection,
+    )
+    state, _ = _run_full(pair_repo)
+    canonical, _ = _semantic_report_paths(pair_repo)
+    report = json.loads(canonical.read_text(encoding="utf-8"))
+    assert len(calls) == 1
+    assert state.cycles_state == "fresh" and state.cycles
+    assert report["status"] == "projection_unavailable"
+    assert report["projection"] is None
+    assert report["semantic_evidence"]["available"] is True
+    assert (pair_repo.parent / "output" / "repo_structure.json").is_file()
+
+
+def test_d4a_optional_report_write_failure_preserves_legacy_reports(
+    pair_repo, monkeypatch,
+) -> None:
+    import contextor.core.reporting_engine.io_manager as io_manager
+
+    original = io_manager.save_json
+
+    def fail_semantic_only(data, path, **kwargs):
+        if str(path).endswith("_cycle_semantics.json"):
+            raise OSError("synthetic semantic report write failure")
+        return original(data, path, **kwargs)
+
+    monkeypatch.setattr(io_manager, "save_json", fail_semantic_only)
+    state, result = _run_full(pair_repo)
+    output = pair_repo.parent / "output"
+    assert state.cycles_state == "fresh" and state.cycles
+    assert state.cycle_semantics_state == "fresh"
+    assert result.cycles == state.cycles
+    assert (output / "repo_structure.json").is_file()
+    assert (output / "repo_summary.json").is_file()
+    assert not (output / "repo_cycle_semantics.json").exists()

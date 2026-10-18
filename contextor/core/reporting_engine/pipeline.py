@@ -23,7 +23,7 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
-from contextor.core.errors import checkpoint
+from contextor.core.errors import AnalysisCancelled, checkpoint
 from contextor.core.program_log import log_program_event
 from contextor.core.runtime_trace import trace_event
 
@@ -53,6 +53,10 @@ def execute_global_pipeline(
     reference_index=None,
     test_facts_by_path: dict[str, dict] | None = None,
     automatic_test_dirs=None,
+    cycle_semantics_report_requested: bool = False,
+    cycle_semantics_snapshot=None,
+    cycle_semantics_freshness: str = "deferred",
+    cycle_semantics_invalidation_reason: str | None = None,
 ):
     """
     Execute the complete global report pipeline.
@@ -191,6 +195,40 @@ def execute_global_pipeline(
         root_path,
         data_source="global",
     )
+
+    semantic_report = None
+    if cycle_semantics_report_requested:
+        from contextor.core.cycle_semantics.report_projection import (
+            build_cycle_semantics_report,
+        )
+
+        try:
+            semantic_report = build_cycle_semantics_report(
+                cycle_semantics_snapshot,
+                cycle_semantics_freshness,
+                cycle_semantics_invalidation_reason,
+                report_header=report_header,
+            )
+        except AnalysisCancelled:
+            raise
+        except Exception as exc:
+            if log:
+                log(
+                    "Warning: cycle semantics report projection "
+                    "unavailable (" + type(exc).__name__ + ")."
+                )
+            trace_event(
+                "FULL",
+                "CYCLE_SEMANTICS_REPORT_PROJECTION_ERROR",
+                status="deferred",
+                exception_class=type(exc).__name__,
+            )
+            semantic_report = build_cycle_semantics_report(
+                None,
+                "deferred",
+                None,
+                report_header=report_header,
+            )
 
     # ------------------------------------------------------
     # SUMMARY
@@ -507,6 +545,8 @@ def execute_global_pipeline(
             graph_analytics_data
         ),
     }
+    if cycle_semantics_report_requested:
+        reports_data["cycle_semantics"] = semantic_report
 
     # ------------------------------------------------------
     # WRITE GLOBAL REPORTS

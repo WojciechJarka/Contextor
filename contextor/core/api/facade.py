@@ -868,6 +868,14 @@ class ContextorFacade:
             reference_index=reference_index,
             test_facts_by_path=index.test_facts_by_path,
             automatic_test_dirs=index.automatic_test_dirs,
+            cycle_semantics_report_requested=True,
+            cycle_semantics_snapshot=cycle_semantics,
+            cycle_semantics_freshness=(
+                cycle_semantics_state
+            ),
+            cycle_semantics_invalidation_reason=(
+                cycle_semantics_invalidation_reason
+            ),
         )
 
         emit_stage_end("reports", reports_started)
