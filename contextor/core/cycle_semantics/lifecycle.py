@@ -12,6 +12,77 @@ boundaries.
 
 from __future__ import annotations
 
+from .contracts import CycleSemanticsSnapshot
+
+
+FULL_SOURCE_DRIFT_ISSUES = frozenset({
+    "CANONICAL_FINGERPRINT_MISMATCH",
+    "SOURCE_CHANGED_DURING_READ",
+})
+
+FULL_SOURCE_AUTHORITY_UNAVAILABLE_ISSUES = frozenset({
+    "MISSING_OR_INVALID_CANONICAL_PATH",
+    "SOURCE_UNREADABLE",
+    "INVALID_CANONICAL_FINGERPRINT",
+})
+
+FULL_SOURCE_BOUNDED_EVALUATION_ISSUES = frozenset({
+    "SOURCE_FILE_LIMIT",
+    "SOURCE_COHORT_BYTE_LIMIT",
+    "SOURCE_NOT_COMPILABLE",
+})
+
+
+def classify_full_cycle_semantics(
+    snapshot: CycleSemanticsSnapshot,
+) -> tuple[str, str | None]:
+    """Classify FULL evidence freshness, not completeness.
+
+    A source mismatch cannot be marked fresh.
+
+    Missing source authority cannot certify freshness.
+
+    Bounded or otherwise explicitly incomplete
+    evaluation may still be a current diagnostic.
+
+    The snapshot itself always preserves its
+    explicit source coverage and issue details.
+    """
+
+    if type(snapshot) is not CycleSemanticsSnapshot:
+        raise TypeError(
+            "Expected CycleSemanticsSnapshot"
+        )
+
+    reasons = {
+        reason
+        for _, reason in snapshot.source_issues
+    }
+
+    if reasons & FULL_SOURCE_DRIFT_ISSUES:
+        return "stale", "SOURCE_CHANGED"
+
+    if reasons & FULL_SOURCE_AUTHORITY_UNAVAILABLE_ISSUES:
+        return "deferred", None
+
+    classified_reasons = (
+        FULL_SOURCE_DRIFT_ISSUES
+        | FULL_SOURCE_AUTHORITY_UNAVAILABLE_ISSUES
+        | FULL_SOURCE_BOUNDED_EVALUATION_ISSUES
+    )
+
+    if reasons - classified_reasons:
+        return "deferred", None
+
+    if (
+        snapshot.coverage_status
+        == "PARTIAL_SOURCE_EVIDENCE"
+        and not reasons
+    ):
+        return "deferred", None
+
+    return "fresh", None
+
 
 CYCLE_SEMANTICS_INVALIDATION_REASONS = frozenset({
     "SOURCE_CHANGED",

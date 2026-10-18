@@ -768,6 +768,79 @@ class ContextorFacade:
 
         emit_stage_end("metrics", metrics_started)
 
+        cycle_semantics = None
+        cycle_semantics_state = "deferred"
+        cycle_semantics_invalidation_reason = None
+        semantic_started_ns = time.perf_counter_ns()
+
+        try:
+            from contextor.core.cycle_semantics.materialization import (
+                materialize_cycle_semantics,
+            )
+            from contextor.core.cycle_semantics.lifecycle import (
+                classify_full_cycle_semantics,
+            )
+
+            cycle_semantics = materialize_cycle_semantics(
+                path,
+                graph.hard_edges,
+                {
+                    module_id: module.path
+                    for module_id, module in modules.items()
+                },
+                index.source_fingerprints_by_module,
+            )
+
+            (
+                cycle_semantics_state,
+                cycle_semantics_invalidation_reason,
+            ) = classify_full_cycle_semantics(
+                cycle_semantics
+            )
+
+        except AnalysisCancelled:
+            raise
+
+        except Exception as exc:
+            cycle_semantics = None
+            cycle_semantics_state = "deferred"
+            cycle_semantics_invalidation_reason = None
+
+            if log:
+                log(
+                    "Warning: cycle-semantic materialization "
+                    "unavailable ("
+                    + type(exc).__name__
+                    + ")."
+                )
+
+            trace_event(
+                "FULL",
+                "CYCLE_SEMANTICS_MATERIALIZATION_ERROR",
+                status="deferred",
+                exception_class=type(exc).__name__,
+            )
+
+        finally:
+            trace_event(
+                "FULL",
+                "CYCLE_SEMANTICS_MATERIALIZATION",
+                elapsed_ms=(
+                    time.perf_counter_ns()
+                    - semantic_started_ns
+                ) / 1_000_000.0,
+                status=cycle_semantics_state,
+                count=(
+                    len(cycle_semantics.cyclic_modules)
+                    if cycle_semantics is not None
+                    else 0
+                ),
+                reason=(
+                    cycle_semantics_invalidation_reason
+                    or "NONE"
+                ),
+            )
+
         from datetime import datetime
         datestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
@@ -989,6 +1062,13 @@ class ContextorFacade:
                 topology_metrics_state="fresh",
                 cycles=getattr(analysis_result, "cycles", []),
                 cycles_state="fresh",
+                cycle_semantics=cycle_semantics,
+                cycle_semantics_state=(
+                    cycle_semantics_state
+                ),
+                cycle_semantics_invalidation_reason=(
+                    cycle_semantics_invalidation_reason
+                ),
                 collision_facts=cf if isinstance(cf, dict) else {},
                 collisions=canonical_collisions,
                 collisions_state=collisions_state,
