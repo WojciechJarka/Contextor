@@ -278,7 +278,7 @@ def test_contextor_profile_analysis_is_registered_and_documented():
 
     assert tool.description == entry["short_description"]
     assert str(inspect.signature(tool.fn, eval_str=True)) == (
-        "(repo_path: str, exclude_paths: list[str] | None = None) -> str"
+        "(repo_path: str, exclude_paths: list[str] | None = None, mode: str = 'full', scope: str | None = None, presets: list[str] | None = None, samples: int = 1, warmup: int = 0, result_view: str = 'summary') -> str"
     )
     assert index["tools"][-1]["tool"] == "get_mcp_documentation"
 

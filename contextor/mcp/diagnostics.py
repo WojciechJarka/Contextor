@@ -183,6 +183,8 @@ def inject_diagnostics_summary(
         return result
     if not isinstance(payload, dict):
         return result
+    if tool_name == "contextor_profile_analysis" and payload.get("schema") == "contextor-atomic-profile/v1":
+        return result
     if payload.get("status") in {
         "error",
         "queued",

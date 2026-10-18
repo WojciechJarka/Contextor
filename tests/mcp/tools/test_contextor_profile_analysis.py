@@ -64,3 +64,51 @@ def test_profile_worker_non_object_payload_propagates_as_runtime_error(tmp_path:
     monkeypatch.setattr(profile_tool.asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
     with pytest.raises(RuntimeError, match="^Contextor profile worker returned a non-object payload\\.$"):
         asyncio.run(profile_tool.contextor_profile_analysis(str(tmp_path)))
+
+
+def test_catalog_and_invalid_input_never_spawn(tmp_path, monkeypatch):
+    async def forbidden(*args, **kwargs):
+        pytest.fail("worker spawned")
+    monkeypatch.setattr(profile_tool.asyncio, "create_subprocess_exec", forbidden)
+    catalog = json.loads(asyncio.run(profile_tool.contextor_profile_analysis(str(tmp_path), mode="catalog")))
+    assert catalog["mode"] == "catalog"
+    for kwargs in [
+        {"mode": "proeb"}, {"mode": "probe", "scope": "live.png", "presets": ["ping"]},
+        {"mode": "probe", "scope": "live.ping", "presets": ["read_bytes"]},
+        {"mode": "probe", "scope": "live.ping", "presets": ["ping", "ping"]},
+        {"mode": "probe", "scope": "live.ping", "presets": []},
+        {"mode": "probe", "scope": "live.ping", "presets": ["ping"], "samples": True},
+        {"mode": "catalog", "scope": "live.ping"},
+    ]:
+        result = json.loads(asyncio.run(profile_tool.contextor_profile_analysis(str(tmp_path), **kwargs)))
+        assert result["status"] == "invalid_profile_request"
+    wrong = json.loads(asyncio.run(profile_tool.contextor_profile_analysis(
+        str(tmp_path), mode="probe", scope="live.ping", presets=["read_bytes"])))
+    assert wrong["owning_scope"] == "reports.summary"
+
+
+def test_probe_request_payload(tmp_path, monkeypatch):
+    process = _FakeProfileProcess({"schema": "contextor-atomic-profile/v1", "status": "ok"})
+    async def create(*args, **kwargs):
+        return process
+    monkeypatch.setattr(profile_tool.asyncio, "create_subprocess_exec", create)
+    asyncio.run(profile_tool.contextor_profile_analysis(
+        str(tmp_path), mode="probe", scope="live.ping", presets=["ping"]))
+    assert json.loads(process.request) == {
+        "repo_path": str(tmp_path.resolve()), "mode": "probe", "scope": "live.ping",
+        "presets": ["ping"], "samples": 1, "warmup": 0, "result_view": "summary"}
+
+
+def test_fuzzy_guidance_uses_shared_helper_without_execution(tmp_path, monkeypatch):
+    seen = []
+    def shared(value, choices):
+        seen.append((value, choices))
+        return [{"value": "live.ping", "score": 0.9}]
+    monkeypatch.setattr(profile_tool, "fuzzy_choice_candidates", shared)
+    async def forbidden(*args, **kwargs):
+        pytest.fail("worker spawned")
+    monkeypatch.setattr(profile_tool.asyncio, "create_subprocess_exec", forbidden)
+    result = json.loads(asyncio.run(profile_tool.contextor_profile_analysis(
+        str(tmp_path), mode="probe", scope="live.png", presets=["ping"])))
+    assert result["similar_candidates"] == [{"value": "live.ping", "score": 0.9}]
+    assert seen[0][0] == "live.png"

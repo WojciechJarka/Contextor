@@ -18,6 +18,13 @@ import contextor.mcp.tools.get_name_collisions as collision_tool
 from contextor.mcp.tools.get_analysis_status import get_analysis_status
 
 
+def test_atomic_profile_skips_diagnostics_injection(tmp_path, monkeypatch):
+    import contextor.mcp.diagnostics as diagnostic_module
+    monkeypatch.setattr(diagnostic_module, "diagnostics_summary", lambda _: pytest.fail("diagnostics read"))
+    response = json.dumps({"schema": "contextor-atomic-profile/v1", "status": "ok"})
+    assert inject_diagnostics_summary(response, tmp_path, "contextor_profile_analysis") == response
+
+
 def _collision(kind="NAME_COLLISION", identical=False, module="pkg.a"):
     return SimpleNamespace(
         kind=kind,

@@ -5,10 +5,21 @@ import sys
 from pathlib import Path
 from typing import Any
 from contextor.core.analysis.profile_runner import run_analysis_profile
+from contextor.core.profiling.runner import run_probe, validate_probe_request
 def execute_profile_request(payload: object) -> dict[str, object]:
     if not isinstance(payload, dict): raise ValueError("profile worker request must be a JSON object")
     repo_path = payload.get("repo_path")
     if not isinstance(repo_path, str) or not repo_path.strip(): raise ValueError("repo_path must be a non-empty string")
+    mode = payload.get("mode", "full")
+    if mode == "probe":
+        if set(payload) != {"repo_path", "mode", "scope", "presets", "samples", "warmup", "result_view"}:
+            raise ValueError("Invalid probe worker request fields.")
+        scope = payload["scope"]; presets = payload["presets"]
+        samples = payload["samples"]; warmup = payload["warmup"]; result_view = payload["result_view"]
+        validate_probe_request(scope, presets, samples, warmup, result_view)
+        return run_probe(Path(repo_path), scope, presets, samples, warmup, result_view)
+    if mode != "full" or "mode" in payload:
+        raise ValueError("Invalid legacy FULL worker request.")
     exclude_paths = payload.get("exclude_paths")
     if exclude_paths is not None and (not isinstance(exclude_paths, list) or not all(isinstance(item, str) and item.strip() for item in exclude_paths)): raise ValueError("exclude_paths must be null or an array of non-empty strings")
     return run_analysis_profile(Path(repo_path), exclude_paths=exclude_paths)
