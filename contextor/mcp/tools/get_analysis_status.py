@@ -124,28 +124,55 @@ def get_analysis_status(
             client = None
         expected_service = job.get("live_publish_service_instance_id")
         expected_process = job.get("live_publish_process_start_identity")
-        if client is None:
-            pass  # Retain the durable pending status.
-        else:
-            try:
-                authority = client.authority_status()
-            except (OSError, EOFError, ConnectionError, TimeoutError, RuntimeError):
+        if client is not None:
+            endpoint_service = client.endpoint.service_instance_id
+            endpoint_process = client.endpoint.process_start_identity
+            endpoint_identity_available = (
+                isinstance(endpoint_service, str) and bool(endpoint_service)
+                and isinstance(endpoint_process, str) and bool(endpoint_process)
+            )
+            if endpoint_identity_available and (
+                endpoint_service != expected_service
+                or endpoint_process != expected_process
+            ):
+                job = {
+                    **job,
+                    "live_publish_status": "unverified_authority_changed",
+                    "live_publish_revision": None,
+                    "live_publish_warning": "LIVE authority identity changed before receipt verification.",
+                }
+                endpoint_identity_available = False
+            if endpoint_identity_available:
+                try:
+                    authority = client.authority_status()
+                except (OSError, EOFError, ConnectionError, TimeoutError, RuntimeError):
+                    authority = None
+            else:
                 authority = None
-        if client is not None and (
-            client.endpoint.service_instance_id != expected_service
-            or client.endpoint.process_start_identity != expected_process
-            or not isinstance(authority, dict)
-            or authority.get("status") != "ok"
-            or authority.get("service_instance_id") != expected_service
-            or authority.get("process_start_identity") != expected_process
-        ):
-            job = {
-                **job,
-                "live_publish_status": "unverified_authority_changed",
-                "live_publish_revision": None,
-                "live_publish_warning": "LIVE authority identity changed before receipt verification.",
-            }
-        elif client is not None:
+        if client is not None and authority is not None:
+            if not isinstance(authority, dict) or authority.get("status") != "ok":
+                authority = None
+            else:
+                authority_service = authority.get("service_instance_id")
+                authority_process = authority.get("process_start_identity")
+                authority_identity_available = (
+                    isinstance(authority_service, str) and bool(authority_service)
+                    and isinstance(authority_process, str) and bool(authority_process)
+                )
+                if authority_identity_available and (
+                    authority_service != expected_service
+                    or authority_process != expected_process
+                ):
+                    job = {
+                        **job,
+                        "live_publish_status": "unverified_authority_changed",
+                        "live_publish_revision": None,
+                        "live_publish_warning": "LIVE authority identity changed before receipt verification.",
+                    }
+                    authority = None
+                elif not authority_identity_available:
+                    authority = None
+        if client is not None and isinstance(authority, dict) and authority.get("status") == "ok":
             mutation_job_id = job.get("live_publish_job_id")
             if not isinstance(mutation_job_id, str):
                 state_id = job["live_publish_expected_state_id"]
@@ -158,9 +185,7 @@ def get_analysis_status(
                         expected_key = committed_publication_key(repo_id, state_id, revision)
                     except ValueError:
                         expected_key = None
-                if not isinstance(stored_key, str) or stored_key != expected_key:
-                    authority = None
-                else:
+                if isinstance(stored_key, str) and stored_key == expected_key:
                     try:
                         lookup = client.lookup_committed_publish(
                             idempotency_key=stored_key, state_id=state_id,
@@ -168,16 +193,21 @@ def get_analysis_status(
                         )
                     except (OSError, EOFError, ConnectionError, TimeoutError, RuntimeError):
                         lookup = None
-                    if isinstance(lookup, dict) and lookup.get("status") == "ok":
-                        mutation_job_id = lookup.get("job_id")
-                        if isinstance(mutation_job_id, str) and mutation_job_id:
-                            job = {**job, "live_publish_job_id": mutation_job_id}
-                            try:
-                                analysis_jobs._write_analysis_job(root, job)
-                            except OSError:
-                                pass
-                    else:
-                        mutation_job_id = None
+                    if (
+                        isinstance(lookup, dict)
+                        and lookup.get("status") == "ok"
+                        and isinstance(lookup.get("job_id"), str)
+                        and bool(lookup.get("job_id"))
+                        and lookup.get("requested_state_id") == state_id
+                        and type(lookup.get("requested_revision")) is int
+                        and lookup.get("requested_revision") == revision
+                    ):
+                        mutation_job_id = lookup["job_id"]
+                        job = {**job, "live_publish_job_id": mutation_job_id}
+                        try:
+                            analysis_jobs._write_analysis_job(root, job)
+                        except OSError:
+                            pass
             if isinstance(mutation_job_id, str) and mutation_job_id:
                 try:
                     receipt = client.mutation_status(mutation_job_id)

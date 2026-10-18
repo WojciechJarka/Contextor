@@ -56,6 +56,336 @@ def _create_job(
     return payload
 
 
+def _pending_publication_job(root: Path, suffix: int = 980) -> dict:
+    from contextor.core.live_state.publication_receipt import committed_publication_key
+
+    job = _create_job(
+        root,
+        suffix,
+        live_publish_status="pending_verification",
+        live_publish_revision=None,
+    )
+    job.update({
+        "live_publish_job_id": None,
+        "live_publish_idempotency_key": committed_publication_key(
+            "repo-id", "sid", 7
+        ),
+        "live_publish_service_instance_id": "service",
+        "live_publish_process_start_identity": "process",
+        "live_publish_expected_state_id": "sid",
+        "live_publish_expected_revision": 7,
+    })
+    analysis_jobs._write_analysis_job(root, job)
+    return job
+
+
+def _patch_reconciliation_diagnostics(monkeypatch) -> None:
+    import contextor.mcp.tools.get_analysis_status as status_module
+
+    monkeypatch.setattr(status_module, "diagnostics_summary", lambda _root: {})
+    monkeypatch.setattr(
+        status_module,
+        "diagnostics_summary_for_completed_job",
+        lambda _summary, _job: {"attention_required": False},
+    )
+
+
+def _status_response(root: Path, job: dict) -> dict:
+    return json.loads(get_analysis_status(str(root), job_id=job["job_id"]))
+
+
+@pytest.mark.parametrize(
+    "authority_result",
+    [
+        TimeoutError("authority timeout"),
+        ConnectionError("authority transport failed"),
+        None,
+        {"status": "unavailable"},
+        {"status": "error", "error": "authority_unavailable"},
+    ],
+    ids=["timeout", "transport-error", "non-object", "unavailable", "error-status"],
+)
+def test_authority_status_uncertainty_retains_pending_without_lookup(
+    tmp_path, monkeypatch, authority_result
+):
+    from types import SimpleNamespace
+    import contextor.core.live_state as live_state_module
+
+    _patch_reconciliation_diagnostics(monkeypatch)
+    job = _pending_publication_job(tmp_path)
+    calls = []
+
+    class Client:
+        endpoint = SimpleNamespace(
+            service_instance_id="service", process_start_identity="process"
+        )
+
+        def authority_status(self):
+            if isinstance(authority_result, BaseException):
+                raise authority_result
+            return authority_result
+
+        def lookup_committed_publish(self, **kwargs):
+            calls.append(("lookup", kwargs))
+            raise AssertionError("uncertain authority must not trigger lookup")
+
+        def mutation_status(self, job_id):
+            calls.append(("status", job_id))
+            raise AssertionError("uncertain authority must not trigger status")
+
+    monkeypatch.setattr(
+        live_state_module,
+        "connect",
+        lambda _root, *, reconcile_missing_endpoint_binding=True: Client(),
+    )
+
+    result = _status_response(tmp_path, job)
+    stored = analysis_jobs._read_analysis_job(tmp_path, job["job_id"])
+    assert result["live_publish_status"] == "pending_verification"
+    assert stored["live_publish_status"] == "pending_verification"
+    assert stored["live_publish_job_id"] is None
+    assert calls == []
+
+
+def test_missing_client_retains_pending_without_mutation_lookup(tmp_path, monkeypatch):
+    import contextor.core.live_state as live_state_module
+
+    _patch_reconciliation_diagnostics(monkeypatch)
+    job = _pending_publication_job(tmp_path)
+    connect_calls = []
+
+    def connect(_root, *, reconcile_missing_endpoint_binding=True):
+        connect_calls.append(reconcile_missing_endpoint_binding)
+        return None
+
+    monkeypatch.setattr(live_state_module, "connect", connect)
+    result = _status_response(tmp_path, job)
+    stored = analysis_jobs._read_analysis_job(tmp_path, job["job_id"])
+    assert connect_calls == [False]
+    assert result["live_publish_status"] == "pending_verification"
+    assert stored["live_publish_status"] == "pending_verification"
+    assert stored["live_publish_job_id"] is None
+
+
+def test_missing_authority_identity_is_uncertain_not_replacement(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    import contextor.core.live_state as live_state_module
+
+    _patch_reconciliation_diagnostics(monkeypatch)
+    job = _pending_publication_job(tmp_path)
+    lookup_calls = []
+
+    class Client:
+        endpoint = SimpleNamespace(
+            service_instance_id="service", process_start_identity="process"
+        )
+
+        def authority_status(self):
+            return {"status": "ok", "repo_id": "repo-id"}
+
+        def lookup_committed_publish(self, **kwargs):
+            lookup_calls.append(kwargs)
+
+    monkeypatch.setattr(
+        live_state_module,
+        "connect",
+        lambda _root, *, reconcile_missing_endpoint_binding=True: Client(),
+    )
+    result = _status_response(tmp_path, job)
+    assert result["live_publish_status"] == "pending_verification"
+    assert lookup_calls == []
+
+
+def test_explicit_authority_service_mismatch_is_unverified(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    import contextor.core.live_state as live_state_module
+
+    _patch_reconciliation_diagnostics(monkeypatch)
+    job = _pending_publication_job(tmp_path)
+    lookup_calls = []
+
+    class Client:
+        endpoint = SimpleNamespace(
+            service_instance_id="service", process_start_identity="process"
+        )
+
+        def authority_status(self):
+            return {
+                "status": "ok",
+                "service_instance_id": "replacement",
+                "process_start_identity": "process",
+                "repo_id": "repo-id",
+            }
+
+        def lookup_committed_publish(self, **kwargs):
+            lookup_calls.append(kwargs)
+
+    monkeypatch.setattr(
+        live_state_module,
+        "connect",
+        lambda _root, *, reconcile_missing_endpoint_binding=True: Client(),
+    )
+    result = _status_response(tmp_path, job)
+    assert result["live_publish_status"] == "unverified_authority_changed"
+    assert lookup_calls == []
+
+
+@pytest.mark.parametrize(
+    "lookup_result",
+    [
+        {"status": "ok", "job_id": "mu-bad", "requested_state_id": "other",
+         "requested_revision": 7},
+        {"status": "ok", "job_id": "mu-bad", "requested_state_id": "sid",
+         "requested_revision": 8},
+        {"status": "ok", "job_id": "mu-bad", "requested_state_id": "sid",
+         "requested_revision": True},
+    ],
+    ids=["wrong-state-id", "wrong-revision", "boolean-revision"],
+)
+def test_invalid_lookup_identity_is_not_persisted(
+    tmp_path, monkeypatch, lookup_result
+):
+    from types import SimpleNamespace
+    import contextor.core.live_state as live_state_module
+
+    _patch_reconciliation_diagnostics(monkeypatch)
+    job = _pending_publication_job(tmp_path)
+    calls = []
+
+    class Client:
+        endpoint = SimpleNamespace(
+            service_instance_id="service", process_start_identity="process"
+        )
+
+        def authority_status(self):
+            return {
+                "status": "ok",
+                "service_instance_id": "service",
+                "process_start_identity": "process",
+                "repo_id": "repo-id",
+            }
+
+        def lookup_committed_publish(self, **kwargs):
+            calls.append(("lookup", kwargs))
+            return lookup_result
+
+        def mutation_status(self, mutation_job_id):
+            calls.append(("status", mutation_job_id))
+            raise AssertionError("invalid lookup must not reach mutation status")
+
+        def submit_committed_publish(self, **kwargs):
+            calls.append(("submit", kwargs))
+            raise AssertionError("status recovery must never submit")
+
+        def publish(self, **kwargs):
+            calls.append(("publish", kwargs))
+            raise AssertionError("status recovery must never publish")
+
+        def update_file(self, **kwargs):
+            calls.append(("update_file", kwargs))
+            raise AssertionError("status recovery must never update_file")
+
+        def analyze_project(self, **kwargs):
+            calls.append(("full", kwargs))
+            raise AssertionError("status recovery must never run FULL")
+
+    monkeypatch.setattr(
+        live_state_module,
+        "connect",
+        lambda _root, *, reconcile_missing_endpoint_binding=True: Client(),
+    )
+    result = _status_response(tmp_path, job)
+    stored = analysis_jobs._read_analysis_job(tmp_path, job["job_id"])
+    assert result["live_publish_status"] == "pending_verification"
+    assert result["live_publish_job_id"] is None
+    assert stored["live_publish_status"] == "pending_verification"
+    assert stored["live_publish_job_id"] is None
+    assert stored["live_publish_idempotency_key"] == job[
+        "live_publish_idempotency_key"
+    ]
+    assert [name for name, _ in calls] == ["lookup"]
+
+
+def test_invalid_lookup_then_valid_lookup_recovers_original_publication(
+    tmp_path, monkeypatch
+):
+    from types import SimpleNamespace
+    import contextor.core.live_state as live_state_module
+
+    _patch_reconciliation_diagnostics(monkeypatch)
+    job = _pending_publication_job(tmp_path)
+    calls = []
+
+    class Client:
+        endpoint = SimpleNamespace(
+            service_instance_id="service", process_start_identity="process"
+        )
+
+        def authority_status(self):
+            return {
+                "status": "ok",
+                "service_instance_id": "service",
+                "process_start_identity": "process",
+                "repo_id": "repo-id",
+            }
+
+        def lookup_committed_publish(self, **kwargs):
+            calls.append(("lookup", kwargs))
+            if sum(name == "lookup" for name, _ in calls) == 1:
+                return {
+                    "status": "ok", "job_id": "mu-wrong",
+                    "requested_state_id": "other", "requested_revision": 7,
+                }
+            return {
+                "status": "ok", "job_id": "mu-exact",
+                "requested_state_id": "sid", "requested_revision": 7,
+            }
+
+        def mutation_status(self, mutation_job_id):
+            calls.append(("status", mutation_job_id))
+            return {
+                "status": "ok", "job_id": mutation_job_id, "state": "completed",
+                "requested_state_id": "sid", "requested_revision": 7,
+                "response": {"status": "ok", "revision": 7},
+            }
+
+        def submit_committed_publish(self, **kwargs):
+            raise AssertionError("recovery retry must never submit")
+
+        def publish(self, **kwargs):
+            raise AssertionError("recovery retry must never publish")
+
+        def update_file(self, **kwargs):
+            raise AssertionError("recovery retry must never update_file")
+
+        def analyze_project(self, **kwargs):
+            raise AssertionError("recovery retry must never run FULL")
+
+    connect_flags = []
+
+    def connect(_root, *, reconcile_missing_endpoint_binding=True):
+        connect_flags.append(reconcile_missing_endpoint_binding)
+        return Client()
+
+    monkeypatch.setattr(live_state_module, "connect", connect)
+    first = _status_response(tmp_path, job)
+    after_invalid = analysis_jobs._read_analysis_job(tmp_path, job["job_id"])
+    assert first["live_publish_status"] == "pending_verification"
+    assert after_invalid["live_publish_job_id"] is None
+    assert after_invalid["live_publish_idempotency_key"] == job[
+        "live_publish_idempotency_key"
+    ]
+
+    second = _status_response(tmp_path, job)
+    stored = analysis_jobs._read_analysis_job(tmp_path, job["job_id"])
+    assert second["live_publish_status"] == "success"
+    assert second["live_publish_job_id"] == "mu-exact"
+    assert stored["live_publish_status"] == "success"
+    assert stored["live_publish_job_id"] == "mu-exact"
+    assert [name for name, _ in calls] == ["lookup", "lookup", "status"]
+    assert connect_flags == [False, False]
+
+
 def test_pending_publication_reconciles_only_exact_job_on_same_authority(tmp_path, monkeypatch):
     from types import SimpleNamespace
     import contextor.core.live_state as live_state_module
