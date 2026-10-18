@@ -7,7 +7,10 @@ import pytest
 
 from contextor import mcp_server
 from contextor.core.analysis.state_manager import RepositoryAnalysisState
+from contextor.core.cycle_semantics.contracts import fingerprint_hard_edges
+from contextor.core.domain.graph import ProjectGraph
 from contextor.mcp.query_helpers import build_state_freshness
+from contextor.mcp import query_helpers
 from contextor.core.cycle_semantics.report_projection import build_cycle_semantics_report
 from tests.test_cycle_semantics_report_projection import _snapshot
 
@@ -508,3 +511,130 @@ def test_cycle_semantics_selected_missing_does_not_change_default(tmp_path, monk
     assert _read_architecture(tmp_path, fields=["cycle_semantics"])["status"] == "partial"
     after = _read_architecture(tmp_path)
     assert before == after
+
+
+def _semantic_state(*, marker="fresh"):
+    state = RepositoryAnalysisState(
+        cycles_state="fresh",
+        cycle_semantics=_snapshot(),
+        cycle_semantics_state=marker,
+    )
+    state.dependency_graph = ProjectGraph(
+        hard_edges={"pkg.a": {"pkg.b"}, "pkg.b": {"pkg.a"}},
+        soft_edges={},
+    )
+    return state
+
+
+def _install_real_freshness(tmp_path, monkeypatch, state):
+    engine = architecture_tool.mcp_runtime.get_or_init_engine(tmp_path)
+    engine.state = state
+    state.state_id = "synthetic-generation"
+    state.revision = 77
+    engine.state_manager = SimpleNamespace(state_id="synthetic-generation", revision=77)
+    monkeypatch.setattr(architecture_tool.query_helpers, "build_state_freshness", build_state_freshness)
+    monkeypatch.setattr(query_helpers, "is_explicit_generation_mismatch", lambda *args, **kwargs: False)
+    monkeypatch.setattr("contextor.mcp.analysis_jobs._latest_analysis_job", lambda _root: None)
+    return engine
+
+
+def test_d4c_default_missing_semantics_is_deferred():
+    state = RepositoryAnalysisState(cycle_semantics=None, cycle_semantics_state="deferred")
+    assert query_helpers._cycle_semantics_family_freshness(state, generation_coherent=True) == "deferred"
+
+
+def test_d4c_no_snapshot_cannot_claim_fresh():
+    state = RepositoryAnalysisState(cycle_semantics=None, cycle_semantics_state="fresh")
+    assert query_helpers._cycle_semantics_family_freshness(state, generation_coherent=True) == "unavailable"
+
+
+def test_d4c_current_semantics_fresh_with_generation_proof():
+    state = _semantic_state()
+    assert fingerprint_hard_edges(state.dependency_graph.hard_edges) == state.cycle_semantics.graph_sha256
+    assert query_helpers._cycle_semantics_family_freshness(state, generation_coherent=True) == "fresh"
+
+
+def test_d4c_unverified_generation_cannot_claim_fresh():
+    assert query_helpers._cycle_semantics_family_freshness(
+        _semantic_state(), generation_coherent=False,
+    ) == "unavailable"
+
+
+def test_d4c_graph_drift_marks_semantics_stale():
+    state = _semantic_state()
+    snapshot = state.cycle_semantics
+    state.dependency_graph = ProjectGraph(hard_edges={"pkg.a": set()}, soft_edges={})
+    assert query_helpers._cycle_semantics_family_freshness(state, generation_coherent=True) == "stale"
+    assert state.cycle_semantics is snapshot
+    assert snapshot.graph_sha256 == fingerprint_hard_edges({"pkg.a": {"pkg.b"}, "pkg.b": {"pkg.a"}})
+
+
+def test_d4c_semantic_stale_independent_of_cycles():
+    state = _semantic_state(marker="stale")
+    assert query_helpers._cycle_semantics_family_freshness(state, generation_coherent=True) == "stale"
+    assert state.cycles_state == "fresh"
+
+
+def test_d4c_resync_fail_closed():
+    state = _semantic_state()
+    state.resync_required = True
+    assert query_helpers._cycle_semantics_family_freshness(state, generation_coherent=True) == "stale"
+
+
+def test_d4c_malformed_evidence_is_unavailable():
+    state = _semantic_state()
+    state.cycle_semantics = {"graph_sha256": state.cycle_semantics.graph_sha256}
+    assert query_helpers._cycle_semantics_family_freshness(state, generation_coherent=True) == "unavailable"
+
+
+def test_d4c_legacy_state_remains_deferred():
+    state = RepositoryAnalysisState()
+    for name in ("cycle_semantics", "cycle_semantics_state", "cycle_semantics_invalidation_reason"):
+        delattr(state, name)
+    assert query_helpers._cycle_semantics_family_freshness(state, generation_coherent=False) == "deferred"
+
+
+def test_d4c_public_envelope_includes_new_family(tmp_path, monkeypatch):
+    _install_runtime(tmp_path, monkeypatch, _small_bundle())
+    state = _semantic_state()
+    engine = _install_real_freshness(tmp_path, monkeypatch, state)
+    def fail(*args, **kwargs):
+        raise AssertionError("semantic materializer called")
+    monkeypatch.setattr("contextor.core.cycle_semantics.materialization.materialize_cycle_semantics", fail)
+    fresh = build_state_freshness(tmp_path, state, engine=engine)
+    assert fresh["families"]["cycle_semantics"] == "fresh"
+    assert fresh["families"]["cycles"] == "fresh"
+    assert {"module", "graph", "topology", "artifact_consumption", "collisions", "lineage"} <= set(fresh["families"])
+    engine.state_manager.revision = 76
+    unverified = build_state_freshness(tmp_path, state, engine=engine)
+    assert unverified["families"]["cycle_semantics"] == "unavailable"
+
+
+def test_d4c_reader_reports_historical_and_live_separately(tmp_path, monkeypatch):
+    report = _historical_report()
+    _install_runtime(tmp_path, monkeypatch, {**_small_bundle(), "cycle_semantics": report})
+    state = _semantic_state(marker="stale")
+    _install_real_freshness(tmp_path, monkeypatch, state)
+    result = _read_architecture(tmp_path, fields=["cycle_semantics"])
+    assert result["reports"]["cycle_semantics"] == report
+    assert result["reports"]["cycle_semantics"]["semantic_evidence"]["freshness_at_report_generation"] == "fresh"
+    assert result["live_state"]["state_freshness"]["families"]["cycle_semantics"] == "stale"
+    assert result["live_state"]["state_freshness"]["canonical_revision"] == 77
+    assert result["reports"]["cycle_semantics"]["publication_binding"]["live_revision"] is None
+
+
+def test_d4c_no_semantic_source_io(tmp_path, monkeypatch):
+    report = _historical_report()
+    _install_runtime(tmp_path, monkeypatch, {**_small_bundle(), "cycle_semantics": report})
+    state = _semantic_state()
+    snapshot = state.cycle_semantics
+    _install_real_freshness(tmp_path, monkeypatch, state)
+    def fail(*args, **kwargs):
+        raise AssertionError("semantic source access or recomputation")
+    monkeypatch.setattr("contextor.core.cycle_semantics.materialization.materialize_cycle_semantics", fail)
+    monkeypatch.setattr("contextor.core.cycle_semantics.source_cohort.build_cycle_source_cohort", fail)
+    assert query_helpers._cycle_semantics_family_freshness(state, generation_coherent=True) == "fresh"
+    result = _read_architecture(tmp_path, fields=["cycle_semantics"])
+    assert result["reports"]["cycle_semantics"] == report
+    assert result["live_state"]["state_freshness"]["families"]["cycle_semantics"] == "fresh"
+    assert state.cycle_semantics is snapshot

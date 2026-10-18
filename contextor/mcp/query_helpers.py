@@ -1,4 +1,5 @@
 import difflib
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +31,86 @@ def _normalize_public_family_marker(
     if isinstance(value, str) and value in allowed:
         return value
     return "unavailable"
+
+
+def _cycle_semantics_family_freshness(
+    state: Any,
+    *,
+    generation_coherent: bool,
+) -> str:
+    """Fail-closed canonical cycle-semantic freshness.
+
+    Evidence identity, lifecycle marker, canonical
+    generation and current graph must agree before
+    publicly claiming fresh.
+
+    No filesystem reads or semantic recomputation.
+    """
+
+    from contextor.core.cycle_semantics.contracts import (
+        CycleSemanticsSnapshot,
+        fingerprint_hard_edges,
+    )
+
+    evidence = getattr(
+        state,
+        "cycle_semantics",
+        None,
+    )
+
+    marker = _normalize_public_family_marker(
+        getattr(
+            state,
+            "cycle_semantics_state",
+            "deferred",
+        ),
+        _PUBLIC_DERIVED_FAMILY_STATES,
+    )
+
+    if evidence is None:
+        return (
+            "deferred"
+            if marker == "deferred"
+            else "unavailable"
+        )
+
+    if type(evidence) is not CycleSemanticsSnapshot:
+        return "unavailable"
+
+    if getattr(state, "resync_required", False):
+        return "stale"
+
+    if marker != "fresh":
+        return marker
+
+    if not generation_coherent:
+        return "unavailable"
+
+    graph = getattr(
+        state,
+        "dependency_graph",
+        None,
+    )
+    hard_edges = getattr(
+        graph,
+        "hard_edges",
+        None,
+    )
+
+    if not isinstance(hard_edges, Mapping):
+        return "unavailable"
+
+    try:
+        current_graph_sha256 = fingerprint_hard_edges(
+            hard_edges
+        )
+    except (TypeError, ValueError):
+        return "unavailable"
+
+    if current_graph_sha256 != evidence.graph_sha256:
+        return "stale"
+
+    return "fresh"
 
 
 def fuzzy_choice_candidates(
@@ -504,6 +585,12 @@ def build_state_freshness(
         "cycles": _normalize_public_family_marker(
             getattr(state, "cycles_state", "deferred"),
             _PUBLIC_DERIVED_FAMILY_STATES,
+        ),
+        "cycle_semantics": (
+            _cycle_semantics_family_freshness(
+                state,
+                generation_coherent=generation_coherent,
+            )
         ),
         "collisions": _normalize_public_family_marker(
             getattr(state, "collisions_state", "deferred"),
