@@ -1383,14 +1383,26 @@ def test_h3a_case_y_unknown_status_facade_fail_closed(tmp_path, monkeypatch):
 
         submissions = []
         status_calls = []
+        receipts = []
 
         def synthetic_submit(self, **kwargs):
             submissions.append(kwargs)
             return {"status": "accepted", "accepted": True, "job_id": "h3a-y-synthetic"}
 
         def unknown_status(self, job_id):
+            assert job_id == "h3a-y-synthetic"
+            assert len(submissions) == 1
+            submitted = submissions[0]
             status_calls.append(job_id)
-            return {"status": "rejected", "revision": 999}
+            receipt = {
+                "status": "rejected",
+                "revision": 999,
+                "job_id": job_id,
+                "requested_state_id": submitted["state_id"],
+                "requested_revision": submitted["revision"],
+            }
+            receipts.append(receipt)
+            return receipt
 
         monkeypatch.setattr(LiveStateClient, "submit_committed_publish", synthetic_submit)
         monkeypatch.setattr(LiveStateClient, "mutation_status", unknown_status)
@@ -1406,10 +1418,14 @@ def test_h3a_case_y_unknown_status_facade_fail_closed(tmp_path, monkeypatch):
         assert client.snapshot()["state"].revision == p0
         assert len(submissions) == 1
         assert status_calls == ["h3a-y-synthetic"]
+        assert len(receipts) == 1
+        assert receipts[0]["job_id"] == "h3a-y-synthetic"
+        assert receipts[0]["requested_state_id"] == submissions[0]["state_id"]
+        assert receipts[0]["requested_revision"] == submissions[0]["revision"]
         assert res.live_publish_status == "pending_verification"
         assert res.live_publish_revision is None
         assert res.live_publish_job_id == "h3a-y-synthetic"
-        assert res.live_publish_warning == "Exact mutation job status unavailable."
+        assert res.live_publish_warning == "Mutation status unavailable."
         assert res.live_publish_idempotency_key == committed_publication_key(
             identity.repo_id, res.live_publish_expected_state_id, p1
         )
