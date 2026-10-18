@@ -1,6 +1,7 @@
 import importlib
 import json
 from copy import deepcopy
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
@@ -12,6 +13,7 @@ from contextor.core.domain.graph import ProjectGraph
 from contextor.mcp.query_helpers import build_state_freshness
 from contextor.mcp import query_helpers
 from contextor.core.cycle_semantics.report_projection import build_cycle_semantics_report
+from contextor.mcp.cycle_semantics_views import project_historical_cycle_semantics
 from tests.test_cycle_semantics_report_projection import _snapshot
 
 
@@ -298,6 +300,9 @@ def test_get_project_architecture_fields_narrow_before_large_retrieval(
     assert set(result["reports"]) == {"summary", "report_diff"}
     assert result["reports"]["summary"] == reports["summary"]
     assert result["reports"]["report_diff"] == reports["report_diff"]
+    assert set(result["report_catalog"]) == set(_REPORT_SUFFIXES) | {
+        "cycle_semantics",
+    }
     assert (
         result["report_catalog"]["graph_analytics"]["serialized_bytes"]
         > 50 * 1024
@@ -368,7 +373,39 @@ def test_cycle_semantics_default_bundle_unchanged(tmp_path, monkeypatch):
     assert result["selected_fields"] == list(_REPORT_SUFFIXES)
     assert set(result["reports"]) == set(_REPORT_SUFFIXES)
     assert "cycle_semantics" in result["available_fields"]
-    assert "cycle_semantics" not in result["report_catalog"]
+    assert result["report_catalog"]["cycle_semantics"]["state"] == "unavailable"
+    assert result["report_catalog"]["cycle_semantics"]["available"] is False
+    assert result["report_catalog"]["cycle_semantics"]["serialized_bytes"] is None
+    assert result["report_catalog"]["cycle_semantics"]["historical_only"] is True
+    assert result["report_catalog"]["cycle_semantics"]["report_live_binding_verified"] is False
+
+
+def test_cycle_semantics_empty_selection_returns_catalog_without_report_bodies(
+    tmp_path,
+    monkeypatch,
+):
+    report = _historical_report()
+    _install_runtime(
+        tmp_path,
+        monkeypatch,
+        {**_small_bundle(), "cycle_semantics": report},
+    )
+    result = _read_architecture(tmp_path, fields=[])
+
+    assert result["status"] == "ok"
+    assert result["selected_fields"] == []
+    assert result["reports"] == {}
+    assert set(result["report_catalog"]) == set(_REPORT_SUFFIXES) | {
+        "cycle_semantics",
+    }
+    metadata = result["report_catalog"]["cycle_semantics"]
+    assert metadata["available"] is True
+    assert metadata["state"] == "available"
+    assert metadata["historical_only"] is True
+    assert metadata["report_live_binding_verified"] is False
+    assert metadata["serialized_bytes"] == len(
+        json.dumps(report, indent=2, ensure_ascii=False).encode("utf-8")
+    )
 
 
 def test_cycle_semantics_explicit_selection_lossless(tmp_path, monkeypatch):
@@ -383,6 +420,206 @@ def test_cycle_semantics_explicit_selection_lossless(tmp_path, monkeypatch):
     assert result["reports"]["cycle_semantics"]["publication_binding"]["live_revision"] is None
 
 
+def test_cycle_semantics_full_view_is_exact_persisted_report(tmp_path, monkeypatch):
+    report = _historical_report()
+    _install_runtime(
+        tmp_path,
+        monkeypatch,
+        {**_small_bundle(), "cycle_semantics": report},
+    )
+    result = _read_architecture(
+        tmp_path,
+        fields=["cycle_semantics"],
+        cycle_semantics_view="full",
+    )
+    assert result["reports"]["cycle_semantics"] == report
+
+
+def test_cycle_semantics_diagnostic_view_omits_only_transmitted_fingerprints(
+    tmp_path,
+    monkeypatch,
+):
+    report = _historical_report()
+    original = deepcopy(report)
+    _install_runtime(
+        tmp_path,
+        monkeypatch,
+        {**_small_bundle(), "cycle_semantics": report},
+    )
+    result = _read_architecture(
+        tmp_path,
+        fields=["cycle_semantics"],
+        cycle_semantics_view="diagnostic",
+    )
+
+    projected = result["reports"]["cycle_semantics"]
+    assert "source_fingerprints" not in projected["semantic_evidence"]
+    assert projected["semantic_evidence"]["coverage_status"] == original[
+        "semantic_evidence"
+    ]["coverage_status"]
+    assert projected["semantic_evidence"]["source_snapshot_binding"] == original[
+        "semantic_evidence"
+    ]["source_snapshot_binding"]
+    assert projected["publication_binding"] == original["publication_binding"]
+    assert projected["projection"] == original["projection"]
+    assert projected["presentation"] == {
+        "view": "diagnostic",
+        "source_fingerprints_omitted": True,
+        "source_fingerprint_count": len(
+            original["semantic_evidence"]["source_fingerprints"]
+        ),
+        "full_evidence_available": True,
+    }
+    assert report == original
+
+
+def test_cycle_semantics_overview_omits_edges_and_witness_chains(tmp_path, monkeypatch):
+    report = _historical_report()
+    _install_runtime(
+        tmp_path,
+        monkeypatch,
+        {**_small_bundle(), "cycle_semantics": report},
+    )
+    result = _read_architecture(
+        tmp_path,
+        fields=["cycle_semantics"],
+        cycle_semantics_view="overview",
+    )
+    projected = result["reports"]["cycle_semantics"]
+
+    assert projected["report_header"] == report["report_header"]
+    assert projected["publication_binding"] == report["publication_binding"]
+    assert projected["semantic_evidence"]["source_issues"] == report[
+        "semantic_evidence"
+    ]["source_issues"]
+    assert projected["semantic_evidence"]["observed_source_count"] == report[
+        "semantic_evidence"
+    ]["observed_source_count"]
+    assert projected["projection"]["summary"] == report["projection"]["summary"]
+    assert "source_fingerprints" not in projected["semantic_evidence"]
+    component = projected["projection"]["components"][0]
+    assert "members" in component
+    assert "diagnostic_category" in component
+    assert "edges" not in component
+    assert "conditional_reexports" not in component
+    assert projected["presentation"]["full_evidence_available"] is True
+    assert "full" in projected["presentation"]["full_evidence_retrieval_path"]
+    assert report == _historical_report()
+
+
+def test_reduced_historical_views_do_not_mutate_loaded_report():
+    report = _historical_report()
+    original = deepcopy(report)
+    for view in ("diagnostic", "overview"):
+        projected, error = project_historical_cycle_semantics(
+            report,
+            view=view,
+            component=None,
+        )
+        assert error is None
+        assert projected is not report
+        assert report == original
+
+
+def test_cycle_semantics_component_selection_is_bounded_and_preserves_total(
+    tmp_path,
+    monkeypatch,
+):
+    report = _historical_report()
+    _install_runtime(
+        tmp_path,
+        monkeypatch,
+        {**_small_bundle(), "cycle_semantics": report},
+    )
+    result = _read_architecture(
+        tmp_path,
+        fields=["cycle_semantics"],
+        cycle_semantics_view="overview",
+        cycle_semantics_component="pkg.a",
+    )
+    projection = result["reports"]["cycle_semantics"]["projection"]
+    assert len(projection["components"]) == 1
+    assert "pkg.a" in projection["components"][0]["members"]
+    assert projection["summary"]["cyclic_scc_total"] == 1
+    assert projection["summary"]["cyclic_scc_returned"] == 1
+
+
+def test_cycle_semantics_component_outside_projection_is_explicit(tmp_path, monkeypatch):
+    report = _historical_report()
+    _install_runtime(
+        tmp_path,
+        monkeypatch,
+        {**_small_bundle(), "cycle_semantics": report},
+    )
+    result = _read_architecture(
+        tmp_path,
+        fields=["cycle_semantics"],
+        cycle_semantics_view="diagnostic",
+        cycle_semantics_component="pkg.missing",
+    )
+    assert result["status"] == "error"
+    assert result["error"] == "component_not_in_projection"
+    assert result["projection_truncated"] is False
+    assert result["cyclic_scc_total"] == 1
+
+
+def test_cycle_semantics_missing_component_in_truncated_projection_is_not_graph_absence(
+    tmp_path,
+    monkeypatch,
+):
+    report = _historical_report()
+    report["projection"]["summary"].update(
+        cyclic_scc_total=5,
+        components_truncated=True,
+    )
+    _install_runtime(
+        tmp_path,
+        monkeypatch,
+        {**_small_bundle(), "cycle_semantics": report},
+    )
+    result = _read_architecture(
+        tmp_path,
+        fields=["cycle_semantics"],
+        cycle_semantics_view="overview",
+        cycle_semantics_component="pkg.omitted",
+    )
+    assert result["error"] == "component_not_in_projection"
+    assert result["projection_truncated"] is True
+    assert result["cyclic_scc_total"] == 5
+    assert result["cyclic_scc_returned"] == 1
+
+
+@pytest.mark.parametrize(
+    "kwargs,error",
+    [
+        ({"cycle_semantics_view": "compact"}, "invalid_cycle_semantics_view"),
+        ({"cycle_semantics_view": None}, "invalid_cycle_semantics_view"),
+        ({"cycle_semantics_component": "   "}, "invalid_cycle_semantics_component"),
+        ({"cycle_semantics_component": 7}, "invalid_cycle_semantics_component"),
+        ({"cycle_semantics_view": "overview"}, "invalid_selection"),
+        ({"cycle_semantics_component": "pkg.a"}, "invalid_selection"),
+        (
+            {
+                "fields": ["cycle_semantics"],
+                "cycle_semantics_view": "full",
+                "cycle_semantics_component": "pkg.a",
+            },
+            "invalid_selection",
+        ),
+    ],
+)
+def test_cycle_semantics_view_parameters_fail_with_controlled_errors(
+    tmp_path,
+    monkeypatch,
+    kwargs,
+    error,
+):
+    _install_runtime(tmp_path, monkeypatch, _small_bundle())
+    result = _read_architecture(tmp_path, **kwargs)
+    assert result["status"] == "error"
+    assert result["error"] == error
+
+
 def test_cycle_semantics_combined_selection(tmp_path, monkeypatch):
     bundle = _small_bundle()
     report = _historical_report()
@@ -390,6 +627,25 @@ def test_cycle_semantics_combined_selection(tmp_path, monkeypatch):
     result = _read_architecture(tmp_path, fields=["structure", "cycle_semantics"])
     assert result["selected_fields"] == ["structure", "cycle_semantics"]
     assert result["reports"] == {"structure": bundle["structure"], "cycle_semantics": report}
+
+
+def test_cycle_semantics_explicit_selection_deduplicates_in_first_seen_order(
+    tmp_path,
+    monkeypatch,
+):
+    report = _historical_report()
+    bundle = {**_small_bundle(), "cycle_semantics": report}
+    _install_runtime(tmp_path, monkeypatch, bundle)
+    result = _read_architecture(
+        tmp_path,
+        fields=["cycle_semantics", "structure", "cycle_semantics"],
+    )
+    assert result["selected_fields"] == ["cycle_semantics", "structure"]
+    assert list(result["reports"]) == ["cycle_semantics", "structure"]
+    assert result["reports"] == {
+        "cycle_semantics": report,
+        "structure": bundle["structure"],
+    }
 
 
 def test_cycle_semantics_missing_optional_is_partial(tmp_path, monkeypatch):
@@ -416,6 +672,8 @@ def test_cycle_semantics_invalid_json_fails_closed(tmp_path, monkeypatch):
     assert result["status"] == "partial"
     assert result["reports"]["cycle_semantics"]["state"] == "invalid"
     assert result["reports"]["cycle_semantics"]["available"] is False
+    assert result["report_catalog"]["cycle_semantics"]["state"] == "invalid"
+    assert result["report_catalog"]["cycle_semantics"]["available"] is False
     assert result["report_bundle_state"] == "complete"
 
 
@@ -489,6 +747,34 @@ def test_cycle_semantics_large_selected_output_guard(tmp_path, monkeypatch):
     full = _read_architecture(tmp_path, fields=["cycle_semantics"], allow_large_output=True)
     assert full["status"] == "ok"
     assert full["reports"]["cycle_semantics"] == report
+
+
+def test_cycle_semantics_diagnostic_guard_runs_after_fingerprint_redaction(
+    tmp_path,
+    monkeypatch,
+):
+    report = deepcopy(_historical_report())
+    report["semantic_evidence"]["source_fingerprints"] = [
+        {"module_id": f"pkg.module_{i}", "sha256": "b" * 64}
+        for i in range(1200)
+    ]
+    _install_runtime(
+        tmp_path,
+        monkeypatch,
+        {**_small_bundle(), "cycle_semantics": report},
+    )
+
+    result = _read_architecture(
+        tmp_path,
+        fields=["cycle_semantics"],
+        cycle_semantics_view="diagnostic",
+    )
+
+    assert result["status"] == "ok"
+    assert "source_fingerprints" not in result["reports"]["cycle_semantics"][
+        "semantic_evidence"
+    ]
+    assert result["report_catalog"]["cycle_semantics"]["serialized_bytes"] > 50 * 1024
 
 
 def test_cycle_semantics_reader_does_not_rematerialize(tmp_path, monkeypatch):
@@ -621,6 +907,197 @@ def test_d4c_reader_reports_historical_and_live_separately(tmp_path, monkeypatch
     assert result["live_state"]["state_freshness"]["families"]["cycle_semantics"] == "stale"
     assert result["live_state"]["state_freshness"]["canonical_revision"] == 77
     assert result["reports"]["cycle_semantics"]["publication_binding"]["live_revision"] is None
+    assert result["live_state"]["cycle_semantic_diagnostics"]["status"] == "stale"
+    assert result["live_state"]["cycle_semantic_diagnostics"]["cyclic_scc_count"] is None
+    assert result["live_state"]["cycle_semantic_diagnostics"]["runtime_execution_status"] == "UNKNOWN_NOT_EVALUATED"
+
+
+def test_live_semantic_diagnostics_uses_positive_current_snapshot_gate(
+    tmp_path,
+    monkeypatch,
+):
+    _install_runtime(tmp_path, monkeypatch, _small_bundle())
+    state = _semantic_state()
+    engine = _install_real_freshness(tmp_path, monkeypatch, state)
+    result = _read_architecture(tmp_path, fields=[])
+
+    semantic = result["live_state"]["cycle_semantic_diagnostics"]
+    assert result["live_state"]["state_freshness"]["families"][
+        "cycle_semantics"
+    ] == "fresh"
+    assert semantic["status"] == "fresh"
+    assert semantic["source"] == "live_canonical_state"
+    assert semantic["canonical_revision"] == engine.revision == 77
+    assert semantic["cyclic_scc_count"] == 1
+    assert semantic["cyclic_module_count"] == 2
+    assert semantic["unresolved_lexical_edge_count"] == 2
+    assert semantic["direct_candidate_attention_required"] is False
+    assert semantic["runtime_execution_status"] == "UNKNOWN_NOT_EVALUATED"
+    assert result["live_state"]["diagnostics_attention_required"] is False
+
+
+def test_live_semantic_diagnostics_partial_coverage_never_infers_absence(
+    tmp_path,
+    monkeypatch,
+):
+    _install_runtime(tmp_path, monkeypatch, _small_bundle())
+    snapshot = _snapshot()
+    partial_snapshot = replace(
+        snapshot,
+        observed_source_fingerprints=snapshot.observed_source_fingerprints[:1],
+        source_issues=(("pkg.b", "SOURCE_UNAVAILABLE"),),
+        coverage_status="PARTIAL_SOURCE_EVIDENCE",
+    )
+    state = _semantic_state()
+    state.cycle_semantics = partial_snapshot
+    engine = _install_real_freshness(tmp_path, monkeypatch, state)
+    result = _read_architecture(tmp_path)
+
+    semantic = result["live_state"]["cycle_semantic_diagnostics"]
+    assert semantic["status"] == "partial"
+    assert semantic["coverage_status"] == "PARTIAL_SOURCE_EVIDENCE"
+    assert semantic["direct_candidate_attention_required"] is None
+    assert semantic["cyclic_scc_count"] == 1
+    assert semantic["runtime_execution_status"] == "UNKNOWN_NOT_EVALUATED"
+    assert engine.revision == 77
+
+
+def test_live_semantic_diagnostics_retains_positive_partial_evidence(
+    tmp_path,
+    monkeypatch,
+):
+    _install_runtime(tmp_path, monkeypatch, _small_bundle())
+    snapshot = _snapshot()
+    partial_snapshot = replace(
+        snapshot,
+        observed_source_fingerprints=snapshot.observed_source_fingerprints[:1],
+        source_issues=(("pkg.b", "SOURCE_UNAVAILABLE"),),
+        coverage_status="PARTIAL_SOURCE_EVIDENCE",
+    )
+    state = _semantic_state()
+    state.cycle_semantics = partial_snapshot
+    _install_real_freshness(tmp_path, monkeypatch, state)
+    monkeypatch.setattr(
+        "contextor.mcp.cycle_semantics_views.build_cycle_evidence_digest",
+        lambda *_args: SimpleNamespace(components=(SimpleNamespace(
+            members=partial_snapshot.cyclic_modules,
+            category="UNGUARDED_DIRECT_CYCLIC_SUBGRAPH",
+        ),)),
+    )
+
+    semantic = _read_architecture(tmp_path)["live_state"][
+        "cycle_semantic_diagnostics"
+    ]
+    assert semantic["status"] == "partial"
+    assert semantic["unguarded_direct_cyclic_scc_count"] == 1
+    assert semantic["direct_candidate_attention_required"] is True
+
+
+@pytest.mark.parametrize(
+    ("marker", "expected"),
+    [("deferred", "deferred"), ("stale", "stale"), ("invalid", "unavailable")],
+)
+def test_live_semantic_diagnostics_nonfresh_families_fail_closed(
+    tmp_path,
+    monkeypatch,
+    marker,
+    expected,
+):
+    _install_runtime(tmp_path, monkeypatch, _small_bundle())
+    state = _semantic_state(marker=marker)
+    _install_real_freshness(tmp_path, monkeypatch, state)
+    semantic = _read_architecture(tmp_path)["live_state"][
+        "cycle_semantic_diagnostics"
+    ]
+    assert semantic["status"] == expected
+    assert semantic["cyclic_scc_count"] is None
+    assert semantic["direct_candidate_attention_required"] is None
+    assert semantic["reason"]
+
+
+def test_live_semantic_diagnostics_generation_mismatch_fails_closed(
+    tmp_path,
+    monkeypatch,
+):
+    _install_runtime(tmp_path, monkeypatch, _small_bundle())
+    state = _semantic_state()
+    engine = _install_real_freshness(tmp_path, monkeypatch, state)
+    engine.state_manager.revision = 76
+    semantic = _read_architecture(tmp_path)["live_state"][
+        "cycle_semantic_diagnostics"
+    ]
+    assert semantic["status"] in {"unavailable", "stale"}
+    assert semantic["cyclic_scc_count"] is None
+    assert semantic["direct_candidate_attention_required"] is None
+
+
+def test_live_semantic_diagnostics_resync_fails_closed(tmp_path, monkeypatch):
+    _install_runtime(tmp_path, monkeypatch, _small_bundle())
+    state = _semantic_state()
+    state.resync_required = True
+    _install_real_freshness(tmp_path, monkeypatch, state)
+    semantic = _read_architecture(tmp_path)["live_state"][
+        "cycle_semantic_diagnostics"
+    ]
+    assert semantic["status"] == "stale"
+    assert semantic["cyclic_scc_count"] is None
+    assert semantic["direct_candidate_attention_required"] is None
+
+
+def test_live_semantic_attention_is_separate_from_structural_attention(
+    tmp_path,
+    monkeypatch,
+):
+    _install_runtime(tmp_path, monkeypatch, _small_bundle())
+    state = _semantic_state()
+    state.cycles = [["pkg.a", "pkg.b", "pkg.a"]]
+    _install_real_freshness(tmp_path, monkeypatch, state)
+    monkeypatch.setattr(
+        "contextor.mcp.cycle_semantics_views.build_cycle_evidence_digest",
+        lambda *_args: SimpleNamespace(components=(SimpleNamespace(
+            members=state.cycle_semantics.cyclic_modules,
+            category="UNGUARDED_DIRECT_CYCLIC_SUBGRAPH",
+        ),)),
+    )
+    monkeypatch.setattr(
+        architecture_tool,
+        "diagnostics_summary",
+        lambda *_args: {
+            "attention_required": True,
+            "availability": {"cycles": "fresh"},
+        },
+    )
+
+    result = _read_architecture(tmp_path, fields=[])
+    assert result["live_state"]["diagnostics_attention_required"] is True
+    assert result["diagnostics_attention_required"] is True
+    assert result["live_state"]["cycle_semantic_diagnostics"][
+        "direct_candidate_attention_required"
+    ] is True
+
+
+def test_live_semantic_diagnostics_derivation_error_is_local_and_fail_closed(
+    tmp_path,
+    monkeypatch,
+):
+    _install_runtime(tmp_path, monkeypatch, _small_bundle())
+    state = _semantic_state()
+    _install_real_freshness(tmp_path, monkeypatch, state)
+
+    def fail(*_args, **_kwargs):
+        raise RuntimeError("test evidence failure")
+
+    monkeypatch.setattr(
+        "contextor.mcp.cycle_semantics_views.build_cycle_evidence_digest",
+        fail,
+    )
+    result = _read_architecture(tmp_path)
+    assert result["status"] == "ok"
+    semantic = result["live_state"]["cycle_semantic_diagnostics"]
+    assert semantic["status"] == "unavailable"
+    assert semantic["cyclic_scc_count"] is None
+    assert semantic["direct_candidate_attention_required"] is None
+    assert semantic["runtime_execution_status"] == "UNKNOWN_NOT_EVALUATED"
 
 
 def test_d4c_no_semantic_source_io(tmp_path, monkeypatch):

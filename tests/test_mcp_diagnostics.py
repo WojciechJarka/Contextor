@@ -140,7 +140,11 @@ def test_resync_diagnostics_summary_hides_fresh_payloads_without_mutation():
         "info": None,
         "availability": "stale",
     }
-    assert summary["cycles"] == {"count": None, "availability": "stale"}
+    assert summary["cycles"] == {
+        "count": None,
+        "availability": "stale",
+        "count_semantics": "DFS_BACK_EDGE_PATHS_DEDUP_ROTATION_NOT_ALL_SIMPLE_CYCLES",
+    }
     assert summary["attention_required"] is False
     assert state.syntax_diagnostics_by_path is syntax_facts
     assert state.collisions is collisions
@@ -234,6 +238,54 @@ def test_diagnostics_summary_does_not_fabricate_unavailable_counts():
     assert summary["name_collisions"]["count"] is None
     assert summary["cycles"]["count"] is None
     assert summary["availability"]["name_collisions"] == "deferred"
+
+
+def test_cycle_count_semantics_is_additive_across_availability_states():
+    expected = "DFS_BACK_EDGE_PATHS_DEDUP_ROTATION_NOT_ALL_SIMPLE_CYCLES"
+    fresh = diagnostics_summary_for_state(SimpleNamespace(
+        cycles_state="fresh",
+        cycles=[["a", "b", "a"]],
+        collisions_state="fresh",
+        collisions=[],
+    ))
+    stale_state = SimpleNamespace(
+        resync_required=True,
+        cycles_state="fresh",
+        cycles=[["a", "b", "a"]],
+        collisions_state="fresh",
+        collisions=[],
+    )
+    stale = diagnostics_summary_for_state(stale_state)
+    deferred = diagnostics_summary_for_state(SimpleNamespace(
+        cycles_state="deferred",
+        cycles=None,
+        collisions_state="deferred",
+        collisions=None,
+    ))
+    unavailable = diagnostics_summary_for_state(SimpleNamespace(
+        cycles_state="invalid",
+        cycles=[["a", "b", "a"]],
+        collisions_state="invalid",
+        collisions=[],
+    ))
+
+    assert fresh["cycles"] == {
+        "count": 1,
+        "availability": "fresh",
+        "count_semantics": expected,
+    }
+    assert stale["cycles"] == {
+        "count": None,
+        "availability": "stale",
+        "count_semantics": expected,
+    }
+    assert deferred["cycles"]["count"] is None
+    assert deferred["cycles"]["availability"] == "deferred"
+    assert deferred["cycles"]["count_semantics"] == expected
+    assert unavailable["cycles"]["count"] is None
+    assert unavailable["cycles"]["availability"] == "unavailable"
+    assert unavailable["cycles"]["count_semantics"] == expected
+    assert fresh["attention_required"] is True
 
 
 def test_get_name_collisions_filters_without_invented_ids(tmp_path, monkeypatch):

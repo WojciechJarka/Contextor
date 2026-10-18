@@ -489,7 +489,11 @@ def test_cycles_lose_freshness_and_preserve_payload_when_resync_required(
     assert state.cycles_state == "stale"
     assert state.cycles is previous
     compute.assert_not_called()
-    assert diagnostics["cycles"] == {"count": None, "availability": "stale"}
+    assert diagnostics["cycles"] == {
+        "count": None,
+        "availability": "stale",
+        "count_semantics": "DFS_BACK_EDGE_PATHS_DEDUP_ROTATION_NOT_ALL_SIMPLE_CYCLES",
+    }
 
 
 @pytest.mark.parametrize(

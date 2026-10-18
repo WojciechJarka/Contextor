@@ -13,7 +13,7 @@ LEGACY_SIGNATURES = {
     "get_analysis_status": "(repo_path: str, job_id: str | None = None, max_skipped_files: int | None = 10, allow_large_output: bool = False) -> str",
     "get_live_events": "(repo_path: str, after_revision: int | None = None, limit: int | None = 20) -> str",
     "update_file": "(repo_path: str, file_path: str, max_items: int | None = 30, compact: bool = True, fields: list[str] | None = None) -> str",
-    "get_project_architecture": "(repo_path: str, fields: list[str] | None = None, allow_large_output: bool = False) -> str",
+    "get_project_architecture": "(repo_path: str, fields: list[str] | None = None, allow_large_output: bool = False, cycle_semantics_view: str = 'full', cycle_semantics_component: str | None = None) -> str",
     "get_module_context": "(repo_path: str, module_name: str = '', max_items: int | None = 30, compact: bool = True, fields: list[str] | None = None, module: str | None = None) -> str",
     "get_artifact_blast_radius": "(repo_path: str, artifact_name: str = '', max_items: int | None = 30, compact: bool = True, fields: list[str] | None = None, representation: str = 'named', artifact: str | None = None) -> str",
     "search_artifacts": "(repo_path: str, search_term: str | None = None, limit: int | None = 20, evidence_limit: int | None = 20, compact: bool = True, fields: list[str] | None = None, query: str | None = None) -> str",
@@ -43,6 +43,24 @@ def test_documentation_has_exact_public_tool_file_coverage():
     assert indexed[:20] == list(LEGACY_SIGNATURES)
     assert indexed[-1] == "get_mcp_documentation"
     assert set(public) == set(indexed) == set(doc_files)
+
+
+def test_project_architecture_progressive_disclosure_signature_is_documented():
+    tool = mcp_server.mcp._tool_manager._tools["get_project_architecture"]
+    assert str(inspect.signature(tool.fn, eval_str=True)) == (
+        "(repo_path: str, fields: list[str] | None = None, "
+        "allow_large_output: bool = False, cycle_semantics_view: str = 'full', "
+        "cycle_semantics_component: str | None = None) -> str"
+    )
+    doc = json.loads(
+        (documentation.DOCS_DIR / "get_project_architecture.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    parameters = "\n".join(doc["parameters"])
+    assert "cycle_semantics_view" in parameters
+    assert "cycle_semantics_component" in parameters
+    assert documentation.validate_documentation_catalog()
 
 
 def test_discovery_descriptions_are_short_and_index_backed():
@@ -103,7 +121,7 @@ def test_get_project_architecture_catalog_version_and_semantics():
     )
     assert 'fields=["cycle_semantics"]' in documented_text
     assert "live_state.state_freshness.families.cycle_semantics" in documented_text
-    assert "Null selects only the original six required sections" in documented_text
+    assert "Null selects exactly the original six reports" in documented_text
     assert all(
         report in documented_text
         for report in (

@@ -10,6 +10,10 @@ from contextor.mcp import runtime as mcp_runtime
 from contextor.mcp.diagnostics import diagnostics_summary
 from contextor.mcp.output_guard import guard_large_output
 from contextor.mcp.representation import serialized_json_bytes
+from contextor.mcp.cycle_semantics_views import (
+    live_cycle_semantic_diagnostics,
+    project_historical_cycle_semantics,
+)
 
 
 PROJECT_ARCHITECTURE_DIRECT_BYTES = 50 * 1024
@@ -161,6 +165,10 @@ def _load_report_bundle(
         payload, metadata = _load_report(root, field, suffix)
         reports[field] = payload
         catalog[field] = metadata
+    for field, _suffix in _OPTIONAL_REPORT_FILES:
+        payload, metadata = _load_cycle_semantics_report(root)
+        reports[field] = payload
+        catalog[field] = metadata
     return reports, catalog
 
 
@@ -246,6 +254,7 @@ def _load_cycle_semantics_report(root: Path) -> tuple[Any, dict[str, Any]]:
         return payload, metadata
     validation_error = _cycle_semantics_report_validation_error(payload)
     if validation_error is None:
+        metadata["state"] = "available"
         return payload, metadata
     invalid = {
         "available": False,
@@ -260,10 +269,18 @@ def _live_state_overlay(root: Path) -> dict[str, Any]:
     try:
         engine = mcp_runtime.get_or_init_engine(root)
     except Exception as exc:
+        semantic_diagnostics = live_cycle_semantic_diagnostics(
+            None,
+            None,
+        )
+        semantic_diagnostics["reason"] = (
+            f"Canonical LIVE state lookup failed: {type(exc).__name__}."
+        )
         return {
             "available": False,
             "state": "unavailable",
             "reason": f"Canonical LIVE state lookup failed: {exc}",
+            "cycle_semantic_diagnostics": semantic_diagnostics,
         }
 
     state = getattr(engine, "state", None) if engine is not None else None
@@ -272,6 +289,10 @@ def _live_state_overlay(root: Path) -> dict[str, Any]:
             "available": False,
             "state": "unavailable",
             "reason": "No usable canonical LIVE state is available.",
+            "cycle_semantic_diagnostics": live_cycle_semantic_diagnostics(
+                None,
+                None,
+            ),
         }
 
     try:
@@ -333,6 +354,38 @@ def _live_state_overlay(root: Path) -> dict[str, Any]:
             else stale_warning
         )
 
+    try:
+        semantic_diagnostics = live_cycle_semantic_diagnostics(
+            state,
+            freshness,
+            engine=engine,
+        )
+    except Exception as exc:
+        revision = (
+            freshness.get("canonical_revision")
+            if isinstance(freshness, dict)
+            else None
+        )
+        if type(revision) is not int or revision < 0:
+            revision = None
+        semantic_diagnostics = {
+            "status": "unavailable",
+            "source": "live_canonical_state",
+            "canonical_revision": revision,
+            "cyclic_scc_count": None,
+            "cyclic_module_count": None,
+            "unguarded_direct_cyclic_scc_count": None,
+            "non_direct_closure_scc_count": None,
+            "unresolved_lexical_edge_count": None,
+            "direct_candidate_attention_required": None,
+            "coverage_status": None,
+            "runtime_execution_status": "UNKNOWN_NOT_EVALUATED",
+            "reason": (
+                "Semantic diagnostic derivation failed: "
+                f"{type(exc).__name__}."
+            ),
+        }
+
     return {
         "available": True,
         "data_source": "live_canonical_state",
@@ -346,6 +399,7 @@ def _live_state_overlay(root: Path) -> dict[str, Any]:
             if isinstance(diag, dict)
             else False
         ),
+        "cycle_semantic_diagnostics": semantic_diagnostics,
     }
 
 
@@ -377,7 +431,7 @@ def _build_payload(
         catalog[field].get("available") is True
         for field in selected_fields
     )
-    return {
+    payload = {
         "status": "ok" if bundle_state == "complete" and selected_available else "partial",
         "scope": "project",
         "data_source": "completed_analysis_report_bundle",
@@ -393,12 +447,24 @@ def _build_payload(
         "report_catalog": catalog,
         "live_state": live_state,
     }
+    if not selected_fields and isinstance(
+        live_state.get("diagnostics_summary"),
+        dict,
+    ):
+        payload["diagnostics_summary"] = live_state["diagnostics_summary"]
+        payload["diagnostics_attention_required"] = live_state.get(
+            "diagnostics_attention_required",
+            False,
+        )
+    return payload
 
 
 def get_project_architecture(
     repo_path: str,
     fields: list[str] | None = None,
     allow_large_output: bool = False,
+    cycle_semantics_view: str = "full",
+    cycle_semantics_component: str | None = None,
 ) -> str:
     if fields is not None and (
         not isinstance(fields, list)
@@ -412,6 +478,24 @@ def get_project_architecture(
         return _error(
             "invalid_allow_large_output",
             expected="boolean",
+        )
+
+    if not isinstance(cycle_semantics_view, str) or cycle_semantics_view not in {
+        "overview",
+        "diagnostic",
+        "full",
+    }:
+        return _error(
+            "invalid_cycle_semantics_view",
+            allowed_views=["overview", "diagnostic", "full"],
+        )
+    if cycle_semantics_component is not None and (
+        not isinstance(cycle_semantics_component, str)
+        or not cycle_semantics_component.strip()
+    ):
+        return _error(
+            "invalid_cycle_semantics_component",
+            expected="non-empty canonical module identity or null",
         )
 
     root = Path(repo_path).expanduser().resolve()
@@ -431,12 +515,39 @@ def get_project_architecture(
                 allowed_fields=allowed_fields,
             )
 
+    if "cycle_semantics" not in selected_fields and (
+        cycle_semantics_view != "full"
+        or cycle_semantics_component is not None
+    ):
+        return _error(
+            "invalid_selection",
+            reason=(
+                "cycle_semantics_view and cycle_semantics_component "
+                "apply only when cycle_semantics is selected."
+            ),
+        )
+    if (
+        "cycle_semantics" in selected_fields
+        and cycle_semantics_view == "full"
+        and cycle_semantics_component is not None
+    ):
+        return _error(
+            "invalid_selection",
+            reason="cycle_semantics_component requires overview or diagnostic view.",
+        )
+
     try:
         reports, catalog = _load_report_bundle(root)
         if "cycle_semantics" in selected_fields:
-            semantic_report, semantic_metadata = _load_cycle_semantics_report(root)
+            semantic_report, selection_error = project_historical_cycle_semantics(
+                reports["cycle_semantics"],
+                view=cycle_semantics_view,
+                component=cycle_semantics_component,
+            )
+            if selection_error is not None:
+                error = selection_error.pop("error")
+                return _error(error, **selection_error)
             reports["cycle_semantics"] = semantic_report
-            catalog["cycle_semantics"] = semantic_metadata
         live_state = _live_state_overlay(root)
         result = _build_payload(
             selected_fields=selected_fields,
@@ -462,7 +573,8 @@ def get_project_architecture(
                 "Inspect report_catalog serialized_bytes/serialized_kib, "
                 "retry with fields limited to the report sections you need, "
                 "or repeat the identical selection with "
-                "allow_large_output=true."
+                "allow_large_output=true and preserve any cycle_semantics "
+                "view or component parameters."
             ),
             warning_threshold_bytes=PROJECT_ARCHITECTURE_DIRECT_BYTES,
         )
@@ -470,6 +582,15 @@ def get_project_architecture(
             return serialized
 
         warning = json.loads(guarded)
+        retry = {
+            "fields": selected_fields,
+            "allow_large_output": True,
+        }
+        if "cycle_semantics" in selected_fields:
+            if cycle_semantics_view != "full":
+                retry["cycle_semantics_view"] = cycle_semantics_view
+            if cycle_semantics_component is not None:
+                retry["cycle_semantics_component"] = cycle_semantics_component
         warning.update(
             {
                 "scope": "project",
@@ -478,10 +599,7 @@ def get_project_architecture(
                 "selected_fields": selected_fields,
                 "report_catalog": catalog,
                 "live_state": live_state,
-                "retry": {
-                    "fields": selected_fields,
-                    "allow_large_output": True,
-                },
+                "retry": retry,
             }
         )
         return json.dumps(

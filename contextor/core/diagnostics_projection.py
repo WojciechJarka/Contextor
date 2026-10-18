@@ -5,6 +5,11 @@ from __future__ import annotations
 from typing import Any
 
 
+_CYCLE_COUNT_SEMANTICS = (
+    "DFS_BACK_EDGE_PATHS_DEDUP_ROTATION_NOT_ALL_SIMPLE_CYCLES"
+)
+
+
 def _availability(
     state: Any,
     family: str,
@@ -39,6 +44,10 @@ def diagnostics_summary_for_state(
             "count": None,
             "availability": "unavailable",
         }
+        unavailable_cycles = {
+            **unavailable,
+            "count_semantics": _CYCLE_COUNT_SEMANTICS,
+        }
 
         return {
             "syntax_errors": dict(unavailable),
@@ -49,7 +58,7 @@ def diagnostics_summary_for_state(
                 "info": None,
                 "availability": "unavailable",
             },
-            "cycles": dict(unavailable),
+            "cycles": unavailable_cycles,
             "attention_required": False,
             "availability": {
                 "syntax_errors": "unavailable",
@@ -63,6 +72,10 @@ def diagnostics_summary_for_state(
             "count": None,
             "availability": "stale",
         }
+        unavailable_cycles = {
+            **unavailable,
+            "count_semantics": _CYCLE_COUNT_SEMANTICS,
+        }
         return {
             "syntax_errors": dict(unavailable),
             "name_collisions": {
@@ -72,7 +85,7 @@ def diagnostics_summary_for_state(
                 "info": None,
                 "availability": "stale",
             },
-            "cycles": dict(unavailable),
+            "cycles": unavailable_cycles,
             "attention_required": False,
             "availability": {
                 "syntax_errors": "stale",
@@ -188,6 +201,7 @@ def diagnostics_summary_for_state(
         "cycles": {
             "count": cycle_count,
             "availability": cycle_availability,
+            "count_semantics": _CYCLE_COUNT_SEMANTICS,
         },
         "attention_required": bool(attention),
         "availability": {

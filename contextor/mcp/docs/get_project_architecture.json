@@ -2,22 +2,25 @@
   "version": "1.0.0",
   "tool": "get_project_architecture",
   "purpose": [
-    "[OPTIMIZED] Return the complete persisted global project-analysis report bundle with an explicit current canonical LIVE freshness overlay. The default bundle contains summary, structure, name_collisions, artifacts_compact, graph_analytics, and report_diff. The optional cycle_semantics field exposes a historical FULL evidence report only when explicitly selected. Report bodies are returned losslessly."
+    "Return persisted global project-analysis reports with a separate current canonical LIVE overlay. The report catalog always lists all seven fields; cycle_semantics remains an optional historical report."
   ],
   "parameters": [
     "repo_path (string, required): canonical repository root.",
-    "fields (array of strings or null, default null): optional selection of global report sections. Allowed values are summary, structure, name_collisions, artifacts_compact, graph_analytics, report_diff, and cycle_semantics. Null selects only the original six required sections; use fields=[\"cycle_semantics\"] for the optional historical FULL evidence report.",
-    "allow_large_output (boolean, default false): approve returning the complete selected report payload when it exceeds the 51200-byte (50 KiB) direct-response threshold."
+    "fields (array of strings or null, default null): optional selection of global report sections. Allowed values are summary, structure, name_collisions, artifacts_compact, graph_analytics, report_diff, and cycle_semantics. Null selects exactly the original six reports; an empty array returns no report bodies while retaining the complete catalog and LIVE overlay.",
+    "allow_large_output (boolean, default false): approve returning the complete selected response when it exceeds the 51200-byte (50 KiB) direct-response threshold.",
+    "cycle_semantics_view (string, default \"full\"): historical cycle_semantics presentation; one of overview, diagnostic, or full. It applies only when cycle_semantics is selected. Full preserves the persisted report exactly.",
+    "cycle_semantics_component (string or null, default null): optional canonical module identity selecting exactly one visible SCC in overview or diagnostic view. It is invalid with full view or when cycle_semantics is not selected."
   ],
   "behavior": [
-    "1. Reads the persisted global report family produced by the latest completed project analysis; it does not rerun report producers or scan repository source files.",
-    "2. The completed-analysis report snapshot and current canonical LIVE state are separate provenance domains. reports contains the persisted analysis snapshot; live_state contains current canonical revision/provenance/family freshness and diagnostics.",
-    "3. When the complete selected response is at most 51200 UTF-8 JSON bytes it is returned directly.",
-    "4. Above 51200 bytes, unless allow_large_output=true, the tool returns confirmation_required with the exact complete selected response size plus report_catalog containing each report section's serialized byte/KiB size. The agent can then narrow fields or explicitly approve the same selection.",
-    "5. Missing or unreadable report sections remain explicit available=false/state/reason entries. They are never fabricated as empty successful reports.",
-    "6. fields controls retrieval width only; it never changes the semantic contents of a selected report.",
-    "7. cycle_semantics is optional and never changes the six-section report_bundle_state. When explicitly selected, a missing or invalid historical report is returned as unavailable or invalid and makes overall status partial.",
-    "8. cycle_semantics freshness_at_report_generation describes historical FULL generation only. Its publication_binding is unverified against current canonical LIVE; no report/LIVE revision equality or runtime import safety is certified."
+    "1. Reads persisted reports without rerunning report producers or scanning source files. report_catalog always lists summary, structure, name_collisions, artifacts_compact, graph_analytics, report_diff, and cycle_semantics.",
+    "2. fields=null preserves the original six-report selection. fields=[] returns selected_fields=[] and reports={} plus all catalog metadata and the current LIVE overlay. Explicit selections are deduplicated while preserving caller order.",
+    "3. The six original required reports alone determine report_bundle_state. Missing or invalid optional cycle_semantics never makes the default six-report bundle incomplete; selecting an unavailable optional report makes the selected response partial.",
+    "4. Catalog serialized_bytes and serialized_kib describe the complete persisted report, even when a reduced view is returned. They use exact serialized JSON accounting. They do not describe filesystem size or LIVE freshness.",
+    "5. full returns the persisted cycle_semantics report without redaction or reformatting. diagnostic retains the report and bounded projection but omits semantic_evidence.source_fingerprints from transmission and records the omitted count in presentation metadata. overview returns provenance, coverage, issue counts, projection totals/truncation, and concise SCC classifications without lexical-site details, detailed edges, or conditional witness chains.",
+    "6. cycle_semantics_component selects one SCC only from the bounded materialized projection. A missing component returns component_not_in_projection with the projection truncation and counts; absence is not inferred from the graph.",
+    "7. The 50 KiB guard measures the actual selected response after semantic view projection. Optional views do not change the persisted-report serialized_bytes catalog value.",
+    "8. reports contains the persisted historical analysis snapshot; live_state contains current canonical revision, freshness and diagnostics. Historical publication_binding remains UNVERIFIED_REPORT_VS_CANONICAL_LIVE with null revisions. No runtime import safety is certified.",
+    "9. live_state.cycle_semantic_diagnostics is derived only from the current canonical CycleSemanticsSnapshot when state_freshness.families.cycle_semantics is positively fresh and the canonical generation is coherent. Its attention value is separate from diagnostics_attention_required; runtime_execution_status remains UNKNOWN_NOT_EVALUATED."
   ],
   "freshness": [
     "Persisted reports describe the latest completed full-analysis report write and may be older than the current incremental LIVE revision.",
@@ -26,19 +29,27 @@
     "If one or more modules are parse-stale, live_state.state_freshness.canonical_state is stale and live_state.parse_stale_modules identifies the affected last-known-good module truths; persisted completed-analysis reports remain independently retrievable.",
     "The explicitly selected cycle_semantics report remains historical even when current LIVE revision is newer or structural diagnostics are fresh. Missing optional files do not affect default six-section completeness.",
     "live_state.state_freshness.families.cycle_semantics independently describes current canonical semantic evidence as fresh, stale, deferred, or unavailable; structural cycles remain a separate family. Fresh requires positive canonical generation coherence and a SHA-256 match with the current in-memory hard dependency graph.",
-    "The cycle_semantics family does not reread analyzed Python source or rerun semantic AST analysis. Historical FULL report freshness never proves current LIVE freshness."
+    "The cycle_semantics family does not reread analyzed Python source or rerun semantic AST analysis. Historical FULL report freshness never proves current LIVE freshness.",
+    "diagnostics_summary.cycles.count is the number of unique normalized DFS back-edge paths after rotational deduplication. It is not the number of SCCs, cyclic modules, cyclic edges, runtime failures, or every possible simple cycle. Those measurements can differ; for example, 16 DFS paths can belong to 2 cyclic SCCs containing 33 modules.",
+    "diagnostics_attention_required retains its existing structural meaning and may be true when structural cycles exist. direct_candidate_attention_required is a separate semantic signal and does not establish Python initialization failure or runtime safety."
   ],
   "errors": [
     "unsupported_fields: one or more requested fields are not global project report sections.",
     "invalid_fields: fields is not an array of strings or null.",
     "invalid_allow_large_output: allow_large_output is not boolean.",
+    "invalid_cycle_semantics_view: cycle_semantics_view is not overview, diagnostic, or full.",
+    "invalid_cycle_semantics_component: component is not a non-empty module identity or null.",
+    "invalid_selection: a non-default semantic view is supplied without selecting cycle_semantics, or a component is combined with full view.",
+    "component_not_in_projection: component is not among the SCCs visible in the bounded persisted projection.",
     "project_architecture_failed: unexpected report-bundle construction failure."
   ],
   "usage_notes": [
-    "Call with the default fields=null first. If the complete bundle is over 50 KiB, inspect report_catalog before choosing the report sections worth loading.",
+    "Call with fields=[] to inspect the seven-entry catalog and LIVE overlay without returning report bodies. This reduces response tokens; catalog construction still reads persisted report metadata to preserve exact serialized size accounting.",
     "Use fields to fetch one or more exact report sections without semantic truncation. Use allow_large_output=true only after deciding that the complete selected payload is worth the context cost.",
     "For targeted extraction from a very large indexed report, prefer the existing specialized indexed/report-context tools rather than loading hundreds of KiB unnecessarily.",
-    "Use fields=[\"cycle_semantics\"] to read only the historical semantic report. The existing 50 KiB guard includes this selected payload; retry the same fields with allow_large_output=true only when the complete body is needed."
+    "Use fields=[\"cycle_semantics\"] with cycle_semantics_view=\"overview\" for concise evidence, \"diagnostic\" to omit transmitted source fingerprints, or \"full\" for the exact persisted report. The full view remains the backward-compatible default.",
+    "Use cycle_semantics_component with overview or diagnostic to select a canonical module in a visible SCC. If it is outside the bounded projection, inspect the explicit component_not_in_projection response; do not infer graph absence.",
+    "A reduced view remains historical. The LIVE semantic diagnostic is available separately under live_state.cycle_semantic_diagnostics and is freshness-gated."
   ],
   "examples": []
 }

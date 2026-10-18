@@ -69,6 +69,7 @@ def _fresh_summary():
         "cycles": {
             "count": 1,
             "availability": "fresh",
+            "count_semantics": "DFS_BACK_EDGE_PATHS_DEDUP_ROTATION_NOT_ALL_SIMPLE_CYCLES",
         },
         "attention_required": True,
         "availability": {
