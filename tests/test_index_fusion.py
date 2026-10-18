@@ -1,3 +1,4 @@
+import hashlib
 import json
 
 from contextor.core.analysis.cache_manager import CacheManager
@@ -53,14 +54,15 @@ def test_reused_indexer_pool_uses_current_parent_cache_root(
             str(first_cache),
         )
 
-        source.write_text(
-            "def first():\n    return 1\n",
-            encoding="utf-8",
-        )
+        first_bytes = b"def first():\n    return 1\n"
+        source.write_bytes(first_bytes)
 
         first = indexer.index_repository(
             str(root)
         )
+
+        first_fingerprint = hashlib.sha256(first_bytes).hexdigest()
+        assert first.source_fingerprints_by_module["module"] == first_fingerprint
 
         assert (
             first
@@ -81,14 +83,16 @@ def test_reused_indexer_pool_uses_current_parent_cache_root(
             str(second_cache),
         )
 
-        source.write_text(
-            "def second():\n    return 2\n",
-            encoding="utf-8",
-        )
+        second_bytes = b"def second():\n    return 2\n"
+        source.write_bytes(second_bytes)
 
         second = indexer.index_repository(
             str(root)
         )
+
+        second_fingerprint = hashlib.sha256(second_bytes).hexdigest()
+        assert second.source_fingerprints_by_module["module"] == second_fingerprint
+        assert first_fingerprint != second_fingerprint
 
         assert (
             second
@@ -354,3 +358,142 @@ def test_symbol_failure_keeps_module_and_retries_without_negative_cache(
     indexer._CACHE_MANAGERS.pop(str(root.resolve()), None)
     retried = indexer.index_repository(str(root))
     assert retried.symbol_facts_by_module["module"]["status"] == "available"
+
+
+def test_index_source_fingerprint_cold_warm_raw_bytes(
+    tmp_path, isolated_dirs, monkeypatch
+):
+    monkeypatch.setenv("CONTEXTOR_DISABLE_PROCESS_POOL", "1")
+    root = tmp_path / "repo"
+    root.mkdir()
+    first = root / "alpha.py"
+    second = root / "beta.py"
+    first_bytes = b"import beta\r\ndef alpha():\r\n    return beta.value\r\n"
+    second_bytes = b"value = 7\n"
+    first.write_bytes(first_bytes)
+    second.write_bytes(second_bytes)
+
+    cold = indexer.index_repository(str(root))
+    expected = {
+        "alpha": hashlib.sha256(first_bytes).hexdigest(),
+        "beta": hashlib.sha256(second_bytes).hexdigest(),
+    }
+    assert set(cold.modules) == set(expected)
+    assert cold.source_fingerprints_by_module == expected
+    assert list(cold.source_fingerprints_by_module) == sorted(expected)
+
+    def forbidden_parse(*_args, **_kwargs):
+        raise AssertionError("warm index reparsed a source")
+
+    with monkeypatch.context() as scoped:
+        scoped.setattr(indexer, "parse_source_snapshot", forbidden_parse)
+        warm = indexer.index_repository(str(root))
+
+    assert warm.source_fingerprints_by_module == expected
+    assert [item.module for item in warm.modules["alpha"].imports] == ["beta"]
+    assert warm.symbol_facts_by_module["alpha"]["status"] == "available"
+    assert warm.reference_facts_by_module["alpha"]["status"] == "available"
+
+
+def test_index_source_fingerprint_body_only_change(
+    tmp_path, isolated_dirs, monkeypatch
+):
+    monkeypatch.setenv("CONTEXTOR_DISABLE_PROCESS_POOL", "1")
+    root = tmp_path / "repo"
+    root.mkdir()
+    source = root / "alpha.py"
+    other = root / "beta.py"
+    original_bytes = b"import beta\ndef answer():\n    return 1\n"
+    changed_bytes = b"import beta\ndef answer():\n    return 2\n"
+    other_bytes = b"value = 7\n"
+    source.write_bytes(original_bytes)
+    other.write_bytes(other_bytes)
+
+    initial = indexer.index_repository(str(root))
+    source.write_bytes(changed_bytes)
+    changed = indexer.index_repository(str(root))
+
+    assert changed.source_fingerprints_by_module["alpha"] == hashlib.sha256(changed_bytes).hexdigest()
+    assert changed.source_fingerprints_by_module["alpha"] != initial.source_fingerprints_by_module["alpha"]
+    assert changed.source_fingerprints_by_module["beta"] == initial.source_fingerprints_by_module["beta"]
+    assert changed.source_fingerprints_by_module["beta"] == hashlib.sha256(other_bytes).hexdigest()
+    assert changed.modules["alpha"].imports == initial.modules["alpha"].imports
+
+    warm = indexer.index_repository(str(root))
+    assert warm.source_fingerprints_by_module == changed.source_fingerprints_by_module
+
+
+def test_index_source_fingerprint_skipped_and_excluded(
+    tmp_path, isolated_dirs, monkeypatch
+):
+    monkeypatch.setenv("CONTEXTOR_DISABLE_PROCESS_POOL", "1")
+    root = tmp_path / "repo"
+    root.mkdir()
+    valid_bytes = b"value = 1\n"
+    (root / "valid.py").write_bytes(valid_bytes)
+    (root / "invalid.py").write_bytes(b"def broken(:\n")
+    (root / "excluded.py").write_bytes(b"value = 2\n")
+
+    result = indexer.index_repository(str(root), excludes=["excluded.py"])
+
+    assert set(result.modules) == {"valid"}
+    assert {item.path for item in result.skipped} == {"invalid.py"}
+    assert list(result.source_fingerprints_by_module) == ["valid"]
+    assert result.source_fingerprints_by_module["valid"] == hashlib.sha256(valid_bytes).hexdigest()
+    assert set(result.source_fingerprints_by_module) == set(result.modules)
+
+
+def test_index_source_fingerprint_survives_optional_fact_failure(
+    tmp_path, isolated_dirs, monkeypatch
+):
+    monkeypatch.setenv("CONTEXTOR_DISABLE_PROCESS_POOL", "1")
+    root = tmp_path / "repo"
+    root.mkdir()
+    source = root / "module.py"
+    source_bytes = b"import os\ndef hello():\n    return os.name\n"
+    source.write_bytes(source_bytes)
+
+    def fail_symbols(path, *, tree=None):
+        raise RuntimeError("visitor failed")
+
+    monkeypatch.setattr(indexer, "extract_file_symbols", fail_symbols)
+    result = indexer.index_repository(str(root))
+
+    assert "module" in result.modules
+    assert [item.module for item in result.modules["module"].imports] == ["os"]
+    assert result.symbol_facts_by_module["module"]["status"] == "failure"
+    assert "symbol_facts" not in _cache_payload(root, source)["data"]
+    assert result.source_fingerprints_by_module == {
+        "module": hashlib.sha256(source_bytes).hexdigest()
+    }
+
+
+def test_repository_index_legacy_construction():
+    modules = {}
+    skipped = []
+    symbol_facts = {"symbol": {"status": "available"}}
+    reference_facts = {"reference": {"status": "available"}}
+    lineage_facts = {}
+    collision_facts = {}
+    test_facts = {}
+    test_dirs = {}
+    result = indexer.RepositoryIndex(
+        modules,
+        skipped,
+        symbol_facts,
+        reference_facts,
+        lineage_facts,
+        collision_facts,
+        test_facts,
+        test_dirs,
+    )
+
+    assert result.modules is modules
+    assert result.skipped is skipped
+    assert result.symbol_facts_by_module is symbol_facts
+    assert result.reference_facts_by_module is reference_facts
+    assert result.lineage_facts_by_source is lineage_facts
+    assert result.collision_facts_by_module is collision_facts
+    assert result.test_facts_by_path is test_facts
+    assert result.automatic_test_dirs is test_dirs
+    assert result.source_fingerprints_by_module == {}

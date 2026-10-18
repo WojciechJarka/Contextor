@@ -545,6 +545,9 @@ def _process_single_file(
         ):
             return {
                 "module_id": module_id,
+                "source_fingerprint": (
+                    source_snapshot.source_fingerprint
+                ),
                 "path": str(rel),
                 "absolute_path": str(path.resolve()),
                 "imports": imports,
@@ -876,6 +879,9 @@ def _process_single_file(
 
     return {
         "module_id": module_id,
+        "source_fingerprint": (
+            source_snapshot.source_fingerprint
+        ),
         "path": str(rel),
         "absolute_path": str(path.resolve()),
         "imports": imports,
@@ -960,6 +966,10 @@ class RepositoryIndex:
 
     automatic_test_dirs: dict[Path, frozenset[str]] = dataclasses.field(default_factory=dict)
 
+    source_fingerprints_by_module: dict[str, str] = (
+        dataclasses.field(default_factory=dict)
+    )
+
 
 def index_repository(
     root: str, excludes: list[str] = None, extra_ignored_dirs: set = None, progress_callback=None
@@ -986,6 +996,7 @@ def index_repository(
     symbol_facts_by_module: dict[str, dict] = {}
     reference_facts_by_module: dict[str, dict] = {}
     lineage_facts_by_source: dict[str, ExtractedLineageSourceFacts] = {}
+    source_fingerprints_by_module: dict[str, str] = {}
     file_tasks = 0
     source_parse_calls = 0
     source_parse_failures = 0
@@ -1077,6 +1088,36 @@ def index_repository(
             directory: frozenset(automatic_test_dir_entries[directory])
             for directory in sorted(automatic_test_dir_entries)
         }
+
+    def record_indexed_source_fingerprint(
+        result: dict,
+    ) -> None:
+        module_id = result.get("module_id")
+        fingerprint = result.get("source_fingerprint")
+
+        if (
+            type(module_id) is not str
+            or not module_id
+        ):
+            raise ValueError(
+                "Indexed module identity is invalid"
+            )
+
+        if (
+            type(fingerprint) is not str
+            or len(fingerprint) != 64
+            or any(
+                character not in "0123456789abcdef"
+                for character in fingerprint
+            )
+        ):
+            raise ValueError(
+                "Indexed source fingerprint is missing or invalid"
+            )
+
+        source_fingerprints_by_module[
+            module_id
+        ] = fingerprint
 
     def record_file_task_evidence(
         result: dict,
@@ -1731,6 +1772,7 @@ def index_repository(
                     absolute_path=res.get("absolute_path", res["path"]),
                     imports=res["imports"],
                 )
+                record_indexed_source_fingerprint(res)
                 if res.get("symbol_facts") is not None:
                     symbol_facts_by_module[res["module_id"]] = res["symbol_facts"]
                 if res.get("reference_facts") is not None:
@@ -1759,6 +1801,11 @@ def index_repository(
             collision_facts_by_module=collision_facts_by_module,
             test_facts_by_path=test_facts_by_path,
             automatic_test_dirs=automatic_test_dirs(),
+            source_fingerprints_by_module=dict(
+                sorted(
+                    source_fingerprints_by_module.items()
+                )
+            ),
         )
 
     pool_scope_started = time.monotonic()
@@ -1874,6 +1921,7 @@ def index_repository(
                     ),
                     imports=res["imports"],
                 )
+                record_indexed_source_fingerprint(res)
 
                 if res.get("symbol_facts") is not None:
                     symbol_facts_by_module[
@@ -1996,6 +2044,11 @@ def index_repository(
         collision_facts_by_module=collision_facts_by_module,
         test_facts_by_path=test_facts_by_path,
         automatic_test_dirs=automatic_test_dirs(),
+        source_fingerprints_by_module=dict(
+            sorted(
+                source_fingerprints_by_module.items()
+            )
+        ),
     )
 
 
