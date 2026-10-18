@@ -12,6 +12,7 @@ from contextor.core.analysis.state_manager import (
     FileState,
     RepositoryAnalysisState,
 )
+from contextor.core.domain.refresh_plan import RefreshPlan
 
 
 engine_module = import_module("contextor.core.analysis.incremental.engine")
@@ -140,7 +141,7 @@ def _run(
         "target.py",
         delta,
         None,
-        SimpleNamespace(
+        RefreshPlan(
             patch_families=patch_families,
         ),
         [],

@@ -1,197 +1,187 @@
-# CONTEXTOR_FULL_JOB_DURABLE_READ_SYNCHRONIZATION
+# CONTEXTOR_REGRESSION_26 — REFRESH_PLAN_LINEAGE_10_FIX
 
 ## TASK
-Controlled minimal implementation of same-process durable analysis-job read synchronization.
+
+Controlled test-only replacement of incomplete RefreshPlan doubles with the canonical domain contract in two approved files. No production changes.
 
 ## HEAD_BEFORE
-61ed85be62d346c78a2e6120de5ca4550e69526a
+
+07abca0fac403788af5a89a17a9f2a7453a8b63d
 
 ## HEAD_AFTER
-61ed85be62d346c78a2e6120de5ca4550e69526a (no commit)
+
+07abca0fac403788af5a89a17a9f2a7453a8b63d (no commit)
 
 ## FILES_CHANGED
-- contextor/mcp/analysis_jobs.py
-- tests/mcp/tools/test_analysis_status_concurrency.py
 
-Three cycle-parity test files were already modified before this task and were not changed here. walkthrough.md is the report.
+- tests/test_incremental_phase_trace.py
+- tests/test_lineage_state_lifecycle.py
+
+walkthrough.md is this report and excluded from source/test diffs. Working tree had no other source/test changes at start.
 
 ## EXACT_IMPLEMENTATION
-_read_analysis_job retains job ID validation and dict|None behavior. The existing _analysis_job_lock now encloses Path.read_text and json.loads. _write_analysis_job, RLock type, atomic replacement, public statuses, and permanent missing/malformed fail-closed behavior are unchanged. No retry, polling, or cross-process lock.
 
-Contextor pre-edit owner: contextor.mcp.analysis_jobs::_read_analysis_job, adapter layer. Direct static consumer: contextor.mcp.tools.get_analysis_status; five test consumers. Downstream includes contextor.mcp_main and contextor.mcp_server. Post-edit Contextor revision 614 confirms fresh source and workspace_sync=verified; same public consumer.
+Both files import contextor.core.domain.refresh_plan.RefreshPlan. In test_incremental_phase_trace.py, the plan passed by _run is RefreshPlan(patch_families=patch_families), retaining the identity_registry tuple or empty tuple. In test_lineage_state_lifecycle.py, seven SimpleNamespace() values used as the positional plan argument of _apply_delta_and_commit are now RefreshPlan(). No other SimpleNamespace double or assertion changed.
 
-## SYNCHRONIZATION_PROOF
-T04 starts writer and reader threads, pauses os.replace while writer owns _analysis_job_lock, observes Path.read_text, and asserts reader cannot enter filesystem read until writer releases the lock. Reader then obtains the complete new record. Removing the reader lock makes the observed read enter the held critical section and fails the assertion. T05 proves reentrancy. T06 repeats queued -> running -> completed. This proves same-process thread synchronization only. The original transient OSError was not captured.
+Contextor identified RefreshPlan in the contract layer; runtime consumers include refresh_planner and incremental.plan_executor. The canonical class defaults refresh_completeness to "complete" and semantic_certainty to "statically_resolved". No requires_resync was introduced.
 
-## T01_T06_RESULTS
-T01 completed record PASS. T02 missing record/public not_found PASS. T03 malformed JSON/public not_found PASS. T04 controlled overlap PASS. T05 reentrancy PASS. T06 successive writes PASS.
-Dedicated command: .venv/Scripts/python.exe -m pytest -q --tb=short tests/mcp/tools/test_analysis_status_concurrency.py -k durable_read_t0
-Result: 6 passed, 55 deselected, 1 warning in 7.18 s.
+## TEN_REGRESSION_RESULTS
 
-## STRICT_FULL_FULL_RESULTS
-Exact test passed three post-edit executions: standalone 1 passed in 8.77 s; selected run 1 passed as part of 6 passed in 7.46 s; standalone 1 passed in 6.47 s. No transient not_found observed in those runs.
+Command: .venv/Scripts/python.exe -m pytest -q --tb=short with the ten exact test node IDs specified in the task.
+Result: 7 passed, 3 failed in 3.90 s.
 
-## CYCLE_PARITY_NON_REGRESSION
-Strict FULL–FULL plus five negative cycle-parity cases: 6 passed, 1 warning in 7.46 s. Cycle-parity test files unchanged by this task.
+1. test_identity_sync_success_emits_order_and_no_missing_owners: FAIL
+2. test_identity_sync_lineage_failure_propagates_without_file_state: PASS
+3. test_non_identity_path_emits_skip_and_default_lineage_scope: FAIL
+4. test_registry_diagnostic_gap_is_observed_without_repair_or_raise: FAIL
+5. test_incremental_commit_publishes_lineage_candidate_fields: PASS
+6. test_identity_sync_materializes_against_new_ids_and_rolls_back_on_failure: PASS
+7. test_identity_sync_owner_deletion_matches_fresh_full_materialization_without_reextracting_untouched_consumer: PASS
+8. test_identity_sync_owner_introduction_promotes_retained_untouched_consumer_to_full_parity: PASS
+9. test_identity_sync_generation_change_rematerializes_against_current_owner_id: PASS
+10. test_identity_sync_revalidation_failure_rolls_back_registry_and_canonical_state: PASS
 
-## TARGETED_TEST_RESULTS
-Entire tests/mcp/tools/test_analysis_status_concurrency.py: 61 passed, 1 warning in 8.50 s. git diff --check on changed files passed. No full repository pytest suite.
+Exact failing traceback chain (same for tests 1, 3, 4; separately repeated with --tb=long, 3 failed in 1.20 s):
+
+```text
+tests/test_incremental_phase_trace.py:175 (or :234 or :261): _run(...)
+tests/test_incremental_phase_trace.py:140: return engine._apply_delta_and_commit(...)
+contextor/core/analysis/incremental/engine.py:148: return method(self, *args, **kwargs)
+contextor/core/analysis/incremental/engine.py:1147:
+    self.state.cycle_semantics = (candidate.cycle_semantics)
+AttributeError: 'types.SimpleNamespace' object has no attribute 'cycle_semantics'. Did you mean: 'cycle_semantics_state'?
+```
+
+CLASSIFICATION: The approved RefreshPlan replacement removes the prior missing plan.refresh_completeness boundary. These three tests now reach a separate incomplete _candidate() SimpleNamespace in the phase-trace fixture. This is a test-double contract gap beyond the explicitly approved plan substitutions. The instruction forbids changing other SimpleNamespace doubles, so no candidate edit was made. The exact long traceback showed RefreshPlan(..., refresh_completeness='complete', semantic_certainty='statically_resolved').
+
+## FOCUSED_NON_REGRESSION_RESULTS
+
+Command: pytest -q --tb=short on only the two approved files with the ten named cases deselected via -k.
+Result: 34 passed, 10 deselected in 6.56 s.
+
+## CONTRACT_PRESERVATION
+
+RefreshPlan canonical defaults are intact. Existing patch_families, identity/non-identity paths, phase-order assertions, rollback and lineage logic, registry, delta, candidate, outcome, and engine doubles remain unchanged. Production engine, refresh_plan, refresh_planner, and plan_executor were not edited. git diff --check passed for both files.
 
 ## LIVE_REVISION_BEFORE_AFTER
-Before: 612, epoch 75fabf0b943b4947b50d420084de8583, continuous, resync_required=false.
-After: 614, same epoch, continuous, resync_required=false. Contextor symbol preview: canonical_state=fresh, workspace_sync=verified, provenance=live.
+
+Before: revision 614, continuity=continuous, resync_required=false.
+After: revision 616, continuity=continuous, resync_required=false, same activity epoch 5d758bf9339c4ac5a5816ab056e7f84b. Contextor get_symbol_implementation at revision 616 reported canonical_state=fresh and workspace_sync=verified for both edited files. get_file_edit_context reported syntax_diagnostics status=checked_and_none, zero errors in both files.
 
 ## WATCHER_EVENTS
-Revision 613: desktop_watcher update_file UPDATED contextor/mcp/analysis_jobs.py.
-Revision 614: desktop_watcher update_file UPDATED tests/mcp/tools/test_analysis_status_concurrency.py.
-No manual update_file.
+
+- Revision 615: desktop_watcher update_file UPDATED tests/test_incremental_phase_trace.py.
+- Revision 616: desktop_watcher update_file UPDATED tests/test_lineage_state_lifecycle.py.
+
+No manual update_file call.
 
 ## RESTART_REQUIREMENTS
-MCP_BACKEND_RESTART_REQUIRED=YES: serving process must reload analysis_jobs. No restart performed.
-LIVE_SERVICE_RESTART_REQUIRED=NO: no separate LIVE service change or restart dependency found.
+
+MCP_BACKEND_RESTART_REQUIRED=NO; LIVE_SERVICE_RESTART_REQUIRED=NO. Changes are test-only and no process was restarted.
 
 ## FULL_DIFFS
-Full actual Git diffs of both task-changed files follow.
+
+Full actual unified diffs of both task-changed test files follow.
 ```diff
-diff --git a/contextor/mcp/analysis_jobs.py b/contextor/mcp/analysis_jobs.py
-index 4815218..dcfb43a 100644
---- a/contextor/mcp/analysis_jobs.py
-+++ b/contextor/mcp/analysis_jobs.py
-@@ -108,7 +108,8 @@ def _read_analysis_job(root: Path, job_id: str) -> dict | None:
-     except ValueError:
-         return None
-     try:
--        return json.loads(path.read_text(encoding="utf-8"))
-+        with _analysis_job_lock:
-+            return json.loads(path.read_text(encoding="utf-8"))
-     except (OSError, json.JSONDecodeError):
-         return None
+diff --git a/tests/test_incremental_phase_trace.py b/tests/test_incremental_phase_trace.py
+index 4f28715..6fb219f 100644
+--- a/tests/test_incremental_phase_trace.py
++++ b/tests/test_incremental_phase_trace.py
+@@ -12,6 +12,7 @@ from contextor.core.analysis.state_manager import (
+     FileState,
+     RepositoryAnalysisState,
+ )
++from contextor.core.domain.refresh_plan import RefreshPlan
  
-diff --git a/tests/mcp/tools/test_analysis_status_concurrency.py b/tests/mcp/tools/test_analysis_status_concurrency.py
-index 4f65224..e44309b 100644
---- a/tests/mcp/tools/test_analysis_status_concurrency.py
-+++ b/tests/mcp/tools/test_analysis_status_concurrency.py
-@@ -1,6 +1,7 @@
- import asyncio
- import json
- import os
-+import threading
- from pathlib import Path
  
- import pytest
-@@ -1394,3 +1395,110 @@ def test_active_analysis_jobs__excludes_dead_same_process_worker(
-     active = analysis_jobs._active_analysis_jobs(tmp_path)
- 
-     assert [job["job_id"] for job in active] == [foreign["job_id"]]
-+
-+
-+def test_durable_read_t01_completed_job(tmp_path):
-+    job = _create_job(tmp_path, 201)
-+    assert analysis_jobs._read_analysis_job(tmp_path, job["job_id"])["status"] == "completed"
-+    assert analysis_jobs._read_analysis_job(tmp_path, job["job_id"])["operation"] == "project"
-+
-+
-+def test_durable_read_t02_missing_job(tmp_path):
-+    job_id = f"{202:032x}"
-+    assert analysis_jobs._read_analysis_job(tmp_path, job_id) is None
-+    assert json.loads(get_analysis_status(str(tmp_path), job_id=job_id))["status"] == "not_found"
-+
-+
-+def test_durable_read_t03_malformed_json(tmp_path):
-+    job_id = f"{203:032x}"
-+    path = analysis_jobs._job_path(tmp_path, job_id)
-+    path.parent.mkdir(parents=True)
-+    path.write_text("{malformed", encoding="utf-8")
-+    assert analysis_jobs._read_analysis_job(tmp_path, job_id) is None
-+    assert json.loads(get_analysis_status(str(tmp_path), job_id=job_id))["status"] == "not_found"
-+
-+
-+def _read_during_replace(tmp_path, monkeypatch, job, next_status):
-+    target = analysis_jobs._job_path(tmp_path, job["job_id"])
-+    replace_entered = threading.Event()
-+    allow_replace = threading.Event()
-+    read_entered = threading.Event()
-+    reader_started = threading.Event()
-+    original_replace = analysis_jobs.os.replace
-+    original_read_text = Path.read_text
-+    results = {}
-+
-+    def held_replace(source, destination):
-+        if Path(destination) == target:
-+            replace_entered.set()
-+            assert allow_replace.wait(5), "writer was not released"
-+        return original_replace(source, destination)
-+
-+    def observed_read_text(path, *args, **kwargs):
-+        if path == target:
-+            read_entered.set()
-+        return original_read_text(path, *args, **kwargs)
-+
-+    monkeypatch.setattr(analysis_jobs.os, "replace", held_replace)
-+    monkeypatch.setattr(Path, "read_text", observed_read_text)
-+    updated = {**job, "status": next_status}
-+
-+    def write_job():
-+        try:
-+            analysis_jobs._write_analysis_job(tmp_path, updated)
-+        except BaseException as exc:
-+            results["writer_error"] = exc
-+
-+    def read_job():
-+        reader_started.set()
-+        try:
-+            results["read"] = analysis_jobs._read_analysis_job(tmp_path, job["job_id"])
-+        except BaseException as exc:
-+            results["reader_error"] = exc
-+
-+    writer = threading.Thread(target=write_job)
-+    reader = threading.Thread(target=read_job)
-+    writer.start()
-+    try:
-+        assert replace_entered.wait(5), "writer did not enter replacement"
-+        reader.start()
-+        assert reader_started.wait(5)
-+        assert not read_entered.wait(0.3), "filesystem read entered writer critical section"
-+    finally:
-+        allow_replace.set()
-+        writer.join(timeout=5)
-+        if reader.ident is not None:
-+            reader.join(timeout=5)
-+    assert not writer.is_alive() and not reader.is_alive()
-+    assert "writer_error" not in results and "reader_error" not in results, results
-+    assert read_entered.is_set()
-+    assert results["read"]["status"] == next_status
-+    assert results["read"]["job_id"] == job["job_id"]
-+    return updated
-+
-+
-+def test_durable_read_t04_waits_for_writer_critical_section(tmp_path, monkeypatch):
-+    job = _create_job(tmp_path, 204, status="queued")
-+    _read_during_replace(tmp_path, monkeypatch, job, "completed")
-+
-+
-+def test_durable_read_t05_reentrant_under_existing_job_lock(tmp_path):
-+    job = _create_job(tmp_path, 205)
-+    result = {}
-+
-+    def nested_read():
-+        with analysis_jobs._analysis_job_lock:
-+            result["job"] = analysis_jobs._read_analysis_job(tmp_path, job["job_id"])
-+
-+    thread = threading.Thread(target=nested_read, daemon=True)
-+    thread.start()
-+    thread.join(timeout=5)
-+    assert not thread.is_alive(), "nested read deadlocked"
-+    assert result["job"]["job_id"] == job["job_id"]
-+
-+
-+def test_durable_read_t06_successive_writes_never_not_found(tmp_path, monkeypatch):
-+    job = _create_job(tmp_path, 206, status="queued")
-+    for status in ("running", "completed"):
-+        job = _read_during_replace(tmp_path, monkeypatch, job, status)
-+        assert analysis_jobs._read_analysis_job(tmp_path, job["job_id"])["status"] == status
+ engine_module = import_module("contextor.core.analysis.incremental.engine")
+@@ -140,7 +141,7 @@ def _run(
+         "target.py",
+         delta,
+         None,
+-        SimpleNamespace(
++        RefreshPlan(
+             patch_families=patch_families,
+         ),
+         [],
+diff --git a/tests/test_lineage_state_lifecycle.py b/tests/test_lineage_state_lifecycle.py
+index b1391e7..0594937 100644
+--- a/tests/test_lineage_state_lifecycle.py
++++ b/tests/test_lineage_state_lifecycle.py
+@@ -51,6 +51,7 @@ from contextor.core.domain.lineage_facts import (
+     build_return_slot,
+ )
+ from contextor.core.domain.module import Module
++from contextor.core.domain.refresh_plan import RefreshPlan
+ from contextor.core.domain.usage_facts import ModuleUsageFacts
+ from contextor.core.live_state.hydration import hydrate_repository_engine
+ from contextor.core.live_state.store import load_snapshot, save_snapshot
+@@ -548,7 +549,7 @@ def test_incremental_commit_publishes_lineage_candidate_fields(
+         str(tmp_path / "pkg.py"),
+         SimpleNamespace(module_path="pkg", is_deleted=False),
+         None,
+-        SimpleNamespace(),
++        RefreshPlan(),
+         [],
+         {},
+         None,
+@@ -1060,7 +1061,7 @@ def test_identity_sync_materializes_against_new_ids_and_rolls_back_on_failure(
+         str(tmp_path / "pkg.py"),
+         SimpleNamespace(module_path="pkg", is_deleted=False),
+         None,
+-        SimpleNamespace(),
++        RefreshPlan(),
+         [],
+         {},
+         None,
+@@ -1106,7 +1107,7 @@ def test_identity_sync_materializes_against_new_ids_and_rolls_back_on_failure(
+             str(tmp_path / "pkg.py"),
+             SimpleNamespace(module_path="pkg", is_deleted=False),
+             None,
+-            SimpleNamespace(),
++            RefreshPlan(),
+             [],
+             {},
+             None,
+@@ -1161,7 +1162,7 @@ def test_identity_sync_owner_deletion_matches_fresh_full_materialization_without
+         str(tmp_path / "provider.py"),
+         SimpleNamespace(module_path="provider", is_deleted=True),
+         None,
+-        SimpleNamespace(),
++        RefreshPlan(),
+         [],
+         {},
+         None,
+@@ -1249,7 +1250,7 @@ def test_identity_sync_owner_introduction_promotes_retained_untouched_consumer_t
+         str(tmp_path / "provider.py"),
+         SimpleNamespace(module_path="provider", is_deleted=False),
+         None,
+-        SimpleNamespace(),
++        RefreshPlan(),
+         [],
+         {},
+         None,
+@@ -1317,7 +1318,7 @@ def test_identity_sync_generation_change_rematerializes_against_current_owner_id
+         str(tmp_path / "provider.py"),
+         SimpleNamespace(module_path="provider", is_deleted=False),
+         None,
+-        SimpleNamespace(),
++        RefreshPlan(),
+         [],
+         {},
+         None,
+@@ -1384,7 +1385,7 @@ def test_identity_sync_revalidation_failure_rolls_back_registry_and_canonical_st
+             str(tmp_path / "provider.py"),
+             SimpleNamespace(module_path="provider", is_deleted=True),
+             None,
+-            SimpleNamespace(),
++            RefreshPlan(),
+             [],
+             {},
+             None,
 ```
 ## FINAL_VERDICT
-PASS for approved same-process synchronization and targeted gates. Original transient exception remains unobserved; no cross-process guarantee.
 
-STOP. Await proceduj.
+PARTIAL. The approved RefreshPlan substitutions are complete and all six lineage-state regressions pass. Three phase-trace regressions remain blocked by an independently incomplete candidate double. Their exact failure boundary is documented above; no unapproved changes were made. All 34 other tests in the two files passed.
+
+STOP. Await `proceduj`.

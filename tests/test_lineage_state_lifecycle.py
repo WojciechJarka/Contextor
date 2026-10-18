@@ -51,6 +51,7 @@ from contextor.core.domain.lineage_facts import (
     build_return_slot,
 )
 from contextor.core.domain.module import Module
+from contextor.core.domain.refresh_plan import RefreshPlan
 from contextor.core.domain.usage_facts import ModuleUsageFacts
 from contextor.core.live_state.hydration import hydrate_repository_engine
 from contextor.core.live_state.store import load_snapshot, save_snapshot
@@ -548,7 +549,7 @@ def test_incremental_commit_publishes_lineage_candidate_fields(
         str(tmp_path / "pkg.py"),
         SimpleNamespace(module_path="pkg", is_deleted=False),
         None,
-        SimpleNamespace(),
+        RefreshPlan(),
         [],
         {},
         None,
@@ -1060,7 +1061,7 @@ def test_identity_sync_materializes_against_new_ids_and_rolls_back_on_failure(
         str(tmp_path / "pkg.py"),
         SimpleNamespace(module_path="pkg", is_deleted=False),
         None,
-        SimpleNamespace(),
+        RefreshPlan(),
         [],
         {},
         None,
@@ -1106,7 +1107,7 @@ def test_identity_sync_materializes_against_new_ids_and_rolls_back_on_failure(
             str(tmp_path / "pkg.py"),
             SimpleNamespace(module_path="pkg", is_deleted=False),
             None,
-            SimpleNamespace(),
+            RefreshPlan(),
             [],
             {},
             None,
@@ -1161,7 +1162,7 @@ def test_identity_sync_owner_deletion_matches_fresh_full_materialization_without
         str(tmp_path / "provider.py"),
         SimpleNamespace(module_path="provider", is_deleted=True),
         None,
-        SimpleNamespace(),
+        RefreshPlan(),
         [],
         {},
         None,
@@ -1249,7 +1250,7 @@ def test_identity_sync_owner_introduction_promotes_retained_untouched_consumer_t
         str(tmp_path / "provider.py"),
         SimpleNamespace(module_path="provider", is_deleted=False),
         None,
-        SimpleNamespace(),
+        RefreshPlan(),
         [],
         {},
         None,
@@ -1317,7 +1318,7 @@ def test_identity_sync_generation_change_rematerializes_against_current_owner_id
         str(tmp_path / "provider.py"),
         SimpleNamespace(module_path="provider", is_deleted=False),
         None,
-        SimpleNamespace(),
+        RefreshPlan(),
         [],
         {},
         None,
@@ -1384,7 +1385,7 @@ def test_identity_sync_revalidation_failure_rolls_back_registry_and_canonical_st
             str(tmp_path / "provider.py"),
             SimpleNamespace(module_path="provider", is_deleted=True),
             None,
-            SimpleNamespace(),
+            RefreshPlan(),
             [],
             {},
             None,
