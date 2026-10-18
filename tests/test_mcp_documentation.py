@@ -80,6 +80,44 @@ def test_documentation_default_returns_only_index(monkeypatch):
     assert loaded == [documentation.INDEX_PATH]
 
 
+def test_get_project_architecture_catalog_version_and_semantics():
+    index = documentation.load_documentation_index()
+    assert index["version"] == "1.0.0"
+
+    document = documentation.load_tool_document("get_project_architecture")
+    assert document["version"] == index["version"]
+    assert documentation.validate_documentation_catalog() == index
+
+    response = json.loads(
+        mcp_server.get_mcp_documentation.fn(tool="get_project_architecture")
+    )
+    assert response["version"] == index["version"]
+    assert list(response["tools"]) == ["get_project_architecture"]
+
+    documented_sections = response["tools"]["get_project_architecture"]
+    documented_text = "\n".join(
+        item
+        for items in document.values()
+        if isinstance(items, list)
+        for item in items
+    )
+    assert 'fields=["cycle_semantics"]' in documented_text
+    assert "live_state.state_freshness.families.cycle_semantics" in documented_text
+    assert "Null selects only the original six required sections" in documented_text
+    assert all(
+        report in documented_text
+        for report in (
+            "summary",
+            "structure",
+            "name_collisions",
+            "artifacts_compact",
+            "graph_analytics",
+            "report_diff",
+        )
+    )
+    assert "cycle_semantics" in json.dumps(documented_sections)
+
+
 def test_get_symbol_implementation_description_prevents_undocumented_modes():
     index = documentation.load_documentation_index()
     entry = next(

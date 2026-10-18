@@ -1,103 +1,259 @@
-# CONTEXTOR_B0G4C38E0_PRODUCTION_ACTIVATION_PREFLIGHT
+# TASK: CONTEXTOR_B0G4C38D4C1_MCP_DOCUMENTATION_VERSION_ALIGNMENT
 
 ## TASK
-Strict read-only preflight. No activation, restart, FULL analysis, test execution, source edit, backup, owner claim or Git mutation was performed. Evidence classes: DIRECT_EVIDENCE, CODE_PATH_PROVED, INFERENCE, UNKNOWN.
 
-## HEAD
-0c4d2a67a8b92ff57f4b9dfcd331e53cae5311d2
+MODE=STRICT CONTROLLED CORRECTION  
+DESIGN_OWNER=AUDITOR  
+IMPLEMENTATION_OWNER=AGENT  
+FULL_ANALYSIS=NOT_RUN  
+SELF_FULL_AUTHORIZED=NO
+
+Evidence is labeled DIRECT_EVIDENCE, CODE_PATH_PROVED, CONTRACT_PROVED, INFERENCE, or UNKNOWN.
+
+## HEAD_BEFORE
+
+0ed90e1baf985ab36a24608bec9242f0d4c1d165
+
+## HEAD_AFTER
+
+0ed90e1baf985ab36a24608bec9242f0d4c1d165
+
+No commit or Git mutation was made.
 
 ## GIT_STATUS
-Clean before this report. Only walkthrough.md is overwritten for E0.
+
+Before this task, only the walkthrough report from E1 was modified. After this task, the only modified paths are the two explicitly allowed files and walkthrough.md. The walkthrough is the task report.
 
 ## CONTEXTOR_DISCOVERY_COVERAGE
-Contextor MCP was used first. get_module_context inspected runtime, watcher, store, MCP server, analysis_jobs, facade and query_helpers ownership/dependencies; get_symbol_implementation resolved all eight requested C38 symbols with complete source contracts and workspace_sync=verified at canonical revision 518. get_live_events reported continuous epoch, no resync and fresh diagnostics. get_mcp_documentation for get_project_architecture returned `Documentation identity mismatch for tool: get_project_architecture`; this is direct serving-runtime drift evidence. Subsequent source/README/Git searches were limited to literal lifecycle, paths, entrypoints and output contracts. D4B reader has mcp_server as direct consumer; query_helpers has broad MCP consumer reachability.
 
-## CURRENT_RUNTIME_AUTHORITY
-DIRECT_EVIDENCE: read_repository_identity and strict _read_endpoint agree for C:\Temp\Contextor_Repo. Read-only LiveStateClient(endpoint, is_owner=False).authority_status matched endpoint. repo_id=ctx_8efc50d8; runtime_domain_id=rd1_4bb21e833272147f29727f8174356b437bdb3dbcba1b2d4965637b97183f8654; service_instance_id=88e879fa630c41299f7ba675009e267f; lease_generation=32; service_pid=7840; process_start_identity=134367770052413468; endpoint_fingerprint=e73abe0959388d48a8c7608c2d13ed8e150314242e23433d2a0c3b36ab316770. Activity epoch=6b4c9554981b4b779b705089dac32739; revision=518; continuity=continuous; resync_required=false. Syntax errors=0 fresh; collisions=0 fresh; structural cycles=16 fresh. No authority mutation requested.
+- DIRECT_EVIDENCE: Contextor MCP was used first. Deferred tools included get_mcp_documentation, get_symbol_implementation, get_symbol_lineage, get_file_edit_context, get_project_architecture, and get_live_events.
+- CONTRACT_PROVED: get_symbol_implementation returned complete, workspace_sync=verified implementations at revision 518 for load_documentation_index, load_tool_document, validate_documentation_catalog, query_documentation, and the registered get_mcp_documentation function.
+- CODE_PATH_PROVED: query_documentation loads the index and only selected per-tool documents on demand. get_mcp_documentation.fn delegates to query_documentation and serializes its response.
+- DIRECT_EVIDENCE: Contextor file context reported contextor.mcp.documentation at revision 518 with 19 direct/41 transitive consumers and 37 covering tests; test_mcp_documentation.py and test_get_project_architecture_full_reports.py had fresh syntax diagnostics and workspace_sync=verified at revision 518.
+- DIRECT_EVIDENCE: The test module’s current Contextor API projection includes existing catalog-wide validation, lazy-document loading, deterministic selection, and public-signature contracts.
+- DIRECT_EVIDENCE: The previously failing MCP documentation query for get_project_architecture succeeded after the correction, as recorded below.
 
-## CURRENT_SOURCE_WORKSPACE_SYNC
-Contextor source status for CycleSemanticsSnapshot, materialize_cycle_semantics, classify_full_cycle_semantics, invalidate_cycle_semantics, ContextorFacade.analyze_project, build_cycle_semantics_report, get_project_architecture and build_state_freshness: workspace_sync=verified at revision 518. This proves canonical source/disk agreement, not process adoption. Source implementation includes D4A dedicated report, D4B optional historical reader and D4C LIVE family helper.
+## ROOT_CAUSE
 
-## CURRENT_RUNTIME_ADOPTION
-NOT VERIFIED for C38 production. DIRECT_EVIDENCE: running MCP get_project_architecture rejects fields=["cycle_semantics"] with unsupported_fields and lists only six legacy fields; fields=[] returns current live_state.state_freshness.families without cycle_semantics. Serving MCP get_mcp_documentation reports documentation identity mismatch. Thus the current MCP process has not adopted at least D4B/D4C. Desktop PID 6736 and LIVE PID 7840 predate these source changes; no process-level code-version attestation exists for them. Historical report is absent because no new real FULL has run. Do not infer activation from revision 518.
+DIRECT_EVIDENCE: docs/index.json declared catalog version 1.0.0, while docs/get_project_architecture.json incorrectly declared 1.2.0.
 
-## MCP_DOCUMENTATION_VERSION
-Disk contextor/mcp/docs/get_project_architecture.json version=1.2.0. Serving MCP cannot return that documentation because of identity mismatch; older runtime implementation is directly demonstrated by optional-field rejection. Post-restart acceptance requires get_mcp_documentation for this tool to return version 1.2.0 and get_project_architecture to accept fields=["cycle_semantics"] (missing report may validly return partial/unavailable before FULL).
+CODE_PATH_PROVED: load_tool_document compares a selected tool document’s version with the index version and raises Documentation identity mismatch if they differ. validate_documentation_catalog iterates every indexed tool and loads every document, so this one mismatch blocked both the selected documentation lookup and whole-catalog validation.
 
-## PROCESS_OWNERSHIP_MAP
-DIRECT_EVIDENCE from Win32_Process, identity-safe backend status and read-only owner claim:
+The version field is the shared documentation catalog identity. It is not a separate get_project_architecture feature version.
 
-| Role | Current evidence | Ownership limit |
-| --- | --- | --- |
-| Desktop | Python PID 6736, parent launcher PID 4832; backend host-owner claim host_kind=desktop, host_pid=6736, process identity match | Desktop GUI source owns watcher lifecycle and calls connect_or_start for LIVE. |
-| Canonical LIVE | PID 7840, launcher PID 7844, service_instance_id and lease generation above | Verified endpoint/authority identity; no second active authority was observed, but process inventory alone is not a universal proof. |
-| Persistent MCP backend | PID 9884, launcher PID 10148; backend instance c5373b46f9e04ccc899173f36deaf0aa; authenticated ready at http://127.0.0.1:8765/mcp | Backend host-owner claim matches Desktop PID 6736. It is a separate process, so IDE restart alone need not reload it. |
-| MCP analysis workers | Backend process registry at C:\Users\DafoO\AppData\Roaming\Contextor\mcp_backend\processes had no records at preflight | No active registered MCP workers proved at this instant. analysis_jobs uses in-process threads and registered subprocess cleanup on backend shutdown. |
-| Desktop child Python processes | PIDs 736, 4144, 7948, 11984 under Desktop PID 6736 | Exact worker roles UNKNOWN without active-job correlation; do not label them MCP workers. |
-| Codex / IDE clients | 2 codex.exe processes, 3 node.exe processes in idle sample | Which process holds the MCP HTTP client connection is UNKNOWN; client lifecycle is separate from backend owner. |
+## CATALOG_VERSION_CONTRACT
 
-One idle observation: 10 Contextor-related Python processes, 2 codex.exe, 10 total Python, 3 Node; Contextor Python working sets summed about 2119.8 MiB and Codex working sets about 175 MiB. These are one-time baselines, not sustained-load evidence.
+- load_documentation_index validates a non-empty catalog version and the index entry shape.
+- load_tool_document checks exact document sections, matching catalog version, matching tool name, and string-list sections.
+- validate_documentation_catalog verifies exact index/file coverage and loads every indexed document.
+- query_documentation returns the catalog version and lazily loads the explicitly selected documents.
+- Registered get_mcp_documentation.fn calls query_documentation and JSON-serializes its result.
+- The get_project_architecture document retains its original six default reports and optional historical cycle_semantics report.
 
-## MANUAL_RESTART_ORDER
-USER-EXECUTED, source-supported procedure; do not run it in E0:
+## EXACT_ONE_LINE_PRODUCTION_FIX
 
-1. Finish or cancel all Desktop/MCP FULL jobs and confirm terminal job status. Record current endpoint authority tuple, backend instance/PID, revision/epoch and process counts. Do not begin another FULL during activation.
-2. Close the existing Desktop GUI through its normal window close action. `ContextorGUI.on_closing` stops watchers/event feeds, cooperatively cancels active FULL, releases the Desktop claim and requests LIVE shutdown only for its exact owner token/service PID. Wait for Desktop PID 6736 and LIVE PID 7840 to exit. If either remains or authority cannot be classified, STOP; do not start another Desktop or manually kill a PID from this runbook.
-3. From C:\Temp\Contextor_Repo, use the repository venv's supported CLI `& .\.venv\Scripts\python.exe -B -m contextor backend status`. The persistent backend may outlive an IDE reconnect; do not assume it stopped. If old backend PID 9884 is still running, use the supported identity-checked `& .\.venv\Scripts\python.exe -B -m contextor backend stop`, then repeat `backend status` until stopped. If status is unready/unknown or stop refuses identity verification, STOP and investigate. Do not issue Task Manager/process-kill commands.
-4. While Desktop/LIVE/backend are stopped and before real FULL, perform the preservation step below. Ensure metadata revision/state_id do not change during the copy.
-5. Start one Desktop instance using the supported entrypoint from the repository root: `& .\.venv\Scripts\python.exe -B -m contextor --gui` (or the user's existing shortcut that invokes the same entrypoint). `contextor.__main__` enforces single-instance GUI; Desktop startup calls start_backend and establishes its host-owner claim; LIVE connect_or_start uses the repository domain/startup lock and lease. Do not also launch a separate LIVE service.
-6. Before reconnecting clients or starting FULL, verify new Desktop PID, exactly one matched backend owner claim, backend `status` ready with a new PID/instance, and one endpoint-matched LIVE authority with a new service PID/instance and valid lease_generation. If old and new PIDs coexist, STOP. Reconnect Codex/IDE MCP clients only after backend readiness; repeat a read-only MCP query. An IDE restart by itself is not a backend restart.
-7. Verify get_mcp_documentation(get_project_architecture) reports 1.2.0 and no identity mismatch; verify fields=["cycle_semantics"] is recognized, with expected partial/unavailable before first new FULL. Verify LIVE revision/epoch continuity by a fresh baseline; never bridge old/new epochs. Confirm D4C family is present in live_state.state_freshness.families. Only then consider separately approved real FULL analysis.
+In contextor/mcp/docs/get_project_architecture.json, changed only:
 
-The normal Desktop GUI also has a source-backed `Restart Backend` button that identity-checks stop/start and reclaims backend ownership, but it does not reload Desktop or the LIVE process. Thus it is insufficient alone for full C38 activation.
+    "version": "1.2.0"
+to:
+    "version": "1.0.0"
 
-## DOUBLE_OWNER_PREVENTION
-Source contracts: Desktop single-instance guard in contextor.__main__; backend persistent lease/host-owner claim and identity-checked CLI stop/start; LIVE RuntimeLeaseManager plus startup lock; FULL single-writer lease. Operational gate: do not relaunch Desktop while old LIVE service PID/endpoint/lease remains unresolved. After restart compare endpoint repo_id, root, runtime_domain_id, service_instance_id, lease_generation, service PID, process start identity and fingerprint; require exactly one valid authority status. Fail closed on a stale/foreign/ambiguous lease or concurrent writer.
+The central docs/index.json remains at 1.0.0. A byte comparison against HEAD, replacing only the old version token in memory, proved the edited JSON file is otherwise byte-identical to HEAD.
 
-## POST_RESTART_IDENTITY_PROOFS
-Capture process list (PID, parent, creation time), `contextor backend status` (ready=true, new backend instance/PID), read-only backend host-owner claim (host_kind=desktop, new Desktop PID, process identity match), strict endpoint plus read-only authority_status (new LIVE service identity), and get_live_events from a new epoch/revision baseline. Verify old PIDs absent; do not rely on PID number alone because reuse is possible. Verify MCP documentation version 1.2.0 and optional field acceptance. A successful source watcher sync alone is not proof.
+## CATALOG_WIDE_VALIDATION
 
-## CANONICAL_SNAPSHOT_LOCATION
-Current repo cache directory: C:\Users\DafoO\AppData\Local\Contextor\cache\repositories\ctx_8efc50d8. Metadata: engine_state.meta.json, revision 518, state_id 20261018_081419. Referenced generation files exist: engine_state.r518.06af85e91f5849d699af7637cc4d6e93.pkl (12097137 bytes); file_state.r518.06af85e91f5849d699af7637cc4d6e93.json (115703 bytes); lineage_manifest.r518.06af85e91f5849d699af7637cc4d6e93.json (133495 bytes). Other referenced lineage chunks may exist; copy the complete cache directory, not a handpicked subset. Next FULL publishes a new active metadata/generation and may affect cleanup/retention of older generation files; do not assume old state survives automatically.
+PASS: the new focused regression invokes validate_documentation_catalog() and asserts it returns the same catalog index. It validates every indexed documentation file through the existing production validator.
 
-## REPORT_OUTPUT_LOCATION
-C:\Temp\Contextor_Repo\output. Six canonical legacy JSON reports exist, last written 2026-10-18 08:14 local time; matching dated directory Contextor_Repo_20261018_081419 exists. Current canonical Contextor_Repo_cycle_semantics.json and dated semantic copy are ABSENT. Next real FULL writes/replaces canonical six reports, summary markdown and dedicated semantic JSON, and creates a dated report directory. The optional semantic writer failure can leave an older canonical semantic file, so file timestamp/content must be checked rather than assuming replacement.
+## TARGETED_TEST_RESULTS
 
-## PRESERVATION_PLAN
-USER-EXECUTED before authorized self-FULL, preferably after confirmed stop: copy (do not move) the entire repo cache directory above and the entire output directory to a separate user-chosen preservation location outside both trees. Record paths, byte counts and SHA-256 for engine_state.meta.json, its referenced state/FileState/lineage files, six canonical reports and any existing semantic report. Read metadata revision/state_id before and after copying; abort/retry if they change. Preserve copy as historical evidence, never feed it back into LIVE or overwrite active paths. Current semantic report is absent, so record absence instead of inventing one. No backup was made in E0.
+Command:
 
-## SELF_ANALYSIS_ENTRYPOINT
-After manual activation and separate user authorization, the supported GUI FULL Project analysis or MCP analyze_project(repo_path=C:\Temp\Contextor_Repo) invokes analysis_jobs and run_full_analysis_exclusive with ContextorFacade.analyze_project. CLI `contextor PROJECT` is another source-supported entrypoint, but choose one writer only. No real FULL was run here.
+    .venv\Scripts\python.exe -m pytest -q tests/test_mcp_documentation.py tests/mcp/tools/test_get_project_architecture_full_reports.py
 
-## SELF_ANALYSIS_ACCEPTANCE_MATRIX
-| Gate | Exact observable evidence after separately authorized FULL |
-| --- | --- |
-| A FULL completion | One terminal completed analysis job or GUI completion, matching repo/op ID, no unexpected error; new canonical publish revision and snapshot metadata. |
-| B One materialization | Exactly one CYCLE_SEMANTICS_MATERIALIZATION trace event for the FULL operation (op/sid/repo correlated); no second materializer invocation in worker or report path. |
-| C Structural cycles | Fresh cycle diagnostics plus actual cycle memberships and structure hard graph before/after; compare nodes/edges, not just count. Count may change legitimately. |
-| D Canonical snapshot | Read-only same-revision canonical state/snapshot shows CycleSemanticsSnapshot and expected schema/version; match published revision/state_id. |
-| E Fingerprint mismatch | Source issues/coverage and current family status show mismatch cannot be fresh; compare snapshot observed hashes with authoritative indexed source hashes. |
-| F Independent freshness | live_state.state_freshness.families.cycles and .cycle_semantics both present and separately classified; stale semantics may coexist with fresh cycles. |
-| G Historical report | Canonical and dated Contextor_Repo_cycle_semantics.json exist, schema 1.0.0; publication_binding exactly UNVERIFIED_REPORT_VS_CANONICAL_LIVE with null revisions. |
-| H Reader no recomputation | get_project_architecture(fields=["cycle_semantics"]) returns persisted report body and catalog historical_only=true; no new materialization trace/event or report-side source reads. |
-| I LIVE family | New MCP process response includes families.cycle_semantics in fresh/stale/deferred/unavailable with generation/graph identity basis. |
-| J Runtime integrity | Exactly one endpoint-matched LIVE authority and one matched backend host owner; compare process counts during FULL and after completion, no unexplained accumulating children; fresh zero new collisions/dependency cycles relative to complete graph. |
-| K Semantic classification | Bounded projection includes cyclic SCC structures, import-site evidence, conditional candidates, source issues/coverage; structural cycles remain visible and unchanged by semantic projection. |
-| L Runtime safety claim | Report and acceptance record explicitly retain runtime_execution_status=UNKNOWN_NOT_EVALUATED unless separate runtime execution evidence exists; lexical/static evidence is not an import-safety certificate. |
+Result: 49 passed, 1 warning, 11.63 seconds.
 
-If get_project_architecture exceeds 50 KiB, inspect report_catalog/selected_fields and retry the exact selected section with allow_large_output=true only when needed. Historical/current generation equality is not certified by matching timestamps, revision order or graph SHA alone.
+The one warning is the existing AuthlibDeprecationWarning emitted from fastmcp’s JWT provider import. No warning suppression was added. No full repository suite or FULL analysis was run.
 
-## OBSERVABILITY_BASELINE
-Idle read-only sample: 10 Contextor-related Python processes, 2 Codex, 3 Node; Contextor Python working sets sum 2119.8 MiB, Codex 175 MiB. Persistent MCP PID 9884 working set about 810.1 MiB; Desktop PID 6736 about 689.3 MiB; LIVE PID 7840 about 702.4 MiB at sample time. Process count during sustained FULL is UNKNOWN. For later certification, take repeated read-only Win32_Process samples at idle, start, steady FULL, completion and quiescence, grouping by PID+creation time+parent/role; compare counts and working set rather than one idle point. FULL duration: correlate FULL_ANALYSIS_STAGE_END critical path and job start/end for one operation. Semantic duration: CYCLE_SEMANTICS_MATERIALIZATION elapsed_ms in runtime trace, correlated by operation/session/repo. Runtime logs directory resolves to C:\Users\DafoO\AppData\Roaming\Contextor\logs; active_trace_path API currently returned contextor_runtime_20261013_150917_876_16628.jsonl, whose relevance to a future FULL must be verified by new session/op identity. No stress test or profiler run in E0.
+New node:
 
-## BLOCKERS_AND_UNKNOWNS
-Current serving MCP is older than disk D4B/D4C (optional field rejected, family absent, docs identity mismatch), so production certification is blocked until manual reload. Desktop and LIVE code adoption unverified. Historical semantic report absent pending new FULL. No active MCP analysis workers were registered at the instant sampled; their behavior under load is not measured. Exact Codex client reconnection UI behavior and whether clients automatically reconnect after backend replacement are UNKNOWN; verify with a new MCP call. Backend may survive IDE restart because it is a separate persistent process, so verify PID/instance rather than assuming reload. No current post-restart or post-FULL evidence exists.
+    tests/test_mcp_documentation.py::test_get_project_architecture_catalog_version_and_semantics
+
+The test checks index version 1.0.0, successful per-tool loading, equal catalog/document versions, full catalog validation, the registered documentation function, optional cycle_semantics selection, current families.cycle_semantics documentation, and the original six-report default contract. It contains no requirement for version 1.2.0 and does not bypass the production validator with mocks.
+
+## SERVING_DOCUMENTATION_RESPONSE
+
+PASS: the running MCP service returned a successful response for get_mcp_documentation(tool="get_project_architecture").
+
+- Response catalog version: 1.0.0.
+- Selected tool: get_project_architecture.
+- Returned sections: purpose, parameters, behavior, freshness, errors, usage_notes, examples.
+- The response contains the optional cycle_semantics selection and current families.cycle_semantics LIVE documentation.
+- No documentation identity mismatch occurred.
+
+The earlier mismatch was observed before the disk change; the post-change query demonstrates lazy serving adoption without restart.
+
+## OPTIONAL_FIELD_RESPONSE
+
+PASS for field recognition; historical report absence remains allowed before FULL.
+
+- get_project_architecture(fields=["cycle_semantics"]) selected the field and did not return unsupported_fields.
+- Its status is partial only because Contextor_Repo_cycle_semantics.json is absent; the field reports unavailable/historical_only.
+- live_state.state_freshness.families.cycle_semantics remains deferred.
+- get_project_architecture(fields=[]) returned status=ok and the current LIVE family map.
+- No semantic family was promoted to fresh and no historical report was generated.
+
+## CURRENT_LIVE_SEMANTIC_FAMILY
+
+At canonical revision 519:
+
+module=fresh  
+graph=fresh  
+topology=fresh  
+artifact_consumption=fresh  
+cycles=fresh  
+cycle_semantics=deferred  
+collisions=fresh  
+lineage=fresh
+
+## LIVE_AUTHORITY_BEFORE_AFTER
+
+The read-only non-owner IPC check matched the strict endpoint before and after.
+
+Stable identity before and after:
+
+- repo_id: ctx_8efc50d8
+- runtime_domain_id: rd1_4bb21e833272147f29727f8174356b437bdb3dbcba1b2d4965637b97183f8654
+- service_instance_id: 6074b9126c2440d5a2b951f79e790e3b
+- lease_generation: 33
+- service_pid: 8008
+- process_start_identity: 134367878980800826
+- endpoint_fingerprint: bdf0f9a1c7cc09ec874ada0f9ae3961e8921e79f468be1fde72539409a28bc88
+
+Only the canonical revision advanced with the watched test-source update. No authority acquisition or reconciliation was requested.
+
+## LIVE_REVISION_BEFORE_AFTER
+
+518 -> 519
+
+The test source’s desktop_watcher event is revision 519. The documentation JSON was verified through the running MCP lazy reader.
+
+## ACTIVITY_EPOCH_BEFORE_AFTER
+
+324f298b8a8041d8a89181c4a03b83d1 -> 324f298b8a8041d8a89181c4a03b83d1
+
+## EVENT_CONTINUITY
+
+- Before edit: revision 518, continuous, resync_required=false.
+- After edit: revision 519, continuous, resync_required=false.
+- Event: revision 519, operation=update_file, origin=desktop_watcher, status=UPDATED, path=tests/test_mcp_documentation.py.
+- A final get_live_events(after_revision=519) returned no additional events and retained continuity.
+- No update_file call was made.
+
+## WORKSPACE_SYNC
+
+PASS for modified test source: get_file_edit_context reports canonical_revision=519, workspace_sync=verified, and fresh checked_and_none syntax diagnostics.
+
+The documentation JSON is not a Python module in the LIVE graph; serving MCP successfully reread the edited document from disk.
+
+## COLLISIONS_BEFORE_AFTER
+
+0 fresh -> 0 fresh
+
+## STRUCTURAL_CYCLES_BEFORE_AFTER
+
+16 fresh -> 16 fresh
+
+No diagnostic regression was observed.
+
+## MCP_SERVER_RESTART_REQUIRED
+
+NO. The running MCP service returned the corrected documentation after the disk-only change, proving the lazy reader adopted it without restart.
+
+## DESKTOP_LIVE_RESTART_REQUIRED
+
+NO. No runtime Python code or canonical semantic state changed. The existing Desktop watcher synchronized the modified Python test file.
+
+## E1_DOCUMENTATION_BLOCKER_RESOLVED
+
+YES. The running MCP documentation query now returns catalog version 1.0.0, and its selected document no longer triggers identity mismatch.
+
+## REMAINING_E1_UNKNOWNS
+
+- SELF_FULL_AUTHORIZED=NO; no FULL analysis was requested or run.
+- The cycle_semantics report remains absent and the LIVE semantic family remains deferred, as allowed before FULL.
+- E1’s earlier full cache-tree equivalence and complete IPC snapshot evidence remain unresolved; this documentation correction does not change those preservation/runtime facts.
+- The aggregate architecture projection may report workspace_sync=unverified; the modified test source itself is verified at revision 519.
 
 ## FILES_CHANGED
-FILES_CHANGED=NONE (source/test/docs). walkthrough.md is the only report file overwritten.
 
-## DIFFS
-DIFFS=NONE for source/test/docs.
+- contextor/mcp/docs/get_project_architecture.json
+- tests/test_mcp_documentation.py
+
+walkthrough.md is the current task report and is excluded from source/test FILES_CHANGED.
+
+## FULL_DIFFS
+
+~~~~diff
+diff --git a/contextor/mcp/docs/get_project_architecture.json b/contextor/mcp/docs/get_project_architecture.json
+index cf8adf6..b8b4ebb 100644
+--- a/contextor/mcp/docs/get_project_architecture.json
++++ b/contextor/mcp/docs/get_project_architecture.json
+@@ -1,5 +1,5 @@
+ {
+-  "version": "1.2.0",
++  "version": "1.0.0",
+   "tool": "get_project_architecture",
+   "purpose": [
+     "[OPTIMIZED] Return the complete persisted global project-analysis report bundle with an explicit current canonical LIVE freshness overlay. The default bundle contains summary, structure, name_collisions, artifacts_compact, graph_analytics, and report_diff. The optional cycle_semantics field exposes a historical FULL evidence report only when explicitly selected. Report bodies are returned losslessly."
+diff --git a/tests/test_mcp_documentation.py b/tests/test_mcp_documentation.py
+index 92b9ea1..05fb2bc 100644
+--- a/tests/test_mcp_documentation.py
++++ b/tests/test_mcp_documentation.py
+@@ -80,6 +80,44 @@ def test_documentation_default_returns_only_index(monkeypatch):
+     )
+     assert loaded == [documentation.INDEX_PATH]
+ 
+ 
++def test_get_project_architecture_catalog_version_and_semantics():
++    index = documentation.load_documentation_index()
++    assert index["version"] == "1.0.0"
++
++    document = documentation.load_tool_document("get_project_architecture")
++    assert document["version"] == index["version"]
++    assert documentation.validate_documentation_catalog() == index
++
++    response = json.loads(
++        mcp_server.get_mcp_documentation.fn(tool="get_project_architecture")
++    )
++    assert response["version"] == index["version"]
++    assert list(response["tools"]) == ["get_project_architecture"]
++
++    documented_sections = response["tools"]["get_project_architecture"]
++    documented_text = "\n".join(
++        item
++        for items in document.values()
++        if isinstance(items, list)
++        for item in items
++    )
++    assert 'fields=["cycle_semantics"]' in documented_text
++    assert "live_state.state_freshness.families.cycle_semantics" in documented_text
++    assert "Null selects only the original six required sections" in documented_text
++    assert all(
++        report in documented_text
++        for report in (
++            "summary",
++            "structure",
++            "name_collisions",
++            "artifacts_compact",
++            "graph_analytics",
++            "report_diff",
++        )
++    )
++    assert "cycle_semantics" in json.dumps(documented_sections)
++~~~~
 
 ## FINAL_VERDICT
-E0_READY_FOR_MANUAL_ACTIVATION as a source-supported, conditional user runbook: orderly Desktop closure, identity-checked persistent backend stop if needed, old LIVE/backend exit verification, preservation copy, one Desktop relaunch, and explicit post-restart authority/docs checks. Any unresolved old owner, ambiguous process identity, failed backend stop, mismatched lease, missing 1.2.0 documentation or absent new semantic family is an immediate STOP before FULL. Runtime activation and self-analysis certification remain unperformed. Await proceduj.
+
+D4C1_PASS
+
+The exact catalog-version correction, complete catalog validation, targeted tests, serving MCP query, optional field selection, LIVE-family preservation, diagnostic stability, source synchronization, and complete actual diffs all pass.
