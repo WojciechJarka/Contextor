@@ -30,6 +30,7 @@ def committed_publication_key(repo_id: str, state_id: str, revision: int) -> str
 def _result(
     status: str, *, job_id: str | None, service_instance_id: str | None,
     process_start_identity: str | None, state_id: str, revision: int,
+    idempotency_key: str | None = None,
     published_revision: int | None = None, warning: str | None = None,
 ) -> dict[str, object]:
     return {
@@ -41,6 +42,7 @@ def _result(
         "live_publish_process_start_identity": process_start_identity,
         "live_publish_expected_state_id": state_id,
         "live_publish_expected_revision": revision,
+        "live_publish_idempotency_key": idempotency_key,
     }
 
 
@@ -51,11 +53,13 @@ def classify_publication_receipt(
     process_start_identity: str,
     state_id: str,
     revision: int,
+    idempotency_key: str | None = None,
 ) -> dict[str, object]:
     common = dict(
         job_id=job_id, service_instance_id=service_instance_id,
         process_start_identity=process_start_identity,
         state_id=state_id, revision=revision,
+        idempotency_key=idempotency_key,
     )
     if not isinstance(receipt, dict) or receipt.get("job_id") != job_id:
         return _result("pending_verification", **common, warning="Exact mutation job status unavailable.")
@@ -106,7 +110,7 @@ def publish_committed_and_wait(
     common = dict(
         job_id=None, service_instance_id=service_id,
         process_start_identity=process_identity,
-        state_id=state_id, revision=revision,
+        state_id=state_id, revision=revision, idempotency_key=key,
     )
     if not isinstance(service_id, str) or not service_id or not isinstance(process_identity, str) or not process_identity:
         return _result("unverified_authority_changed", **common,
@@ -125,13 +129,37 @@ def publish_committed_and_wait(
             accepted = submitted
         break
     if accepted is None:
-        return _result("pending_verification", **common,
-                       warning="Publication admission result unavailable.")
-    if accepted.get("status") != "accepted" or accepted.get("accepted") is not True:
+        try:
+            accepted = client.lookup_committed_publish(
+                idempotency_key=key, state_id=state_id, revision=revision,
+            )
+        except (OSError, EOFError, ConnectionError, TimeoutError, RuntimeError):
+            accepted = None
+        if not isinstance(accepted, dict) or accepted.get("status") != "ok":
+            return _result("pending_verification", **common,
+                           warning="Publication admission and read-only job lookup unavailable.")
+    if accepted.get("status") == "ok" and isinstance(accepted.get("job_id"), str):
+        job_id = accepted["job_id"]
+    elif accepted.get("status") == "accepted" and accepted.get("accepted") is True:
+        job_id = accepted.get("job_id")
+    else:
         return _result("failed", **common, warning="Publication admission rejected.")
-    job_id = accepted.get("job_id")
     if not isinstance(job_id, str) or not job_id:
-        return _result("pending_verification", **common, warning="Publication job identity unavailable.")
+        try:
+            recovered = client.lookup_committed_publish(
+                idempotency_key=key, state_id=state_id, revision=revision,
+            )
+        except (OSError, EOFError, ConnectionError, TimeoutError, RuntimeError):
+            recovered = None
+        if isinstance(recovered, dict) and recovered.get("status") == "ok":
+            accepted = recovered
+            job_id = recovered.get("job_id")
+        else:
+            return _result("pending_verification", **common,
+                           warning="Publication job identity unavailable; read-only recovery found no job.")
+    if not isinstance(job_id, str) or not job_id:
+        return _result("pending_verification", **common,
+                       warning="Publication job identity unavailable.")
     common["job_id"] = job_id
     while True:
         try:
@@ -142,7 +170,7 @@ def publish_committed_and_wait(
         classified = classify_publication_receipt(
             status, job_id=job_id, service_instance_id=service_id,
             process_start_identity=process_identity,
-            state_id=state_id, revision=revision,
+            state_id=state_id, revision=revision, idempotency_key=key,
         )
         if classified["live_publish_status"] != "pending_verification":
             try:

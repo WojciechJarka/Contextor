@@ -12,6 +12,7 @@ import pytest
 
 from contextor.core.live_state import ipc as ipc_module
 from contextor.core.live_state.ipc import CanonicalLiveServer, LiveStateClient
+from contextor.core.live_state.publication_receipt import committed_publication_key
 from contextor.core.live_state.store import (
     load_snapshot,
     locked_committed_snapshot,
@@ -209,13 +210,27 @@ def test_queued_committed_publish_reuses_existing_worker_and_loads_committed_sta
     server._repository_identity_reader = lambda: durable_harness.identity
     request = {
         "operation": "submit_committed_publish", "state_id": "sid",
-        "revision": 1, "origin": "mcp_analysis", "idempotency_key": "cp-test",
+        "revision": 1, "origin": "mcp_analysis",
+        "idempotency_key": committed_publication_key(durable_harness.identity.repo_id, "sid", 1),
         "trace_op": None,
     }
     accepted = server._dispatch(request)
     assert accepted["status"] == "accepted"
     assert server._dispatch(request)["job_id"] == accepted["job_id"]
-    assert server._dispatch({**request, "state_id": "other"})["error"] == "publication_idempotency_conflict"
+    assert server._dispatch({**request, "idempotency_key": "arbitrary"})["error"] == "invalid_publication_idempotency_key"
+    lookup = server._dispatch({
+        "operation": "lookup_committed_publish",
+        "idempotency_key": request["idempotency_key"],
+        "state_id": "sid", "revision": 1,
+    })
+    assert lookup["job_id"] == accepted["job_id"]
+    assert len(server._mutation_coordinator._jobs) == 1
+    assert server._dispatch({
+        "operation": "lookup_committed_publish",
+        "idempotency_key": request["idempotency_key"],
+        "state_id": "other", "revision": 1,
+    })["error"] == "invalid_publication_idempotency_key"
+    assert server._dispatch({**request, "idempotency_key": "different-key"})["error"] == "invalid_publication_idempotency_key"
     deadline = time.monotonic() + 3
     while time.monotonic() < deadline:
         receipt = server._dispatch({"operation": "mutation_status", "job_id": accepted["job_id"]})

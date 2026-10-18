@@ -197,6 +197,7 @@ def _public_job(
             "created_at", "started_at", "completed_at", "updated_at",
             "message", "error", "live_publish_status",
             "live_publish_revision", "live_publish_warning",
+            "live_publish_idempotency_key",
             "live_publish_job_id", "live_publish_service_instance_id",
             "live_publish_process_start_identity",
             "live_publish_expected_state_id", "live_publish_expected_revision",
@@ -276,6 +277,7 @@ async def _run_analysis_worker(
                             "live_publish_warning",
                             None,
                         ),
+                        "live_publish_idempotency_key": getattr(result, "live_publish_idempotency_key", None),
                         "live_publish_job_id": getattr(result, "live_publish_job_id", None),
                         "live_publish_service_instance_id": getattr(result, "live_publish_service_instance_id", None),
                         "live_publish_process_start_identity": getattr(result, "live_publish_process_start_identity", None),
@@ -391,6 +393,7 @@ async def _execute_analysis_job(
                 **{
                     key: (analysis_outcome or {}).get(key)
                     for key in (
+                        "live_publish_idempotency_key",
                         "live_publish_job_id",
                         "live_publish_service_instance_id",
                         "live_publish_process_start_identity",
@@ -479,6 +482,7 @@ def _start_analysis_job(
                 "pending" if operation == "project" else "not_applicable"
             ),
             "live_publish_revision": None, "live_publish_warning": None,
+            "live_publish_idempotency_key": None,
             "live_publish_job_id": None,
             "live_publish_service_instance_id": None,
             "live_publish_process_start_identity": None,

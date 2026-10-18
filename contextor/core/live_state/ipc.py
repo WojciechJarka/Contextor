@@ -276,25 +276,58 @@ class CanonicalMutationCoordinator:
                     "error": "unknown_mutation_job",
                     "job_id": job_id,
                 }
-            response: dict[str, Any] = {
-                "status": "ok",
-                "job_id": job.job_id,
-                "queue_order": job.queue_order,
-                "accepted_revision": job.accepted_revision,
-                "state": job.state,
-            }
-            if job.started_revision is not None:
-                response["started_revision"] = job.started_revision
-            if job.final_revision is not None:
-                response["final_revision"] = job.final_revision
-            if job.error is not None:
-                response["error"] = job.error
-            if job.response is not None:
-                response["response"] = copy.deepcopy(job.response)
-            if job.request.get("operation") == "submit_committed_publish":
-                response["requested_state_id"] = job.request["state_id"]
-                response["requested_revision"] = job.request["revision"]
-            return response
+            return self._serialize_status_locked(job)
+
+    @staticmethod
+    def _serialize_status_locked(job: _MutationJob) -> dict[str, Any]:
+        response: dict[str, Any] = {
+            "status": "ok",
+            "job_id": job.job_id,
+            "queue_order": job.queue_order,
+            "accepted_revision": job.accepted_revision,
+            "state": job.state,
+        }
+        if job.started_revision is not None:
+            response["started_revision"] = job.started_revision
+        if job.final_revision is not None:
+            response["final_revision"] = job.final_revision
+        if job.error is not None:
+            response["error"] = job.error
+        if job.response is not None:
+            response["response"] = copy.deepcopy(job.response)
+        if job.request.get("operation") == "submit_committed_publish":
+            response["requested_state_id"] = job.request["state_id"]
+            response["requested_revision"] = job.request["revision"]
+        return response
+
+    def lookup_committed_publish(
+        self,
+        *,
+        idempotency_key: str,
+        repo_id: str,
+        state_id: str,
+        revision: int,
+    ) -> dict[str, Any]:
+        if (
+            not isinstance(idempotency_key, str) or not idempotency_key
+            or not isinstance(repo_id, str) or not repo_id
+            or not isinstance(state_id, str) or not state_id
+            or type(revision) is not int or revision < 1
+        ):
+            return {"status": "error", "error": "unknown_publication_job"}
+        with self._condition:
+            job_id = self._idempotency_jobs.get(idempotency_key)
+            job = self._jobs.get(job_id) if job_id is not None else None
+            if (
+                job is None
+                or job.request.get("operation") != "submit_committed_publish"
+                or job.request.get("repo_id") != repo_id
+                or job.request.get("state_id") != state_id
+                or type(job.request.get("revision")) is not int
+                or job.request.get("revision") != revision
+            ):
+                return {"status": "error", "error": "unknown_publication_job"}
+            return self._serialize_status_locked(job)
 
     def _prune_terminal_locked(self) -> None:
         terminal = {"completed", "failed", "cancelled"}
@@ -1957,7 +1990,39 @@ class CanonicalLiveServer:
         repo_id = getattr(identity, "repo_id", None)
         if not isinstance(repo_id, str) or not repo_id:
             return {"status": "error", "error": "repository_identity_unavailable"}
+        from contextor.core.live_state.publication_receipt import committed_publication_key
+        if key != committed_publication_key(repo_id, state_id, revision):
+            return {"status": "error", "error": "invalid_publication_idempotency_key"}
         return self._mutation_coordinator.submit({**request, "repo_id": repo_id})
+
+    def _lookup_committed_publish(self, request: dict[str, Any]) -> dict[str, Any]:
+        if set(request) != {"operation", "idempotency_key", "state_id", "revision"}:
+            return {"status": "error", "error": "invalid_committed_publish_lookup"}
+        key = request["idempotency_key"]
+        state_id = request["state_id"]
+        revision = request["revision"]
+        if not isinstance(key, str) or not key or len(key) > 256:
+            return {"status": "error", "error": "invalid_idempotency_key"}
+        if not isinstance(state_id, str) or not state_id or len(state_id) > 256:
+            return {"status": "error", "error": "invalid_state_id"}
+        if type(revision) is not int or revision < 1:
+            return {"status": "error", "error": "invalid_canonical_revision"}
+        if self._repository_identity_reader is None:
+            return {"status": "error", "error": "repository_identity_unavailable"}
+        try:
+            identity = self._repository_identity_reader()
+        except Exception:
+            return {"status": "error", "error": "repository_identity_unavailable"}
+        repo_id = getattr(identity, "repo_id", None)
+        if not isinstance(repo_id, str) or not repo_id:
+            return {"status": "error", "error": "repository_identity_unavailable"}
+        from contextor.core.live_state.publication_receipt import committed_publication_key
+        if key != committed_publication_key(repo_id, state_id, revision):
+            return {"status": "error", "error": "invalid_publication_idempotency_key"}
+        return self._mutation_coordinator.lookup_committed_publish(
+            idempotency_key=key, repo_id=repo_id, state_id=state_id,
+            revision=revision,
+        )
 
     def _execute_update_file(
         self, request: dict[str, Any], *, allow_recovery_fence: bool = False
@@ -2252,6 +2317,8 @@ class CanonicalLiveServer:
             return self._mutation_coordinator.submit(request)
         if operation == "submit_committed_publish":
             return self._submit_committed_publish(request)
+        if operation == "lookup_committed_publish":
+            return self._lookup_committed_publish(request)
         if operation == "mutation_status":
             return self._mutation_coordinator.status(request.get("job_id"))
         if operation == "verify_recovery":
@@ -2706,6 +2773,20 @@ class LiveStateClient:
             origin=origin,
             idempotency_key=idempotency_key,
             trace_op=trace_op,
+        )
+
+    def lookup_committed_publish(
+        self,
+        *,
+        idempotency_key: str,
+        state_id: str,
+        revision: int,
+    ) -> dict[str, Any]:
+        return self.request(
+            "lookup_committed_publish",
+            idempotency_key=idempotency_key,
+            state_id=state_id,
+            revision=revision,
         )
 
     def mutation_status(self, job_id: str) -> dict[str, Any]:

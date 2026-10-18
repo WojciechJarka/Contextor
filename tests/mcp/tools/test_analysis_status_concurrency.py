@@ -77,6 +77,11 @@ def test_pending_publication_reconciles_only_exact_job_on_same_authority(tmp_pat
         endpoint = SimpleNamespace(service_instance_id="replacement",
                                    process_start_identity="process")
 
+        def authority_status(self):
+            return {"status": "ok", "service_instance_id": self.endpoint.service_instance_id,
+                    "process_start_identity": self.endpoint.process_start_identity,
+                    "repo_id": "repo-id"}
+
         def mutation_status(self, job_id):
             calls.append(job_id)
             return {"status": "ok", "job_id": job_id, "state": "completed",
@@ -101,6 +106,208 @@ def test_pending_publication_reconciles_only_exact_job_on_same_authority(tmp_pat
     assert result["live_publish_revision"] == 7
     assert calls == ["mu-exact"]
     assert analysis_jobs._read_analysis_job(root, job["job_id"])["live_publish_status"] == "success"
+
+
+def test_pending_publication_without_job_id_recovers_by_canonical_key_read_only(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    import contextor.core.live_state as live_state_module
+    from contextor.core.live_state.publication_receipt import committed_publication_key
+
+    root = tmp_path
+    import contextor.mcp.tools.get_analysis_status as status_module
+    monkeypatch.setattr(status_module, "diagnostics_summary", lambda _root: {})
+    monkeypatch.setattr(status_module, "diagnostics_summary_for_completed_job",
+                        lambda _summary, _job: {"attention_required": False})
+    job = _create_job(root, 991, live_publish_status="pending_verification",
+                      live_publish_revision=None)
+    key = committed_publication_key("repo-id", "sid", 7)
+    job.update({
+        "live_publish_job_id": None,
+        "live_publish_idempotency_key": key,
+        "live_publish_service_instance_id": "service",
+        "live_publish_process_start_identity": "process",
+        "live_publish_expected_state_id": "sid",
+        "live_publish_expected_revision": 7,
+    })
+    analysis_jobs._write_analysis_job(root, job)
+    calls = []
+
+    class Client:
+        endpoint = SimpleNamespace(service_instance_id="service",
+                                   process_start_identity="process")
+
+        def authority_status(self):
+            return {"status": "ok", "service_instance_id": "service",
+                    "process_start_identity": "process", "repo_id": "repo-id"}
+
+        def lookup_committed_publish(self, *, idempotency_key, state_id, revision):
+            calls.append(("lookup", idempotency_key, state_id, revision))
+            return {"status": "ok", "job_id": "mu-recovered", "state": "completed",
+                    "requested_state_id": "sid", "requested_revision": 7,
+                    "response": {"status": "ok", "revision": 7}}
+
+        def mutation_status(self, recovered_job_id):
+            calls.append(("status", recovered_job_id))
+            return {"status": "ok", "job_id": recovered_job_id, "state": "completed",
+                    "requested_state_id": "sid", "requested_revision": 7,
+                    "response": {"status": "ok", "revision": 7}}
+
+    def connect(_root, *, reconcile_missing_endpoint_binding=True):
+        assert reconcile_missing_endpoint_binding is False
+        return Client()
+
+    monkeypatch.setattr(live_state_module, "connect", connect)
+    result = json.loads(get_analysis_status(str(root), job_id=job["job_id"]))
+    assert calls == [("lookup", key, "sid", 7), ("status", "mu-recovered")]
+    assert result["live_publish_status"] == "success"
+    assert result["live_publish_job_id"] == "mu-recovered"
+    stored = analysis_jobs._read_analysis_job(root, job["job_id"])
+    assert stored["live_publish_job_id"] == "mu-recovered"
+    assert stored["live_publish_idempotency_key"] == key
+
+
+def test_pending_publication_missing_or_replaced_authority_stays_unverified(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    import contextor.core.live_state as live_state_module
+    from contextor.core.live_state.publication_receipt import committed_publication_key
+
+    root = tmp_path
+    import contextor.mcp.tools.get_analysis_status as status_module
+    monkeypatch.setattr(status_module, "diagnostics_summary", lambda _root: {})
+    monkeypatch.setattr(status_module, "diagnostics_summary_for_completed_job",
+                        lambda _summary, _job: {"attention_required": False})
+    job = _create_job(root, 992, live_publish_status="pending_verification",
+                      live_publish_revision=None)
+    job.update({
+        "live_publish_job_id": None,
+        "live_publish_idempotency_key": committed_publication_key("repo-id", "sid", 7),
+        "live_publish_service_instance_id": "service",
+        "live_publish_process_start_identity": "process",
+        "live_publish_expected_state_id": "sid",
+        "live_publish_expected_revision": 7,
+    })
+    analysis_jobs._write_analysis_job(root, job)
+    lookup_calls = []
+
+    class Client:
+        endpoint = SimpleNamespace(service_instance_id="replacement",
+                                   process_start_identity="process")
+
+        def authority_status(self):
+            return {"status": "ok", "service_instance_id": "replacement",
+                    "process_start_identity": "process", "repo_id": "repo-id"}
+
+        def lookup_committed_publish(self, **kwargs):
+            lookup_calls.append(kwargs)
+            return {"status": "error", "error": "unknown_publication_job"}
+
+    monkeypatch.setattr(
+        live_state_module, "connect",
+        lambda _root, *, reconcile_missing_endpoint_binding=False: Client(),
+    )
+    result = json.loads(get_analysis_status(str(root), job_id=job["job_id"]))
+    assert result["live_publish_status"] == "unverified_authority_changed"
+    assert result["live_publish_revision"] is None
+    assert lookup_calls == []
+    assert analysis_jobs._read_analysis_job(root, job["job_id"])["live_publish_status"] == "pending_verification"
+
+
+def test_pending_publication_unknown_key_lookup_remains_pending(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    import contextor.core.live_state as live_state_module
+    from contextor.core.live_state.publication_receipt import committed_publication_key
+
+    root = tmp_path
+    import contextor.mcp.tools.get_analysis_status as status_module
+    monkeypatch.setattr(status_module, "diagnostics_summary", lambda _root: {})
+    monkeypatch.setattr(status_module, "diagnostics_summary_for_completed_job",
+                        lambda _summary, _job: {"attention_required": False})
+    job = _create_job(root, 993, live_publish_status="pending_verification",
+                      live_publish_revision=None)
+    job.update({
+        "live_publish_job_id": None,
+        "live_publish_idempotency_key": committed_publication_key("repo-id", "sid", 7),
+        "live_publish_service_instance_id": "service",
+        "live_publish_process_start_identity": "process",
+        "live_publish_expected_state_id": "sid",
+        "live_publish_expected_revision": 7,
+    })
+    analysis_jobs._write_analysis_job(root, job)
+
+    class Client:
+        endpoint = SimpleNamespace(service_instance_id="service",
+                                   process_start_identity="process")
+
+        def authority_status(self):
+            return {"status": "ok", "service_instance_id": "service",
+                    "process_start_identity": "process", "repo_id": "repo-id"}
+
+        def lookup_committed_publish(self, **kwargs):
+            return {"status": "error", "error": "unknown_publication_job"}
+
+    monkeypatch.setattr(
+        live_state_module, "connect",
+        lambda _root, *, reconcile_missing_endpoint_binding=False: Client(),
+    )
+    result = json.loads(get_analysis_status(str(root), job_id=job["job_id"]))
+    assert result["live_publish_status"] == "pending_verification"
+    assert result["live_publish_job_id"] is None
+    assert result["live_publish_revision"] is None
+    stored = analysis_jobs._read_analysis_job(root, job["job_id"])
+    assert stored["live_publish_status"] == "pending_verification"
+    assert stored["live_publish_job_id"] is None
+
+
+def test_running_publication_recovery_persists_job_id_and_stays_pending(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    import contextor.core.live_state as live_state_module
+    import contextor.mcp.tools.get_analysis_status as status_module
+    from contextor.core.live_state.publication_receipt import committed_publication_key
+
+    root = tmp_path
+    monkeypatch.setattr(status_module, "diagnostics_summary", lambda _root: {})
+    monkeypatch.setattr(status_module, "diagnostics_summary_for_completed_job",
+                        lambda _summary, _job: {"attention_required": False})
+    job = _create_job(root, 994, live_publish_status="pending_verification",
+                      live_publish_revision=None)
+    job.update({
+        "live_publish_job_id": None,
+        "live_publish_idempotency_key": committed_publication_key("repo-id", "sid", 7),
+        "live_publish_service_instance_id": "service",
+        "live_publish_process_start_identity": "process",
+        "live_publish_expected_state_id": "sid",
+        "live_publish_expected_revision": 7,
+    })
+    analysis_jobs._write_analysis_job(root, job)
+
+    class Client:
+        endpoint = SimpleNamespace(service_instance_id="service",
+                                   process_start_identity="process")
+
+        def authority_status(self):
+            return {"status": "ok", "service_instance_id": "service",
+                    "process_start_identity": "process", "repo_id": "repo-id"}
+
+        def lookup_committed_publish(self, **kwargs):
+            return {"status": "ok", "job_id": "mu-running", "state": "running",
+                    "requested_state_id": "sid", "requested_revision": 7}
+
+        def mutation_status(self, mutation_job_id):
+            assert mutation_job_id == "mu-running"
+            return {"status": "ok", "job_id": mutation_job_id, "state": "running",
+                    "requested_state_id": "sid", "requested_revision": 7}
+
+    monkeypatch.setattr(
+        live_state_module, "connect",
+        lambda _root, *, reconcile_missing_endpoint_binding=False: Client(),
+    )
+    result = json.loads(get_analysis_status(str(root), job_id=job["job_id"]))
+    assert result["live_publish_status"] == "pending_verification"
+    assert result["live_publish_job_id"] == "mu-running"
+    assert result["live_publish_revision"] is None
+    stored = analysis_jobs._read_analysis_job(root, job["job_id"])
+    assert stored["live_publish_status"] == "pending_verification"
+    assert stored["live_publish_job_id"] == "mu-running"
 
 
 def test_analysis_status_concurrency__multiple_active_without_job_id_returns_ambiguity(tmp_path):

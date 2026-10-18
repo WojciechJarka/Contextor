@@ -578,6 +578,7 @@ class ContextorFacade:
             list: List of architectural validation errors, if any.
         """
         facade_started = time.monotonic()
+        live_publish_idempotency_key = None
         live_publish_job_id = None
         live_publish_service_instance_id = None
         live_publish_process_start_identity = None
@@ -1165,6 +1166,7 @@ class ContextorFacade:
             live_publish_status = "not_attempted"
             live_publish_revision = None
             live_publish_warning = None
+            live_publish_idempotency_key = None
             live_publish_job_id = None
             live_publish_service_instance_id = None
             live_publish_process_start_identity = None
@@ -1270,6 +1272,7 @@ class ContextorFacade:
                         live_publish_status = published["live_publish_status"]
                         live_publish_revision = published["live_publish_revision"]
                         live_publish_warning = published["live_publish_warning"]
+                        live_publish_idempotency_key = published["live_publish_idempotency_key"]
                         live_publish_job_id = published["live_publish_job_id"]
                         live_publish_service_instance_id = published["live_publish_service_instance_id"]
                         live_publish_process_start_identity = published["live_publish_process_start_identity"]
@@ -1384,6 +1387,7 @@ class ContextorFacade:
             analysis_result.live_publish_status = live_publish_status
             analysis_result.live_publish_revision = live_publish_revision
             analysis_result.live_publish_warning = live_publish_warning
+            analysis_result.live_publish_idempotency_key = live_publish_idempotency_key
             analysis_result.live_publish_job_id = live_publish_job_id
             analysis_result.live_publish_service_instance_id = live_publish_service_instance_id
             analysis_result.live_publish_process_start_identity = live_publish_process_start_identity
@@ -1393,6 +1397,7 @@ class ContextorFacade:
                 analysis_result.summary_data["live_publish_status"] = live_publish_status
                 analysis_result.summary_data["live_publish_revision"] = live_publish_revision
                 analysis_result.summary_data["live_publish_warning"] = live_publish_warning
+                analysis_result.summary_data["live_publish_idempotency_key"] = live_publish_idempotency_key
                 analysis_result.summary_data["live_publish_job_id"] = live_publish_job_id
                 analysis_result.summary_data["live_publish_service_instance_id"] = live_publish_service_instance_id
                 analysis_result.summary_data["live_publish_process_start_identity"] = live_publish_process_start_identity

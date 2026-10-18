@@ -1,6 +1,7 @@
 """Focused safety contracts for queued committed publication receipts."""
 
 from types import SimpleNamespace
+import time
 
 from contextor.core.live_state.ipc import CanonicalMutationCoordinator
 from contextor.core.live_state.publication_receipt import (
@@ -37,6 +38,10 @@ def test_publication_idempotency_binds_exact_generation_without_conflict_executi
         status = coordinator.status(first["job_id"])
         assert status["requested_state_id"] == "sid"
         assert status["requested_revision"] == 1
+        deadline = time.monotonic() + 2
+        while status["state"] not in {"completed", "failed", "cancelled"} and time.monotonic() < deadline:
+            time.sleep(0.01)
+            status = coordinator.status(first["job_id"])
         coordinator.close()
         assert len(executed) == 1
         assert executed[0]["state_id"] == "sid"
@@ -136,3 +141,90 @@ def test_changed_service_instance_rejects_completion():
     )
     assert result["live_publish_status"] == "unverified_authority_changed"
     assert result["live_publish_revision"] is None
+
+
+def test_lost_first_admission_response_reuses_same_generation_job():
+    class Client:
+        endpoint = SimpleNamespace(service_instance_id="service", process_start_identity="process")
+
+        def __init__(self):
+            self.submissions = []
+
+        def submit_committed_publish(self, **kwargs):
+            self.submissions.append(kwargs)
+            if len(self.submissions) == 1:
+                raise TimeoutError("response lost")
+            return {"status": "accepted", "accepted": True, "job_id": "mu-original"}
+
+        def mutation_status(self, job_id):
+            assert job_id == "mu-original"
+            return {**_terminal(), "job_id": job_id}
+
+        def authority_status(self):
+            return {"status": "ok", "service_instance_id": "service",
+                    "process_start_identity": "process"}
+
+    client = Client()
+    result = publish_committed_and_wait(
+        client, repo_id="repo", state_id="sid", revision=1, origin="mcp_analysis",
+    )
+    assert result["live_publish_status"] == "success"
+    assert result["live_publish_job_id"] == "mu-original"
+    assert len(client.submissions) == 2
+    assert client.submissions[0]["idempotency_key"] == client.submissions[1]["idempotency_key"]
+
+
+def test_lost_both_admission_responses_recovers_original_receipt_read_only():
+    key = committed_publication_key("repo", "sid", 1)
+
+    class Client:
+        endpoint = SimpleNamespace(service_instance_id="service", process_start_identity="process")
+
+        def __init__(self):
+            self.submissions = 0
+            self.lookups = 0
+
+        def submit_committed_publish(self, **kwargs):
+            self.submissions += 1
+            raise TimeoutError("response lost")
+
+        def lookup_committed_publish(self, *, idempotency_key, state_id, revision):
+            self.lookups += 1
+            assert (idempotency_key, state_id, revision) == (key, "sid", 1)
+            return {**_terminal(), "job_id": "mu-original"}
+
+        def mutation_status(self, job_id):
+            assert job_id == "mu-original"
+            return {**_terminal(), "job_id": job_id}
+
+        def authority_status(self):
+            return {"status": "ok", "service_instance_id": "service",
+                    "process_start_identity": "process"}
+
+    client = Client()
+    result = publish_committed_and_wait(
+        client, repo_id="repo", state_id="sid", revision=1, origin="mcp_analysis",
+    )
+    assert client.submissions == 2
+    assert client.lookups == 1
+    assert result["live_publish_status"] == "success"
+    assert result["live_publish_job_id"] == "mu-original"
+    assert result["live_publish_idempotency_key"] == key
+
+
+def test_lost_admission_and_missing_lookup_remain_pending_with_key():
+    class Client:
+        endpoint = SimpleNamespace(service_instance_id="service", process_start_identity="process")
+
+        def submit_committed_publish(self, **kwargs):
+            raise TimeoutError("response lost")
+
+        def lookup_committed_publish(self, **kwargs):
+            return {"status": "error", "error": "unknown_publication_job"}
+
+    result = publish_committed_and_wait(
+        Client(), repo_id="repo", state_id="sid", revision=1, origin="mcp_analysis",
+    )
+    assert result["live_publish_status"] == "pending_verification"
+    assert result["live_publish_job_id"] is None
+    assert result["live_publish_idempotency_key"] == committed_publication_key("repo", "sid", 1)

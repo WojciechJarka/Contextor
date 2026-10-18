@@ -105,12 +105,18 @@ def get_analysis_status(
         job_id is not None
         and job.get("status") == "completed"
         and job.get("live_publish_status") == "pending_verification"
-        and isinstance(job.get("live_publish_job_id"), str)
         and isinstance(job.get("live_publish_expected_state_id"), str)
         and type(job.get("live_publish_expected_revision")) is int
+        and isinstance(job.get("live_publish_service_instance_id"), str)
+        and isinstance(job.get("live_publish_process_start_identity"), str)
+        and (
+            isinstance(job.get("live_publish_job_id"), str)
+            or isinstance(job.get("live_publish_idempotency_key"), str)
+        )
     ):
         from contextor.core.live_state import connect
         from contextor.core.live_state.publication_receipt import classify_publication_receipt
+        from contextor.core.live_state.publication_receipt import committed_publication_key
 
         try:
             client = connect(root, reconcile_missing_endpoint_binding=False)
@@ -120,9 +126,18 @@ def get_analysis_status(
         expected_process = job.get("live_publish_process_start_identity")
         if client is None:
             pass  # Retain the durable pending status.
-        elif (
+        else:
+            try:
+                authority = client.authority_status()
+            except (OSError, EOFError, ConnectionError, TimeoutError, RuntimeError):
+                authority = None
+        if client is not None and (
             client.endpoint.service_instance_id != expected_service
             or client.endpoint.process_start_identity != expected_process
+            or not isinstance(authority, dict)
+            or authority.get("status") != "ok"
+            or authority.get("service_instance_id") != expected_service
+            or authority.get("process_start_identity") != expected_process
         ):
             job = {
                 **job,
@@ -130,22 +145,56 @@ def get_analysis_status(
                 "live_publish_revision": None,
                 "live_publish_warning": "LIVE authority identity changed before receipt verification.",
             }
-        else:
-            try:
-                receipt = client.mutation_status(job["live_publish_job_id"])
-            except (OSError, EOFError, ConnectionError, TimeoutError, RuntimeError):
-                receipt = None
-            classified = classify_publication_receipt(
-                receipt,
-                job_id=job["live_publish_job_id"],
-                service_instance_id=expected_service,
-                process_start_identity=expected_process,
-                state_id=job["live_publish_expected_state_id"],
-                revision=job["live_publish_expected_revision"],
-            )
-            if classified["live_publish_status"] in {"success", "failed", "recovery_required"}:
-                job = {**job, **classified}
-                analysis_jobs._write_analysis_job(root, job)
+        elif client is not None:
+            mutation_job_id = job.get("live_publish_job_id")
+            if not isinstance(mutation_job_id, str):
+                state_id = job["live_publish_expected_state_id"]
+                revision = job["live_publish_expected_revision"]
+                stored_key = job.get("live_publish_idempotency_key")
+                repo_id = authority.get("repo_id")
+                expected_key = None
+                if isinstance(repo_id, str) and repo_id:
+                    try:
+                        expected_key = committed_publication_key(repo_id, state_id, revision)
+                    except ValueError:
+                        expected_key = None
+                if not isinstance(stored_key, str) or stored_key != expected_key:
+                    authority = None
+                else:
+                    try:
+                        lookup = client.lookup_committed_publish(
+                            idempotency_key=stored_key, state_id=state_id,
+                            revision=revision,
+                        )
+                    except (OSError, EOFError, ConnectionError, TimeoutError, RuntimeError):
+                        lookup = None
+                    if isinstance(lookup, dict) and lookup.get("status") == "ok":
+                        mutation_job_id = lookup.get("job_id")
+                        if isinstance(mutation_job_id, str) and mutation_job_id:
+                            job = {**job, "live_publish_job_id": mutation_job_id}
+                            try:
+                                analysis_jobs._write_analysis_job(root, job)
+                            except OSError:
+                                pass
+                    else:
+                        mutation_job_id = None
+            if isinstance(mutation_job_id, str) and mutation_job_id:
+                try:
+                    receipt = client.mutation_status(mutation_job_id)
+                except (OSError, EOFError, ConnectionError, TimeoutError, RuntimeError):
+                    receipt = None
+                classified = classify_publication_receipt(
+                    receipt,
+                    job_id=mutation_job_id,
+                    service_instance_id=expected_service,
+                    process_start_identity=expected_process,
+                    state_id=job["live_publish_expected_state_id"],
+                    revision=job["live_publish_expected_revision"],
+                    idempotency_key=job.get("live_publish_idempotency_key"),
+                )
+                if classified["live_publish_status"] in {"success", "failed", "recovery_required"}:
+                    job = {**job, **classified}
+                    analysis_jobs._write_analysis_job(root, job)
     public_job = analysis_jobs._public_job(job, max_skipped_files=max_skipped_files)
     if public_job.get("status") == "completed":
         diag = diagnostics_summary_for_completed_job(diagnostics_summary(root), job)
