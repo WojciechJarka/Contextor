@@ -168,6 +168,20 @@ def assess_index_bound_scc_models(
         if site_edges != structural.internal_edges:
             outputs.append(result(members, "SNAPSHOT_INTERNAL_EDGES_MISMATCH"))
             continue
+        site_component = snapshot.import_sites.components[position]
+        if (
+            site_component.matched_edge_count != len(structural.internal_edges)
+            or site_component.unresolved_edge_count != 0
+            or any(
+                edge.status != "LEXICAL_CANDIDATES" or not edge.sites
+                for edge in site_component.internal_edges
+            )
+        ):
+            outputs.append(result(
+                members, "UNRESOLVED_CYCLIC_IMPORT_SITES",
+                state="INCOMPLETE_EVIDENCE",
+            ))
+            continue
         if (
             evidence.classification != scenario.classification
             or evidence.coverage != scenario.coverage
@@ -245,6 +259,8 @@ def assess_index_bound_scc_models(
             or any(not isinstance(a, ImportOrderAssessment)
                    for a in scenario.entry_assessments)
             or tuple(a.entry_module for a in scenario.entry_assessments) != members
+            or any(a.evidence_scope != "RESTRICTED_FLAT_MODULE_MODEL"
+                   for a in scenario.entry_assessments)
             or any(a.outcome == "UNKNOWN" for a in scenario.entry_assessments)
         ):
             outputs.append(result(

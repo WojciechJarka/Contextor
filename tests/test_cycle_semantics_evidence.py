@@ -348,3 +348,87 @@ def test_p0_t16_no_warning_suppression_or_public_api_change():
     }
     assert not any("SAFE" in value or "warning" in value.lower()
                    for value in asdict(result[0]).values() if isinstance(value, str))
+
+
+@pytest.mark.parametrize(
+    "mode",
+    (
+        "unresolved",
+        "unresolved_spoofed_counts",
+        "empty_sites",
+    ),
+)
+def test_p0_t17_lexical_import_evidence_required(mode):
+    _, index, snapshot, evidence = _one()
+    site_report = snapshot.import_sites
+    component = site_report.components[0]
+    original_edge = component.internal_edges[0]
+
+    changed_edge = replace(
+        original_edge,
+        status=(
+            "LEXICAL_CANDIDATES"
+            if mode == "empty_sites"
+            else "NO_MATCHING_LEXICAL_SITE"
+        ),
+        sites=(),
+    )
+
+    if mode == "unresolved":
+        matched = component.matched_edge_count - 1
+        unresolved = component.unresolved_edge_count + 1
+    else:
+        matched = component.matched_edge_count
+        unresolved = component.unresolved_edge_count
+
+    changed_component = replace(
+        component,
+        internal_edges=(
+            changed_edge,
+            *component.internal_edges[1:],
+        ),
+        matched_edge_count=matched,
+        unresolved_edge_count=unresolved,
+    )
+
+    changed_snapshot = replace(
+        snapshot,
+        import_sites=replace(
+            site_report,
+            components=(changed_component,),
+        ),
+    )
+
+    result = assess(PAIR, index, changed_snapshot, evidence)
+    assert result[0].model_classification == "INDETERMINATE"
+    assert result[0].evidence_state == "INCOMPLETE_EVIDENCE"
+    assert result[0].reason == "UNRESOLVED_CYCLIC_IMPORT_SITES"
+
+
+@pytest.mark.parametrize("sources", (PASS, HAZARD))
+def test_p0_t18_entry_model_scope_must_match(sources):
+    _, index, snapshot, evidence = _one(sources=sources)
+    scenario = evidence.scenarios.components[0]
+    changed_entry = replace(
+        scenario.entry_assessments[0],
+        evidence_scope="UNVERIFIED_EXECUTION_MODEL",
+    )
+    changed_scenario = replace(
+        scenario,
+        entry_assessments=(
+            changed_entry,
+            *scenario.entry_assessments[1:],
+        ),
+    )
+    changed_evidence = replace(
+        evidence,
+        scenarios=replace(
+            evidence.scenarios,
+            components=(changed_scenario,),
+        ),
+    )
+
+    result = assess(PAIR, index, snapshot, changed_evidence)
+    assert result[0].model_classification == "INDETERMINATE"
+    assert result[0].evidence_state == "INCOMPLETE_EVIDENCE"
+    assert result[0].reason == "INCOMPLETE_MEMBER_ENTRY_ASSESSMENTS"
