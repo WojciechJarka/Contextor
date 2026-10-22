@@ -24,6 +24,10 @@ from contextor.core.cycle_semantics.evidence import (
 from contextor.core.cycle_semantics.source_proof import (
     assess_scc_source_bytes,
 )
+from contextor.core.cycle_semantics.generation_manifest import (
+    PreparedCycleSourceManifest,
+    prepare_cycle_source_manifest,
+)
 from contextor.core.cycle_semantics.contracts import (
     CycleSemanticsSnapshot, fingerprint_hard_edges,
 )
@@ -980,3 +984,165 @@ def test_p1b_t14_pep263_encoding_from_exact_bytes():
     assert result[0].bytes_state == (
         "BYTE_AST_CONSISTENT_NON_ATOMIC"
     )
+
+
+def test_p1c0_t01_prepared_manifest_contains_exact_sources():
+    index, snapshot, evidence = _bound(PAIR, PASS)
+    result = prepare_cycle_source_manifest(
+        PAIR, index, snapshot, evidence,
+        _p1b_snapshots(PASS),
+    )
+    assert isinstance(result, PreparedCycleSourceManifest)
+    assert result.graph_sha256 == fingerprint_hard_edges(PAIR)
+    assert len(result.source_manifest_sha256) == 64
+    assert result.components[0].members == ("a", "b")
+    assert result.components[0].preparation_state == (
+        "PREPARED_UNPUBLISHED"
+    )
+    assert result.components[0].source_signatures == (
+        evidence.components[0].source_signatures
+    )
+    assert result.authority == (
+        "PREPARED_ONLY_NOT_CANONICALLY_PUBLISHED"
+    )
+
+
+def test_p1c0_t02_byte_drift_cannot_prepare_manifest():
+    index, snapshot, evidence = _bound(PAIR, PASS)
+    sources = _p1b_snapshots(PASS)
+    sources["a"] = _p1b_snapshots(
+        {"a": PASS["a"] + "\n# changed"}
+    )["a"]
+    result = prepare_cycle_source_manifest(
+        PAIR, index, snapshot, evidence, sources,
+    )
+    assert result.source_manifest_sha256 is None
+    assert result.components[0].preparation_state == "UNAVAILABLE"
+    assert result.components[0].model_classification == "INDETERMINATE"
+
+
+def test_p1c0_t03_reachable_dependency_is_in_manifest():
+    graph = {
+        "a": {"b", "dep"},
+        "b": {"a"},
+        "dep": set(),
+    }
+    sources = {
+        "a": "import b\nimport dep",
+        "b": "import a",
+        "dep": "x=1",
+    }
+    index, snapshot, evidence = _bound(graph, sources)
+    result = prepare_cycle_source_manifest(
+        graph, index, snapshot, evidence,
+        _p1b_snapshots(sources),
+    )
+    assert result.components[0].preparation_state == (
+        "PREPARED_UNPUBLISHED"
+    )
+    assert tuple(
+        item[0]
+        for item in result.components[0].source_signatures
+    ) == ("a", "b", "dep")
+
+
+def test_p1c0_t04_missing_dependency_blocks_digest():
+    graph = {
+        "a": {"b", "dep"},
+        "b": {"a"},
+        "dep": set(),
+    }
+    sources = {
+        "a": "import b\nimport dep",
+        "b": "import a",
+        "dep": "x=1",
+    }
+    index, snapshot, evidence = _bound(graph, sources)
+    raw = _p1b_snapshots(sources)
+    del raw["dep"]
+    result = prepare_cycle_source_manifest(
+        graph, index, snapshot, evidence, raw,
+    )
+    assert result.source_manifest_sha256 is None
+    assert result.components[0].reason == (
+        "SOURCE_BYTES_UNAVAILABLE:dep"
+    )
+
+
+def test_p1c0_t05_independent_scc_partial_failure():
+    graph = {
+        "a": {"b"},
+        "b": {"a"},
+        "x": {"y"},
+        "y": {"x"},
+    }
+    sources = dict(
+        PASS,
+        x="import y\nn=1",
+        y="import x\nm=2",
+    )
+    index, snapshot, evidence = _bound(graph, sources)
+    raw = _p1b_snapshots(sources)
+    del raw["x"]
+    result = prepare_cycle_source_manifest(
+        graph, index, snapshot, evidence, raw,
+    )
+    assert [
+        item.preparation_state
+        for item in result.components
+    ] == ["PREPARED_UNPUBLISHED", "UNAVAILABLE"]
+    assert result.source_manifest_sha256 is None
+
+
+def test_p1c0_t06_unrelated_source_does_not_affect_digest():
+    graph = {
+        "a": {"b"},
+        "b": {"a"},
+        "other": set(),
+    }
+    first = dict(PASS, other="x=1")
+    second = dict(PASS, other="x=2")
+    a_index, a_snapshot, a_evidence = _bound(graph, first)
+    b_index, b_snapshot, b_evidence = _bound(graph, second)
+    a = prepare_cycle_source_manifest(
+        graph, a_index, a_snapshot, a_evidence,
+        _p1b_snapshots(PASS),
+    )
+    b = prepare_cycle_source_manifest(
+        graph, b_index, b_snapshot, b_evidence,
+        _p1b_snapshots(PASS),
+    )
+    assert a.source_manifest_sha256 == b.source_manifest_sha256
+
+
+def test_p1c0_t07_no_cycles_is_not_positive_proof():
+    graph = {"a": {"b"}, "b": set()}
+    sources = {"a": "import b", "b": "pass"}
+    index, snapshot, evidence = _bound(graph, sources)
+    result = prepare_cycle_source_manifest(
+        graph, index, snapshot, evidence, {},
+    )
+    assert result.components == ()
+    assert result.source_manifest_sha256 is None
+
+
+def test_p1c0_t08_deterministic_and_never_published():
+    index, snapshot, evidence = _bound(PAIR, PASS)
+    sources = _p1b_snapshots(PASS)
+    before = repr((index, snapshot, evidence, sources))
+    a = prepare_cycle_source_manifest(
+        PAIR, index, snapshot, evidence, sources,
+    )
+    b = prepare_cycle_source_manifest(
+        PAIR, index, snapshot, evidence, sources,
+    )
+    assert a == b
+    assert before == repr((index, snapshot, evidence, sources))
+    assert a.authority == (
+        "PREPARED_ONLY_NOT_CANONICALLY_PUBLISHED"
+    )
+    assert "SAFE" not in a.authority
+    assert "PUBLISHED" not in a.components[0].preparation_state.replace(
+        "UNPUBLISHED", ""
+    )
+    json.dumps(asdict(a))
