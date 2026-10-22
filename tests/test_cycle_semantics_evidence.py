@@ -2,13 +2,16 @@ import ast
 import hashlib
 import json
 from dataclasses import asdict, replace
+from types import SimpleNamespace
 
 import pytest
 
 from contextor.core.source import ParsedSourceInput
 from contextor.core.cycle_semantics.evidence import (
     SCCModelEvidenceAssessment,
+    SCCGenerationModelAssessment,
     assess_index_bound_scc_models as assess,
+    assess_live_generation_scc_models,
     build_source_bound_cycle_evidence as build,
     compare_source_bound_cycle_evidence as compare,
 )
@@ -339,7 +342,6 @@ def test_p0_t15_deterministic_without_input_mutation():
     assert before == (repr(edges), repr(index), repr(snapshot), repr(evidence))
     json.dumps(asdict(first[0]))
 
-
 def test_p0_t16_no_warning_suppression_or_public_api_change():
     result, _, _, _ = _one()
     assert result[0].authority == "SNAPSHOT_MODEL_ONLY_NOT_LIVE_CERTIFIED"
@@ -432,3 +434,177 @@ def test_p0_t18_entry_model_scope_must_match(sources):
     assert result[0].model_classification == "INDETERMINATE"
     assert result[0].evidence_state == "INCOMPLETE_EVIDENCE"
     assert result[0].reason == "INCOMPLETE_MEMBER_ENTRY_ASSESSMENTS"
+
+
+def _p1_case(sources=PASS):
+    _, index, snapshot, evidence = _one(sources=sources)
+    state = SimpleNamespace(
+        dependency_graph=SimpleNamespace(hard_edges=PAIR),
+        cycle_semantics=snapshot,
+        cycle_semantics_state="fresh",
+        cycles_state="fresh",
+        revision=47,
+        state_id="canonical-state-1",
+        resync_required=False,
+    )
+    manager = SimpleNamespace(
+        revision=47,
+        state_id="canonical-state-1",
+    )
+    engine = SimpleNamespace(
+        state=state,
+        revision=47,
+        state_manager=manager,
+    )
+    freshness = {
+        "canonical_state": "fresh",
+        "canonical_revision": 47,
+        "provenance": "live",
+        "workspace_sync": "unverified",
+        "families": {
+            "module": "fresh",
+            "graph": "fresh",
+            "cycles": "fresh",
+            "cycle_semantics": "fresh",
+        },
+    }
+    return state, freshness, engine, index, evidence
+
+
+def test_p1_t01_coherent_metadata_preserves_bounded_model():
+    state, freshness, engine, index, evidence = _p1_case()
+    result = assess_live_generation_scc_models(
+        state, freshness, engine, index, evidence,
+    )
+    assert result == (
+        SCCGenerationModelAssessment(
+            ("a", "b"),
+            "MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS",
+            "DECLARED_GENERATION_COHERENT",
+            None,
+            47,
+        ),
+    )
+    assert result[0].authority == (
+        "LIVE_METADATA_COHERENT_MODEL_ONLY_NOT_SOURCE_CERTIFIED"
+    )
+
+
+def test_p1_t02_hazard_remains_model_only():
+    state, freshness, engine, index, evidence = _p1_case(
+        sources=HAZARD,
+    )
+    result = assess_live_generation_scc_models(
+        state, freshness, engine, index, evidence,
+    )
+    assert result[0].model_classification == (
+        "MODEL_INTERNAL_EARLY_BINDING_HAZARD"
+    )
+    assert result[0].generation_state == (
+        "DECLARED_GENERATION_COHERENT"
+    )
+
+
+@pytest.mark.parametrize("condition,reason", (
+    ("resync", "CANONICAL_RESYNC_REQUIRED"),
+    ("revision", "CANONICAL_GENERATION_MISMATCH"),
+    ("engine_revision", "CANONICAL_GENERATION_MISMATCH"),
+    ("manager_revision", "CANONICAL_GENERATION_MISMATCH"),
+    ("state_id", "STATE_IDENTITY_MISMATCH"),
+    ("engine_state", "ENGINE_STATE_IDENTITY_MISMATCH"),
+    ("family", "REQUIRED_FAMILY_NOT_FRESH"),
+    ("state_family", "STATE_FAMILY_NOT_FRESH"),
+    ("canonical_state", "CANONICAL_STATE_NOT_FRESH"),
+    ("snapshot", "CYCLE_SNAPSHOT_UNAVAILABLE"),
+    ("provenance", "LIVE_PROVENANCE_UNVERIFIED"),
+    ("workspace", "WORKSPACE_NOT_CONTENT_VERIFIED"),
+    ("manager_missing", "STATE_MANAGER_UNAVAILABLE"),
+))
+def test_p1_t03_missing_or_stale_generation_fails_closed(
+    condition, reason,
+):
+    state, freshness, engine, index, evidence = _p1_case()
+    if condition == "resync":
+        state.resync_required = True
+    elif condition == "revision":
+        state.revision = 48
+    elif condition == "engine_revision":
+        engine.revision = 48
+    elif condition == "manager_revision":
+        engine.state_manager.revision = 48
+    elif condition == "state_id":
+        engine.state_manager.state_id = "other-state"
+    elif condition == "engine_state":
+        engine.state = SimpleNamespace()
+    elif condition == "family":
+        freshness["families"]["cycle_semantics"] = "stale"
+    elif condition == "state_family":
+        state.cycle_semantics_state = "deferred"
+    elif condition == "canonical_state":
+        freshness["canonical_state"] = "stale"
+    elif condition == "snapshot":
+        state.cycle_semantics = None
+    elif condition == "provenance":
+        freshness["provenance"] = "snapshot"
+    elif condition == "workspace":
+        freshness["workspace_sync"] = "out_of_sync"
+    elif condition == "manager_missing":
+        engine.state_manager = None
+
+    result = assess_live_generation_scc_models(
+        state, freshness, engine, index, evidence,
+    )
+    assert len(result) == 1
+    assert result[0].model_classification == "INDETERMINATE"
+    assert result[0].generation_state == "UNAVAILABLE"
+    assert result[0].reason == reason
+
+
+def test_p1_t04_source_index_mismatch_rejects_model():
+    state, freshness, engine, index, evidence = _p1_case()
+    index["a"] = "0" * 64
+    result = assess_live_generation_scc_models(
+        state, freshness, engine, index, evidence,
+    )
+    assert result[0].model_classification == "INDETERMINATE"
+    assert result[0].generation_state == "UNAVAILABLE"
+    assert result[0].reason == (
+        "SOURCE_INDEX_FINGERPRINT_MISMATCH:a"
+    )
+
+
+def test_p1_t05_metadata_match_cannot_establish_content():
+    state, freshness, engine, index, evidence = _p1_case()
+    freshness["workspace_sync"] = "metadata_match"
+    result = assess_live_generation_scc_models(
+        state, freshness, engine, index, evidence,
+    )
+    assert result[0].generation_state == "UNAVAILABLE"
+    assert result[0].reason == (
+        "WORKSPACE_NOT_CONTENT_VERIFIED"
+    )
+
+
+def test_p1_t06_deterministic_and_no_mutation():
+    state, freshness, engine, index, evidence = _p1_case()
+    before = (
+        repr(state),
+        repr(freshness),
+        repr(engine),
+        repr(index),
+        repr(evidence),
+    )
+    first = assess_live_generation_scc_models(
+        state, freshness, engine, index, evidence,
+    )
+    assert first == assess_live_generation_scc_models(
+        state, freshness, engine, index, evidence,
+    )
+    assert before == (
+        repr(state),
+        repr(freshness),
+        repr(engine),
+        repr(index),
+        repr(evidence),
+    )
+    json.dumps(asdict(first[0]))

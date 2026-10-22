@@ -11,6 +11,7 @@ import hashlib
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import Any
 
 from contextor.core.source import ParsedSourceInput
 
@@ -298,6 +299,190 @@ def assess_index_bound_scc_models(
                 state="INCOMPLETE_EVIDENCE",
             ))
     return tuple(outputs)
+
+
+_GENERATION_AUTHORITY = (
+    "LIVE_METADATA_COHERENT_MODEL_ONLY_NOT_SOURCE_CERTIFIED"
+)
+
+
+@dataclass(frozen=True)
+class SCCGenerationModelAssessment:
+    members: tuple[str, ...]
+    model_classification: str
+    generation_state: str
+    reason: str | None
+    canonical_revision: int | None
+    authority: str = _GENERATION_AUTHORITY
+
+
+def assess_live_generation_scc_models(
+    state: Any,
+    freshness: Mapping[str, Any],
+    engine: Any,
+    indexed_fingerprints_by_module: Mapping[str, str],
+    source_evidence: SourceBoundCycleEvidence,
+) -> tuple[SCCGenerationModelAssessment, ...]:
+    """Gate P0 evidence on coherent supplied LIVE metadata.
+
+    This is not a proof of source-byte provenance, authentic
+    LIVE transport, import execution, or runtime safety.
+
+    No filesystem access, model execution, mutation, or IPC.
+    """
+    if not isinstance(freshness, Mapping):
+        raise TypeError("freshness must be a mapping")
+    if not isinstance(indexed_fingerprints_by_module, Mapping):
+        raise TypeError("indexed fingerprints must be a mapping")
+    if not isinstance(source_evidence, SourceBoundCycleEvidence):
+        raise TypeError(
+            "source_evidence must be SourceBoundCycleEvidence"
+        )
+
+    graph = getattr(state, "dependency_graph", None)
+    hard_edges = getattr(graph, "hard_edges", None)
+
+    if isinstance(hard_edges, Mapping):
+        topology = analyze_import_cycle_topology(hard_edges)
+        members = tuple(
+            component.members
+            for component in topology.cyclic_components
+        )
+    else:
+        members = tuple(
+            component.members
+            for component in (
+                source_evidence.scenarios.topology.cyclic_components
+            )
+        )
+
+    revision = freshness.get("canonical_revision")
+    canonical_revision = (
+        revision
+        if type(revision) is int and revision >= 0
+        else None
+    )
+
+    def reject(
+        reason: str,
+    ) -> tuple[SCCGenerationModelAssessment, ...]:
+        return tuple(
+            SCCGenerationModelAssessment(
+                component,
+                "INDETERMINATE",
+                "UNAVAILABLE",
+                reason,
+                canonical_revision,
+            )
+            for component in members
+        )
+
+    if not isinstance(hard_edges, Mapping):
+        return reject("CANONICAL_GRAPH_UNAVAILABLE")
+
+    if getattr(state, "resync_required", False) is not False:
+        return reject("CANONICAL_RESYNC_REQUIRED")
+
+    if canonical_revision is None:
+        return reject("CANONICAL_REVISION_UNAVAILABLE")
+
+    if freshness.get("canonical_state") != "fresh":
+        return reject("CANONICAL_STATE_NOT_FRESH")
+
+    if freshness.get("provenance") != "live":
+        return reject("LIVE_PROVENANCE_UNVERIFIED")
+
+    # A global workspace envelope usually has no exact
+    # source-file SHA proof. Even "verified" is potentially
+    # target-local and never certifies the SCC closure.
+    workspace_sync = freshness.get("workspace_sync")
+    if workspace_sync not in ("unverified", "verified"):
+        return reject("WORKSPACE_NOT_CONTENT_VERIFIED")
+
+    families = freshness.get("families")
+    if (
+        not isinstance(families, Mapping)
+        or any(
+            families.get(name) != "fresh"
+            for name in (
+                "module",
+                "graph",
+                "cycles",
+                "cycle_semantics",
+            )
+        )
+    ):
+        return reject("REQUIRED_FAMILY_NOT_FRESH")
+
+    if (
+        getattr(state, "cycle_semantics_state", None) != "fresh"
+        or getattr(state, "cycles_state", None) != "fresh"
+    ):
+        return reject("STATE_FAMILY_NOT_FRESH")
+
+    snapshot = getattr(state, "cycle_semantics", None)
+    if snapshot is None:
+        return reject("CYCLE_SNAPSHOT_UNAVAILABLE")
+
+    if (
+        engine is None
+        or getattr(engine, "state", None) is not state
+    ):
+        return reject("ENGINE_STATE_IDENTITY_MISMATCH")
+
+    manager = getattr(engine, "state_manager", None)
+    if manager is None:
+        return reject("STATE_MANAGER_UNAVAILABLE")
+
+    revisions = (
+        getattr(state, "revision", None),
+        getattr(engine, "revision", None),
+        getattr(manager, "revision", None),
+    )
+    if any(
+        type(value) is not int
+        or value != canonical_revision
+        for value in revisions
+    ):
+        return reject("CANONICAL_GENERATION_MISMATCH")
+
+    state_id = getattr(state, "state_id", None)
+    manager_id = getattr(manager, "state_id", None)
+    if (
+        type(state_id) is not str
+        or not state_id.strip()
+        or type(manager_id) is not str
+        or manager_id != state_id
+    ):
+        return reject("STATE_IDENTITY_MISMATCH")
+
+    # P0 remains the sole owner of source/index/model
+    # consistency. Do not duplicate its verification.
+    model = assess_index_bound_scc_models(
+        hard_edges,
+        indexed_fingerprints_by_module,
+        snapshot,
+        source_evidence,
+    )
+
+    if tuple(item.members for item in model) != members:
+        return reject("MODEL_COMPONENT_IDENTITY_MISMATCH")
+
+    return tuple(
+        SCCGenerationModelAssessment(
+            item.members,
+            item.model_classification,
+            (
+                "DECLARED_GENERATION_COHERENT"
+                if item.evidence_state
+                == "DECLARED_INPUTS_CONSISTENT"
+                else "UNAVAILABLE"
+            ),
+            item.reason,
+            canonical_revision,
+        )
+        for item in model
+    )
 
 
 def build_source_bound_cycle_evidence(
