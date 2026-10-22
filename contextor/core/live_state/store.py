@@ -1518,6 +1518,7 @@ def save_snapshot(
     previous_state: Any = None,
     migration_file_state_source: str | Path | None = None,
     migration_only_if_absent: bool = False,
+    prepared_cycle_manifest: Any = None,
 ) -> LiveStateMetadata:
     """Atomically publish a complete snapshot and monotonically increasing revision."""
 
@@ -1736,6 +1737,46 @@ def save_snapshot(
                 pass
 
         state_to_persist = state
+
+        # A prepared manifest is sealed by the canonical STORE OWNER
+        # under the existing store lock, as part of the SAME state
+        # generation. Never write it as a separate metadata file.
+        #
+        # The original caller state is not given a receipt before
+        # the durable metadata commit can succeed.
+        if prepared_cycle_manifest is not None:
+            if not isinstance(state, RepositoryAnalysisState):
+                raise TypeError(
+                    "prepared cycle manifest requires canonical state"
+                )
+
+            from contextor.core.cycle_semantics.publication_binding import (
+                seal_prepared_cycle_manifest,
+            )
+
+            state_to_persist = copy.copy(state)
+            state_to_persist.cycle_source_publication = (
+                seal_prepared_cycle_manifest(
+                    state_to_persist,
+                    prepared_cycle_manifest,
+                    revision=metadata.revision,
+                    state_id=metadata.state_id,
+                    repo_id=metadata.repo_id,
+                    root_path=metadata.root_path,
+                )
+            )
+
+        elif (
+            isinstance(state, RepositoryAnalysisState)
+            and getattr(
+                state,
+                "cycle_source_publication",
+                None,
+            ) is not None
+        ):
+            # Old receipt must never be republished implicitly.
+            state_to_persist = copy.copy(state)
+            state_to_persist.cycle_source_publication = None
 
         if (
             generation_lineage_manifest
@@ -2308,6 +2349,26 @@ def load_snapshot(
                 phase_started,
                 repo_id=expected_repo_id,
             )
+            # Fail closed on absent/foreign/tampered generation
+            # receipts while retaining otherwise valid diagnostics.
+            if getattr(
+                state_obj,
+                "cycle_source_publication",
+                None,
+            ) is not None:
+                from contextor.core.cycle_semantics.publication_binding import (
+                    verify_co_published_cycle_manifest,
+                )
+
+                if not verify_co_published_cycle_manifest(
+                    state_obj,
+                    revision=metadata.revision,
+                    state_id=metadata.state_id,
+                    repo_id=metadata.repo_id,
+                    root_path=metadata.root_path,
+                ):
+                    state_obj.cycle_source_publication = None
+
             return state_obj, metadata
         if metadata.lineage_manifest_file:
             return None

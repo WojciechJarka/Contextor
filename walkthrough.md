@@ -1,414 +1,793 @@
-# CONTEXTOR_CYCLE_PROOF_P1C0_PREPARED_SOURCE_MANIFEST
+# CONTEXTOR_CYCLE_PROOF_P1C1_OWNER_CO_PUBLICATION
 
 ## TASK
-Applied the exact auditor-supplied P1C0 prepared source-manifest implementation. It prepares immutable model evidence; it does not publish a canonical generation, certify source capture or runtime safety, or alter cycle warnings.
+Applied the exact auditor-supplied P1C1 patch in five approved files. This is a co-publication claim, not authenticated source capture or Python runtime SAFE certification. No redesign, extra source/test edits, FULL analysis, full pytest suite, update_file or restart.
 
 ## HEAD_BEFORE
-4796dc8422f19a4b41dcdecb931214faf73ffeb0; clean tree before task. generation_manifest.py did not exist and both test patch anchors matched. Contextor showed P1B source_proof assessor and its test consumer, with both target modules workspace_sync=verified at LIVE revision 636. Cycle-semantics family was stale before this task.
+9cecd293eee33901fee07e130ae9087de3177239; clean working tree. All supplied source anchors existed and both new files were absent. Contextor identified save_snapshot as the canonical store writer with 19 pre-edit direct static consumers, RepositoryAnalysisState with broad consumers, and invalidate_cycle_semantics with incremental-engine and test consumers. LIVE revision 638, resync_required=false.
 
 ## HEAD_AFTER
-4796dc8422f19a4b41dcdecb931214faf73ffeb0. No commit made.
+9cecd293eee33901fee07e130ae9087de3177239. No commit made.
 
 ## FILES_CHANGED
-- contextor/core/cycle_semantics/generation_manifest.py (new)
-- tests/test_cycle_semantics_evidence.py
-walkthrough.md is the required report and excluded from production/test/docs changes.
+- contextor/core/cycle_semantics/publication_binding.py (new)
+- contextor/core/analysis/state_manager.py
+- contextor/core/cycle_semantics/lifecycle.py
+- contextor/core/live_state/store.py
+- tests/test_cycle_semantics_publication_binding.py (new)
+walkthrough.md is this required report, excluded from source/test/docs changes.
 
 ## EXACT_IMPLEMENTATION
-Added the supplied MANIFEST_VERSION, PREPARED_ONLY_NOT_CANONICALLY_PUBLISHED authority, frozen PreparedSCCSourceBinding and PreparedCycleSourceManifest, deterministic digest helper, and prepare_cycle_source_manifest. It delegates byte/AST verification and budgets to P1B, retains exact successful SCC source signatures, rejects missing/failed evidence or conflicting shared source signatures, and emits a global source-manifest digest only if every cyclic SCC is complete. Added the auditor-supplied local P1C0 T01–T08 tests. No publication, persistence, GUI, MCP, report, graph, SCC or warning-policy integration.
+Applied the supplied CanonicalCycleManifestReceipt, claim-digest validation, seal and verification helpers. Added optional cycle_source_publication state field, cleared it on clone_for_update and cycle invalidation, added prepared_cycle_manifest handling and receipt verification to the existing store save/load path, and added ten named tests. No alternative transaction or metadata file was added. py_compile of all five files exited 0.
 
-## T01_T08_RESULTS
-Command: .\.venv\Scripts\python.exe -m pytest -q tests/test_cycle_semantics_evidence.py -k p1c0
-Actual: 8 passed, 67 deselected in 1.63s, exit code 0.
-T01 exact prepared source signatures and graph hash PASS; T02 byte drift blocks digest PASS; T03 reachable dependency included PASS; T04 missing dependency blocks digest PASS; T05 independent SCC partial failure blocks global digest PASS; T06 unrelated source does not alter digest PASS; T07 no cyclic SCC is not positive proof PASS; T08 deterministic immutable preparation without publication PASS.
+## T01_T10_RESULTS
+Command: .\.venv\Scripts\python.exe -m pytest -q tests/test_cycle_semantics_publication_binding.py
+Actual: 6 failed, 4 passed in 3.38s; exit code 1.
+- T01 FAIL: load_snapshot returns cycle_source_publication=None; expected CanonicalCycleManifestReceipt.
+- T02 PASS: no prepared input yields no receipt.
+- T03 FAIL: prior revision's loaded receipt is None after rejected forged manifest.
+- T04 FAIL: loaded old revision receipt is None.
+- T05 FAIL: after synthetic metadata commit failure, loaded previous receipt is None, so .revision raises AttributeError.
+- T06 FAIL: persisted payload receipt is None; dataclasses.replace(None, revision=999) raises TypeError before tamper check.
+- T07 PASS: clone and invalidation clear receipt in memory.
+- T08 FAIL: loaded receipt is None, so model_claims_sha256 access raises AttributeError.
+- T09 PASS: stale state cannot seal.
+- T10 PASS: legacy missing receipt remains unavailable.
+The failures are one shared in-scope durable-write defect, not proof of six independent causes.
 
 ## FOCUSED_NON_REGRESSION
-Command: .\.venv\Scripts\python.exe -m pytest -q tests/test_cycle_semantics_evidence.py tests/test_cycle_semantics_scenarios.py tests/test_cycle_semantics_initialization_model.py tests/test_cycle_semantics_canonical_state.py tests/test_cycle_semantics_source_cohort.py
-Actual: 137 passed in 6.32s, exit code 0. py_compile of both changed files: exit code 0. git diff --check for tracked test emitted no whitespace findings; git diff --no-index --check for new file emitted no whitespace findings (exit 1 reflects the expected difference from /dev/null). No full repository pytest suite.
+Command: .\.venv\Scripts\python.exe -m pytest -q tests/test_cycle_semantics_canonical_state.py tests/test_cycle_semantics_invalidation.py tests/test_cycle_semantics_evidence.py tests/test_live_state_store.py
+Actual: 1 failed, 174 passed in 42.29s; exit code 1. Failure: tests/test_cycle_semantics_canonical_state.py::test_existing_constructor_compatibility asserts the exact previous dataclass field tuple and now sees the newly added cycle_source_publication field. This is a direct contract/test mismatch introduced by the approved patch; that test file is outside the allowlist. No broader suite run.
+git diff --check for tracked files and git diff --no-index --check for both new files showed no whitespace error (no-index returns difference status for new files).
 
-## MANIFEST_IDENTITY_AND_SOURCE_CLOSURE
-The manifest graph_sha256 is fingerprint_hard_edges of the supplied graph. For each SCC, accepted signatures are exactly the P1B-checked source_evidence component signatures for the reachable closure, including noncyclic dependencies. Shared-module signatures must agree. The deterministic digest covers manifest version, graph hash, ordered SCC member tuples and sorted accepted source signatures. It is null if there are no cyclic SCCs or if any SCC cannot be prepared. Tests T03–T07 exercise closure inclusion, missing evidence, independent components, unrelated source and empty cyclic set.
+## DURABLE_GENERATION_BINDING
+CODE_PATH_PROVED failure boundary: save_snapshot sets state_to_persist=copy.copy(state) and attaches the sealed receipt. For the exact-revision RepositoryAnalysisState path used by T01/T03/T04/T05/T06/T08, generation_lineage_manifest is non-None. The subsequent _write_split_lineage_generation call receives the original state, not state_to_persist, and replaces state_to_persist with a new object built from that original. The pickled payload therefore has cycle_source_publication=None. DIRECT_EVIDENCE: T06 reads the stored pickle and finds None; T01 load also finds None. The auditor-supplied patch's claimed same-generation durable binding is not achieved. No implementation adaptation was made.
 
-## PUBLICATION_AUTHORITY_LIMITATION
-PREPARED_UNPUBLISHED means an immutable candidate only. No canonical owner has accepted the manifest, no LIVE revision is attached to it, and caller-supplied source bytes remain non-atomic with the graph. The result is not a publication receipt, SAFE classification, or permission to suppress ArchitectureCycle. Current LIVE cycle_semantics family is stale.
+## COMMIT_FAILURE_AND_RECOVERY
+T03 confirms the forged manifest is rejected and durable metadata remains revision 1; the prior receipt is absent due to the write-path defect. T05 confirms the synthetic failed metadata replacement leaves metadata at revision 1; the old loaded receipt is again absent. Existing store atomicity of metadata was not disproven, but receipt preservation/recovery assertions fail. T06's foreign receipt test cannot reach its tamper assertion because the initial receipt was never serialized.
+
+## INCREMENTAL_INVALIDATION
+T07 passes: clone_for_update returns a separate candidate with receipt=None while the original retains its in-memory receipt; invalidate_cycle_semantics clears the original receipt and marks semantic state stale. The exact dataclass-field extension breaks the preexisting constructor compatibility assertion in focused non-regression.
+
+## SOURCE_AUTHORITY_LIMITATION
+Even a corrected co-publication receipt would attest only to committed prepared claims and exact metadata identity. It would not prove source-byte authenticity, atomic source/graph capture, import execution or runtime safety. Current LIVE cycle_semantics family remains stale. No SAFE classification or warning suppression was added.
 
 ## LIVE_REVISION_BEFORE_AFTER
-Before: revision 636, resync_required=false. After: revision 638, resync_required=false. Module, graph, topology, artifact-consumption and structural cycles are fresh; cycle_semantics remains stale.
+Before edits: revision 638, resync_required=false. After watcher adoption: revision 643, resync_required=false. Module/graph/topology/structural cycle families fresh; cycle_semantics stale.
 
 ## WATCHER_EVENTS
-get_live_events(after_revision=636): revision 637, desktop_watcher update_file UPDATED new generation_manifest.py, blast_radius_state=fresh. get_live_events(after_revision=637): revision 638, desktop_watcher update_file UPDATED test_cycle_semantics_evidence.py, blast_radius_state=fresh. Continuity=continuous and resync_required=false. No manual update_file.
+get_live_events(after_revision=638) and follow-up after_revision=641 returned continuous history, resync_required=false:
+- 639 desktop_watcher UPDATED publication_binding.py, blast_radius_state=fresh.
+- 640 desktop_watcher UPDATED state_manager.py, blast_radius_state=deferred.
+- 641 desktop_watcher UPDATED lifecycle.py, blast_radius_state=deferred.
+- 642 desktop_watcher UPDATED store.py, blast_radius_state=fresh; affected_modules total=253 (bounded journal list truncated).
+- 643 desktop_watcher UPDATED test_cycle_semantics_publication_binding.py, blast_radius_state=fresh.
+No manual update_file.
 
 ## WORKSPACE_SYNC
-At revision 637, Contextor get_module_context reported generation_manifest.py workspace_sync=verified. At revision 638, get_module_context reported test_cycle_semantics_evidence.py workspace_sync=verified; blast radius for prepare_cycle_source_manifest also reported workspace_sync=verified with one confirmed test consumer. Project aggregate workspace_sync remains a separate, potentially unverified read scope.
+At revision 643, sequential Contextor get_module_context checks reported workspace_sync=verified and no advisory warning for all five changed modules. An earlier concurrent check briefly returned Resource deadlock avoided / unverified during watcher progression; the sequential final checks resolved this. Post-edit blast radius confirms seal_prepared_cycle_manifest has store.py and the new test as static consumers, and save_snapshot has 20 static consumers. Source/test graph family is fresh; semantic diagnostic family remains stale.
 
 ## RESTART_REQUIREMENTS
-No restart performed. The new pure helper has only a confirmed test consumer; it is not integrated into serving MCP/LIVE code. An existing process would need to import this new module before calling it. No restart is required for the current test-only consumption path.
+No process was restarted. Active MCP HTTP listener 127.0.0.1:8765 remains owned by PID 3128. store.py, state_manager.py and lifecycle.py are imported in serving paths; an already-running process needs a manual reload/restart before it could execute modified code. Actual remote sys.modules and post-restart adoption were not certified. Because tests fail, restarting now would not certify P1C1 and should follow an auditor-approved correction. LIVE runtime likewise needs owner-managed reload if the modified store path is to be exercised there.
 
 ## FULL_DIFFS
-Complete actual unified diff of both changed files follows. The new file is diffed against /dev/null because it is untracked.
+Complete actual unified diffs of all five changed production/test files follow. New files are diffed against /dev/null.
 
 ```diff
-diff --git a/tests/test_cycle_semantics_evidence.py b/tests/test_cycle_semantics_evidence.py
-index a44937d..6389e6a 100644
---- a/tests/test_cycle_semantics_evidence.py
-+++ b/tests/test_cycle_semantics_evidence.py
-@@ -24,6 +24,10 @@ from contextor.core.cycle_semantics.evidence import (
- from contextor.core.cycle_semantics.source_proof import (
-     assess_scc_source_bytes,
- )
-+from contextor.core.cycle_semantics.generation_manifest import (
-+    PreparedCycleSourceManifest,
-+    prepare_cycle_source_manifest,
-+)
- from contextor.core.cycle_semantics.contracts import (
-     CycleSemanticsSnapshot, fingerprint_hard_edges,
- )
-@@ -980,3 +984,165 @@ def test_p1b_t14_pep263_encoding_from_exact_bytes():
-     assert result[0].bytes_state == (
-         "BYTE_AST_CONSISTENT_NON_ATOMIC"
-     )
+diff --git a/contextor/core/analysis/state_manager.py b/contextor/core/analysis/state_manager.py
+index 6f5e643..0278ded 100644
+--- a/contextor/core/analysis/state_manager.py
++++ b/contextor/core/analysis/state_manager.py
+@@ -133,6 +133,8 @@ class RepositoryAnalysisState:
+     cycle_semantics: CycleSemanticsSnapshot | None = None
+     cycle_semantics_state: str = "deferred"
+     cycle_semantics_invalidation_reason: str | None = None
++    # Optional durable receipt. Never a runtime SAFE certificate.
++    cycle_source_publication: Any = None
+ 
+     def clone_for_update(self) -> "RepositoryAnalysisState":
+         """
+@@ -150,6 +152,9 @@ class RepositoryAnalysisState:
+         contracts in the incremental pipeline.
+         """
+         candidate = copy.copy(self)
++        # An incremental candidate is a new generation.
++        # It cannot inherit a receipt from the old generation.
++        candidate.cycle_source_publication = None
+ 
+         for state_field in fields(self):
+             value = getattr(
+diff --git a/contextor/core/cycle_semantics/lifecycle.py b/contextor/core/cycle_semantics/lifecycle.py
+index ec041d5..7556255 100644
+--- a/contextor/core/cycle_semantics/lifecycle.py
++++ b/contextor/core/cycle_semantics/lifecycle.py
+@@ -113,6 +113,10 @@ def invalidate_cycle_semantics(
+             "Unsupported cycle semantics invalidation reason"
+         )
+ 
++    # Even retained historical semantic evidence cannot carry
++    # its old publication receipt into a new generation.
++    state.cycle_source_publication = None
 +
+     evidence = getattr(
+         state,
+         "cycle_semantics",
+diff --git a/contextor/core/live_state/store.py b/contextor/core/live_state/store.py
+index 1cc83fd..cd4b541 100644
+--- a/contextor/core/live_state/store.py
++++ b/contextor/core/live_state/store.py
+@@ -1518,6 +1518,7 @@ def save_snapshot(
+     previous_state: Any = None,
+     migration_file_state_source: str | Path | None = None,
+     migration_only_if_absent: bool = False,
++    prepared_cycle_manifest: Any = None,
+ ) -> LiveStateMetadata:
+     """Atomically publish a complete snapshot and monotonically increasing revision."""
+ 
+@@ -1737,6 +1738,46 @@ def save_snapshot(
+ 
+         state_to_persist = state
+ 
++        # A prepared manifest is sealed by the canonical STORE OWNER
++        # under the existing store lock, as part of the SAME state
++        # generation. Never write it as a separate metadata file.
++        #
++        # The original caller state is not given a receipt before
++        # the durable metadata commit can succeed.
++        if prepared_cycle_manifest is not None:
++            if not isinstance(state, RepositoryAnalysisState):
++                raise TypeError(
++                    "prepared cycle manifest requires canonical state"
++                )
 +
-+def test_p1c0_t01_prepared_manifest_contains_exact_sources():
-+    index, snapshot, evidence = _bound(PAIR, PASS)
-+    result = prepare_cycle_source_manifest(
-+        PAIR, index, snapshot, evidence,
-+        _p1b_snapshots(PASS),
-+    )
-+    assert isinstance(result, PreparedCycleSourceManifest)
-+    assert result.graph_sha256 == fingerprint_hard_edges(PAIR)
-+    assert len(result.source_manifest_sha256) == 64
-+    assert result.components[0].members == ("a", "b")
-+    assert result.components[0].preparation_state == (
-+        "PREPARED_UNPUBLISHED"
-+    )
-+    assert result.components[0].source_signatures == (
-+        evidence.components[0].source_signatures
-+    )
-+    assert result.authority == (
-+        "PREPARED_ONLY_NOT_CANONICALLY_PUBLISHED"
-+    )
++            from contextor.core.cycle_semantics.publication_binding import (
++                seal_prepared_cycle_manifest,
++            )
 +
++            state_to_persist = copy.copy(state)
++            state_to_persist.cycle_source_publication = (
++                seal_prepared_cycle_manifest(
++                    state_to_persist,
++                    prepared_cycle_manifest,
++                    revision=metadata.revision,
++                    state_id=metadata.state_id,
++                    repo_id=metadata.repo_id,
++                    root_path=metadata.root_path,
++                )
++            )
 +
-+def test_p1c0_t02_byte_drift_cannot_prepare_manifest():
-+    index, snapshot, evidence = _bound(PAIR, PASS)
-+    sources = _p1b_snapshots(PASS)
-+    sources["a"] = _p1b_snapshots(
-+        {"a": PASS["a"] + "\n# changed"}
-+    )["a"]
-+    result = prepare_cycle_source_manifest(
-+        PAIR, index, snapshot, evidence, sources,
-+    )
-+    assert result.source_manifest_sha256 is None
-+    assert result.components[0].preparation_state == "UNAVAILABLE"
-+    assert result.components[0].model_classification == "INDETERMINATE"
++        elif (
++            isinstance(state, RepositoryAnalysisState)
++            and getattr(
++                state,
++                "cycle_source_publication",
++                None,
++            ) is not None
++        ):
++            # Old receipt must never be republished implicitly.
++            state_to_persist = copy.copy(state)
++            state_to_persist.cycle_source_publication = None
 +
+         if (
+             generation_lineage_manifest
+             is not None
+@@ -2308,6 +2349,26 @@ def load_snapshot(
+                 phase_started,
+                 repo_id=expected_repo_id,
+             )
++            # Fail closed on absent/foreign/tampered generation
++            # receipts while retaining otherwise valid diagnostics.
++            if getattr(
++                state_obj,
++                "cycle_source_publication",
++                None,
++            ) is not None:
++                from contextor.core.cycle_semantics.publication_binding import (
++                    verify_co_published_cycle_manifest,
++                )
 +
-+def test_p1c0_t03_reachable_dependency_is_in_manifest():
-+    graph = {
-+        "a": {"b", "dep"},
-+        "b": {"a"},
-+        "dep": set(),
-+    }
-+    sources = {
-+        "a": "import b\nimport dep",
-+        "b": "import a",
-+        "dep": "x=1",
-+    }
-+    index, snapshot, evidence = _bound(graph, sources)
-+    result = prepare_cycle_source_manifest(
-+        graph, index, snapshot, evidence,
-+        _p1b_snapshots(sources),
-+    )
-+    assert result.components[0].preparation_state == (
-+        "PREPARED_UNPUBLISHED"
-+    )
-+    assert tuple(
-+        item[0]
-+        for item in result.components[0].source_signatures
-+    ) == ("a", "b", "dep")
++                if not verify_co_published_cycle_manifest(
++                    state_obj,
++                    revision=metadata.revision,
++                    state_id=metadata.state_id,
++                    repo_id=metadata.repo_id,
++                    root_path=metadata.root_path,
++                ):
++                    state_obj.cycle_source_publication = None
 +
-+
-+def test_p1c0_t04_missing_dependency_blocks_digest():
-+    graph = {
-+        "a": {"b", "dep"},
-+        "b": {"a"},
-+        "dep": set(),
-+    }
-+    sources = {
-+        "a": "import b\nimport dep",
-+        "b": "import a",
-+        "dep": "x=1",
-+    }
-+    index, snapshot, evidence = _bound(graph, sources)
-+    raw = _p1b_snapshots(sources)
-+    del raw["dep"]
-+    result = prepare_cycle_source_manifest(
-+        graph, index, snapshot, evidence, raw,
-+    )
-+    assert result.source_manifest_sha256 is None
-+    assert result.components[0].reason == (
-+        "SOURCE_BYTES_UNAVAILABLE:dep"
-+    )
-+
-+
-+def test_p1c0_t05_independent_scc_partial_failure():
-+    graph = {
-+        "a": {"b"},
-+        "b": {"a"},
-+        "x": {"y"},
-+        "y": {"x"},
-+    }
-+    sources = dict(
-+        PASS,
-+        x="import y\nn=1",
-+        y="import x\nm=2",
-+    )
-+    index, snapshot, evidence = _bound(graph, sources)
-+    raw = _p1b_snapshots(sources)
-+    del raw["x"]
-+    result = prepare_cycle_source_manifest(
-+        graph, index, snapshot, evidence, raw,
-+    )
-+    assert [
-+        item.preparation_state
-+        for item in result.components
-+    ] == ["PREPARED_UNPUBLISHED", "UNAVAILABLE"]
-+    assert result.source_manifest_sha256 is None
-+
-+
-+def test_p1c0_t06_unrelated_source_does_not_affect_digest():
-+    graph = {
-+        "a": {"b"},
-+        "b": {"a"},
-+        "other": set(),
-+    }
-+    first = dict(PASS, other="x=1")
-+    second = dict(PASS, other="x=2")
-+    a_index, a_snapshot, a_evidence = _bound(graph, first)
-+    b_index, b_snapshot, b_evidence = _bound(graph, second)
-+    a = prepare_cycle_source_manifest(
-+        graph, a_index, a_snapshot, a_evidence,
-+        _p1b_snapshots(PASS),
-+    )
-+    b = prepare_cycle_source_manifest(
-+        graph, b_index, b_snapshot, b_evidence,
-+        _p1b_snapshots(PASS),
-+    )
-+    assert a.source_manifest_sha256 == b.source_manifest_sha256
-+
-+
-+def test_p1c0_t07_no_cycles_is_not_positive_proof():
-+    graph = {"a": {"b"}, "b": set()}
-+    sources = {"a": "import b", "b": "pass"}
-+    index, snapshot, evidence = _bound(graph, sources)
-+    result = prepare_cycle_source_manifest(
-+        graph, index, snapshot, evidence, {},
-+    )
-+    assert result.components == ()
-+    assert result.source_manifest_sha256 is None
-+
-+
-+def test_p1c0_t08_deterministic_and_never_published():
-+    index, snapshot, evidence = _bound(PAIR, PASS)
-+    sources = _p1b_snapshots(PASS)
-+    before = repr((index, snapshot, evidence, sources))
-+    a = prepare_cycle_source_manifest(
-+        PAIR, index, snapshot, evidence, sources,
-+    )
-+    b = prepare_cycle_source_manifest(
-+        PAIR, index, snapshot, evidence, sources,
-+    )
-+    assert a == b
-+    assert before == repr((index, snapshot, evidence, sources))
-+    assert a.authority == (
-+        "PREPARED_ONLY_NOT_CANONICALLY_PUBLISHED"
-+    )
-+    assert "SAFE" not in a.authority
-+    assert "PUBLISHED" not in a.components[0].preparation_state.replace(
-+        "UNPUBLISHED", ""
-+    )
-+    json.dumps(asdict(a))
-diff --git a/contextor/core/cycle_semantics/generation_manifest.py b/contextor/core/cycle_semantics/generation_manifest.py
+             return state_obj, metadata
+         if metadata.lineage_manifest_file:
+             return None
+diff --git a/contextor/core/cycle_semantics/publication_binding.py b/contextor/core/cycle_semantics/publication_binding.py
 new file mode 100644
-index 0000000..afd2372
+index 0000000..935e4cb
 --- /dev/null
-+++ b/contextor/core/cycle_semantics/generation_manifest.py
-@@ -0,0 +1,173 @@
-+"""Prepared source manifests for cyclic SCC model evidence.
++++ b/contextor/core/cycle_semantics/publication_binding.py
+@@ -0,0 +1,306 @@
++"""Co-publication of prepared SCC manifest claims with durable generations.
 +
-+The manifest binds graph identity, reachable source fingerprints,
-+AST fingerprints and successful P1B assessments. Preparation is
-+not canonical publication, atomic source capture or runtime safety.
++Only the canonical snapshot-store writer creates this receipt.
++It attests to co-publication of a declaration, NOT provenance
++of source bytes or runtime import safety.
 +"""
 +
 +from __future__ import annotations
 +
-+import hashlib
-+import json
-+from collections.abc import Mapping
 +from dataclasses import dataclass
-+
-+from contextor.core.source import SourceSnapshot
++from typing import Any
 +
 +from .contracts import (
 +    CycleSemanticsSnapshot,
 +    fingerprint_hard_edges,
 +)
-+from .evidence import SourceBoundCycleEvidence
-+from .source_proof import assess_scc_source_bytes
++from .generation_manifest import (
++    MANIFEST_VERSION,
++    PreparedCycleSourceManifest,
++    PreparedSCCSourceBinding,
++    _digest,
++)
++from .scc import analyze_import_cycle_topology
 +
 +
-+MANIFEST_VERSION = "cycle-source-manifest/1"
-+_AUTHORITY = "PREPARED_ONLY_NOT_CANONICALLY_PUBLISHED"
-+
-+
-+def _digest(value: object) -> str:
-+    payload = json.dumps(
-+        value,
-+        ensure_ascii=True,
-+        sort_keys=True,
-+        separators=(",", ":"),
-+    ).encode("utf-8")
-+    return hashlib.sha256(payload).hexdigest()
-+
-+
-+@dataclass(frozen=True)
-+class PreparedSCCSourceBinding:
-+    members: tuple[str, ...]
-+    source_signatures: tuple[tuple[str, str, str], ...]
-+    model_classification: str
-+    preparation_state: str
-+    reason: str | None
++PUBLICATION_BINDING_VERSION = "cycle-prepared-co-publication/1"
++PUBLICATION_AUTHORITY = (
++    "COMMITTED_PREPARED_CLAIMS_NOT_SOURCE_CERTIFIED"
++)
++_ALLOWED_MODELS = frozenset((
++    "MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS",
++    "MODEL_INTERNAL_EARLY_BINDING_HAZARD",
++))
 +
 +
 +@dataclass(frozen=True)
-+class PreparedCycleSourceManifest:
-+    graph_sha256: str
-+    source_manifest_sha256: str | None
-+    components: tuple[PreparedSCCSourceBinding, ...]
-+    version: str = MANIFEST_VERSION
-+    authority: str = _AUTHORITY
++class CanonicalCycleManifestReceipt:
++    prepared_manifest: PreparedCycleSourceManifest
++    model_claims_sha256: str
++    revision: int
++    state_id: str
++    repo_id: str
++    root_path: str
++    version: str = PUBLICATION_BINDING_VERSION
++    authority: str = PUBLICATION_AUTHORITY
 +
 +
-+def prepare_cycle_source_manifest(
-+    hard_edges: Mapping[str, object],
-+    indexed_fingerprints_by_module: Mapping[str, str],
-+    snapshot: CycleSemanticsSnapshot,
-+    source_evidence: SourceBoundCycleEvidence,
-+    source_snapshots: Mapping[str, SourceSnapshot],
-+    *,
-+    max_source_bytes: int = 2 * 1024 * 1024,
-+    max_closure_bytes: int = 32 * 1024 * 1024,
-+) -> PreparedCycleSourceManifest:
-+    """Prepare immutable source evidence without publication.
++def _validated_claim_digest(
++    state: Any,
++    manifest: PreparedCycleSourceManifest,
++) -> str:
++    """Validate declarations, not source-byte authenticity."""
++    if type(manifest) is not PreparedCycleSourceManifest:
++        raise ValueError("prepared manifest contract missing")
++    if (
++        manifest.version != MANIFEST_VERSION
++        or manifest.authority
++        != "PREPARED_ONLY_NOT_CANONICALLY_PUBLISHED"
++        or not isinstance(manifest.source_manifest_sha256, str)
++        or len(manifest.source_manifest_sha256) != 64
++        or any(
++            c not in "0123456789abcdef"
++            for c in manifest.source_manifest_sha256
++        )
++    ):
++        raise ValueError(
++            "prepared manifest is incomplete or unsupported"
++        )
 +
-+    P1B owns byte-to-AST consistency and source budget checks.
-+    This operation never asserts that a canonical owner accepted
-+    these inputs or that they belong to a published revision.
-+    """
++    graph = getattr(state, "dependency_graph", None)
++    hard_edges = getattr(graph, "hard_edges", None)
++    snapshot = getattr(state, "cycle_semantics", None)
++
++    if (
++        getattr(state, "resync_required", False) is not False
++        or getattr(state, "cycle_semantics_state", None) != "fresh"
++        or getattr(state, "cycles_state", None) != "fresh"
++        or type(snapshot) is not CycleSemanticsSnapshot
++        or snapshot.coverage_status
++        != "FILESYSTEM_STABLE_NON_ATOMIC"
++        or snapshot.source_issues
++        or not isinstance(hard_edges, dict)
++    ):
++        raise ValueError(
++            "canonical cycle evidence is not complete and fresh"
++        )
++
 +    graph_hash = fingerprint_hard_edges(hard_edges)
++    if (
++        graph_hash != manifest.graph_sha256
++        or graph_hash != snapshot.graph_sha256
++    ):
++        raise ValueError("canonical graph identity mismatch")
 +
-+    checks = assess_scc_source_bytes(
-+        hard_edges,
-+        indexed_fingerprints_by_module,
-+        snapshot,
-+        source_evidence,
-+        source_snapshots,
-+        max_source_bytes=max_source_bytes,
-+        max_closure_bytes=max_closure_bytes,
++    topology = analyze_import_cycle_topology(hard_edges)
++    cyclic = topology.cyclic_components
++    if (
++        not cyclic
++        or type(manifest.components) is not tuple
++        or len(manifest.components) != len(cyclic)
++    ):
++        raise ValueError("prepared SCC coverage incomplete")
++
++    adjacency = {
++        source: set(targets)
++        for source, targets in hard_edges.items()
++    }
++    for targets in tuple(adjacency.values()):
++        for target in targets:
++            adjacency.setdefault(target, set())
++
++    accepted: dict[str, tuple[str, str]] = {}
++    claims = []
++
++    for structural, prepared in zip(cyclic, manifest.components):
++        if (
++            type(prepared) is not PreparedSCCSourceBinding
++            or prepared.members != structural.members
++            or prepared.preparation_state
++            != "PREPARED_UNPUBLISHED"
++            or prepared.reason is not None
++            or prepared.model_classification not in _ALLOWED_MODELS
++            or type(prepared.source_signatures) is not tuple
++        ):
++            raise ValueError(
++                "prepared SCC claims are inconsistent"
++            )
++
++        closure = set(structural.members)
++        pending = list(structural.members)
++
++        while pending:
++            for target in adjacency[pending.pop()]:
++                if target not in closure:
++                    closure.add(target)
++                    pending.append(target)
++
++        rows = prepared.source_signatures
++        if (
++            len(rows) != len(closure)
++            or tuple(
++                row[0]
++                for row in rows
++                if type(row) is tuple and len(row) == 3
++            ) != tuple(sorted(closure))
++        ):
++            raise ValueError(
++                "prepared source closure is incomplete"
++            )
++
++        for row in rows:
++            if type(row) is not tuple or len(row) != 3:
++                raise ValueError("invalid source signature")
++
++            name, raw, ast_hash = row
++            if any(
++                type(digest) is not str
++                or len(digest) != 64
++                or any(
++                    c not in "0123456789abcdef"
++                    for c in digest
++                )
++                for digest in (raw, ast_hash)
++            ):
++                raise ValueError("invalid source digest")
++
++            signature = (raw, ast_hash)
++            if (
++                name in accepted
++                and accepted[name] != signature
++            ):
++                raise ValueError(
++                    "conflicting shared source digest"
++                )
++            accepted[name] = signature
++
++        claims.append((
++            prepared.members,
++            prepared.model_classification,
++            rows,
++        ))
++
++    observed = dict(snapshot.observed_source_fingerprints)
++    cyclic_members = tuple(sorted(
++        member
++        for component in cyclic
++        for member in component.members
++    ))
++
++    if (
++        snapshot.cyclic_modules != cyclic_members
++        or tuple(sorted(observed)) != cyclic_members
++        or any(
++            accepted[member][0] != observed[member]
++            for member in cyclic_members
++        )
++    ):
++        raise ValueError(
++            "canonical cyclic source fingerprints mismatch"
++        )
++
++    ordered_sources = tuple(
++        (name, *accepted[name])
++        for name in sorted(accepted)
++    )
++    expected_manifest_hash = _digest((
++        MANIFEST_VERSION,
++        graph_hash,
++        tuple(component.members for component in cyclic),
++        ordered_sources,
++    ))
++    if manifest.source_manifest_sha256 != expected_manifest_hash:
++        raise ValueError(
++            "prepared source manifest digest mismatch"
++        )
++
++    # Bind model CLAIMS independently of the source digest.
++    # This does not authenticate model execution or source origin.
++    return _digest((
++        PUBLICATION_BINDING_VERSION,
++        graph_hash,
++        expected_manifest_hash,
++        tuple(claims),
++    ))
++
++
++def seal_prepared_cycle_manifest(
++    state: Any,
++    manifest: PreparedCycleSourceManifest,
++    *,
++    revision: int,
++    state_id: str,
++    repo_id: str,
++    root_path: str,
++) -> CanonicalCycleManifestReceipt:
++    """Seal during the snapshot-store commit path only."""
++    if (
++        type(revision) is not int
++        or revision < 1
++        or type(state_id) is not str
++        or not state_id
++    ):
++        raise ValueError(
++            "invalid publication generation identity"
++        )
++
++    if (
++        type(repo_id) is not str
++        or type(root_path) is not str
++    ):
++        raise ValueError("invalid repository identity")
++
++    if (
++        getattr(state, "revision", None) != revision
++        or getattr(state, "state_id", None) != state_id
++    ):
++        raise ValueError(
++            "canonical state and store metadata differ"
++        )
++
++    digest = _validated_claim_digest(state, manifest)
++    return CanonicalCycleManifestReceipt(
++        prepared_manifest=manifest,
++        model_claims_sha256=digest,
++        revision=revision,
++        state_id=state_id,
++        repo_id=repo_id,
++        root_path=root_path,
 +    )
 +
-+    prepared: list[PreparedSCCSourceBinding] = []
-+    accepted_signatures: dict[str, tuple[str, str]] = {}
-+    all_complete = bool(checks)
 +
-+    for position, check in enumerate(checks):
-+        complete = (
-+            check.bytes_state == "BYTE_AST_CONSISTENT_NON_ATOMIC"
-+            and check.authority
-+            == "CALLER_SUPPLIED_BYTES_NOT_ATOMICALLY_BOUND_TO_LIVE"
-+            and check.model_classification
-+            in {
-+                "MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS",
-+                "MODEL_INTERNAL_EARLY_BINDING_HAZARD",
-+            }
++def verify_co_published_cycle_manifest(
++    state: Any,
++    *,
++    revision: int,
++    state_id: str,
++    repo_id: str,
++    root_path: str,
++) -> bool:
++    """Check persisted claim and exact generation identity."""
++    receipt = getattr(
++        state,
++        "cycle_source_publication",
++        None,
++    )
++    if type(receipt) is not CanonicalCycleManifestReceipt:
++        return False
++
++    try:
++        expected = seal_prepared_cycle_manifest(
++            state,
++            receipt.prepared_manifest,
++            revision=revision,
++            state_id=state_id,
++            repo_id=repo_id,
++            root_path=root_path,
 +        )
++    except (
++        TypeError,
++        ValueError,
++        AttributeError,
++        KeyError,
++    ):
++        return False
 +
-+        if not complete:
-+            all_complete = False
-+            prepared.append(PreparedSCCSourceBinding(
-+                members=check.members,
-+                source_signatures=(),
-+                model_classification="INDETERMINATE",
-+                preparation_state="UNAVAILABLE",
-+                reason=check.reason or "P1B_EVIDENCE_UNAVAILABLE",
-+            ))
-+            continue
++    return receipt == expected
+diff --git a/tests/test_cycle_semantics_publication_binding.py b/tests/test_cycle_semantics_publication_binding.py
+new file mode 100644
+index 0000000..ae10d77
+--- /dev/null
++++ b/tests/test_cycle_semantics_publication_binding.py
+@@ -0,0 +1,271 @@
++"""P1C1 durable co-publication gates; never runtime safety tests."""
 +
-+        source_component = source_evidence.components[position]
++from __future__ import annotations
 +
-+        # P1B has already validated the exact component,
-+        # its reachable closure, source hashes and AST hashes.
-+        signatures = source_component.source_signatures
++import pickle
++from dataclasses import replace
 +
-+        conflict = next((
-+            module
-+            for module, raw_hash, ast_hash in signatures
-+            if (
-+                module in accepted_signatures
-+                and accepted_signatures[module]
-+                != (raw_hash, ast_hash)
-+            )
-+        ), None)
++import pytest
 +
-+        if conflict is not None:
-+            all_complete = False
-+            prepared.append(PreparedSCCSourceBinding(
-+                members=check.members,
-+                source_signatures=(),
-+                model_classification="INDETERMINATE",
-+                preparation_state="UNAVAILABLE",
-+                reason="SOURCE_MANIFEST_CONFLICT:" + conflict,
-+            ))
-+            continue
++from contextor.core.analysis.state_manager import (
++    RepositoryAnalysisState,
++)
++from contextor.core.cycle_semantics.generation_manifest import (
++    prepare_cycle_source_manifest,
++)
++from contextor.core.cycle_semantics.lifecycle import (
++    invalidate_cycle_semantics,
++)
++from contextor.core.cycle_semantics.publication_binding import (
++    PUBLICATION_AUTHORITY,
++    CanonicalCycleManifestReceipt,
++    verify_co_published_cycle_manifest,
++)
++from contextor.core.domain.graph import ProjectGraph
++from contextor.core.live_state.store import (
++    load_snapshot,
++    read_metadata,
++    save_snapshot,
++)
++from tests.test_cycle_semantics_evidence import (
++    PAIR,
++    PASS,
++    _bound,
++    _p1b_snapshots,
++)
 +
-+        for module, raw_hash, ast_hash in signatures:
-+            accepted_signatures[module] = (raw_hash, ast_hash)
 +
-+        prepared.append(PreparedSCCSourceBinding(
-+            members=check.members,
-+            source_signatures=signatures,
-+            model_classification=check.model_classification,
-+            preparation_state="PREPARED_UNPUBLISHED",
-+            reason=None,
-+        ))
++def _case():
++    index, snapshot, evidence = _bound(PAIR, PASS)
++    prepared = prepare_cycle_source_manifest(
++        PAIR,
++        index,
++        snapshot,
++        evidence,
++        _p1b_snapshots(PASS),
++    )
++    state = RepositoryAnalysisState(
++        dependency_graph=ProjectGraph(
++            hard_edges={key: set(value) for key, value in PAIR.items()},
++            soft_edges={},
++        ),
++        cycle_semantics=snapshot,
++        cycle_semantics_state="fresh",
++        cycles_state="fresh",
++    )
++    return state, prepared
 +
-+    # A global manifest digest must not imply completeness
-+    # when even one SCC lacks sufficient evidence.
-+    if all_complete:
-+        ordered_sources = tuple(
-+            (module, *accepted_signatures[module])
-+            for module in sorted(accepted_signatures)
-+        )
-+        manifest_hash: str | None = _digest((
-+            MANIFEST_VERSION,
-+            graph_hash,
-+            tuple(
-+                component.members
-+                for component in prepared
-+            ),
-+            ordered_sources,
-+        ))
-+    else:
-+        manifest_hash = None
 +
-+    return PreparedCycleSourceManifest(
-+        graph_sha256=graph_hash,
-+        source_manifest_sha256=manifest_hash,
-+        components=tuple(prepared),
++def _save(state, root, revision, prepared=None):
++    return save_snapshot(
++        state,
++        root,
++        "cycle-state",
++        exact_revision=revision,
++        file_state_payload={
++            "_meta": {
++                "state_id": "cycle-state",
++                "revision": revision,
++            },
++            "files": {},
++        },
++        prepared_cycle_manifest=prepared,
++    )
++
++
++def test_p1c1_t01_receipt_is_committed_with_exact_generation(tmp_path):
++    state, prepared = _case()
++    metadata = _save(state, tmp_path, 1, prepared)
++    loaded, loaded_metadata = load_snapshot(
++        tmp_path, "cycle-state",
++    )
++
++    receipt = loaded.cycle_source_publication
++    assert isinstance(receipt, CanonicalCycleManifestReceipt)
++    assert receipt.authority == PUBLICATION_AUTHORITY
++    assert receipt.revision == metadata.revision == 1
++    assert receipt.state_id == metadata.state_id
++    assert receipt.prepared_manifest == prepared
++    assert len(receipt.model_claims_sha256) == 64
++    assert loaded_metadata == metadata
++    assert verify_co_published_cycle_manifest(
++        loaded,
++        revision=metadata.revision,
++        state_id=metadata.state_id,
++        repo_id=metadata.repo_id,
++        root_path=metadata.root_path,
++    )
++
++    # Writer does not expose receipt on its original object.
++    assert state.cycle_source_publication is None
++
++
++def test_p1c1_t02_no_prepared_input_means_no_receipt(tmp_path):
++    state, _ = _case()
++    _save(state, tmp_path, 1)
++    loaded, _ = load_snapshot(tmp_path, "cycle-state")
++    assert loaded.cycle_source_publication is None
++
++
++def test_p1c1_t03_incomplete_manifest_does_not_commit(tmp_path):
++    state, prepared = _case()
++    _save(state, tmp_path, 1, prepared)
++
++    forged = replace(
++        prepared,
++        source_manifest_sha256="f" * 64,
++    )
++    with pytest.raises(ValueError):
++        _save(state, tmp_path, 2, forged)
++
++    assert read_metadata(tmp_path).revision == 1
++    loaded, metadata = load_snapshot(
++        tmp_path, "cycle-state",
++    )
++    assert metadata.revision == 1
++    assert loaded.cycle_source_publication is not None
++
++
++def test_p1c1_t04_new_revision_cannot_reuse_old_receipt(tmp_path):
++    state, prepared = _case()
++    _save(state, tmp_path, 1, prepared)
++    old, _ = load_snapshot(tmp_path, "cycle-state")
++    assert old.cycle_source_publication is not None
++
++    _save(old, tmp_path, 2)
++    loaded, metadata = load_snapshot(
++        tmp_path, "cycle-state",
++    )
++    assert metadata.revision == 2
++    assert loaded.cycle_source_publication is None
++
++
++def test_p1c1_t05_failed_metadata_commit_preserves_previous(tmp_path, monkeypatch):
++    import contextor.core.live_state.store as store
++
++    state, prepared = _case()
++    _save(state, tmp_path, 1, prepared)
++
++    original_replace = store.os.replace
++
++    def fail_metadata(source, target):
++        if target.name == "engine_state.meta.json":
++            raise RuntimeError("synthetic commit failure")
++        return original_replace(source, target)
++
++    with monkeypatch.context() as patch:
++        patch.setattr(store.os, "replace", fail_metadata)
++        with pytest.raises(RuntimeError, match="synthetic commit failure"):
++            _save(state, tmp_path, 2, prepared)
++
++    loaded, metadata = load_snapshot(
++        tmp_path, "cycle-state",
++    )
++    assert metadata.revision == 1
++    assert loaded.cycle_source_publication.revision == 1
++
++
++def test_p1c1_t06_foreign_revision_receipt_fails_closed(tmp_path):
++    state, prepared = _case()
++    metadata = _save(state, tmp_path, 1, prepared)
++
++    state_file = tmp_path / metadata.state_file
++    payload = pickle.loads(state_file.read_bytes())
++    original = payload["state"].cycle_source_publication
++    payload["state"].cycle_source_publication = replace(
++        original,
++        revision=999,
++    )
++    state_file.write_bytes(pickle.dumps(payload))
++
++    loaded, loaded_metadata = load_snapshot(
++        tmp_path, "cycle-state",
++    )
++    assert loaded_metadata.revision == 1
++    assert loaded.cycle_source_publication is None
++
++
++def test_p1c1_t07_cow_invalidates_without_mutating_previous():
++    state, prepared = _case()
++    state.revision = 1
++    state.state_id = "cycle-state"
++
++    from contextor.core.cycle_semantics.publication_binding import (
++        seal_prepared_cycle_manifest,
++    )
++
++    state.cycle_source_publication = seal_prepared_cycle_manifest(
++        state,
++        prepared,
++        revision=1,
++        state_id="cycle-state",
++        repo_id="",
++        root_path="",
++    )
++
++    candidate = state.clone_for_update()
++    assert candidate is not state
++    assert candidate.cycle_source_publication is None
++    assert state.cycle_source_publication is not None
++
++    invalidate_cycle_semantics(
++        state,
++        "SOURCE_CHANGED",
++    )
++    assert state.cycle_source_publication is None
++    assert state.cycle_semantics_state == "stale"
++
++
++def test_p1c1_t08_classification_claim_has_distinct_digest(tmp_path):
++    state, prepared = _case()
++    metadata = _save(state, tmp_path, 1, prepared)
++    loaded, _ = load_snapshot(tmp_path, "cycle-state")
++    receipt = loaded.cycle_source_publication
++
++    assert receipt.model_claims_sha256 != (
++        prepared.source_manifest_sha256
++    )
++
++    tampered_claim = replace(
++        prepared.components[0],
++        model_classification=(
++            "MODEL_INTERNAL_EARLY_BINDING_HAZARD"
++        ),
++    )
++    tampered_manifest = replace(
++        prepared,
++        components=(tampered_claim,),
++    )
++    loaded.cycle_source_publication = replace(
++        receipt,
++        prepared_manifest=tampered_manifest,
++    )
++    assert not verify_co_published_cycle_manifest(
++        loaded,
++        revision=metadata.revision,
++        state_id=metadata.state_id,
++        repo_id=metadata.repo_id,
++        root_path=metadata.root_path,
++    )
++
++
++def test_p1c1_t09_partial_or_stale_state_cannot_seal(tmp_path):
++    state, prepared = _case()
++    state.cycle_semantics_state = "stale"
++    with pytest.raises(ValueError):
++        _save(state, tmp_path, 1, prepared)
++    assert read_metadata(tmp_path) is None
++
++
++def test_p1c1_t10_legacy_missing_receipt_is_unavailable():
++    state, _ = _case()
++    assert state.cycle_source_publication is None
++    del state.__dict__["cycle_source_publication"]
++    assert state.cycle_source_publication is None
++    assert not verify_co_published_cycle_manifest(
++        state,
++        revision=1,
++        state_id="cycle-state",
++        repo_id="",
++        root_path="",
 +    )
 ```
 
 ## FINAL_VERDICT
-PASS for the exact P1C0 patch, targeted and focused tests, source/test watcher events and verified per-file workspace synchronization. The manifest remains prepared and unpublished.
+FAIL. The exact auditor patch compiles and LIVE watcher indexed all files, but the receipt is dropped before durable serialization in the split-lineage store path (6/10 named tests fail), and the approved dataclass extension breaks one existing focused constructor-contract test (174/175 pass). No unauthorized adaptation was made.

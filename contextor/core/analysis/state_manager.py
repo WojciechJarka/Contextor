@@ -133,6 +133,8 @@ class RepositoryAnalysisState:
     cycle_semantics: CycleSemanticsSnapshot | None = None
     cycle_semantics_state: str = "deferred"
     cycle_semantics_invalidation_reason: str | None = None
+    # Optional durable receipt. Never a runtime SAFE certificate.
+    cycle_source_publication: Any = None
 
     def clone_for_update(self) -> "RepositoryAnalysisState":
         """
@@ -150,6 +152,9 @@ class RepositoryAnalysisState:
         contracts in the incremental pipeline.
         """
         candidate = copy.copy(self)
+        # An incremental candidate is a new generation.
+        # It cannot inherit a receipt from the old generation.
+        candidate.cycle_source_publication = None
 
         for state_field in fields(self):
             value = getattr(
