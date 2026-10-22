@@ -2,7 +2,7 @@ import os
 import json
 import copy
 from dataclasses import dataclass, field, fields
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, ClassVar
 from pathlib import Path
 
 from contextor.core.cycle_semantics.contracts import (
@@ -133,8 +133,16 @@ class RepositoryAnalysisState:
     cycle_semantics: CycleSemanticsSnapshot | None = None
     cycle_semantics_state: str = "deferred"
     cycle_semantics_invalidation_reason: str | None = None
-    # Optional durable receipt. Never a runtime SAFE certificate.
-    cycle_source_publication: Any = None
+    # An instance-level publication receipt, deliberately excluded
+    # from dataclass fields and constructor compatibility.
+    # ClassVar also supplies None for old unpickled states in
+    # which the instance attribute is absent.
+    cycle_source_publication: ClassVar[Any] = None
+
+    def __post_init__(self) -> None:
+        # Persisted as an ordinary instance __dict__ attribute,
+        # not as a dataclass field.
+        self.cycle_source_publication = None
 
     def clone_for_update(self) -> "RepositoryAnalysisState":
         """

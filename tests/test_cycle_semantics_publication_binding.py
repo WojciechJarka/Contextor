@@ -269,3 +269,134 @@ def test_p1c1_t10_legacy_missing_receipt_is_unavailable():
         repo_id="",
         root_path="",
     )
+
+
+def test_p1c1_t11_receipt_does_not_extend_dataclass_fields():
+    from dataclasses import fields
+
+    state = RepositoryAnalysisState()
+    field_names = tuple(
+        item.name
+        for item in fields(RepositoryAnalysisState)
+    )
+
+    assert "cycle_source_publication" not in field_names
+    assert "cycle_source_publication" in state.__dict__
+    assert state.cycle_source_publication is None
+
+    restored = pickle.loads(pickle.dumps(state))
+    assert restored.cycle_source_publication is None
+
+    del restored.__dict__["cycle_source_publication"]
+    assert restored.cycle_source_publication is None
+
+
+def test_p1c1_t12_non_split_snapshot_commits_receipt(tmp_path):
+    state, prepared = _case()
+
+    metadata = save_snapshot(
+        state,
+        tmp_path,
+        "cycle-state",
+        prepared_cycle_manifest=prepared,
+    )
+
+    assert metadata.revision == 1
+    assert metadata.lineage_manifest_file == ""
+    assert state.cycle_source_publication is None
+
+    loaded, loaded_metadata = load_snapshot(
+        tmp_path,
+        "cycle-state",
+    )
+
+    assert loaded_metadata == metadata
+    assert isinstance(
+        loaded.cycle_source_publication,
+        CanonicalCycleManifestReceipt,
+    )
+    assert verify_co_published_cycle_manifest(
+        loaded,
+        revision=metadata.revision,
+        state_id=metadata.state_id,
+        repo_id=metadata.repo_id,
+        root_path=metadata.root_path,
+    )
+
+
+def test_p1c1_t13_non_split_wrapped_tamper_fails_closed(
+    tmp_path,
+):
+    state, prepared = _case()
+
+    metadata = save_snapshot(
+        state,
+        tmp_path,
+        "cycle-state",
+        prepared_cycle_manifest=prepared,
+    )
+
+    state_file = tmp_path / "engine_state.pkl"
+    payload = pickle.loads(state_file.read_bytes())
+
+    receipt = payload["state"].cycle_source_publication
+    assert isinstance(
+        receipt,
+        CanonicalCycleManifestReceipt,
+    )
+
+    payload["state"].cycle_source_publication = replace(
+        receipt,
+        revision=999,
+    )
+    state_file.write_bytes(pickle.dumps(payload))
+
+    loaded, loaded_metadata = load_snapshot(
+        tmp_path,
+        "cycle-state",
+    )
+
+    assert loaded_metadata.revision == metadata.revision
+    assert loaded.cycle_source_publication is None
+
+
+def test_p1c1_t14_legacy_raw_payload_tamper_fails_closed(
+    tmp_path,
+):
+    state, prepared = _case()
+
+    metadata = save_snapshot(
+        state,
+        tmp_path,
+        "cycle-state",
+        prepared_cycle_manifest=prepared,
+    )
+
+    state_file = tmp_path / "engine_state.pkl"
+    wrapped = pickle.loads(state_file.read_bytes())
+    legacy_state = wrapped["state"]
+
+    receipt = legacy_state.cycle_source_publication
+    assert isinstance(
+        receipt,
+        CanonicalCycleManifestReceipt,
+    )
+
+    legacy_state.cycle_source_publication = replace(
+        receipt,
+        revision=999,
+    )
+
+    # Exercise the legacy raw-payload loader branch rather
+    # than the modern metadata-wrapped branch.
+    state_file.write_bytes(
+        pickle.dumps(legacy_state)
+    )
+
+    loaded, loaded_metadata = load_snapshot(
+        tmp_path,
+        "cycle-state",
+    )
+
+    assert loaded_metadata.revision == metadata.revision
+    assert loaded.cycle_source_publication is None

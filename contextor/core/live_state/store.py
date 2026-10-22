@@ -1786,7 +1786,7 @@ def save_snapshot(
                 state_to_persist,
                 generation_lineage_chunks,
             ) = _write_split_lineage_generation(
-                state,
+                state_to_persist,
                 generation_lineage_manifest,
                 state_id=metadata.state_id,
                 revision=metadata.revision,
@@ -2467,6 +2467,27 @@ def load_snapshot(
                     setattr(payload, "shared_usage_clusters_state", "deferred")
                 except AttributeError:
                     pass
+        # Legacy raw-payload snapshots are not produced by the
+        # current canonical writer. Never trust an embedded receipt
+        # merely because unpickling succeeded.
+        if getattr(
+            payload,
+            "cycle_source_publication",
+            None,
+        ) is not None:
+            from contextor.core.cycle_semantics.publication_binding import (
+                verify_co_published_cycle_manifest,
+            )
+
+            if not verify_co_published_cycle_manifest(
+                payload,
+                revision=metadata.revision,
+                state_id=metadata.state_id,
+                repo_id=metadata.repo_id,
+                root_path=metadata.root_path,
+            ):
+                payload.cycle_source_publication = None
+
         return payload, metadata
 
 
