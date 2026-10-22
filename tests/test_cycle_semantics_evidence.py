@@ -6,14 +6,23 @@ from types import SimpleNamespace
 
 import pytest
 
-from contextor.core.source import ParsedSourceInput
+from contextor.core.source import (
+    ParsedSourceInput,
+    SourceSnapshot,
+    parse_source_snapshot,
+)
 from contextor.core.cycle_semantics.evidence import (
+    EVIDENCE_SEMANTIC_VERSION,
+    _digest,
     SCCModelEvidenceAssessment,
     SCCGenerationModelAssessment,
     assess_index_bound_scc_models as assess,
     assess_live_generation_scc_models,
     build_source_bound_cycle_evidence as build,
     compare_source_bound_cycle_evidence as compare,
+)
+from contextor.core.cycle_semantics.source_proof import (
+    assess_scc_source_bytes,
 )
 from contextor.core.cycle_semantics.contracts import (
     CycleSemanticsSnapshot, fingerprint_hard_edges,
@@ -609,3 +618,365 @@ def test_p1_t06_deterministic_and_no_mutation():
         repr(evidence),
     )
     json.dumps(asdict(first[0]))
+
+
+# P1B test IDs are local, NOT canonical C01-C30 IDs.
+def _p1b_snapshots(sources):
+    result = {}
+    for module, text in sources.items():
+        raw = text.encode("utf-8")
+        result[module] = SourceSnapshot(
+            raw,
+            hashlib.sha256(raw).hexdigest(),
+        )
+    return result
+
+
+@pytest.mark.parametrize("sources,expected", (
+    (PASS, "MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS"),
+    (HAZARD, "MODEL_INTERNAL_EARLY_BINDING_HAZARD"),
+))
+def test_p1b_t01_bytes_ast_match_preserves_model_only(
+    sources, expected,
+):
+    index, snapshot, evidence = _bound(PAIR, sources)
+    result = assess_scc_source_bytes(
+        PAIR, index, snapshot, evidence,
+        _p1b_snapshots(sources),
+    )
+    assert len(result) == 1
+    assert result[0].model_classification == expected
+    assert result[0].bytes_state == (
+        "BYTE_AST_CONSISTENT_NON_ATOMIC"
+    )
+    assert result[0].authority == (
+        "CALLER_SUPPLIED_BYTES_NOT_ATOMICALLY_BOUND_TO_LIVE"
+    )
+
+
+def test_p1b_t02_source_snapshot_hash_is_recomputed():
+    index, snapshot, evidence = _bound(PAIR, PASS)
+    sources = _p1b_snapshots(PASS)
+    sources["a"] = SourceSnapshot(
+        b"import b\nx=1\n# changed", index["a"]
+    )
+    result = assess_scc_source_bytes(
+        PAIR, index, snapshot, evidence, sources,
+    )
+    assert result[0].model_classification == "INDETERMINATE"
+    assert result[0].bytes_state == "EVIDENCE_MISMATCH"
+    assert result[0].reason == (
+        "SOURCE_SNAPSHOT_HASH_MISMATCH:a"
+    )
+
+
+def test_p1b_t03_changed_bytes_even_with_same_ast():
+    index, snapshot, evidence = _bound(PAIR, PASS)
+    sources = _p1b_snapshots(PASS)
+    raw = (PASS["a"] + "\n# changed").encode("utf-8")
+    sources["a"] = SourceSnapshot(
+        raw, hashlib.sha256(raw).hexdigest()
+    )
+    result = assess_scc_source_bytes(
+        PAIR, index, snapshot, evidence, sources,
+    )
+    assert result[0].reason == (
+        "SOURCE_INDEX_BYTES_MISMATCH:a"
+    )
+
+
+def test_p1b_t04_forged_ast_signature_and_token():
+    index, snapshot, evidence = _bound(PAIR, PASS)
+    component = evidence.components[0]
+    forged = tuple(
+        (
+            module,
+            raw,
+            "f" * 64 if module == "a" else ast_hash,
+        )
+        for module, raw, ast_hash
+        in component.source_signatures
+    )
+    subgraph = tuple(
+        (module, tuple(sorted(PAIR[module])))
+        for module in component.reachable_modules
+    )
+    altered = replace(
+        component,
+        source_signatures=forged,
+        evidence_token=_digest((
+            EVIDENCE_SEMANTIC_VERSION,
+            component.members,
+            subgraph,
+            forged,
+        )),
+    )
+    spoofed = replace(
+        evidence, components=(altered,),
+    )
+
+    # P0 checks consistent declarations but does not
+    # rederive the AST from independently supplied bytes.
+    assert assess(
+        PAIR, index, snapshot, spoofed,
+    )[0].evidence_state == "DECLARED_INPUTS_CONSISTENT"
+
+    result = assess_scc_source_bytes(
+        PAIR, index, snapshot, spoofed,
+        _p1b_snapshots(PASS),
+    )
+    assert result[0].model_classification == "INDETERMINATE"
+    assert result[0].reason == (
+        "SOURCE_AST_BYTES_MISMATCH:a"
+    )
+
+
+def test_p1b_t05_missing_reachable_dependency():
+    graph = {
+        "a": {"b", "dep"},
+        "b": {"a"},
+        "dep": set(),
+    }
+    inputs = {
+        "a": "import b\nimport dep",
+        "b": "import a",
+        "dep": "x=1",
+    }
+    index, snapshot, evidence = _bound(graph, inputs)
+    sources = _p1b_snapshots(inputs)
+    del sources["dep"]
+    result = assess_scc_source_bytes(
+        graph, index, snapshot, evidence, sources,
+    )
+    assert result[0].bytes_state == "UNAVAILABLE"
+    assert result[0].reason == (
+        "SOURCE_BYTES_UNAVAILABLE:dep"
+    )
+
+
+def test_p1b_t06_changed_noncyclic_reachable_dependency():
+    graph = {
+        "a": {"b", "dep"},
+        "b": {"a"},
+        "dep": set(),
+    }
+    inputs = {
+        "a": "import b\nimport dep",
+        "b": "import a",
+        "dep": "x=1",
+    }
+    index, snapshot, evidence = _bound(graph, inputs)
+    sources = _p1b_snapshots(inputs)
+    sources["dep"] = _p1b_snapshots(
+        {"dep": "x=2"}
+    )["dep"]
+    result = assess_scc_source_bytes(
+        graph, index, snapshot, evidence, sources,
+    )
+    assert result[0].reason == (
+        "SOURCE_INDEX_BYTES_MISMATCH:dep"
+    )
+
+
+def test_p1b_t07_unrelated_module_is_not_required():
+    graph = {
+        "a": {"b"},
+        "b": {"a"},
+        "unrelated": set(),
+    }
+    inputs = dict(PASS, unrelated="x=1")
+    index, snapshot, evidence = _bound(graph, inputs)
+    result = assess_scc_source_bytes(
+        graph, index, snapshot, evidence,
+        _p1b_snapshots(PASS),
+    )
+    assert result[0].bytes_state == (
+        "BYTE_AST_CONSISTENT_NON_ATOMIC"
+    )
+
+
+def test_p1b_t08_independent_sccs():
+    graph = {
+        "a": {"b"},
+        "b": {"a"},
+        "x": {"y"},
+        "y": {"x"},
+    }
+    inputs = dict(
+        PASS,
+        x="import y\nn=1",
+        y="import x\nm=2",
+    )
+    index, snapshot, evidence = _bound(graph, inputs)
+    sources = _p1b_snapshots(inputs)
+    sources["x"] = _p1b_snapshots(
+        {"x": "import y\nn=4"}
+    )["x"]
+    result = assess_scc_source_bytes(
+        graph, index, snapshot, evidence, sources,
+    )
+    assert [
+        (item.members, item.bytes_state)
+        for item in result
+    ] == [
+        (("a", "b"), "BYTE_AST_CONSISTENT_NON_ATOMIC"),
+        (("x", "y"), "EVIDENCE_MISMATCH"),
+    ]
+
+
+def test_p1b_t09_invalid_source_bytes_fail_closed():
+    index, snapshot, evidence = _bound(PAIR, PASS)
+    sources = _p1b_snapshots(PASS)
+    invalid = b"import b\nx=)"
+    forged_hash = hashlib.sha256(invalid).hexdigest()
+
+    parsed = _sources(**PASS)
+    parsed["a"] = ParsedSourceInput(
+        parsed["a"].tree, forged_hash,
+    )
+    forged_evidence = build(PAIR, parsed)
+    forged_index = dict(index, a=forged_hash)
+    forged_snapshot = replace(
+        snapshot,
+        observed_source_fingerprints=tuple(
+            sorted(forged_index.items())
+        ),
+        import_sites=analyze_cyclic_import_sites(
+            PAIR, parsed,
+        ),
+    )
+    assert assess(
+        PAIR, forged_index,
+        forged_snapshot, forged_evidence,
+    )[0].evidence_state == "DECLARED_INPUTS_CONSISTENT"
+
+    sources["a"] = SourceSnapshot(
+        invalid, forged_hash,
+    )
+    result = assess_scc_source_bytes(
+        PAIR, forged_index,
+        forged_snapshot, forged_evidence, sources,
+    )
+    assert result[0].reason == (
+        "SOURCE_BYTES_UNPARSABLE:a"
+    )
+
+
+def test_p1b_t10_byte_budgets_and_invalid_arguments():
+    index, snapshot, evidence = _bound(PAIR, PASS)
+    sources = _p1b_snapshots(PASS)
+    result = assess_scc_source_bytes(
+        PAIR, index, snapshot, evidence, sources,
+        max_source_bytes=1,
+    )
+    assert result[0].reason == (
+        "SOURCE_BYTE_BUDGET_EXCEEDED:a"
+    )
+
+    with pytest.raises(TypeError):
+        assess_scc_source_bytes(
+            PAIR, index, snapshot, evidence, None,
+        )
+
+    with pytest.raises(ValueError):
+        assess_scc_source_bytes(
+            PAIR, index, snapshot, evidence, sources,
+            max_source_bytes=True,
+        )
+
+
+def test_p1b_t11_no_cyclic_scc():
+    graph = {"a": {"b"}, "b": set()}
+    inputs = {"a": "import b", "b": "pass"}
+    index, snapshot, evidence = _bound(graph, inputs)
+    assert assess_scc_source_bytes(
+        graph, index, snapshot, evidence, {},
+    ) == ()
+
+
+def test_p1b_t12_p0_incomplete_remains_unavailable():
+    index, snapshot, evidence = _bound(PAIR, PASS)
+    partial = replace(
+        snapshot,
+        coverage_status="PARTIAL_SOURCE_EVIDENCE",
+        observed_source_fingerprints=(
+            ("a", index["a"]),
+        ),
+    )
+    result = assess_scc_source_bytes(
+        PAIR, index, partial, evidence,
+        _p1b_snapshots(PASS),
+    )
+    assert result[0].model_classification == "INDETERMINATE"
+    assert result[0].bytes_state == "UNAVAILABLE"
+    assert result[0].reason == (
+        "INCOMPLETE_CYCLIC_SOURCE_COHORT"
+    )
+
+
+def test_p1b_t13_deterministic_and_immutable_inputs():
+    index, snapshot, evidence = _bound(PAIR, PASS)
+    sources = _p1b_snapshots(PASS)
+    before = repr((index, snapshot, evidence, sources))
+    first = assess_scc_source_bytes(
+        PAIR, index, snapshot, evidence, sources,
+    )
+    assert first == assess_scc_source_bytes(
+        PAIR, index, snapshot, evidence, sources,
+    )
+    assert repr((index, snapshot, evidence, sources)) == before
+    json.dumps(asdict(first[0]))
+
+
+def test_p1b_t14_pep263_encoding_from_exact_bytes():
+    raw_sources = {
+        "a": (
+            b"# coding: latin-1\n"
+            b"import b\n"
+            b"label = '\xe9'\n"
+        ),
+        "b": b"import a\nx=1\n",
+    }
+    sources = {
+        module: SourceSnapshot(
+            raw, hashlib.sha256(raw).hexdigest(),
+        )
+        for module, raw in raw_sources.items()
+    }
+    parsed = {
+        module: parse_source_snapshot(source, module)
+        for module, source in sources.items()
+    }
+    index = {
+        module: source.source_fingerprint
+        for module, source in sources.items()
+    }
+    evidence = build(PAIR, parsed)
+    snapshot = CycleSemanticsSnapshot(
+        graph_sha256=fingerprint_hard_edges(PAIR),
+        cyclic_modules=("a", "b"),
+        observed_source_fingerprints=tuple(
+            sorted(index.items())
+        ),
+        source_issues=(),
+        coverage_status="FILESYSTEM_STABLE_NON_ATOMIC",
+        source_snapshot_binding=(
+            "NOT_ATOMICALLY_VERIFIED_BY_DISCOVERY"
+        ),
+        runtime_execution_status="UNKNOWN_NOT_EVALUATED",
+        import_sites=analyze_cyclic_import_sites(
+            PAIR, parsed,
+        ),
+        conditional_discovery=ConditionalDiscoveryReport(
+            (), 0, (), 0, "COMPLETE",
+        ),
+    )
+    result = assess_scc_source_bytes(
+        PAIR, index, snapshot, evidence, sources,
+    )
+    assert result[0].model_classification == (
+        "MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS"
+    )
+    assert result[0].bytes_state == (
+        "BYTE_AST_CONSISTENT_NON_ATOMIC"
+    )
