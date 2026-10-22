@@ -342,6 +342,7 @@ def test_p0_t15_deterministic_without_input_mutation():
     assert before == (repr(edges), repr(index), repr(snapshot), repr(evidence))
     json.dumps(asdict(first[0]))
 
+
 def test_p0_t16_no_warning_suppression_or_public_api_change():
     result, _, _, _ = _one()
     assert result[0].authority == "SNAPSHOT_MODEL_ONLY_NOT_LIVE_CERTIFIED"
