@@ -30,8 +30,8 @@ WORKER_CAPTURE_AUTHORITY = (
     "_NOT_ATOMIC_NOT_LIVE_CERTIFIED"
 )
 
-DEFAULT_MAX_SOURCE_BYTES = 2 * 1024 * 1024
-DEFAULT_MAX_CLOSURE_BYTES = 32 * 1024 * 1024
+_DEFAULT_WORKER_CAPTURE_SOURCE_BYTES = 2 * 1024 * 1024
+_DEFAULT_WORKER_CAPTURE_CLOSURE_BYTES = 32 * 1024 * 1024
 
 _SUCCESS = (
     "WORKER_SECOND_PASS_BYTES_AND_IMPORTS_MATCH_INDEX_NON_ATOMIC"
@@ -276,8 +276,8 @@ def iter_selective_scc_worker_captures(
     hard_edges: Mapping[str, object],
     index: RepositoryIndex,
     *,
-    max_source_bytes: int = DEFAULT_MAX_SOURCE_BYTES,
-    max_closure_bytes: int = DEFAULT_MAX_CLOSURE_BYTES,
+    max_source_bytes: int = _DEFAULT_WORKER_CAPTURE_SOURCE_BYTES,
+    max_closure_bytes: int = _DEFAULT_WORKER_CAPTURE_CLOSURE_BYTES,
     executor: Executor | None = None,
 ) -> Iterator[SCCWorkerCapture]:
     """Replay only reachable cyclic SCC closures.

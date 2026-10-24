@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import ast
 import hashlib
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 
@@ -14,9 +16,17 @@ from contextor.core.analysis.process_pool_lifecycle import (
 from contextor.core.cycle_semantics import (
     selective_worker_capture as capture,
 )
+from contextor.core.cycle_semantics import (
+    selective_source_replay,
+)
 from contextor.core.graph.graph import build_graph
+from contextor.core.symbol_engine import indexer as worker_indexer
 from contextor.core.symbol_engine.indexer import (
     index_repository,
+)
+from contextor.core.validator.collisions import (
+    compute_collisions_from_facts,
+    extract_module_collision_facts,
 )
 
 
@@ -99,18 +109,28 @@ def test_p1d1b_t01_only_scc_closure_replayed(
 
 
 def test_p1d1b_t02_warm_cache_mode_is_explicit(
-    tmp_path, isolated_dirs,
+    tmp_path, isolated_dirs, monkeypatch,
 ):
     root = _repo(tmp_path)
     index, edges = _analyze(root)
 
+    def forbidden_parse(*args, **kwargs):
+        raise AssertionError(
+            "warm-cache worker reparsed source"
+        )
+
+    monkeypatch.setattr(
+        worker_indexer,
+        "parse_source_snapshot",
+        forbidden_parse,
+    )
+
     (item,) = _results(root, index, edges)
 
     _assert_complete(item, index)
-    assert set(dict(item.ast_modes).values()).issubset({
+    assert set(dict(item.ast_modes).values()) == {
         "CACHE_SHA256_EQUIVALENT",
-        "PARSED_FROM_WORKER_READ",
-    })
+    }
 
 
 def test_p1d1b_t03_real_process_pool_capture(
@@ -432,3 +452,26 @@ def test_p1d1b_t16_worker_module_identity_fails_closed(
         "WORKER_IDENTITY_MISMATCH:"
     )
     assert item.source_snapshots == {}
+
+
+def test_p1d1b_t17_no_public_definition_collision_with_p1d0():
+    modules = {
+        "selective_source_replay": selective_source_replay,
+        "selective_worker_capture": capture,
+    }
+
+    facts = {}
+
+    for module_id, module in modules.items():
+        path = Path(module.__file__).resolve()
+        tree = ast.parse(
+            path.read_text(encoding="utf-8"),
+            filename=str(path),
+        )
+        facts[module_id] = extract_module_collision_facts(
+            tree,
+            module_id,
+            str(path),
+        )
+
+    assert compute_collisions_from_facts(facts) == []
