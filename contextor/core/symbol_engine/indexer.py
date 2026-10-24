@@ -44,6 +44,7 @@ from contextor.core.reference.index import extract_compact_reference_facts
 from contextor.core.runtime_trace import trace_event
 from contextor.core.source import (
     SourceError,
+    SourceSnapshot,
     parse_source,
     parse_source_snapshot,
     read_source_snapshot,
@@ -330,14 +331,60 @@ def _cache_manager(
     return manager
 
 
+def _worker_source_capture_fields(
+    snapshot: SourceSnapshot,
+    max_bytes: int | None,
+    *,
+    indexed: bool,
+    ast_mode: str,
+) -> dict[str, object]:
+    """Optional payload from the worker's original read.
+
+    No byte copy, filesystem access, or raw transport when
+    capture was not requested.
+    """
+    if max_bytes is None:
+        return {}
+
+    if not indexed:
+        return {
+            "source_capture_status": "INDEX_FAILED",
+        }
+
+    if len(snapshot.raw) > max_bytes:
+        return {
+            "source_capture_status": "BYTE_LIMIT",
+        }
+
+    return {
+        "source_capture_status": "CAPTURED",
+        "source_capture_bytes": snapshot.raw,
+        "source_capture_ast_mode": ast_mode,
+        "source_capture_origin": "INDEXER_WORKER_READ",
+    }
+
+
 def _process_single_file(
     path_str: str,
     root_str: str,
     submitted_monotonic_ns: int | None = None,
     batch_token: str | None = None,
     cache_dir_str: str | None = None,
+    source_capture_max_bytes: int | None = None,
 ) -> dict:
     """Funkcja pomocnicza dla wieloprocesowości."""
+    if (
+        source_capture_max_bytes is not None
+        and (
+            type(source_capture_max_bytes) is not int
+            or not 1 <= source_capture_max_bytes
+            <= 64 * 1024 * 1024
+        )
+    ):
+        raise ValueError(
+            "source_capture_max_bytes out of range"
+        )
+
     path = Path(path_str)
 
     rel = path.relative_to(Path(root_str))
@@ -479,6 +526,14 @@ def _process_single_file(
                 or path.parent == Path(root_str)
                 else None
             ),
+            **(
+                {
+                    "source_capture_status":
+                    "SOURCE_READ_FAILED",
+                }
+                if source_capture_max_bytes is not None
+                else {}
+            ),
             **timing_evidence(),
         }
 
@@ -574,6 +629,12 @@ def _process_single_file(
                     if test_candidate or path.parent == Path(root_str)
                     else None
                 ),
+                **_worker_source_capture_fields(
+                    source_snapshot,
+                    source_capture_max_bytes,
+                    indexed=True,
+                    ast_mode="CACHE_SHA256_EQUIVALENT",
+                ),
                 **timing_evidence(),
             }
 
@@ -597,6 +658,14 @@ def _process_single_file(
             "automatic_test_context_directory": (
                 str(path.parent) if test_candidate or path.parent == Path(root_str)
                 else None
+            ),
+            **(
+                {
+                    "source_capture_status":
+                    "SOURCE_PARSE_FAILED",
+                }
+                if source_capture_max_bytes is not None
+                else {}
             ),
             **timing_evidence(),
         }
@@ -907,6 +976,12 @@ def _process_single_file(
             str(path.parent)
             if test_candidate or path.parent == Path(root_str)
             else None
+        ),
+        **_worker_source_capture_fields(
+            source_snapshot,
+            source_capture_max_bytes,
+            indexed=(error is None and imports is not None),
+            ast_mode="PARSED_FROM_WORKER_READ",
         ),
         **timing_evidence(),
     }
