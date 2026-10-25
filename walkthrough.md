@@ -1,374 +1,399 @@
-# CONTEXTOR_P1D2A_BOUNDED_ORIGINAL_INDEXER_CAPTURE_HANDOFF
+# CONTEXTOR_P1D2B_SELECTED_SCC_CLOSURE_BINDING
 
-## HEAD_BEFORE
-DIRECT_EVIDENCE: `78c386611245a475f436f2ca3938390b60f4fc69`. Pre-existing worktree modification was `walkthrough.md` only. Exact source anchors and absence of the new test path were checked before applying the patch.
+## HEAD_BEFORE_AND_AFTER
 
-## HEAD_AFTER
-DIRECT_EVIDENCE: `78c386611245a475f436f2ca3938390b60f4fc69`. No commit or Git mutation was made.
+- DIRECT_EVIDENCE: HEAD before and after: `9ba55b9b905cd58c0db46c1b57a1c71c8b3d2b2b`. The supplied baseline was `78c386611245a475f436f2ca3938390b60f4fc69`; the user explicitly waived that HEAD condition with “jebac head”. No Git history change was made.
 
-## PATCH_APPLICATION
-DIRECT_EVIDENCE: Architect-authored patch extracted verbatim from the supplied attachment. `git apply --check -` returned 0; `git apply -` returned 0. The inspected actual diffs below are limited to the two specified production/test paths. No source outside the literal patch was changed.
+## PREFLIGHT_AND_PRIOR_P1D2A_PRESERVATION
+
+- DIRECT_EVIDENCE: `indexer.py` still contains `source_capture_module_ids`, `original_worker_source_snapshots`, `original_worker_ast_modes` and `ALL_SELECTED_CAPTURED_NON_ATOMIC`; `tests/test_indexer_original_capture_handoff.py` exists. Neither P1D2B target existed before editing. Final `git status` lists only the two new files and this report; no P1D2A file was changed.
+- CODE_PATH_PROVED: Contextor MCP resolved `RepositoryIndex` and `analyze_import_cycle_topology` at canonical revision 672 before editing.
+
+## NATIVE_CODEX_FILE_EDITS
+
+- DIRECT_EVIDENCE: Created exactly `contextor/core/cycle_semantics/original_worker_binding.py` and `tests/test_original_worker_cycle_closure_binding.py` using the native Codex file-editing tool. A read-only normalized text comparison against the two marked blocks in the attachment reported `EXACT_MATCH` for both (160 and 166 lines). No other source or test was edited.
 
 ## FILES_CHANGED
-- `contextor/core/symbol_engine/indexer.py`
-- `tests/test_indexer_original_capture_handoff.py` (new)
-- `walkthrough.md` (this report; excluded from source/test actual diffs)
+
+- `contextor/core/cycle_semantics/original_worker_binding.py` (new)
+- `tests/test_original_worker_cycle_closure_binding.py` (new)
+- `walkthrough.md` (this report; excluded from production/test diff requirement)
 
 ## ACTUAL_DIFF
 
-### `contextor/core/symbol_engine/indexer.py`
-```diff
-diff --git a/contextor/core/symbol_engine/indexer.py b/contextor/core/symbol_engine/indexer.py
-index 157963b..e3d9488 100644
---- a/contextor/core/symbol_engine/indexer.py
-+++ b/contextor/core/symbol_engine/indexer.py
-@@ -12,6 +12,7 @@ Builds stable module_id against project root.
- 
- import ast
- import dataclasses
-+import hashlib
- import os
- import re
- import time
-@@ -1045,13 +1046,116 @@ class RepositoryIndex:
-         dataclasses.field(default_factory=dict)
-     )
- 
-+    # Optional original worker-read evidence. Not a publication receipt,
-+    # generation binding, or cross-file atomic source snapshot.
-+    original_worker_source_snapshots: dict[str, SourceSnapshot] = (
-+        dataclasses.field(default_factory=dict)
-+    )
-+    original_worker_ast_modes: dict[str, str] = (
-+        dataclasses.field(default_factory=dict)
-+    )
-+    original_worker_capture_status: str = "NOT_REQUESTED"
-+    original_worker_capture_reason: str | None = None
-+
- 
- def index_repository(
--    root: str, excludes: list[str] = None, extra_ignored_dirs: set = None, progress_callback=None
-+    root: str,
-+    excludes: list[str] = None,
-+    extra_ignored_dirs: set = None,
-+    progress_callback=None,
-+    *,
-+    source_capture_module_ids: frozenset[str] | None = None,
- ) -> RepositoryIndex:
-+    """Buduje indeks modułów projektu wraz z listą pominiętych plików.
-+
-+    Optional evidence is not a coherent cross-file snapshot and does
-+    not authorize canonical publication. Default indexing transports no
-+    raw source bytes beyond the worker.
-     """
--    Buduje indeks modułów projektu wraz z listą pominiętych plików.
--    """
-+    if source_capture_module_ids is None:
-+        selected_captures = frozenset()
-+    elif (
-+        type(source_capture_module_ids) is not frozenset
-+        or any(
-+            type(name) is not str or not name
-+            for name in source_capture_module_ids
-+        )
-+        or len(source_capture_module_ids) > 16
-+    ):
-+        raise ValueError("source_capture_module_ids must be <=16 module names")
-+    else:
-+        selected_captures = source_capture_module_ids
-+
-+    # At most 16 selected results of 2 MiB each (32 MiB raw payload).
-+    # This does not bound unrelated indexing memory overhead.
-+    capture_per_source_max = 2 * 1024 * 1024
-+    captures: dict[str, SourceSnapshot] = {}
-+    capture_modes: dict[str, str] = {}
-+    capture_errors: dict[str, str] = {}
-+
-+    def capture_limit(path: Path) -> int | None:
-+        module_id = ".".join(path.relative_to(root_path).with_suffix("").parts)
-+        return capture_per_source_max if module_id in selected_captures else None
-+
-+    def record_capture(result: dict, path: Path) -> None:
-+        if not selected_captures:
-+            return
-+        module_id = ".".join(path.relative_to(root_path).with_suffix("").parts)
-+        if module_id not in selected_captures:
-+            return
-+        if (
-+            result.get("module_id") != module_id
-+            or result.get("path") != str(path.relative_to(root_path))
-+            or result.get("absolute_path") != str(path.resolve())
-+        ):
-+            capture_errors[module_id] = "WORKER_IDENTITY_MISMATCH"
-+            return
-+        if (
-+            result.get("error") is not None
-+            or result.get("source_capture_status") != "CAPTURED"
-+        ):
-+            status = result.get("source_capture_status")
-+            capture_errors[module_id] = (
-+                status if type(status) is str and status else "INDEX_FAILED"
-+            )
-+            return
-+        raw = result.get("source_capture_bytes")
-+        fingerprint = result.get("source_fingerprint")
-+        mode = result.get("source_capture_ast_mode")
-+        if (
-+            type(raw) is not bytes
-+            or len(raw) > capture_per_source_max
-+            or type(fingerprint) is not str
-+            or hashlib.sha256(raw).hexdigest() != fingerprint
-+            or result.get("source_capture_origin") != "INDEXER_WORKER_READ"
-+            or mode not in (
-+                "PARSED_FROM_WORKER_READ",
-+                "CACHE_SHA256_EQUIVALENT",
-+            )
-+        ):
-+            capture_errors[module_id] = "INVALID_WORKER_CAPTURE"
-+            return
-+        captures[module_id] = SourceSnapshot(raw=raw, source_fingerprint=fingerprint)
-+        capture_modes[module_id] = mode
-+
-+    def capture_result_fields() -> dict[str, object]:
-+        if not selected_captures:
-+            return {}
-+        missing = selected_captures - captures.keys()
-+        if missing or capture_errors:
-+            # No partially successful source cohort may escape this index.
-+            return {
-+                "original_worker_capture_status": "UNAVAILABLE",
-+                "original_worker_capture_reason": (
-+                    capture_errors[sorted(capture_errors)[0]]
-+                    if capture_errors else "SELECTED_MODULE_NOT_INDEXED"
-+                ),
-+            }
-+        return {
-+            "original_worker_source_snapshots": dict(sorted(captures.items())),
-+            "original_worker_ast_modes": dict(sorted(capture_modes.items())),
-+            "original_worker_capture_status": "ALL_SELECTED_CAPTURED_NON_ATOMIC",
-+        }
- 
-     index_started = time.monotonic()
-     root_path = Path(root).resolve()
-@@ -1828,8 +1932,13 @@ def index_repository(
-             res = _process_single_file(
-                 str(path),
-                 str(root_path),
-+                **(
-+                    {"source_capture_max_bytes": capture_limit(path)}
-+                    if selected_captures else {}
-+                ),
-             )
-             record_file_task_evidence(res)
-+            record_capture(res, path)
-             if res["error"]:
-                 line_number, column_number = _syntax_error_location(res["error"])
-                 skipped.append(
-@@ -1881,6 +1990,7 @@ def index_repository(
-                     source_fingerprints_by_module.items()
-                 )
-             ),
-+            **capture_result_fields(),
-         )
- 
-     pool_scope_started = time.monotonic()
-@@ -1921,6 +2031,10 @@ def index_repository(
-                 time.monotonic_ns(),
-                 worker_batch_token,
-                 resolved_cache_dir,
-+                *(
-+                    (capture_limit(p),)
-+                    if selected_captures else ()
-+                ),
-             ): p
-             for p in files_to_process
-         }
-@@ -1971,6 +2085,7 @@ def index_repository(
-                     parent_result_received_monotonic_ns
-                 ),
-             )
-+            record_capture(res, futures[future])
- 
-             if res["error"]:
-                 line_number, column_number = (
-@@ -2124,6 +2239,7 @@ def index_repository(
-                 source_fingerprints_by_module.items()
-             )
-         ),
-+        **capture_result_fields(),
-     )
-```
+### `contextor/core/cycle_semantics/original_worker_binding.py`
 
-### `tests/test_indexer_original_capture_handoff.py`
 ```diff
-diff --git a/tests/test_indexer_original_capture_handoff.py b/tests/test_indexer_original_capture_handoff.py
+diff --git a/contextor/core/cycle_semantics/original_worker_binding.py b/contextor/core/cycle_semantics/original_worker_binding.py
 new file mode 100644
-index 0000000..24e28cd
+index 0000000..d469b86
 --- /dev/null
-+++ b/tests/test_indexer_original_capture_handoff.py
-@@ -0,0 +1,140 @@
-+"""P1D2A: bounded original-worker capture handoff, not publication."""
++++ b/contextor/core/cycle_semantics/original_worker_binding.py
+@@ -0,0 +1,160 @@
++"""Bound selected original indexer bytes to a supplied SCC closure.
++
++This is a non-atomic, in-memory consistency check. It does not authenticate
++canonical graph ownership, bind an installed LIVE generation, or mint receipts.
++"""
 +
 +from __future__ import annotations
 +
 +import hashlib
++from collections.abc import Mapping
++from dataclasses import dataclass
++
++from contextor.core.source import SourceSnapshot
++
++from .scc import analyze_import_cycle_topology
++
++
++_CAPTURE_STATUS = "ALL_SELECTED_CAPTURED_NON_ATOMIC"
++_ACCEPTED_MODES = frozenset({
++    "PARSED_FROM_WORKER_READ",
++    "CACHE_SHA256_EQUIVALENT",
++})
++_MAX_MODULES = 16
++_MAX_SOURCE_BYTES = 2 * 1024 * 1024
++_MAX_TOTAL_BYTES = 32 * 1024 * 1024
++
++
++@dataclass(frozen=True)
++class OriginalWorkerCycleClosureBinding:
++    status: str
++    reason: str | None
++    cyclic_components: tuple[tuple[str, ...], ...]
++    reachable_modules: tuple[str, ...]
++    source_snapshots: dict[str, SourceSnapshot]
++    ast_modes: tuple[tuple[str, str], ...]
++    retained_raw_bytes: int
++
++
++def assess_original_worker_cycle_closure(
++    index: object,
++    hard_edges: Mapping[str, object],
++) -> OriginalWorkerCycleClosureBinding:
++    """Validate that opted-in original indexer captures cover every SCC closure.
++
++    Inputs are caller-supplied index and graph. No filesystem access, parsing,
++    worker execution, canonical freshness assertion, publication, or LIVE I/O.
++    Complete only means selected worker-read bytes match the supplied index
++    fingerprints, across all reachable cyclic SCC closures, without atomically
++    capturing the repository or authenticating who supplied the graph.
++    """
++    # Import locally to avoid creating an import-time dependency back to the
++    # indexer from cycle-semantics modules.
++    from contextor.core.symbol_engine.indexer import RepositoryIndex
++
++    if type(index) is not RepositoryIndex:
++        raise TypeError("index must be RepositoryIndex")
++    if not isinstance(hard_edges, Mapping):
++        raise TypeError("hard_edges must be a mapping")
++
++    def unavailable(reason: str) -> OriginalWorkerCycleClosureBinding:
++        # Never expose partially validated snapshots or modes.
++        return OriginalWorkerCycleClosureBinding(
++            status="UNAVAILABLE",
++            reason=reason,
++            cyclic_components=(),
++            reachable_modules=(),
++            source_snapshots={},
++            ast_modes=(),
++            retained_raw_bytes=0,
++        )
++
++    topology = analyze_import_cycle_topology(hard_edges)
++    if not topology.cyclic_components:
++        return unavailable("NO_CYCLIC_COMPONENTS")
++    if (
++        index.original_worker_capture_status != _CAPTURE_STATUS
++        or index.original_worker_capture_reason is not None
++    ):
++        return unavailable("INDEX_CAPTURE_NOT_COMPLETE")
++
++    if (
++        type(index.modules) is not dict
++        or type(index.source_fingerprints_by_module) is not dict
++        or type(index.original_worker_source_snapshots) is not dict
++        or type(index.original_worker_ast_modes) is not dict
++    ):
++        return unavailable("INDEX_CAPTURE_SHAPE_INVALID")
++
++    snapshots = index.original_worker_source_snapshots
++    modes = index.original_worker_ast_modes
++    if (
++        len(snapshots) > _MAX_MODULES
++        or set(snapshots) != set(modes)
++    ):
++        return unavailable("INDEX_CAPTURE_SHAPE_INVALID")
++
++    adjacency: dict[str, tuple[str, ...]] = {}
++    for module_id, targets in hard_edges.items():
++        adjacency[module_id] = tuple(sorted(set(targets)))
++    for targets in tuple(adjacency.values()):
++        for target in targets:
++            adjacency.setdefault(target, ())
++
++    required: set[str] = set()
++    components = tuple(
++        component.members
++        for component in topology.cyclic_components
++    )
++    for members in components:
++        pending = list(members)
++        required.update(members)
++        while pending:
++            for target in adjacency[pending.pop()]:
++                if target not in required:
++                    required.add(target)
++                    pending.append(target)
++        if len(required) > _MAX_MODULES:
++            return unavailable("CLOSURE_MODULE_LIMIT")
++
++    selected = tuple(sorted(required))
++    for module_id in selected:
++        if module_id not in index.modules:
++            return unavailable("CLOSURE_MODULE_NOT_INDEXED:" + module_id)
++        if module_id not in snapshots or module_id not in modes:
++            return unavailable("CLOSURE_CAPTURE_MISSING:" + module_id)
++
++    selected_snapshots: dict[str, SourceSnapshot] = {}
++    selected_modes: dict[str, str] = {}
++    total = 0
++    for module_id in selected:
++        snapshot = snapshots[module_id]
++        if type(snapshot) is not SourceSnapshot or type(snapshot.raw) is not bytes:
++            return unavailable("CLOSURE_SOURCE_INVALID:" + module_id)
++        if len(snapshot.raw) > _MAX_SOURCE_BYTES:
++            return unavailable("CLOSURE_SOURCE_BYTE_LIMIT:" + module_id)
++        total += len(snapshot.raw)
++        if total > _MAX_TOTAL_BYTES:
++            return unavailable("CLOSURE_TOTAL_BYTE_LIMIT")
++        indexed_hash = index.source_fingerprints_by_module.get(module_id)
++        if (
++            type(indexed_hash) is not str
++            or snapshot.source_fingerprint != indexed_hash
++            or hashlib.sha256(snapshot.raw).hexdigest() != indexed_hash
++        ):
++            return unavailable("CLOSURE_SOURCE_DIGEST_MISMATCH:" + module_id)
++        mode = modes[module_id]
++        if type(mode) is not str or mode not in _ACCEPTED_MODES:
++            return unavailable("CLOSURE_AST_MODE_INVALID:" + module_id)
++        selected_snapshots[module_id] = snapshot
++        selected_modes[module_id] = mode
++
++    return OriginalWorkerCycleClosureBinding(
++        status="SELECTED_CLOSURES_CONSISTENT_NON_ATOMIC",
++        reason=None,
++        cyclic_components=components,
++        reachable_modules=selected,
++        source_snapshots=selected_snapshots,
++        ast_modes=tuple(sorted(selected_modes.items())),
++        retained_raw_bytes=total,
++    )
+```
+
+### `tests/test_original_worker_cycle_closure_binding.py`
+
+```diff
+diff --git a/tests/test_original_worker_cycle_closure_binding.py b/tests/test_original_worker_cycle_closure_binding.py
+new file mode 100644
+index 0000000..2fca506
+--- /dev/null
++++ b/tests/test_original_worker_cycle_closure_binding.py
+@@ -0,0 +1,166 @@
++"""P1D2B: pure SCC-closure binding of opted-in original indexer bytes."""
++
++from __future__ import annotations
++
++import hashlib
++from dataclasses import replace
++from pathlib import Path
 +
 +import pytest
 +
-+from contextor.core.analysis.process_pool_lifecycle import (
-+    terminate_active_process_pools,
++from contextor.core.cycle_semantics.original_worker_binding import (
++    assess_original_worker_cycle_closure,
 +)
-+from contextor.core.symbol_engine import indexer
++from contextor.core.source import SourceSnapshot
++from contextor.core.symbol_engine.indexer import index_repository
++
++
++_GRAPH = {
++    "a": {"b", "helper"},
++    "b": {"a"},
++    "helper": set(),
++}
 +
 +
 +@pytest.fixture(autouse=True)
-+def _inline_by_default(monkeypatch):
++def _inline_index(monkeypatch):
 +    monkeypatch.setenv("CONTEXTOR_DISABLE_PROCESS_POOL", "1")
 +
 +
 +def _repo(tmp_path):
 +    root = tmp_path / "repo"
 +    root.mkdir()
-+    (root / "a.py").write_bytes(b"import os\nvalue = os.name\n")
-+    (root / "b.py").write_bytes(b"other = 2\n")
++    (root / "a.py").write_bytes(b"import b\nimport helper\n")
++    (root / "b.py").write_bytes(b"import a\n")
++    (root / "helper.py").write_bytes(b"value = 1\n")
 +    return root
 +
 +
 +def _index(root, *selected):
-+    return indexer.index_repository(
++    return index_repository(
 +        str(root), source_capture_module_ids=frozenset(selected),
 +    )
 +
 +
-+def test_p1d2a_t01_default_remains_capture_free(tmp_path, isolated_dirs):
++def test_p1d2b_t01_complete_original_indexer_closure(tmp_path, isolated_dirs):
 +    root = _repo(tmp_path)
-+    result = indexer.index_repository(str(root))
-+    assert result.original_worker_capture_status == "NOT_REQUESTED"
-+    assert result.original_worker_source_snapshots == {}
-+    assert result.original_worker_ast_modes == {}
-+    assert result.original_worker_capture_reason is None
-+
-+
-+def test_p1d2a_t02_only_selected_original_worker_bytes(tmp_path, isolated_dirs):
-+    root = _repo(tmp_path)
-+    result = _index(root, "a")
-+    assert result.original_worker_capture_status == "ALL_SELECTED_CAPTURED_NON_ATOMIC"
-+    assert result.original_worker_capture_reason is None
-+    assert set(result.original_worker_source_snapshots) == {"a"}
-+    assert set(result.original_worker_ast_modes) == {"a"}
-+    raw = (root / "a.py").read_bytes()
-+    snap = result.original_worker_source_snapshots["a"]
-+    assert snap.raw == raw
-+    assert snap.source_fingerprint == hashlib.sha256(raw).hexdigest()
-+    assert snap.source_fingerprint == result.source_fingerprints_by_module["a"]
-+    assert result.original_worker_ast_modes["a"] in {
-+        "PARSED_FROM_WORKER_READ", "CACHE_SHA256_EQUIVALENT",
-+    }
-+    assert "b" in result.modules
-+
-+
-+def test_p1d2a_t03_warm_cache_keeps_equivalent_mode(tmp_path, isolated_dirs):
-+    root = _repo(tmp_path)
-+    indexer.index_repository(str(root))
-+    result = _index(root, "a")
-+    assert result.original_worker_capture_status == "ALL_SELECTED_CAPTURED_NON_ATOMIC"
-+    assert result.original_worker_ast_modes["a"] == "CACHE_SHA256_EQUIVALENT"
-+
-+
-+def test_p1d2a_t04_missing_selected_module_no_partial_data(tmp_path, isolated_dirs):
-+    root = _repo(tmp_path)
-+    result = _index(root, "a", "missing")
-+    assert result.original_worker_capture_status == "UNAVAILABLE"
-+    assert result.original_worker_capture_reason == "SELECTED_MODULE_NOT_INDEXED"
-+    assert result.original_worker_source_snapshots == {}
-+    assert result.original_worker_ast_modes == {}
-+
-+
-+def test_p1d2a_t05_byte_limit_fails_closed(tmp_path, isolated_dirs):
-+    root = _repo(tmp_path)
-+    (root / "big.py").write_bytes(b"#" + b"a" * (2 * 1024 * 1024) + b"\n")
-+    result = _index(root, "a", "big")
-+    assert result.original_worker_capture_status == "UNAVAILABLE"
-+    assert result.original_worker_capture_reason == "BYTE_LIMIT"
-+    assert result.original_worker_source_snapshots == {}
-+    assert result.original_worker_ast_modes == {}
-+
-+
-+def test_p1d2a_t06_invalid_selector_rejected(tmp_path, isolated_dirs):
-+    root = _repo(tmp_path)
-+    invalid = [
-+        "a",
-+        frozenset({""}),
-+        frozenset({"a", 7}),
-+        frozenset(f"x{i}" for i in range(17)),
-+    ]
-+    for selected in invalid:
-+        with pytest.raises(ValueError):
-+            indexer.index_repository(str(root), source_capture_module_ids=selected)
-+
-+
-+def test_p1d2a_t07_forged_worker_capture_rejected(tmp_path, isolated_dirs, monkeypatch):
-+    root = _repo(tmp_path)
-+    original = indexer._process_single_file
-+
-+    def forged(*args, **kwargs):
-+        result = original(*args, **kwargs)
-+        if result["module_id"] == "a":
-+            result["source_capture_bytes"] = b"forged"
-+        return result
-+
-+    monkeypatch.setattr(indexer, "_process_single_file", forged)
-+    result = _index(root, "a")
-+    assert result.original_worker_capture_status == "UNAVAILABLE"
-+    assert result.original_worker_capture_reason == "INVALID_WORKER_CAPTURE"
-+    assert result.original_worker_source_snapshots == {}
-+
-+
-+def test_p1d2a_t08_selected_parse_failure_no_partial_data(tmp_path, isolated_dirs):
-+    root = _repo(tmp_path)
-+    (root / "broken.py").write_bytes(b"def oops(:\n    pass\n")
-+    result = _index(root, "a", "broken")
-+    assert result.original_worker_capture_status == "UNAVAILABLE"
-+    assert result.original_worker_capture_reason == "SOURCE_PARSE_FAILED"
-+    assert result.original_worker_source_snapshots == {}
-+
-+
-+def test_p1d2a_t09_real_pool_capture(tmp_path, isolated_dirs, monkeypatch):
-+    root = _repo(tmp_path)
-+    monkeypatch.delenv("CONTEXTOR_DISABLE_PROCESS_POOL", raising=False)
-+    terminate_active_process_pools(timeout=1.0)
-+    try:
-+        result = _index(root, "a")
-+        assert result.original_worker_capture_status == "ALL_SELECTED_CAPTURED_NON_ATOMIC"
-+        raw = (root / "a.py").read_bytes()
-+        assert result.original_worker_source_snapshots["a"].raw == raw
-+        assert result.original_worker_source_snapshots["a"].source_fingerprint == (
-+            result.source_fingerprints_by_module["a"]
++    index = _index(root, "a", "b", "helper")
++    result = assess_original_worker_cycle_closure(index, _GRAPH)
++    assert result.status == "SELECTED_CLOSURES_CONSISTENT_NON_ATOMIC"
++    assert result.reason is None
++    assert result.cyclic_components == (("a", "b"),)
++    assert result.reachable_modules == ("a", "b", "helper")
++    assert set(result.source_snapshots) == set(result.reachable_modules)
++    assert set(dict(result.ast_modes)) == set(result.reachable_modules)
++    assert result.retained_raw_bytes == sum(
++        len(item.raw) for item in result.source_snapshots.values()
++    )
++    for module_id, snapshot in result.source_snapshots.items():
++        assert snapshot.raw == (root / f"{module_id}.py").read_bytes()
++        assert hashlib.sha256(snapshot.raw).hexdigest() == (
++            index.source_fingerprints_by_module[module_id]
 +        )
-+    finally:
-+        terminate_active_process_pools(timeout=1.0)
++
++
++def test_p1d2b_t02_default_index_not_authorized(tmp_path, isolated_dirs):
++    index = index_repository(str(_repo(tmp_path)))
++    result = assess_original_worker_cycle_closure(index, _GRAPH)
++    assert result.status == "UNAVAILABLE"
++    assert result.reason == "INDEX_CAPTURE_NOT_COMPLETE"
++    assert result.source_snapshots == {}
++    assert result.retained_raw_bytes == 0
++
++
++def test_p1d2b_t03_missing_closure_source_rejects_all(tmp_path, isolated_dirs):
++    index = _index(_repo(tmp_path), "a", "b")
++    result = assess_original_worker_cycle_closure(index, _GRAPH)
++    assert result.reason == "CLOSURE_CAPTURE_MISSING:helper"
++    assert result.source_snapshots == {}
++    assert result.ast_modes == ()
++
++
++def test_p1d2b_t04_tampered_original_bytes_rejected(tmp_path, isolated_dirs):
++    index = _index(_repo(tmp_path), "a", "b", "helper")
++    altered = dict(index.original_worker_source_snapshots)
++    old = altered["a"]
++    altered["a"] = SourceSnapshot(b"forged", old.source_fingerprint)
++    forged_index = replace(index, original_worker_source_snapshots=altered)
++    result = assess_original_worker_cycle_closure(forged_index, _GRAPH)
++    assert result.reason == "CLOSURE_SOURCE_DIGEST_MISMATCH:a"
++    assert result.source_snapshots == {}
++
++
++def test_p1d2b_t05_invalid_ast_mode_rejected(tmp_path, isolated_dirs):
++    index = _index(_repo(tmp_path), "a", "b", "helper")
++    modes = dict(index.original_worker_ast_modes)
++    modes["b"] = "FAKE_AST_MODE"
++    result = assess_original_worker_cycle_closure(
++        replace(index, original_worker_ast_modes=modes), _GRAPH,
++    )
++    assert result.reason == "CLOSURE_AST_MODE_INVALID:b"
++    assert result.source_snapshots == {}
++
++
++def test_p1d2b_t06_nonindexed_reachable_module_rejected(tmp_path, isolated_dirs):
++    index = _index(_repo(tmp_path), "a", "b", "helper")
++    graph = {"a": {"b", "ghost"}, "b": {"a"}, "ghost": set()}
++    result = assess_original_worker_cycle_closure(index, graph)
++    assert result.reason == "CLOSURE_MODULE_NOT_INDEXED:ghost"
++    assert result.source_snapshots == {}
++
++
++def test_p1d2b_t07_closure_above_selection_budget_rejected(tmp_path, isolated_dirs):
++    index = _index(_repo(tmp_path), "a", "b", "helper")
++    graph = {"a": {"a", *(f"x{i}" for i in range(16))}}
++    result = assess_original_worker_cycle_closure(index, graph)
++    assert result.reason == "CLOSURE_MODULE_LIMIT"
++    assert result.source_snapshots == {}
++
++
++def test_p1d2b_t08_no_cycle_does_not_claim_evidence(tmp_path, isolated_dirs):
++    index = _index(_repo(tmp_path), "a", "b", "helper")
++    result = assess_original_worker_cycle_closure(index, {
++        "a": {"helper"}, "helper": set(), "b": set(),
++    })
++    assert result.reason == "NO_CYCLIC_COMPONENTS"
++    assert result.source_snapshots == {}
++
++
++def test_p1d2b_t09_multiple_sccs_no_partial_success(tmp_path, isolated_dirs):
++    root = _repo(tmp_path)
++    (root / "c.py").write_bytes(b"import d\n")
++    (root / "d.py").write_bytes(b"import c\n")
++    graph = {**_GRAPH, "c": {"d"}, "d": {"c"}}
++    index = _index(root, "a", "b", "helper", "c", "d")
++    valid = assess_original_worker_cycle_closure(index, graph)
++    assert valid.status == "SELECTED_CLOSURES_CONSISTENT_NON_ATOMIC"
++    assert valid.cyclic_components == (("a", "b"), ("c", "d"))
++    assert valid.reachable_modules == ("a", "b", "c", "d", "helper")
++    invalid = assess_original_worker_cycle_closure(
++        _index(root, "a", "b", "helper", "c"), graph,
++    )
++    assert invalid.reason == "CLOSURE_CAPTURE_MISSING:d"
++    assert invalid.source_snapshots == {}
++
++
++def test_p1d2b_t10_warm_cache_equivalence_explicit(tmp_path, isolated_dirs):
++    root = _repo(tmp_path)
++    index_repository(str(root))
++    index = _index(root, "a", "b", "helper")
++    result = assess_original_worker_cycle_closure(index, _GRAPH)
++    assert result.status == "SELECTED_CLOSURES_CONSISTENT_NON_ATOMIC"
++    assert set(dict(result.ast_modes).values()) == {"CACHE_SHA256_EQUIVALENT"}
++
++
++def test_p1d2b_t11_binding_performs_no_filesystem_reads(
++    tmp_path, isolated_dirs, monkeypatch,
++):
++    root = _repo(tmp_path)
++    index = _index(root, "a", "b", "helper")
++
++    def forbidden_read(self):
++        raise AssertionError("binding performed a new filesystem read")
++
++    monkeypatch.setattr(Path, "read_bytes", forbidden_read)
++    result = assess_original_worker_cycle_closure(index, _GRAPH)
++    assert result.status == "SELECTED_CLOSURES_CONSISTENT_NON_ATOMIC"
 ```
 
-## NEW_TESTS
-DIRECT_EVIDENCE: 9 P1D2A tests in the new file. The required combined focused pytest invocation passed all 52 tests in 16.66 s. P1D2A coverage includes default no-capture, selected bytes, warm cache mode, missing selection, 2 MiB limit, selector validation, forged bytes, parse failure and real process-pool transport. No failures.
+## P1D2B_TEST_RESULTS
+
+- DIRECT_EVIDENCE: New file defines 11 P1D2B tests. The exact requested focused invocation returned `63 passed in 15.25s`; no failures.
 
 ## FOCUSED_NON_REGRESSION
-DIRECT_EVIDENCE: `& .\.venv\Scripts\python.exe -m pytest -q tests/test_indexer_original_capture_handoff.py tests/test_indexer_worker_source_capture.py tests/test_cycle_semantics_selective_worker_capture.py tests/test_index_fusion.py` returned 0: **52 passed in 16.66 s**. File counts from test function definitions: new P1D2A 9, P1D1A 13, P1D1B 17, index fusion 13; total 52. No additional test was run. These are isolated test fixtures, not FULL analysis of the user repository.
 
-## PY_COMPILE
-DIRECT_EVIDENCE: `& .\.venv\Scripts\python.exe -m py_compile contextor/core/symbol_engine/indexer.py tests/test_indexer_original_capture_handoff.py` returned 0 for both files.
+- DIRECT_EVIDENCE: `& .\.venv\Scripts\python.exe -m pytest -q tests/test_original_worker_cycle_closure_binding.py tests/test_indexer_original_capture_handoff.py tests/test_indexer_worker_source_capture.py tests/test_cycle_semantics_selective_worker_capture.py tests/test_index_fusion.py` returned exit 0, 63/63 passed. The prior four-file set contributed 52 tests. No FULL run or test on the active repository was performed.
 
-## WHITESPACE
-DIRECT_EVIDENCE: `git diff --check -- contextor/core/symbol_engine/indexer.py` returned 0. `git diff --no-index --check -- /dev/null tests/test_indexer_original_capture_handoff.py` emitted no whitespace diagnostics (exit 1 is the expected new-file difference). Final repo-wide `git diff --check` returned 1 only for `walkthrough.md:48,150,191`: these are single-space context lines in the mandatory verbatim ACTUAL_DIFF code block. No production/test whitespace diagnostic was reported. The pre-existing Stage 1 report was overwritten.
+## PY_COMPILE_AND_WHITESPACE
 
-## CANONICAL_LIVE_READS
-DIRECT_EVIDENCE: Read-only `get_live_events(after_revision=670)` returned continuous events at revision 671 (`desktop_watcher`, `UPDATED`, `contextor/core/symbol_engine/indexer.py`) and 672 (`desktop_watcher`, `UPDATED`, `tests/test_indexer_original_capture_handoff.py`), with `resync_required=false`. After both events, Contextor `get_symbol_implementation(mode=preview)` resolved `index_repository` at lines 1061-2243 and P1D2A T01 at lines 34-40, each at canonical revision 672 with `workspace_sync=verified`. The returned cycle_semantics family remained stale; freshness of that unrelated family was not required. Earlier search at revision 671 had not yet indexed the new test; the revision-672 read resolved it.
+- DIRECT_EVIDENCE: `py_compile` on both new files returned exit 0. `git diff --no-index --check -- /dev/null` on each new file emitted no whitespace diagnostics; exit 1 denotes the expected difference from `/dev/null`. `git diff --check` on tracked changes emitted no whitespace diagnostics. Git warned that LF may become CRLF on a future checkout; no source content mismatch was found.
 
-## SOURCE_CAPTURE_AUTHORITY_LIMITS
-CODE_PATH_PROVED: Capture is opt-in via `source_capture_module_ids`, default is capture-free. At most 16 selected module IDs and 2 MiB per selected worker payload yield a 32 MiB selected-raw-payload bound per indexing call; this does not bound total process peak memory. Failure or incomplete selection returns `UNAVAILABLE` without partial snapshots. Successful handoff is labeled `ALL_SELECTED_CAPTURED_NON_ATOMIC`. Warm cache mode is explicitly `CACHE_SHA256_EQUIVALENT`. No cross-file atomic transaction, canonical receipt, FULL end-to-end generation binding, active LIVE adoption or SAFE claim follows from this patch. The opt-in was not wired into facade/FULL or canonical publication.
+## CANONICAL_WATCHER_AND_FRESHNESS
 
-## UNVERIFIED_RUNTIME_ADOPTION
-UNKNOWN: Contextor watcher indexing and verified disk source demonstrate canonical indexing of the changed files, not adoption of the edited Python implementation by an already running process. No restart, reload, active-code introspection or LIVE behavior probe was performed.
+- DIRECT_EVIDENCE: Pre-edit canonical revision 672. `get_live_events(after_revision=672)` returned a continuous `desktop_watcher` UPDATED event for the new production file at revision 673; subsequent read after 673 returned the test-file UPDATED event at revision 674. `resync_required=false`. At revision 674, Contextor `get_symbol_implementation(mode=preview)` resolved both new symbols with `workspace_sync=verified`. Cycles family: fresh, count 16 DFS back-edge paths. `cycle_semantics`: stale. No manual `update_file` was called.
+
+## ORIGINAL_SOURCE_CAPTURE_PROOF_LIMITS
+
+- CODE_PATH_PROVED: The new binding checks the caller-supplied index and hard-edge closure against opted-in original worker captures, indexed SHA-256 values, accepted AST modes and 16-module/2 MiB-per-source/32 MiB-total limits. It returns no partial snapshots on failure. Successful status explicitly says `NON_ATOMIC`. It does not establish cross-file atomicity or canonical graph ownership.
+- CONTRACT_PROVED by isolated tests: complete closure, missing/default capture, tampered bytes/mode, nonindexed module, limit, no cycle, multiple SCCs, warm-cache equivalence and no binding-time filesystem read.
+
+## RUNTIME_ADOPTION_LIMITS
+
+- UNKNOWN: Watcher indexing and verified source equality do not establish which implementation is loaded in the active LIVE process. No restart, reload, installed-generation verification, publication, runtime import-safety test or SAFE certification occurred.
 
 ## FINAL_VERDICT
-CONTRACT_PROVED by the 52 passing focused tests and CODE_PATH_PROVED by the exact patch: bounded optional original-worker capture handoff works in isolated inline and process-pool test paths. DIRECT_EVIDENCE confirms canonical watcher indexing at revision 672. Runtime adoption and future publication authority remain UNKNOWN. STOP after P1D2A exact patch and tests.
+
+- DIRECT_EVIDENCE: Literal files created, exact-content comparison passed, 63 focused tests passed, compiler passed and both watcher events were observed. CODE_PATH_PROVED / CONTRACT_PROVED: the selected in-memory SCC closure binding works under the supplied non-atomic limits in isolated tests. UNKNOWN: active loaded-code adoption and generation/publication authority. STOP after P1D2B.
