@@ -881,6 +881,14 @@ class ContextorFacade:
                 cycle_source_preparation = preview_unavailable(
                     "CYCLE_SEMANTICS_NOT_FRESH"
                 )
+            elif (
+                cycle_semantics.coverage_status
+                != "FILESYSTEM_STABLE_NON_ATOMIC"
+                or cycle_semantics.source_issues
+            ):
+                cycle_source_preparation = preview_unavailable(
+                    "CYCLE_SOURCE_EVIDENCE_INCOMPLETE"
+                )
             else:
                 try:
                     plan = plan_original_worker_reindex(
