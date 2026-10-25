@@ -126,15 +126,20 @@ def test_p1d1d_t01_real_registered_committed_match(committed):
 
 
 def test_p1d1d_t02_unregistered_repo_is_not_created(
-    tmp_path, isolated_dirs,
+    committed, tmp_path,
 ):
+    _, _, _, capture = committed
     root = tmp_path / "unregistered"
     root.mkdir()
 
-    result = _assess(root, None)
-    assert result.binding_state == "UNAVAILABLE"
-    assert result.reason == "INVALID_CAPTURE_CONTRACT"
     assert read_repository_identity(root) is None
+
+    result = _assess(root, capture)
+
+    assert result.binding_state == "UNAVAILABLE"
+    assert result.reason == "REPOSITORY_NOT_REGISTERED"
+    assert read_repository_identity(root) is None
+    assert list(root.iterdir()) == []
 
 
 def test_p1d1d_t03_missing_store_fails_closed(
