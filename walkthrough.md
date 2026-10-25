@@ -1,52 +1,88 @@
-# CONTEXTOR_P1D2G_FULL_PREVIEW_COMPLETENESS_GATE
+# CONTEXTOR_P1D2H_PREPARED_MANIFEST_STORE_HANDOFF
 
 ## PREFLIGHT_RESULT
 
-- DIRECT_EVIDENCE: Initial HEAD `f0638acecc63ba39fdc2130b8ad78bd73c6afd35`; worktree clean; `tests/test_original_worker_full_preview_completeness.py` absent.
-- DIRECT_EVIDENCE: `ContextorFacade.analyze_project` retained the exact P1D2F branch and replacement anchor from the architect's instructions. Contextor preview resolved it at canonical revision 682 with `workspace_sync=verified`.
-- CONTRACT_PROVED: `CycleSemanticsSnapshot` has `coverage_status`, `source_issues`, `observed_source_fingerprints`, and `cyclic_modules`; complete coverage requires every cyclic source and no issues.
-- CODE_PATH_PROVED: `classify_full_cycle_semantics` allows bounded source issues to remain `fresh`. `SOURCE_FILE_LIMIT` is in `FULL_SOURCE_BOUNDED_EVALUATION_ISSUES` in `lifecycle.py`.
-- DIRECT_EVIDENCE: All specified preconditions held. No `PREFLIGHT_MISMATCH`.
+- DIRECT_EVIDENCE: Initial HEAD `c6e43eddef5aedc214204c1a44557a03b7b5afb9`; worktree clean; `tests/test_original_worker_store_handoff.py` absent.
+- DIRECT_EVIDENCE: `save_engine_state` had the architect's exact original signature, forwarded the historical store keywords, caught exceptions and returned `None` on failed persistence. Contextor resolved the complete function at canonical revision 684 with `workspace_sync=verified`.
+- CODE_PATH_PROVED: `save_snapshot` already accepts `prepared_cycle_manifest: Any = None`. It acquires the store lock at line 1556, seals the supplied manifest through `seal_prepared_cycle_manifest` at lines 1757–1767, commits metadata at lines 1909–1914, and releases the lock in `finally` at line 1959. It copies the state before attaching the receipt and clears inherited receipts when the next save omits a manifest.
+- CONTRACT_PROVED: `seal_prepared_cycle_manifest` binds the receipt to revision, state ID, repo ID and root path, then validates claim digest; the authority constant is `COMMITTED_PREPARED_CLAIMS_NOT_SOURCE_CERTIFIED`.
+- DIRECT_EVIDENCE: Existing P1C1 helper `tests.test_cycle_semantics_publication_binding._case` returns a canonical state and prepared manifest. Contextor resolved its implementation with `workspace_sync=verified`.
+- DIRECT_EVIDENCE: Full `save_snapshot` symbol fetch reached `confirmation_required` (15,408 bytes versus 15,360-byte threshold). The boundary was preserved; bounded local source ranges supplied the lock, seal and metadata order evidence. No preflight mismatch occurred.
 
 ## NATIVE_CODEX_LITERAL_EDITS
 
-- DIRECT_EVIDENCE: Native Codex `apply_patch` inserted only the supplied `elif` completeness gate in `facade.py` and created the new test file with the supplied literal content. A read-only comparison against the attachment returned `TEST_LITERAL_EXACT=True`.
-- DIRECT_EVIDENCE: Opened Codex's native unstaged review. No other source or test was edited.
+- DIRECT_EVIDENCE: Native Codex `apply_patch` replaced only `save_engine_state` with the exact architect-supplied implementation and created the supplied test file. Read-only comparison against the attachment returned `FUNCTION_LITERAL_EXACT=True` and `TEST_LITERAL_EXACT=True`.
+- DIRECT_EVIDENCE: Opened the native Codex unstaged review. No `save_snapshot`, publication binding, facade, store, IPC, lifecycle or other source/test file was edited.
 
 ## FILES_CHANGED
 
-- `contextor/core/api/facade.py` — one 8-line addition; full actual diff below.
-- `tests/test_original_worker_full_preview_completeness.py` — new, 282 lines; full actual new-file diff below.
-- `walkthrough.md` — overwritten as this report; its self-diff is excluded from the source/test diff requirement.
+- `contextor/core/analysis/state_manager.py` — modified wrapper; full actual diff below.
+- `tests/test_original_worker_store_handoff.py` — new, 310 lines; full actual new-file diff below.
+- `walkthrough.md` — overwritten as this execution report; its self-diff is excluded from the source/test diff requirement.
 
-## ACTUAL_FACADE_DIFF
+## ACTUAL_WRAPPER_DIFF
 
 ```diff
-diff --git a/contextor/core/api/facade.py b/contextor/core/api/facade.py
-index 491905a..d017562 100644
---- a/contextor/core/api/facade.py
-+++ b/contextor/core/api/facade.py
-@@ -883,0 +884,8 @@ class ContextorFacade:
-+            elif (
-+                cycle_semantics.coverage_status
-+                != "FILESYSTEM_STABLE_NON_ATOMIC"
-+                or cycle_semantics.source_issues
-+            ):
-+                cycle_source_preparation = preview_unavailable(
-+                    "CYCLE_SOURCE_EVIDENCE_INCOMPLETE"
-+                )
+diff --git a/contextor/core/analysis/state_manager.py b/contextor/core/analysis/state_manager.py
+index 4c557c9..d5a38f8 100644
+--- a/contextor/core/analysis/state_manager.py
++++ b/contextor/core/analysis/state_manager.py
+@@ -534,0 +535 @@ def save_engine_state(
++    prepared_cycle_manifest: Any = None,
+@@ -535,0 +537,9 @@ def save_engine_state(
++    """Persist canonical state; optionally forward prepared SCC claims.
++
++    Only the canonical snapshot-store writer may seal a publication
++    receipt. Supplying a manifest does not authenticate source origin,
++    prove cross-file atomicity or establish runtime import safety.
++
++    Omit the optional store keyword when no manifest was supplied to
++    preserve the historical default call contract.
++    """
+@@ -536,0 +547 @@ def save_engine_state(
++
+@@ -537,0 +549,13 @@ def save_engine_state(
++        save_kwargs = {
++            "writer": writer,
++            "repo_id": repo_id,
++            "root_path": root_path,
++            "exact_revision": exact_revision,
++            "file_state_payload": file_state_payload,
++        }
++
++        if prepared_cycle_manifest is not None:
++            save_kwargs["prepared_cycle_manifest"] = (
++                prepared_cycle_manifest
++            )
++
+@@ -542,5 +566 @@ def save_engine_state(
+-            writer=writer,
+-            repo_id=repo_id,
+-            root_path=root_path,
+-            exact_revision=exact_revision,
+-            file_state_payload=file_state_payload,
++            **save_kwargs,
+@@ -547,0 +568 @@ def save_engine_state(
++
+@@ -550 +571,5 @@ def save_engine_state(
+-        print(f"Failed to save engine state: {e}", file=sys.stderr)
++
++        print(
++            f"Failed to save engine state: {e}",
++            file=sys.stderr,
++        )
 ```
 
 ## ACTUAL_NEW_TEST_CONTENT
 
 ```diff
-diff --git a/tests/test_original_worker_full_preview_completeness.py b/tests/test_original_worker_full_preview_completeness.py
+diff --git a/tests/test_original_worker_store_handoff.py b/tests/test_original_worker_store_handoff.py
 new file mode 100644
-index 0000000..581c203
+index 0000000..dca3ac7
 --- /dev/null
-+++ b/tests/test_original_worker_full_preview_completeness.py
-@@ -0,0 +1,282 @@
-+"""P1D2G: complete semantic evidence gates FULL preview reindexing."""
++++ b/tests/test_original_worker_store_handoff.py
+@@ -0,0 +1,310 @@
++"""P1D2H: optional prepared-manifest handoff to canonical store."""
 +
 +from __future__ import annotations
 +
@@ -54,330 +90,359 @@ index 0000000..581c203
 +
 +import pytest
 +
-+import contextor.core.api.facade as facade_module
-+import contextor.core.cycle_semantics.materialization as materialization_module
++import contextor.core.live_state as live_state
 +
-+from contextor.core.analysis.process_pool_lifecycle import (
-+    terminate_active_process_pools,
++from contextor.core.analysis.state_manager import (
++    RepositoryAnalysisState,
++    load_engine_state,
++    save_engine_state,
 +)
-+from contextor.core.api.facade import ContextorFacade
-+from contextor.core.cycle_semantics.lifecycle import (
-+    classify_full_cycle_semantics,
++from contextor.core.cycle_semantics.publication_binding import (
++    PUBLICATION_AUTHORITY,
++    CanonicalCycleManifestReceipt,
++    verify_co_published_cycle_manifest,
 +)
-+from contextor.core.errors import AnalysisCancelled
-+from tests.test_original_worker_full_preparation_optin import (
-+    _flat_repo,
-+    _full,
-+    _stored,
-+)
++from contextor.core.live_state.store import read_metadata
++from tests.test_cycle_semantics_publication_binding import _case
 +
 +
-+@pytest.fixture(autouse=True)
-+def _inline_by_default(monkeypatch):
-+    monkeypatch.setenv(
-+        "CONTEXTOR_DISABLE_PROCESS_POOL",
-+        "1",
++_STATE_ID = "cycle-state"
++_REPO_ID = "p1d2h-fixture-repo"
++
++
++def _save(root, state, revision, prepared=None):
++    return save_engine_state(
++        state,
++        str(root),
++        _STATE_ID,
++        writer="desktop",
++        repo_id=_REPO_ID,
++        root_path=str(root.resolve()),
++        exact_revision=revision,
++        file_state_payload={
++            "_meta": {
++                "state_id": _STATE_ID,
++                "revision": revision,
++            },
++            "files": {},
++        },
++        prepared_cycle_manifest=prepared,
 +    )
 +
 +
-+def test_p1d2g_t01_partial_but_fresh_skips_second_index(
-+    tmp_path, isolated_dirs, monkeypatch,
++def _load(root):
++    return load_engine_state(
++        str(root),
++        _STATE_ID,
++        expected_repo_id=_REPO_ID,
++        expected_root_path=str(root.resolve()),
++    )
++
++
++def test_p1d2h_t01_valid_manifest_sealed_in_same_generation(
++    tmp_path,
 +):
-+    root = _flat_repo(tmp_path)
++    state, prepared = _case()
 +
-+    original_materialize = (
-+        materialization_module.materialize_cycle_semantics
-+    )
-+    original_index = facade_module.index_repository
-+    selections = []
-+
-+    def partial_materialization(*args, **kwargs):
-+        snapshot = original_materialize(*args, **kwargs)
-+
-+        assert snapshot.cyclic_modules == ("a", "b")
-+
-+        partial = replace(
-+            snapshot,
-+            observed_source_fingerprints=(
-+                snapshot.observed_source_fingerprints[1:]
-+            ),
-+            source_issues=(
-+                ("a", "SOURCE_FILE_LIMIT"),
-+            ),
-+            coverage_status="PARTIAL_SOURCE_EVIDENCE",
-+        )
-+
-+        assert classify_full_cycle_semantics(partial) == (
-+            "fresh",
-+            None,
-+        )
-+
-+        return partial
-+
-+    def observed_index(*args, **kwargs):
-+        selections.append(
-+            kwargs.get("source_capture_module_ids")
-+        )
-+        return original_index(*args, **kwargs)
-+
-+    monkeypatch.setattr(
-+        materialization_module,
-+        "materialize_cycle_semantics",
-+        partial_materialization,
-+    )
-+    monkeypatch.setattr(
-+        facade_module,
-+        "index_repository",
-+        observed_index,
++    metadata = _save(
++        tmp_path,
++        state,
++        1,
++        prepared,
 +    )
 +
-+    _, result = _full(root, preview=True)
++    assert metadata is not None
++    assert metadata.revision == 1
++    assert metadata.state_id == _STATE_ID
++    assert metadata.repo_id == _REPO_ID
++    assert metadata.root_path == str(tmp_path.resolve())
 +
-+    assert selections == [None]
++    loaded = _load(tmp_path)
 +
-+    preview = result.cycle_source_preparation_preview
++    assert isinstance(loaded, RepositoryAnalysisState)
++    assert loaded is not state
 +
-+    assert preview.status == "UNAVAILABLE"
-+    assert preview.reason == (
-+        "CYCLE_SOURCE_EVIDENCE_INCOMPLETE"
++    receipt = loaded.cycle_source_publication
++
++    assert isinstance(
++        receipt,
++        CanonicalCycleManifestReceipt,
 +    )
-+    assert preview.manifest is None
-+    assert preview.source_modules == ()
++    assert receipt.authority == PUBLICATION_AUTHORITY
++    assert receipt.revision == metadata.revision
++    assert receipt.state_id == metadata.state_id
++    assert receipt.repo_id == metadata.repo_id
++    assert receipt.root_path == metadata.root_path
++    assert receipt.prepared_manifest == prepared
 +
-+    state = _stored(root)
-+
-+    assert state.cycle_semantics_state == "fresh"
-+    assert state.cycle_semantics is not None
-+    assert state.cycle_semantics.coverage_status == (
-+        "PARTIAL_SOURCE_EVIDENCE"
++    assert verify_co_published_cycle_manifest(
++        loaded,
++        revision=metadata.revision,
++        state_id=metadata.state_id,
++        repo_id=metadata.repo_id,
++        root_path=metadata.root_path,
 +    )
++
 +    assert state.cycle_source_publication is None
 +
 +
-+def test_p1d2g_t02_deferred_semantics_skips_second_index(
-+    tmp_path, isolated_dirs, monkeypatch,
++def test_p1d2h_t02_default_save_does_not_create_receipt(
++    tmp_path,
 +):
-+    root = _flat_repo(tmp_path)
++    state, _prepared = _case()
 +
-+    original_index = facade_module.index_repository
-+    selections = []
-+
-+    def failed_materialization(*args, **kwargs):
-+        raise ValueError("synthetic semantic unavailability")
-+
-+    def observed_index(*args, **kwargs):
-+        selections.append(
-+            kwargs.get("source_capture_module_ids")
-+        )
-+        return original_index(*args, **kwargs)
-+
-+    monkeypatch.setattr(
-+        materialization_module,
-+        "materialize_cycle_semantics",
-+        failed_materialization,
-+    )
-+    monkeypatch.setattr(
-+        facade_module,
-+        "index_repository",
-+        observed_index,
++    metadata = _save(
++        tmp_path,
++        state,
++        1,
 +    )
 +
-+    _, result = _full(root, preview=True)
++    assert metadata is not None
++    assert metadata.revision == 1
 +
-+    assert selections == [None]
++    loaded = _load(tmp_path)
 +
-+    preview = result.cycle_source_preparation_preview
-+
-+    assert preview.status == "UNAVAILABLE"
-+    assert preview.reason == "CYCLE_SEMANTICS_NOT_FRESH"
-+    assert preview.manifest is None
-+
-+    state = _stored(root)
-+
-+    assert state.cycle_semantics is None
-+    assert state.cycle_semantics_state == "deferred"
++    assert loaded is not None
++    assert loaded.cycle_source_publication is None
 +    assert state.cycle_source_publication is None
 +
 +
-+def test_p1d2g_t03_second_pass_cancellation_propagates(
-+    tmp_path, isolated_dirs, monkeypatch,
++def test_p1d2h_t03_forged_manifest_cannot_commit(
++    tmp_path,
 +):
-+    root = _flat_repo(tmp_path)
++    state, prepared = _case()
 +
-+    original_index = facade_module.index_repository
-+    selections = []
++    forged = replace(
++        prepared,
++        source_manifest_sha256="f" * 64,
++    )
 +
-+    def cancelled_index(*args, **kwargs):
-+        selection = kwargs.get("source_capture_module_ids")
-+        selections.append(selection)
++    result = _save(
++        tmp_path,
++        state,
++        1,
++        forged,
++    )
 +
-+        if selection is not None:
-+            raise AnalysisCancelled()
++    assert result is None
++    assert read_metadata(tmp_path) is None
++    assert _load(tmp_path) is None
++    assert state.cycle_source_publication is None
 +
-+        return original_index(*args, **kwargs)
++
++def test_p1d2h_t04_stale_semantics_cannot_commit_receipt(
++    tmp_path,
++):
++    state, prepared = _case()
++
++    state.cycle_semantics_state = "stale"
++
++    result = _save(
++        tmp_path,
++        state,
++        1,
++        prepared,
++    )
++
++    assert result is None
++    assert read_metadata(tmp_path) is None
++    assert _load(tmp_path) is None
++    assert state.cycle_source_publication is None
++
++
++def test_p1d2h_t05_next_generation_drops_old_receipt(
++    tmp_path,
++):
++    state, prepared = _case()
++
++    first = _save(
++        tmp_path,
++        state,
++        1,
++        prepared,
++    )
++    assert first is not None
++
++    old = _load(tmp_path)
++
++    assert old is not None
++    assert isinstance(
++        old.cycle_source_publication,
++        CanonicalCycleManifestReceipt,
++    )
++
++    second = _save(
++        tmp_path,
++        old,
++        2,
++    )
++
++    assert second is not None
++    assert second.revision == 2
++
++    current = _load(tmp_path)
++
++    assert current is not None
++    assert current.revision == 2
++    assert current.cycle_source_publication is None
++
++    assert old.cycle_source_publication is not None
++
++
++def test_p1d2h_t06_default_store_call_shape_unchanged(
++    tmp_path, monkeypatch,
++):
++    observed = []
++    marker = object()
++
++    def observed_save(*args, **kwargs):
++        observed.append((args, kwargs))
++        return marker
 +
 +    monkeypatch.setattr(
-+        facade_module,
-+        "index_repository",
-+        cancelled_index,
++        live_state,
++        "save_snapshot",
++        observed_save,
 +    )
 +
-+    with pytest.raises(AnalysisCancelled):
-+        _full(root, preview=True)
++    state = RepositoryAnalysisState()
 +
-+    assert selections == [
-+        None,
-+        frozenset({"a", "b", "helper"}),
-+    ]
++    result = save_engine_state(
++        state,
++        str(tmp_path),
++        "probe-state",
++    )
++
++    assert result is marker
++    assert len(observed) == 1
++
++    args, kwargs = observed[0]
++
++    assert args == (
++        state,
++        str(tmp_path),
++        "probe-state",
++    )
++
++    assert "prepared_cycle_manifest" not in kwargs
++    assert kwargs["writer"] == "unknown"
++    assert kwargs["repo_id"] == ""
++    assert kwargs["root_path"] == ""
++    assert kwargs["exact_revision"] is None
++    assert kwargs["file_state_payload"] is None
 +
 +
-+def test_p1d2g_t04_real_process_pool_full_preview(
-+    tmp_path, isolated_dirs, monkeypatch,
++def test_p1d2h_t07_explicit_manifest_forwarded_unchanged(
++    tmp_path, monkeypatch,
 +):
-+    root = _flat_repo(tmp_path)
++    state, prepared = _case()
++    observed = []
++    marker = object()
 +
-+    monkeypatch.delenv(
-+        "CONTEXTOR_DISABLE_PROCESS_POOL",
-+        raising=False,
-+    )
-+
-+    terminate_active_process_pools(timeout=1.0)
-+
-+    try:
-+        _, result = _full(root, preview=True)
-+
-+        preview = result.cycle_source_preparation_preview
-+
-+        assert preview.status == (
-+            "PREPARED_UNPUBLISHED_NON_ATOMIC"
-+        )
-+        assert preview.reason is None
-+        assert preview.manifest is not None
-+        assert preview.manifest.authority == (
-+            "PREPARED_ONLY_NOT_CANONICALLY_PUBLISHED"
-+        )
-+        assert preview.source_modules == (
-+            "a",
-+            "b",
-+            "helper",
-+        )
-+
-+        state = _stored(root)
-+
-+        assert state.cycle_semantics_state == "fresh"
-+        assert state.cycle_source_publication is None
-+        assert not hasattr(
-+            state,
-+            "cycle_source_preparation_preview",
-+        )
-+
-+    finally:
-+        terminate_active_process_pools(timeout=1.0)
-+
-+
-+def test_p1d2g_t05_oversized_closure_skips_second_index(
-+    tmp_path, isolated_dirs, monkeypatch,
-+):
-+    root = _flat_repo(tmp_path)
-+
-+    imports = [
-+        b"import b",
-+        b"import helper",
-+    ]
-+
-+    for number in range(14):
-+        module_id = f"x{number}"
-+
-+        (root / f"{module_id}.py").write_bytes(
-+            b"value = 1\n"
-+        )
-+        imports.append(
-+            f"import {module_id}".encode("ascii")
-+        )
-+
-+    (root / "a.py").write_bytes(
-+        b"\n".join(imports) + b"\nvalue = 1\n"
-+    )
-+
-+    original_index = facade_module.index_repository
-+    selections = []
-+
-+    def observed_index(*args, **kwargs):
-+        selections.append(
-+            kwargs.get("source_capture_module_ids")
-+        )
-+        return original_index(*args, **kwargs)
++    def observed_save(*args, **kwargs):
++        observed.append((args, kwargs))
++        return marker
 +
 +    monkeypatch.setattr(
-+        facade_module,
-+        "index_repository",
-+        observed_index,
++        live_state,
++        "save_snapshot",
++        observed_save,
 +    )
 +
-+    _, result = _full(root, preview=True)
++    result = save_engine_state(
++        state,
++        str(tmp_path),
++        _STATE_ID,
++        prepared_cycle_manifest=prepared,
++    )
 +
-+    preview = result.cycle_source_preparation_preview
++    assert result is marker
++    assert len(observed) == 1
 +
-+    assert selections == [None]
-+    assert preview.status == "UNAVAILABLE"
-+    assert preview.reason == "PLAN_CLOSURE_MODULE_LIMIT"
-+    assert preview.manifest is None
-+    assert preview.source_modules == ()
++    args, kwargs = observed[0]
 +
-+    state = _stored(root)
++    assert args == (
++        state,
++        str(tmp_path),
++        _STATE_ID,
++    )
++    assert kwargs["prepared_cycle_manifest"] is prepared
++    assert state.cycle_source_publication is None
 +
++
++def test_p1d2h_t08_invalid_graph_claim_cannot_commit(
++    tmp_path,
++):
++    state, prepared = _case()
++
++    forged = replace(
++        prepared,
++        graph_sha256="0" * 64,
++    )
++
++    result = _save(
++        tmp_path,
++        state,
++        1,
++        forged,
++    )
++
++    assert result is None
++    assert read_metadata(tmp_path) is None
++    assert _load(tmp_path) is None
 +    assert state.cycle_source_publication is None
 +
 ```
 
 ## PY_COMPILE_RESULT
 
-- DIRECT_EVIDENCE: The requested `py_compile` command exited 0 for the two authorized code files.
+- DIRECT_EVIDENCE: Requested `py_compile` exited 0 for `state_manager.py` and the new test.
 
-## P1D2G_TEST_RESULTS
+## P1D2H_TEST_RESULTS
 
-- DIRECT_EVIDENCE: The five new tests passed: `5 passed in 11.04s`.
+- DIRECT_EVIDENCE: New test file: `8 passed in 7.50s`.
 
 ## FOCUSED_REGRESSION_RESULTS
 
-- DIRECT_EVIDENCE: The exact listed focused regression set passed: `204 passed in 44.58s`.
+- DIRECT_EVIDENCE: Exact requested focused regression set: `226 passed in 56.97s`.
 
-## PARTIAL_BUT_FRESH_SOURCE_GATE
+## DEFAULT_SAVE_COMPATIBILITY
 
-- CONTRACT_PROVED: `SOURCE_FILE_LIMIT` can coexist with lifecycle `fresh` and `PARTIAL_SOURCE_EVIDENCE`; the new gate additionally requires `FILESYSTEM_STABLE_NON_ATOMIC` and empty `source_issues`.
-- DIRECT_EVIDENCE: T01 supplies a partial-but-fresh snapshot and observes one index pass (`[None]`), `UNAVAILABLE` with `CYCLE_SOURCE_EVIDENCE_INCOMPLETE`, no manifest, and persisted semantics still `fresh` with no receipt.
-- DIRECT_EVIDENCE: T02 defers semantic materialization and observes no second pass and `CYCLE_SEMANTICS_NOT_FRESH`.
+- DIRECT_EVIDENCE: T02 saves without a manifest and persists no receipt. T06 intercepts `save_snapshot` and confirms the historical default keyword set; `prepared_cycle_manifest` is omitted entirely when not supplied.
+- CODE_PATH_PROVED: The wrapper builds the existing keyword set and conditionally adds the manifest only when it is not `None`.
 
-## CANCELLATION_PROPAGATION
+## EXPLICIT_MANIFEST_FORWARDING
 
-- DIRECT_EVIDENCE: T03 injects `AnalysisCancelled` in the second index pass; it propagates and the observed selections are the initial no-capture pass followed by the selected `a/b/helper` pass.
+- DIRECT_EVIDENCE: T07 intercepts the store call and confirms the exact prepared object is forwarded by identity as `prepared_cycle_manifest`; the original caller state remains receipt-free.
 
-## REAL_PROCESS_POOL_FULL_PREVIEW
+## SAME_GENERATION_STORE_RECEIPT
 
-- DIRECT_EVIDENCE: T04 uses the real process pool in an isolated temporary repo; returned preview is `PREPARED_UNPUBLISHED_NON_ATOMIC`, source modules are `a/b/helper`, authority is `PREPARED_ONLY_NOT_CANONICALLY_PUBLISHED`, and persisted receipt remains absent.
+- DIRECT_EVIDENCE: T01 persists a valid prepared manifest in an isolated temporary store. The loaded receipt is `CanonicalCycleManifestReceipt`; its revision, state ID, repo ID and root path match the committed metadata, its manifest matches the input, and `verify_co_published_cycle_manifest` succeeds. The original caller state has no receipt.
+- CODE_PATH_PROVED: Store seals the manifest on a copy under the existing lock before the generation metadata commit. The existing store remains the sole receipt-sealing owner.
 
-## OVERSIZED_CLOSURE_GATE
+## FAIL_CLOSED_PUBLICATION_CASES
 
-- DIRECT_EVIDENCE: T05 creates a closure beyond the 16-module limit; it observes one index pass, `PLAN_CLOSURE_MODULE_LIMIT`, no manifest and no persisted receipt.
+- DIRECT_EVIDENCE: T03 forged source-manifest hash, T04 stale cycle-semantics state and T08 forged graph hash each yield wrapper result `None`, no committed metadata, no loadable state and no receipt on the caller state.
+- CONTRACT_PROVED: Store validation/sealing failure precedes metadata commit; wrapper catches the error and returns `None`.
 
-## PERSISTED_RECEIPT_NEGATIVE_ASSERTIONS
+## LATER_GENERATION_INVALIDATION
 
-- DIRECT_EVIDENCE: T01, T02, T04 and T05 each assert `state.cycle_source_publication is None`; T04 also asserts no preview field on persisted state.
-- CODE_PATH_PROVED: The new condition only gates the existing opt-in branch before second indexing. The canonical state and save path were not modified.
+- DIRECT_EVIDENCE: T05 saves generation 1 with a receipt, then generation 2 without a manifest. Generation 2 loads with no receipt while the previously loaded generation-1 object still has its receipt.
+- CODE_PATH_PROVED: Existing store branch clears an inherited receipt on the persisted copy when the new save omits a manifest.
 
 ## CANONICAL_WATCHER_OBSERVATIONS
 
-- DIRECT_EVIDENCE: `get_live_events(after_revision=682)` returned continuous revision 683 for `contextor/core/api/facade.py`, `origin=desktop_watcher`, `operation=update_file`, `status=UPDATED`, `resync_required=false`; blast-radius state was `deferred`.
-- DIRECT_EVIDENCE: A narrow symbol preview resolved `ContextorFacade.analyze_project` at canonical revision 684 with `workspace_sync=verified`; `cycle_semantics` family remained `stale`.
-- INFERENCE: These readings establish watcher ingestion and canonical source visibility, not active process code adoption.
+- DIRECT_EVIDENCE: `get_live_events(after_revision=684)` returned continuous desktop-watcher `update_file` events at revisions 685 (`state_manager.py`) and 686 (new test), with `resync_required=false`. Wrapper blast-radius state was `deferred`; the test event indexed its module.
+- DIRECT_EVIDENCE: Narrow `get_symbol_implementation` reads resolved the updated wrapper and new T01 test at canonical revision 686, both with `workspace_sync=verified`. The `cycle_semantics` family remained `stale`.
+- INFERENCE: Watcher indexing and source visibility do not establish active process loaded-code adoption.
 
-## AUTHORITY_LIMITS
+## AUTHORITY_AND_RUNTIME_LIMITS
 
-- CONTRACT_PROVED: Successful preview remains prepared only, non-atomic and unpublished. The added gate does not change the lifecycle classifier or scenario model.
-- DIRECT_EVIDENCE: No active-repository FULL, manual `update_file`, restart, reload, receipt sealing, store or IPC edit, or installed-generation verification was performed.
-- UNKNOWN: Active loaded-code adoption and canonical generation/receipt authority remain unverified.
+- CONTRACT_PROVED: Receipt authority is `COMMITTED_PREPARED_CLAIMS_NOT_SOURCE_CERTIFIED`. It authenticates committed prepared claims for the store generation, not original source-byte ownership, repository-wide atomicity or Python import safety.
+- DIRECT_EVIDENCE: No facade FULL save call was connected to the manifest. No FULL on the active repository, store/IPC/publication-binding edit, manual `update_file`, restart or reload occurred.
+- UNKNOWN: Active LIVE loaded-code adoption and any production FULL receipt handoff remain unverified.
 
 ## FINAL_VERDICT
 
-- DIRECT_EVIDENCE: P1D2G literal edit and new test completed; compile passed, all five new tests passed and the requested 204-test regression set passed. Actual source/test diffs are complete above.
-- STOP: P1D2G only. Await the architect's next explicit `proceduj`.
+- DIRECT_EVIDENCE: P1D2H literal wrapper handoff is complete. Both files compile, all 8 new tests pass and the requested 226-test regression set passes. Full actual source/test diffs are included above.
+- STOP: P1D2H only. Await the architect's next explicit `proceduj`.

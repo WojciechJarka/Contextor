@@ -532,22 +532,47 @@ def save_engine_state(
     root_path: str = "",
     exact_revision: int | None = None,
     file_state_payload: dict[str, Any] | None = None,
+    prepared_cycle_manifest: Any = None,
 ):
+    """Persist canonical state; optionally forward prepared SCC claims.
+
+    Only the canonical snapshot-store writer may seal a publication
+    receipt. Supplying a manifest does not authenticate source origin,
+    prove cross-file atomicity or establish runtime import safety.
+
+    Omit the optional store keyword when no manifest was supplied to
+    preserve the historical default call contract.
+    """
     from contextor.core.live_state import save_snapshot
+
     try:
+        save_kwargs = {
+            "writer": writer,
+            "repo_id": repo_id,
+            "root_path": root_path,
+            "exact_revision": exact_revision,
+            "file_state_payload": file_state_payload,
+        }
+
+        if prepared_cycle_manifest is not None:
+            save_kwargs["prepared_cycle_manifest"] = (
+                prepared_cycle_manifest
+            )
+
         return save_snapshot(
             state,
             cache_dir,
             state_id,
-            writer=writer,
-            repo_id=repo_id,
-            root_path=root_path,
-            exact_revision=exact_revision,
-            file_state_payload=file_state_payload,
+            **save_kwargs,
         )
+
     except Exception as e:
         import sys
-        print(f"Failed to save engine state: {e}", file=sys.stderr)
+
+        print(
+            f"Failed to save engine state: {e}",
+            file=sys.stderr,
+        )
         return None
 
 def load_engine_state(
