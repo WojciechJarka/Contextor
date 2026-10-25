@@ -12,6 +12,7 @@ Builds stable module_id against project root.
 
 import ast
 import dataclasses
+import hashlib
 import os
 import re
 import time
@@ -1045,13 +1046,116 @@ class RepositoryIndex:
         dataclasses.field(default_factory=dict)
     )
 
+    # Optional original worker-read evidence. Not a publication receipt,
+    # generation binding, or cross-file atomic source snapshot.
+    original_worker_source_snapshots: dict[str, SourceSnapshot] = (
+        dataclasses.field(default_factory=dict)
+    )
+    original_worker_ast_modes: dict[str, str] = (
+        dataclasses.field(default_factory=dict)
+    )
+    original_worker_capture_status: str = "NOT_REQUESTED"
+    original_worker_capture_reason: str | None = None
+
 
 def index_repository(
-    root: str, excludes: list[str] = None, extra_ignored_dirs: set = None, progress_callback=None
+    root: str,
+    excludes: list[str] = None,
+    extra_ignored_dirs: set = None,
+    progress_callback=None,
+    *,
+    source_capture_module_ids: frozenset[str] | None = None,
 ) -> RepositoryIndex:
+    """Buduje indeks modułów projektu wraz z listą pominiętych plików.
+
+    Optional evidence is not a coherent cross-file snapshot and does
+    not authorize canonical publication. Default indexing transports no
+    raw source bytes beyond the worker.
     """
-    Buduje indeks modułów projektu wraz z listą pominiętych plików.
-    """
+    if source_capture_module_ids is None:
+        selected_captures = frozenset()
+    elif (
+        type(source_capture_module_ids) is not frozenset
+        or any(
+            type(name) is not str or not name
+            for name in source_capture_module_ids
+        )
+        or len(source_capture_module_ids) > 16
+    ):
+        raise ValueError("source_capture_module_ids must be <=16 module names")
+    else:
+        selected_captures = source_capture_module_ids
+
+    # At most 16 selected results of 2 MiB each (32 MiB raw payload).
+    # This does not bound unrelated indexing memory overhead.
+    capture_per_source_max = 2 * 1024 * 1024
+    captures: dict[str, SourceSnapshot] = {}
+    capture_modes: dict[str, str] = {}
+    capture_errors: dict[str, str] = {}
+
+    def capture_limit(path: Path) -> int | None:
+        module_id = ".".join(path.relative_to(root_path).with_suffix("").parts)
+        return capture_per_source_max if module_id in selected_captures else None
+
+    def record_capture(result: dict, path: Path) -> None:
+        if not selected_captures:
+            return
+        module_id = ".".join(path.relative_to(root_path).with_suffix("").parts)
+        if module_id not in selected_captures:
+            return
+        if (
+            result.get("module_id") != module_id
+            or result.get("path") != str(path.relative_to(root_path))
+            or result.get("absolute_path") != str(path.resolve())
+        ):
+            capture_errors[module_id] = "WORKER_IDENTITY_MISMATCH"
+            return
+        if (
+            result.get("error") is not None
+            or result.get("source_capture_status") != "CAPTURED"
+        ):
+            status = result.get("source_capture_status")
+            capture_errors[module_id] = (
+                status if type(status) is str and status else "INDEX_FAILED"
+            )
+            return
+        raw = result.get("source_capture_bytes")
+        fingerprint = result.get("source_fingerprint")
+        mode = result.get("source_capture_ast_mode")
+        if (
+            type(raw) is not bytes
+            or len(raw) > capture_per_source_max
+            or type(fingerprint) is not str
+            or hashlib.sha256(raw).hexdigest() != fingerprint
+            or result.get("source_capture_origin") != "INDEXER_WORKER_READ"
+            or mode not in (
+                "PARSED_FROM_WORKER_READ",
+                "CACHE_SHA256_EQUIVALENT",
+            )
+        ):
+            capture_errors[module_id] = "INVALID_WORKER_CAPTURE"
+            return
+        captures[module_id] = SourceSnapshot(raw=raw, source_fingerprint=fingerprint)
+        capture_modes[module_id] = mode
+
+    def capture_result_fields() -> dict[str, object]:
+        if not selected_captures:
+            return {}
+        missing = selected_captures - captures.keys()
+        if missing or capture_errors:
+            # No partially successful source cohort may escape this index.
+            return {
+                "original_worker_capture_status": "UNAVAILABLE",
+                "original_worker_capture_reason": (
+                    capture_errors[sorted(capture_errors)[0]]
+                    if capture_errors else "SELECTED_MODULE_NOT_INDEXED"
+                ),
+            }
+        return {
+            "original_worker_source_snapshots": dict(sorted(captures.items())),
+            "original_worker_ast_modes": dict(sorted(capture_modes.items())),
+            "original_worker_capture_status": "ALL_SELECTED_CAPTURED_NON_ATOMIC",
+        }
 
     index_started = time.monotonic()
     root_path = Path(root).resolve()
@@ -1828,8 +1932,13 @@ def index_repository(
             res = _process_single_file(
                 str(path),
                 str(root_path),
+                **(
+                    {"source_capture_max_bytes": capture_limit(path)}
+                    if selected_captures else {}
+                ),
             )
             record_file_task_evidence(res)
+            record_capture(res, path)
             if res["error"]:
                 line_number, column_number = _syntax_error_location(res["error"])
                 skipped.append(
@@ -1881,6 +1990,7 @@ def index_repository(
                     source_fingerprints_by_module.items()
                 )
             ),
+            **capture_result_fields(),
         )
 
     pool_scope_started = time.monotonic()
@@ -1921,6 +2031,10 @@ def index_repository(
                 time.monotonic_ns(),
                 worker_batch_token,
                 resolved_cache_dir,
+                *(
+                    (capture_limit(p),)
+                    if selected_captures else ()
+                ),
             ): p
             for p in files_to_process
         }
@@ -1971,6 +2085,7 @@ def index_repository(
                     parent_result_received_monotonic_ns
                 ),
             )
+            record_capture(res, futures[future])
 
             if res["error"]:
                 line_number, column_number = (
@@ -2124,6 +2239,7 @@ def index_repository(
                 source_fingerprints_by_module.items()
             )
         ),
+        **capture_result_fields(),
     )
 
 
