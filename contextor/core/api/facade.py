@@ -562,6 +562,8 @@ class ContextorFacade:
         progress_callback=None,
         additional_excludes: list[str] | None = None,
         owner: str = "desktop_analysis",
+        *,
+        cycle_source_preparation_preview: bool = False,
     ) -> list:
         """
         Analyzes full project hierarchy, builds dependency graph, evaluates
@@ -584,6 +586,13 @@ class ContextorFacade:
         live_publish_process_start_identity = None
         live_publish_expected_state_id = None
         live_publish_expected_revision = None
+
+        if type(cycle_source_preparation_preview) is not bool:
+            raise ValueError(
+                "cycle_source_preparation_preview must be bool"
+            )
+
+        cycle_source_preparation = None
 
         def emit_stage_end(stage: str, started: float) -> None:
             elapsed_ms = (time.monotonic() - started) * 1000.0
@@ -847,6 +856,130 @@ class ContextorFacade:
                 ),
             )
 
+        if cycle_source_preparation_preview:
+            from contextor.core.cycle_semantics.original_worker_preparation import (
+                OriginalWorkerManifestPreparation,
+                prepare_original_worker_cycle_manifest,
+            )
+            from contextor.core.cycle_semantics.original_worker_reindex_planning import (
+                plan_original_worker_reindex,
+                verify_original_worker_reindex,
+            )
+
+            def preview_unavailable(reason):
+                return OriginalWorkerManifestPreparation(
+                    status="UNAVAILABLE",
+                    reason=reason,
+                    manifest=None,
+                    source_modules=(),
+                )
+
+            if (
+                cycle_semantics is None
+                or cycle_semantics_state != "fresh"
+            ):
+                cycle_source_preparation = preview_unavailable(
+                    "CYCLE_SEMANTICS_NOT_FRESH"
+                )
+            else:
+                try:
+                    plan = plan_original_worker_reindex(
+                        index,
+                        graph.hard_edges,
+                    )
+
+                    if plan.status != "READY_FOR_REINDEX_NON_ATOMIC":
+                        cycle_source_preparation = preview_unavailable(
+                            "PLAN_" + (
+                                plan.reason or "UNAVAILABLE"
+                            )
+                        )
+                    else:
+                        captured_index = index_repository(
+                            path,
+                            excludes=excludes,
+                            extra_ignored_dirs=extra_dirs,
+                            source_capture_module_ids=(
+                                plan.selected_module_ids
+                            ),
+                        )
+
+                        captured_modules = captured_index.modules
+
+                        captured_reexport_facts = (
+                            materialize_reexport_facts_by_module(
+                                captured_modules,
+                                captured_index.reference_facts_by_module,
+                            )
+                        )
+
+                        captured_trie = build_trie(
+                            captured_modules.keys()
+                        )
+                        captured_package_root = detect_package_root(
+                            captured_modules,
+                            captured_trie,
+                        )
+
+                        captured_graph = build_graph(
+                            captured_modules,
+                            trie=captured_trie,
+                            package_root=captured_package_root,
+                            reexport_facts_by_module=(
+                                captured_reexport_facts
+                            ),
+                        )
+
+                        verification = verify_original_worker_reindex(
+                            plan,
+                            index,
+                            graph.hard_edges,
+                            captured_index,
+                            captured_graph.hard_edges,
+                        )
+
+                        if verification.status != (
+                            "REINDEX_COHERENT_SELECTED_BYTES_NON_ATOMIC"
+                        ):
+                            cycle_source_preparation = preview_unavailable(
+                                "VERIFY_" + (
+                                    verification.reason
+                                    or "UNAVAILABLE"
+                                )
+                            )
+                        else:
+                            cycle_source_preparation = (
+                                prepare_original_worker_cycle_manifest(
+                                    captured_index,
+                                    captured_graph.hard_edges,
+                                    cycle_semantics,
+                                )
+                            )
+
+                except AnalysisCancelled:
+                    raise
+
+                except Exception as exc:
+                    cycle_source_preparation = preview_unavailable(
+                        "PREVIEW_EXECUTION_ERROR:"
+                        + type(exc).__name__
+                    )
+
+            trace_event(
+                "FULL",
+                "CYCLE_SOURCE_PREPARATION_PREVIEW",
+                status=cycle_source_preparation.status,
+                reason=(
+                    cycle_source_preparation.reason or "NONE"
+                ),
+                source_count=len(
+                    cycle_source_preparation.source_modules
+                ),
+                authority=(
+                    "PREPARED_ONLY_NOT_CANONICALLY_PUBLISHED"
+                ),
+            )
+
         from datetime import datetime
         datestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
@@ -893,6 +1026,14 @@ class ContextorFacade:
         canonical_materialization_started = time.monotonic()
         canonical_setup_started = canonical_materialization_started
         analysis_result = report_result.get("_analysis_result")
+
+        if (
+            cycle_source_preparation_preview
+            and analysis_result is not None
+        ):
+            analysis_result.cycle_source_preparation_preview = (
+                cycle_source_preparation
+            )
 
         progress.begin("Persisting canonical LIVE snapshot")
         if analysis_result:
