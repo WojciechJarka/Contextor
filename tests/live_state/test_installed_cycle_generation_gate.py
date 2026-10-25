@@ -342,3 +342,47 @@ def test_p1d1e_t16_owner_without_authority_fails_closed(
     assert answer["reason"] == (
         "LIVE_AUTHORITY_UNAVAILABLE"
     )
+
+
+def test_p1d1e_t17_structural_impostor_state_rejected(owner):
+    from types import SimpleNamespace
+
+    server, request = owner
+    original = server._state
+
+    # Copy the canonical state's attributes into a different
+    # class. Matching attributes do not imply class identity.
+    server._state = SimpleNamespace(**vars(original))
+    try:
+        answer = _check(server, request)
+    finally:
+        server._state = original
+
+    assert answer["status"] == "unavailable"
+    assert answer["reason"] == (
+        "INSTALLED_STATE_UNAVAILABLE"
+    )
+
+
+def test_p1d1e_t18_absent_loaded_class_fails_closed(
+    owner, monkeypatch,
+):
+    import sys
+
+    server, request = owner
+
+    # The helper must not try a dynamic import when the
+    # nominal canonical class cannot be obtained from the
+    # currently loaded module registry.
+    with monkeypatch.context() as scoped:
+        scoped.delitem(
+            sys.modules,
+            "contextor.core.analysis.state_manager",
+            raising=True,
+        )
+        answer = _check(server, request)
+
+    assert answer["status"] == "unavailable"
+    assert answer["reason"] == (
+        "INSTALLED_STATE_UNAVAILABLE"
+    )

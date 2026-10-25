@@ -12,12 +12,9 @@ safety is certified by this operation.
 
 from __future__ import annotations
 
+import sys
 from collections.abc import Mapping
 from typing import Any
-
-from contextor.core.analysis.state_manager import (
-    RepositoryAnalysisState,
-)
 
 from .publication_binding import (
     CanonicalCycleManifestReceipt,
@@ -120,7 +117,24 @@ def assess_live_installed_prepared_claims(
     ):
         return unavailable("LIVE_REPOSITORY_MISMATCH")
 
-    if type(state) is not RepositoryAnalysisState:
+    # The LIVE owner already holds an instance of the canonical
+    # state class. Resolve its exact loaded class identity without
+    # importing analysis.state_manager from the LIVE query layer.
+    #
+    # Do not dynamically import an absent module: that would
+    # reintroduce initialization coupling and weaken fail-closed
+    # behavior during partial or inconsistent runtime adoption.
+    registered_state_type = getattr(
+        sys.modules.get(
+            "contextor.core.analysis.state_manager"
+        ),
+        "RepositoryAnalysisState",
+        None,
+    )
+    if (
+        type(registered_state_type) is not type
+        or type(state) is not registered_state_type
+    ):
         return unavailable("INSTALLED_STATE_UNAVAILABLE")
 
     if (
