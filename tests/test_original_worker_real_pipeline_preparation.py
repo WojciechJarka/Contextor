@@ -23,10 +23,9 @@ from contextor.core.symbol_engine.indexer import index_repository
 
 
 _SELECTED = frozenset({
-    "pkg.__init__",
-    "pkg.a",
-    "pkg.b",
-    "pkg.helper",
+    "a",
+    "b",
+    "helper",
 })
 
 
@@ -37,23 +36,19 @@ def _inline_by_default(monkeypatch):
 
 def _repo(tmp_path):
     root = tmp_path / "repo"
-    pkg = root / "pkg"
-    pkg.mkdir(parents=True)
+    root.mkdir()
 
-    (pkg / "__init__.py").write_bytes(b"")
-    (pkg / "a.py").write_bytes(
-        b"import pkg.b\n"
-        b"import pkg.helper\n"
-        b"def fa():\n"
-        b"    return 1\n"
+    (root / "a.py").write_bytes(
+        b"import b\n"
+        b"import helper\n"
+        b"value = 1\n"
     )
-    (pkg / "b.py").write_bytes(
-        b"import pkg.a\n"
-        b"def fb():\n"
-        b"    return 2\n"
+    (root / "b.py").write_bytes(
+        b"import a\n"
+        b"value = 2\n"
     )
-    (pkg / "helper.py").write_bytes(b"value = 1\n")
-    (pkg / "unrelated.py").write_bytes(b"value = 999\n")
+    (root / "helper.py").write_bytes(b"value = 3\n")
+    (root / "unrelated.py").write_bytes(b"value = 999\n")
 
     return root
 
@@ -96,7 +91,7 @@ def test_p1d2d_t01_real_component_chain_prepares_only(
     assert snapshot.coverage_status == (
         "FILESYSTEM_STABLE_NON_ATOMIC"
     )
-    assert snapshot.cyclic_modules == ("pkg.a", "pkg.b")
+    assert snapshot.cyclic_modules == ("a", "b")
     assert snapshot.graph_sha256 == fingerprint_hard_edges(
         graph.hard_edges
     )
@@ -111,15 +106,18 @@ def test_p1d2d_t01_real_component_chain_prepares_only(
     )
     assert result.manifest.source_manifest_sha256 is not None
     assert result.manifest.components[0].members == (
-        "pkg.a",
-        "pkg.b",
+        "a",
+        "b",
+    )
+    assert result.manifest.components[0].model_classification == (
+        "MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS"
     )
     assert {
-        "pkg.a",
-        "pkg.b",
-        "pkg.helper",
+        "a",
+        "b",
+        "helper",
     }.issubset(result.source_modules)
-    assert "pkg.unrelated" not in result.source_modules
+    assert "unrelated" not in result.source_modules
 
 
 def test_p1d2d_t02_warm_cache_keeps_preparation_valid(
@@ -162,9 +160,8 @@ def test_p1d2d_t04_missing_reachable_capture_fails_closed(
     root = _repo(tmp_path)
 
     selected = frozenset({
-        "pkg.__init__",
-        "pkg.a",
-        "pkg.b",
+        "a",
+        "b",
     })
     index, graph, snapshot = _analyze_components(
         root,
@@ -175,7 +172,7 @@ def test_p1d2d_t04_missing_reachable_capture_fails_closed(
 
     assert result.status == "UNAVAILABLE"
     assert result.reason == (
-        "BINDING_CLOSURE_CAPTURE_MISSING:pkg.helper"
+        "BINDING_CLOSURE_CAPTURE_MISSING:helper"
     )
     assert result.manifest is None
     assert result.source_modules == ()
@@ -192,11 +189,10 @@ def test_p1d2d_t05_cyclic_source_drift_fails_closed(
     )
     graph = build_graph(index.modules)
 
-    (root / "pkg" / "a.py").write_bytes(
-        b"import pkg.b\n"
-        b"import pkg.helper\n"
-        b"def fa():\n"
-        b"    return 99\n"
+    (root / "a.py").write_bytes(
+        b"import b\n"
+        b"import helper\n"
+        b"value = 99\n"
     )
 
     snapshot = materialize_cycle_semantics(
@@ -252,3 +248,71 @@ def test_p1d2d_t07_real_process_pool_component_chain(
         assert result.manifest is not None
     finally:
         terminate_active_process_pools(timeout=1.0)
+
+
+def test_p1d2d_t08_dotted_imports_remain_fail_closed(
+    tmp_path, isolated_dirs,
+):
+    root = tmp_path / "package_repo"
+    package = root / "pkg"
+    package.mkdir(parents=True)
+
+    (package / "__init__.py").write_bytes(b"")
+    (package / "a.py").write_bytes(
+        b"import pkg.b\n"
+    )
+    (package / "b.py").write_bytes(
+        b"import pkg.a\n"
+    )
+
+    index = index_repository(
+        str(root),
+        source_capture_module_ids=frozenset({
+            "pkg.__init__",
+            "pkg.a",
+            "pkg.b",
+        }),
+    )
+
+    graph = build_graph(index.modules)
+
+    snapshot = materialize_cycle_semantics(
+        root,
+        graph.hard_edges,
+        {
+            module_id: module.path
+            for module_id, module in index.modules.items()
+        },
+        index.source_fingerprints_by_module,
+    )
+
+    result = _prepare(index, graph, snapshot)
+
+    assert result.status == "UNAVAILABLE"
+    assert result.reason == (
+        "P1C0_SOURCE_EVIDENCE_UNAVAILABLE"
+    )
+    assert result.manifest is None
+
+
+def test_p1d2d_t09_function_definition_remains_fail_closed(
+    tmp_path, isolated_dirs,
+):
+    root = _repo(tmp_path)
+
+    (root / "a.py").write_bytes(
+        b"import b\n"
+        b"import helper\n"
+        b"def fa():\n"
+        b"    return 1\n"
+    )
+
+    index, graph, snapshot = _analyze_components(root)
+
+    result = _prepare(index, graph, snapshot)
+
+    assert result.status == "UNAVAILABLE"
+    assert result.reason == (
+        "P1C0_SOURCE_EVIDENCE_UNAVAILABLE"
+    )
+    assert result.manifest is None

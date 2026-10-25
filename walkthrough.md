@@ -1,96 +1,186 @@
-# CONTEXTOR_P1D2D_REAL_INDEX_TO_PREPARED_MANIFEST
+# CONTEXTOR_P1D2D_FLAT_MODULE_FIX
 
-## PREFLIGHT_RESULT
+## ROOT_CAUSE_DIAGNOSTIC
 
-- DIRECT_EVIDENCE: Required symbols (`index_repository`, `build_graph`, `materialize_cycle_semantics`, `prepare_original_worker_cycle_manifest`) existed at preflight. The new test path did not exist. Initial worktree was clean at HEAD `f1694a22bd9c36bdc95962cb400928323e721624`.
-- CODE_PATH_PROVED: Contextor MCP resolved all four symbols at canonical revision 676 before editing.
+- DIRECT_EVIDENCE: The required single diagnostic test failed at the expected positive-status assertion. The local `result` was `OriginalWorkerManifestPreparation(status='UNAVAILABLE', reason='P1C0_SOURCE_EVIDENCE_UNAVAILABLE', manifest=None, source_modules=())`.
+- DIRECT_EVIDENCE: Its graph contained `pkg.a`/`pkg.b` with `pkg.helper`; captured indexing and filesystem-stable semantic cohort assertions passed before preparation returned unavailable.
+- INFERENCE: This matches the architect-specified restricted flat-module P1C0 model boundary. No production contract was broadened.
 
-## NATIVE_CODEX_EDIT
+## CONFIRMED_PRE_EDIT_FAILURE_REASON
 
-- DIRECT_EVIDENCE: Created only `tests/test_original_worker_real_pipeline_preparation.py` with the native Codex editing tool. Read-only comparison with attachment reported `EXACT_MATCH` (254 lines). No production code or existing test was modified.
+- DIRECT_EVIDENCE: Exact reason: `P1C0_SOURCE_EVIDENCE_UNAVAILABLE`.
+- Diagnostic test: 1 failed in 1.83s. The failure was the expected diagnostic, not treated as a stop condition by the correction instructions.
+
+## NATIVE_CODEX_LITERAL_CORRECTIONS
+
+- DIRECT_EVIDENCE: Applied only the supplied literal replacements to `tests/test_original_worker_real_pipeline_preparation.py`: flat module IDs and source fixtures, matching positive/missing/drift assertions, the model-only classification assertion, plus T08 dotted-import and T09 function-definition fail-closed tests.
+- CODE_PATH_PROVED: No production file was changed. The original bounded P1C0 model remains in force.
 
 ## FILES_CHANGED
 
-- `tests/test_original_worker_real_pipeline_preparation.py` (new)
+- `tests/test_original_worker_real_pipeline_preparation.py`
 - `walkthrough.md` (this report)
 
-## ACTUAL_NEW_FILE_CONTENT
+## ACTUAL_TEST_FILE_DIFF
 
-Complete unified diff of the new test file:
+Full actual diff against the pre-correction file:
 
 ```diff
 diff --git a/tests/test_original_worker_real_pipeline_preparation.py b/tests/test_original_worker_real_pipeline_preparation.py
-new file mode 100644
-index 0000000..dae7182
---- /dev/null
+index dae7182..7e8f0b2 100644
+--- a/tests/test_original_worker_real_pipeline_preparation.py
 +++ b/tests/test_original_worker_real_pipeline_preparation.py
-@@ -0,0 +1,254 @@
-+"""P1D2D: real analysis components to prepared-only worker manifest."""
+@@ -23,10 +23,9 @@ from contextor.core.symbol_engine.indexer import index_repository
+ 
+ 
+ _SELECTED = frozenset({
+-    "pkg.__init__",
+-    "pkg.a",
+-    "pkg.b",
+-    "pkg.helper",
++    "a",
++    "b",
++    "helper",
+ })
+ 
+ 
+@@ -37,23 +36,19 @@ def _inline_by_default(monkeypatch):
+ 
+ def _repo(tmp_path):
+     root = tmp_path / "repo"
+-    pkg = root / "pkg"
+-    pkg.mkdir(parents=True)
++    root.mkdir()
+ 
+-    (pkg / "__init__.py").write_bytes(b"")
+-    (pkg / "a.py").write_bytes(
+-        b"import pkg.b\n"
+-        b"import pkg.helper\n"
+-        b"def fa():\n"
+-        b"    return 1\n"
++    (root / "a.py").write_bytes(
++        b"import b\n"
++        b"import helper\n"
++        b"value = 1\n"
+     )
+-    (pkg / "b.py").write_bytes(
+-        b"import pkg.a\n"
+-        b"def fb():\n"
+-        b"    return 2\n"
++    (root / "b.py").write_bytes(
++        b"import a\n"
++        b"value = 2\n"
+     )
+-    (pkg / "helper.py").write_bytes(b"value = 1\n")
+-    (pkg / "unrelated.py").write_bytes(b"value = 999\n")
++    (root / "helper.py").write_bytes(b"value = 3\n")
++    (root / "unrelated.py").write_bytes(b"value = 999\n")
+ 
+     return root
+ 
+@@ -96,7 +91,7 @@ def test_p1d2d_t01_real_component_chain_prepares_only(
+     assert snapshot.coverage_status == (
+         "FILESYSTEM_STABLE_NON_ATOMIC"
+     )
+-    assert snapshot.cyclic_modules == ("pkg.a", "pkg.b")
++    assert snapshot.cyclic_modules == ("a", "b")
+     assert snapshot.graph_sha256 == fingerprint_hard_edges(
+         graph.hard_edges
+     )
+@@ -111,15 +106,18 @@ def test_p1d2d_t01_real_component_chain_prepares_only(
+     )
+     assert result.manifest.source_manifest_sha256 is not None
+     assert result.manifest.components[0].members == (
+-        "pkg.a",
+-        "pkg.b",
++        "a",
++        "b",
++    )
++    assert result.manifest.components[0].model_classification == (
++        "MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS"
+     )
+     assert {
+-        "pkg.a",
+-        "pkg.b",
+-        "pkg.helper",
++        "a",
++        "b",
++        "helper",
+     }.issubset(result.source_modules)
+-    assert "pkg.unrelated" not in result.source_modules
++    assert "unrelated" not in result.source_modules
+ 
+ 
+ def test_p1d2d_t02_warm_cache_keeps_preparation_valid(
+@@ -162,9 +160,8 @@ def test_p1d2d_t04_missing_reachable_capture_fails_closed(
+     root = _repo(tmp_path)
+ 
+     selected = frozenset({
+-        "pkg.__init__",
+-        "pkg.a",
+-        "pkg.b",
++        "a",
++        "b",
+     })
+     index, graph, snapshot = _analyze_components(
+         root,
+@@ -175,7 +172,7 @@ def test_p1d2d_t04_missing_reachable_capture_fails_closed(
+ 
+     assert result.status == "UNAVAILABLE"
+     assert result.reason == (
+-        "BINDING_CLOSURE_CAPTURE_MISSING:pkg.helper"
++        "BINDING_CLOSURE_CAPTURE_MISSING:helper"
+     )
+     assert result.manifest is None
+     assert result.source_modules == ()
+@@ -192,11 +189,10 @@ def test_p1d2d_t05_cyclic_source_drift_fails_closed(
+     )
+     graph = build_graph(index.modules)
+ 
+-    (root / "pkg" / "a.py").write_bytes(
+-        b"import pkg.b\n"
+-        b"import pkg.helper\n"
+-        b"def fa():\n"
+-        b"    return 99\n"
++    (root / "a.py").write_bytes(
++        b"import b\n"
++        b"import helper\n"
++        b"value = 99\n"
+     )
+ 
+     snapshot = materialize_cycle_semantics(
+@@ -252,3 +248,71 @@ def test_p1d2d_t07_real_process_pool_component_chain(
+         assert result.manifest is not None
+     finally:
+         terminate_active_process_pools(timeout=1.0)
 +
-+from __future__ import annotations
 +
-+from dataclasses import replace
++def test_p1d2d_t08_dotted_imports_remain_fail_closed(
++    tmp_path, isolated_dirs,
++):
++    root = tmp_path / "package_repo"
++    package = root / "pkg"
++    package.mkdir(parents=True)
 +
-+import pytest
-+
-+from contextor.core.analysis.process_pool_lifecycle import (
-+    terminate_active_process_pools,
-+)
-+from contextor.core.cycle_semantics.contracts import (
-+    fingerprint_hard_edges,
-+)
-+from contextor.core.cycle_semantics.materialization import (
-+    materialize_cycle_semantics,
-+)
-+from contextor.core.cycle_semantics.original_worker_preparation import (
-+    prepare_original_worker_cycle_manifest,
-+)
-+from contextor.core.graph.graph import build_graph
-+from contextor.core.symbol_engine.indexer import index_repository
-+
-+
-+_SELECTED = frozenset({
-+    "pkg.__init__",
-+    "pkg.a",
-+    "pkg.b",
-+    "pkg.helper",
-+})
-+
-+
-+@pytest.fixture(autouse=True)
-+def _inline_by_default(monkeypatch):
-+    monkeypatch.setenv("CONTEXTOR_DISABLE_PROCESS_POOL", "1")
-+
-+
-+def _repo(tmp_path):
-+    root = tmp_path / "repo"
-+    pkg = root / "pkg"
-+    pkg.mkdir(parents=True)
-+
-+    (pkg / "__init__.py").write_bytes(b"")
-+    (pkg / "a.py").write_bytes(
++    (package / "__init__.py").write_bytes(b"")
++    (package / "a.py").write_bytes(
 +        b"import pkg.b\n"
-+        b"import pkg.helper\n"
-+        b"def fa():\n"
-+        b"    return 1\n"
 +    )
-+    (pkg / "b.py").write_bytes(
++    (package / "b.py").write_bytes(
 +        b"import pkg.a\n"
-+        b"def fb():\n"
-+        b"    return 2\n"
 +    )
-+    (pkg / "helper.py").write_bytes(b"value = 1\n")
-+    (pkg / "unrelated.py").write_bytes(b"value = 999\n")
 +
-+    return root
-+
-+
-+def _analyze_components(root, selected=_SELECTED):
 +    index = index_repository(
 +        str(root),
-+        source_capture_module_ids=selected,
++        source_capture_module_ids=frozenset({
++            "pkg.__init__",
++            "pkg.a",
++            "pkg.b",
++        }),
 +    )
++
 +    graph = build_graph(index.modules)
++
 +    snapshot = materialize_cycle_semantics(
 +        root,
 +        graph.hard_edges,
@@ -99,321 +189,72 @@ index 0000000..dae7182
 +            for module_id, module in index.modules.items()
 +        },
 +        index.source_fingerprints_by_module,
-+    )
-+    return index, graph, snapshot
-+
-+
-+def _prepare(index, graph, snapshot):
-+    return prepare_original_worker_cycle_manifest(
-+        index,
-+        graph.hard_edges,
-+        snapshot,
-+    )
-+
-+
-+def test_p1d2d_t01_real_component_chain_prepares_only(
-+    tmp_path, isolated_dirs,
-+):
-+    root = _repo(tmp_path)
-+    index, graph, snapshot = _analyze_components(root)
-+
-+    assert index.original_worker_capture_status == (
-+        "ALL_SELECTED_CAPTURED_NON_ATOMIC"
-+    )
-+    assert snapshot.coverage_status == (
-+        "FILESYSTEM_STABLE_NON_ATOMIC"
-+    )
-+    assert snapshot.cyclic_modules == ("pkg.a", "pkg.b")
-+    assert snapshot.graph_sha256 == fingerprint_hard_edges(
-+        graph.hard_edges
-+    )
-+
-+    result = _prepare(index, graph, snapshot)
-+
-+    assert result.status == "PREPARED_UNPUBLISHED_NON_ATOMIC"
-+    assert result.reason is None
-+    assert result.manifest is not None
-+    assert result.manifest.authority == (
-+        "PREPARED_ONLY_NOT_CANONICALLY_PUBLISHED"
-+    )
-+    assert result.manifest.source_manifest_sha256 is not None
-+    assert result.manifest.components[0].members == (
-+        "pkg.a",
-+        "pkg.b",
-+    )
-+    assert {
-+        "pkg.a",
-+        "pkg.b",
-+        "pkg.helper",
-+    }.issubset(result.source_modules)
-+    assert "pkg.unrelated" not in result.source_modules
-+
-+
-+def test_p1d2d_t02_warm_cache_keeps_preparation_valid(
-+    tmp_path, isolated_dirs,
-+):
-+    root = _repo(tmp_path)
-+    index_repository(str(root))
-+
-+    index, graph, snapshot = _analyze_components(root)
-+
-+    assert set(index.original_worker_ast_modes.values()) == {
-+        "CACHE_SHA256_EQUIVALENT"
-+    }
-+
-+    result = _prepare(index, graph, snapshot)
-+
-+    assert result.status == "PREPARED_UNPUBLISHED_NON_ATOMIC"
-+    assert result.manifest is not None
-+
-+
-+def test_p1d2d_t03_default_index_cannot_prepare_manifest(
-+    tmp_path, isolated_dirs,
-+):
-+    root = _repo(tmp_path)
-+    index, graph, snapshot = _analyze_components(
-+        root,
-+        selected=None,
-+    )
-+
-+    result = _prepare(index, graph, snapshot)
-+
-+    assert result.status == "UNAVAILABLE"
-+    assert result.reason == "BINDING_INDEX_CAPTURE_NOT_COMPLETE"
-+    assert result.manifest is None
-+
-+
-+def test_p1d2d_t04_missing_reachable_capture_fails_closed(
-+    tmp_path, isolated_dirs,
-+):
-+    root = _repo(tmp_path)
-+
-+    selected = frozenset({
-+        "pkg.__init__",
-+        "pkg.a",
-+        "pkg.b",
-+    })
-+    index, graph, snapshot = _analyze_components(
-+        root,
-+        selected=selected,
 +    )
 +
 +    result = _prepare(index, graph, snapshot)
 +
 +    assert result.status == "UNAVAILABLE"
 +    assert result.reason == (
-+        "BINDING_CLOSURE_CAPTURE_MISSING:pkg.helper"
++        "P1C0_SOURCE_EVIDENCE_UNAVAILABLE"
 +    )
 +    assert result.manifest is None
-+    assert result.source_modules == ()
 +
 +
-+def test_p1d2d_t05_cyclic_source_drift_fails_closed(
++def test_p1d2d_t09_function_definition_remains_fail_closed(
 +    tmp_path, isolated_dirs,
 +):
 +    root = _repo(tmp_path)
 +
-+    index = index_repository(
-+        str(root),
-+        source_capture_module_ids=_SELECTED,
-+    )
-+    graph = build_graph(index.modules)
-+
-+    (root / "pkg" / "a.py").write_bytes(
-+        b"import pkg.b\n"
-+        b"import pkg.helper\n"
++    (root / "a.py").write_bytes(
++        b"import b\n"
++        b"import helper\n"
 +        b"def fa():\n"
-+        b"    return 99\n"
++        b"    return 1\n"
 +    )
 +
-+    snapshot = materialize_cycle_semantics(
-+        root,
-+        graph.hard_edges,
-+        {
-+            module_id: module.path
-+            for module_id, module in index.modules.items()
-+        },
-+        index.source_fingerprints_by_module,
-+    )
-+
-+    assert snapshot.coverage_status == "PARTIAL_SOURCE_EVIDENCE"
++    index, graph, snapshot = _analyze_components(root)
 +
 +    result = _prepare(index, graph, snapshot)
 +
 +    assert result.status == "UNAVAILABLE"
-+    assert result.manifest is None
-+
-+
-+def test_p1d2d_t06_graph_identity_mismatch_rejected(
-+    tmp_path, isolated_dirs,
-+):
-+    index, graph, snapshot = _analyze_components(_repo(tmp_path))
-+
-+    altered = replace(snapshot, graph_sha256="0" * 64)
-+    result = _prepare(index, graph, altered)
-+
-+    assert result.status == "UNAVAILABLE"
-+    assert result.manifest is None
-+
-+
-+def test_p1d2d_t07_real_process_pool_component_chain(
-+    tmp_path, isolated_dirs, monkeypatch,
-+):
-+    root = _repo(tmp_path)
-+    monkeypatch.delenv(
-+        "CONTEXTOR_DISABLE_PROCESS_POOL",
-+        raising=False,
++    assert result.reason == (
++        "P1C0_SOURCE_EVIDENCE_UNAVAILABLE"
 +    )
-+
-+    terminate_active_process_pools(timeout=1.0)
-+    try:
-+        index, graph, snapshot = _analyze_components(root)
-+        result = _prepare(index, graph, snapshot)
-+
-+        assert index.original_worker_capture_status == (
-+            "ALL_SELECTED_CAPTURED_NON_ATOMIC"
-+        )
-+        assert result.status == (
-+            "PREPARED_UNPUBLISHED_NON_ATOMIC"
-+        )
-+        assert result.manifest is not None
-+    finally:
-+        terminate_active_process_pools(timeout=1.0)
++    assert result.manifest is None
 ```
+
+## P1D2D_TEST_RESULTS
+
+- DIRECT_EVIDENCE: All nine tests in `tests/test_original_worker_real_pipeline_preparation.py` passed: `9 passed in 8.93s`.
+
+## FOCUSED_NON_REGRESSION
+
+- DIRECT_EVIDENCE: Exact focused suite passed: `173 passed in 27.60s` across the nine P1D2D cases and the seven specified existing test files.
 
 ## PY_COMPILE_RESULT
 
 - DIRECT_EVIDENCE: `py_compile tests/test_original_worker_real_pipeline_preparation.py` returned exit 0.
+- DIRECT_EVIDENCE: `git diff --check -- tests/test_original_worker_real_pipeline_preparation.py` returned exit 0. Git emitted only an LF-to-CRLF checkout warning. Repo-wide `git diff --check` reports trailing spaces in blank context lines inside the mandatory ACTUAL_TEST_FILE_DIFF block in `walkthrough.md`.
 
-## P1D2D_TEST_RESULTS
+## P1C0_MODEL_RESTRICTIONS_PRESERVED
 
-- DIRECT_EVIDENCE: Exact requested pytest command completed with **3 failed, 168 passed in 29.91s**.
-- Failed cases: `test_p1d2d_t01_real_component_chain_prepares_only`, `test_p1d2d_t02_warm_cache_keeps_preparation_valid`, `test_p1d2d_t07_real_process_pool_component_chain`. Each failed because expected status `PREPARED_UNPUBLISHED_NON_ATOMIC`, actual `UNAVAILABLE`.
-- Other 168 tests passed. No test was repeated and no implementation was changed after failure.
+- CONTRACT_PROVED by passing tests: the flat import and assignment fixture reaches `MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS`, which remains model-only. New T08 preserves fail-closed behavior for dotted imports; T09 preserves fail-closed behavior for function definitions.
+- No production scenario or initialization-model code was modified.
 
-### Exact failure output
+## SOURCE_PROVENANCE_AUTHORITY_LIMITS
 
-```text
-================================== FAILURES ===================================
-______________ test_p1d2d_t01_real_component_chain_prepares_only ______________
-
-tmp_path = WindowsPath('C:/Users/DafoO/AppData/Local/Temp/pytest-of-DafoO/pytest-834/test_p1d2d_t01_real_component_0')
-isolated_dirs = WindowsPath('C:/Users/DafoO/AppData/Local/Temp/pytest-of-DafoO/pytest-834/test_p1d2d_t01_real_component_0')
-
-    def test_p1d2d_t01_real_component_chain_prepares_only(
-        tmp_path, isolated_dirs,
-    ):
-        root = _repo(tmp_path)
-        index, graph, snapshot = _analyze_components(root)
-
-        assert index.original_worker_capture_status == (
-            "ALL_SELECTED_CAPTURED_NON_ATOMIC"
-        )
-        assert snapshot.coverage_status == (
-            "FILESYSTEM_STABLE_NON_ATOMIC"
-        )
-        assert snapshot.cyclic_modules == ("pkg.a", "pkg.b")
-        assert snapshot.graph_sha256 == fingerprint_hard_edges(
-            graph.hard_edges
-        )
-
-        result = _prepare(index, graph, snapshot)
-
->       assert result.status == "PREPARED_UNPUBLISHED_NON_ATOMIC"
-E       AssertionError: assert 'UNAVAILABLE' == 'PREPARED_UNP...ED_NON_ATOMIC'
-E         
-E         - PREPARED_UNPUBLISHED_NON_ATOMIC
-E         + UNAVAILABLE
-
-tests\test_original_worker_real_pipeline_preparation.py:106: AssertionError
-______________ test_p1d2d_t02_warm_cache_keeps_preparation_valid ______________
-
-tmp_path = WindowsPath('C:/Users/DafoO/AppData/Local/Temp/pytest-of-DafoO/pytest-834/test_p1d2d_t02_warm_cache_keep0')
-isolated_dirs = WindowsPath('C:/Users/DafoO/AppData/Local/Temp/pytest-of-DafoO/pytest-834/test_p1d2d_t02_warm_cache_keep0')
-
-    def test_p1d2d_t02_warm_cache_keeps_preparation_valid(
-        tmp_path, isolated_dirs,
-    ):
-        root = _repo(tmp_path)
-        index_repository(str(root))
-
-        index, graph, snapshot = _analyze_components(root)
-
-        assert set(index.original_worker_ast_modes.values()) == {
-            "CACHE_SHA256_EQUIVALENT"
-        }
-
-        result = _prepare(index, graph, snapshot)
-
->       assert result.status == "PREPARED_UNPUBLISHED_NON_ATOMIC"
-E       AssertionError: assert 'UNAVAILABLE' == 'PREPARED_UNP...ED_NON_ATOMIC'
-E         
-E         - PREPARED_UNPUBLISHED_NON_ATOMIC
-E         + UNAVAILABLE
-
-tests\test_original_worker_real_pipeline_preparation.py:139: AssertionError
-______________ test_p1d2d_t07_real_process_pool_component_chain ______________
-
-tmp_path = WindowsPath('C:/Users/DafoO/AppData/Local/Temp/pytest-of-DafoO/pytest-834/test_p1d2d_t07_real_process_po0')
-isolated_dirs = WindowsPath('C:/Users/DafoO/AppData/Local/Temp/pytest-of-DafoO/pytest-834/test_p1d2d_t07_real_process_po0')
-monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000019241B0E710>
-
-    def test_p1d2d_t07_real_process_pool_component_chain(
-        tmp_path, isolated_dirs, monkeypatch,
-    ):
-        root = _repo(tmp_path)
-        monkeypatch.delenv(
-            "CONTEXTOR_DISABLE_PROCESS_POOL",
-            raising=False,
-        )
-
-        terminate_active_process_pools(timeout=1.0)
-        try:
-            index, graph, snapshot = _analyze_components(root)
-            result = _prepare(index, graph, snapshot)
-
-            assert index.original_worker_capture_status == (
-                "ALL_SELECTED_CAPTURED_NON_ATOMIC"
-            )
->           assert result.status == (
-                "PREPARED_UNPUBLISHED_NON_ATOMIC"
-            )
-E           AssertionError: assert 'UNAVAILABLE' == 'PREPARED_UNP...ED_NON_ATOMIC'
-E             
-E             - PREPARED_UNPUBLISHED_NON_ATOMIC
-E             + UNAVAILABLE
-
-tests\test_original_worker_real_pipeline_preparation.py:249: AssertionError
-=========================== short test summary info ============================
-FAILED tests/test_original_worker_real_pipeline_preparation.py::test_p1d2d_t01_real_component_chain_prepares_only
-FAILED tests/test_original_worker_real_pipeline_preparation.py::test_p1d2d_t02_warm_cache_keeps_preparation_valid
-FAILED tests/test_original_worker_real_pipeline_preparation.py::test_p1d2d_t07_real_process_pool_component_chain
-3 failed, 168 passed in 29.91s
-```
-
-## FOCUSED_NON_REGRESSION
-
-- DIRECT_EVIDENCE: This exact focused set ran once. Result: 3 failed, 168 passed. No broader test run was made.
-- DIRECT_EVIDENCE: `git diff --check` reported only three trailing-space lines (`walkthrough.md:324,350,382`) inside the verbatim pytest traceback above. The new test file itself has no reported whitespace diagnostics.
-
-## CANONICAL_WATCHER_OBSERVATIONS
-
-- NOT PERFORMED: The instruction says to stop immediately after any test failure. Therefore no post-edit Contextor watcher/read check was made. No LIVE freshness is claimed.
-
-## SOURCE_CAPTURE_AND_SEMANTIC_CONSISTENCY
-
-- DIRECT_EVIDENCE: In the three failing tests, execution reached the assertion after successful indexing and graph/materialization setup; T01 explicitly passed its capture status, stable cohort, cyclic module and graph fingerprint assertions; T02 passed its warm-cache AST mode assertion; T07 passed its index capture status assertion. The preparation result was `UNAVAILABLE` in each case.
-- UNKNOWN: The precise internal reason for `UNAVAILABLE`; no diagnostic probe or code change was performed after the mandated stop.
-
-## PREPARED_ONLY_AUTHORITY_LIMITS
-
-- CODE_PATH_PROVED: The supplied test is intended to exercise isolated components only. No facade FULL, persistence, receipt sealing or LIVE publication is invoked by the test code. Since three positive-path assertions failed, this stage does not establish a real component chain that prepares a manifest.
-- No claim of cross-file atomicity, current filesystem freshness after preparation, durable receipt, canonical generation certification, active LIVE adoption or runtime import safety.
+- CODE_PATH_PROVED: Tests use isolated temporary repositories, real index/graph/materialization components, and the preparation bridge. Successful output remains `PREPARED_UNPUBLISHED_NON_ATOMIC`; no receipt or canonical publication is produced.
+- No claim of cross-file atomicity, source freshness after preparation, canonical generation certification, installed LIVE adoption or runtime import safety.
 
 ## UNVERIFIED_RUNTIME_BEHAVIOR
 
-- UNKNOWN: Active runtime behavior and loaded-code adoption were not tested. No restart, publication or LIVE operation occurred.
+- UNKNOWN: Active runtime loaded-code adoption was not tested. No FULL analysis of the user's repository, LIVE restart/reload, publication, receipt sealing or manual `update_file` was performed.
 
 ## FINAL_VERDICT
 
-P1D2D is incomplete. The architect-supplied test file matches the attachment and compiles, but its three positive-path cases fail with `UNAVAILABLE`; 168 other tests in the requested set pass. No code was adjusted. STOP and await the architect's correction.
+P1D2D correction completed. The diagnostic reason matched the architect's expectation; the literal flat-fixture corrections and two fail-closed regression tests passed. The requested focused suite passed 173/173. Watcher and canonical read results follow below.
+
+### CANONICAL_WATCHER_OBSERVATIONS
+
+- DIRECT_EVIDENCE: Before correction the canonical revision was 676. Watcher emitted revision 677 `UPDATED` for the test file (`blast_radius_state=fresh`), then revision 678 `UPDATED` for the same file (`blast_radius_state=deferred`), continuous with `resync_required=false`.
+- DIRECT_EVIDENCE: At revision 678, Contextor `get_symbol_implementation(mode=preview)` resolved T01 with `workspace_sync=verified`. Structural cycles were fresh, count 16; `cycle_semantics` remained stale. No forced refresh or manual update was used.
