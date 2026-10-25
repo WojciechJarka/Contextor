@@ -1,399 +1,510 @@
-# CONTEXTOR_P1D2B_SELECTED_SCC_CLOSURE_BINDING
+# CONTEXTOR_P1D2C_ORIGINAL_WORKER_MANIFEST_PREPARATION
 
-## HEAD_BEFORE_AND_AFTER
+## PREFLIGHT_RESULT
 
-- DIRECT_EVIDENCE: HEAD before and after: `9ba55b9b905cd58c0db46c1b57a1c71c8b3d2b2b`. The supplied baseline was `78c386611245a475f436f2ca3938390b60f4fc69`; the user explicitly waived that HEAD condition with “jebac head”. No Git history change was made.
+- DIRECT_EVIDENCE: Required modules and symbols were present: P1D2B `assess_original_worker_cycle_closure` and P1C0 `prepare_cycle_source_manifest`. Both authorized new paths were absent before edits. P1D2A/P1D2B files were present; initial worktree was clean at HEAD `21c6b8649d5ad49dd9df957cc93f9f767a4140ba`.
+- CODE_PATH_PROVED: Contextor MCP resolved P1D2B and P1C0 symbols at canonical revision 674 before edits; P1C0 source was verified.
 
-## PREFLIGHT_AND_PRIOR_P1D2A_PRESERVATION
+## NATIVE_CODEX_EDITS
 
-- DIRECT_EVIDENCE: `indexer.py` still contains `source_capture_module_ids`, `original_worker_source_snapshots`, `original_worker_ast_modes` and `ALL_SELECTED_CAPTURED_NON_ATOMIC`; `tests/test_indexer_original_capture_handoff.py` exists. Neither P1D2B target existed before editing. Final `git status` lists only the two new files and this report; no P1D2A file was changed.
-- CODE_PATH_PROVED: Contextor MCP resolved `RepositoryIndex` and `analyze_import_cycle_topology` at canonical revision 672 before editing.
-
-## NATIVE_CODEX_FILE_EDITS
-
-- DIRECT_EVIDENCE: Created exactly `contextor/core/cycle_semantics/original_worker_binding.py` and `tests/test_original_worker_cycle_closure_binding.py` using the native Codex file-editing tool. A read-only normalized text comparison against the two marked blocks in the attachment reported `EXACT_MATCH` for both (160 and 166 lines). No other source or test was edited.
+- DIRECT_EVIDENCE: Created the two authorized files with the native Codex file-editing tool. Read-only comparison to the attachment reported `EXACT_MATCH` for both files: 161 lines and 277 lines. No existing source/test file was edited.
 
 ## FILES_CHANGED
 
-- `contextor/core/cycle_semantics/original_worker_binding.py` (new)
-- `tests/test_original_worker_cycle_closure_binding.py` (new)
-- `walkthrough.md` (this report; excluded from production/test diff requirement)
+- `contextor/core/cycle_semantics/original_worker_preparation.py` (new)
+- `tests/test_original_worker_manifest_preparation.py` (new)
+- `walkthrough.md` (this report; excluded from source/test diff requirement)
 
-## ACTUAL_DIFF
+## ACTUAL_SOURCE_AND_TEST_DIFFS
 
-### `contextor/core/cycle_semantics/original_worker_binding.py`
+### `contextor/core/cycle_semantics/original_worker_preparation.py`
 
 ```diff
-diff --git a/contextor/core/cycle_semantics/original_worker_binding.py b/contextor/core/cycle_semantics/original_worker_binding.py
+diff --git a/contextor/core/cycle_semantics/original_worker_preparation.py b/contextor/core/cycle_semantics/original_worker_preparation.py
 new file mode 100644
-index 0000000..d469b86
+index 0000000..067aa94
 --- /dev/null
-+++ b/contextor/core/cycle_semantics/original_worker_binding.py
-@@ -0,0 +1,160 @@
-+"""Bound selected original indexer bytes to a supplied SCC closure.
++++ b/contextor/core/cycle_semantics/original_worker_preparation.py
+@@ -0,0 +1,161 @@
++"""Prepare P1C0 evidence from selected original indexer worker bytes.
 +
-+This is a non-atomic, in-memory consistency check. It does not authenticate
-+canonical graph ownership, bind an installed LIVE generation, or mint receipts.
++This is caller-supplied, non-atomic, in-memory evidence preparation.
++It does not establish canonical ownership, publication, installed LIVE
++identity, original cross-file atomicity, or runtime import safety.
 +"""
 +
 +from __future__ import annotations
 +
-+import hashlib
 +from collections.abc import Mapping
 +from dataclasses import dataclass
 +
-+from contextor.core.source import SourceSnapshot
++from contextor.core.source import (
++    SourceError,
++    parse_source_snapshot,
++)
 +
-+from .scc import analyze_import_cycle_topology
-+
-+
-+_CAPTURE_STATUS = "ALL_SELECTED_CAPTURED_NON_ATOMIC"
-+_ACCEPTED_MODES = frozenset({
-+    "PARSED_FROM_WORKER_READ",
-+    "CACHE_SHA256_EQUIVALENT",
-+})
-+_MAX_MODULES = 16
-+_MAX_SOURCE_BYTES = 2 * 1024 * 1024
-+_MAX_TOTAL_BYTES = 32 * 1024 * 1024
++from .contracts import CycleSemanticsSnapshot
++from .evidence import build_source_bound_cycle_evidence
++from .generation_manifest import (
++    PreparedCycleSourceManifest,
++    prepare_cycle_source_manifest,
++)
++from .original_worker_binding import (
++    assess_original_worker_cycle_closure,
++)
 +
 +
 +@dataclass(frozen=True)
-+class OriginalWorkerCycleClosureBinding:
++class OriginalWorkerManifestPreparation:
 +    status: str
 +    reason: str | None
-+    cyclic_components: tuple[tuple[str, ...], ...]
-+    reachable_modules: tuple[str, ...]
-+    source_snapshots: dict[str, SourceSnapshot]
-+    ast_modes: tuple[tuple[str, str], ...]
-+    retained_raw_bytes: int
++    manifest: PreparedCycleSourceManifest | None
++    source_modules: tuple[str, ...]
 +
 +
-+def assess_original_worker_cycle_closure(
++def prepare_original_worker_cycle_manifest(
 +    index: object,
 +    hard_edges: Mapping[str, object],
-+) -> OriginalWorkerCycleClosureBinding:
-+    """Validate that opted-in original indexer captures cover every SCC closure.
++    snapshot: CycleSemanticsSnapshot,
++) -> OriginalWorkerManifestPreparation:
++    """Prepare a non-published manifest from supplied original-worker bytes.
 +
-+    Inputs are caller-supplied index and graph. No filesystem access, parsing,
-+    worker execution, canonical freshness assertion, publication, or LIVE I/O.
-+    Complete only means selected worker-read bytes match the supplied index
-+    fingerprints, across all reachable cyclic SCC closures, without atomically
-+    capturing the repository or authenticating who supplied the graph.
++    The existing P1D2B binding owns selection and byte fingerprint checks.
++    Existing P0/P1B/P1C0 functions own graph/model, byte/AST and manifest
++    consistency checks.
++
++    No filesystem reading, worker execution, canonical mutation, store
++    operation, receipt sealing, LIVE IPC or generation certification occurs.
 +    """
-+    # Import locally to avoid creating an import-time dependency back to the
-+    # indexer from cycle-semantics modules.
-+    from contextor.core.symbol_engine.indexer import RepositoryIndex
 +
-+    if type(index) is not RepositoryIndex:
-+        raise TypeError("index must be RepositoryIndex")
-+    if not isinstance(hard_edges, Mapping):
-+        raise TypeError("hard_edges must be a mapping")
-+
-+    def unavailable(reason: str) -> OriginalWorkerCycleClosureBinding:
-+        # Never expose partially validated snapshots or modes.
-+        return OriginalWorkerCycleClosureBinding(
-+            status="UNAVAILABLE",
-+            reason=reason,
-+            cyclic_components=(),
-+            reachable_modules=(),
-+            source_snapshots={},
-+            ast_modes=(),
-+            retained_raw_bytes=0,
++    if type(snapshot) is not CycleSemanticsSnapshot:
++        raise TypeError(
++            "snapshot must be CycleSemanticsSnapshot"
 +        )
 +
-+    topology = analyze_import_cycle_topology(hard_edges)
-+    if not topology.cyclic_components:
-+        return unavailable("NO_CYCLIC_COMPONENTS")
-+    if (
-+        index.original_worker_capture_status != _CAPTURE_STATUS
-+        or index.original_worker_capture_reason is not None
-+    ):
-+        return unavailable("INDEX_CAPTURE_NOT_COMPLETE")
++    def unavailable(
++        reason: str,
++    ) -> OriginalWorkerManifestPreparation:
++        return OriginalWorkerManifestPreparation(
++            status="UNAVAILABLE",
++            reason=reason,
++            manifest=None,
++            source_modules=(),
++        )
 +
-+    if (
-+        type(index.modules) is not dict
-+        or type(index.source_fingerprints_by_module) is not dict
-+        or type(index.original_worker_source_snapshots) is not dict
-+        or type(index.original_worker_ast_modes) is not dict
-+    ):
-+        return unavailable("INDEX_CAPTURE_SHAPE_INVALID")
-+
-+    snapshots = index.original_worker_source_snapshots
-+    modes = index.original_worker_ast_modes
-+    if (
-+        len(snapshots) > _MAX_MODULES
-+        or set(snapshots) != set(modes)
-+    ):
-+        return unavailable("INDEX_CAPTURE_SHAPE_INVALID")
-+
-+    adjacency: dict[str, tuple[str, ...]] = {}
-+    for module_id, targets in hard_edges.items():
-+        adjacency[module_id] = tuple(sorted(set(targets)))
-+    for targets in tuple(adjacency.values()):
-+        for target in targets:
-+            adjacency.setdefault(target, ())
-+
-+    required: set[str] = set()
-+    components = tuple(
-+        component.members
-+        for component in topology.cyclic_components
++    binding = assess_original_worker_cycle_closure(
++        index,
++        hard_edges,
 +    )
-+    for members in components:
-+        pending = list(members)
-+        required.update(members)
-+        while pending:
-+            for target in adjacency[pending.pop()]:
-+                if target not in required:
-+                    required.add(target)
-+                    pending.append(target)
-+        if len(required) > _MAX_MODULES:
-+            return unavailable("CLOSURE_MODULE_LIMIT")
 +
-+    selected = tuple(sorted(required))
-+    for module_id in selected:
-+        if module_id not in index.modules:
-+            return unavailable("CLOSURE_MODULE_NOT_INDEXED:" + module_id)
-+        if module_id not in snapshots or module_id not in modes:
-+            return unavailable("CLOSURE_CAPTURE_MISSING:" + module_id)
++    if binding.status != (
++        "SELECTED_CLOSURES_CONSISTENT_NON_ATOMIC"
++    ):
++        return unavailable(
++            "BINDING_" + (
++                binding.reason
++                or "UNAVAILABLE"
++            )
++        )
 +
-+    selected_snapshots: dict[str, SourceSnapshot] = {}
-+    selected_modes: dict[str, str] = {}
-+    total = 0
-+    for module_id in selected:
-+        snapshot = snapshots[module_id]
-+        if type(snapshot) is not SourceSnapshot or type(snapshot.raw) is not bytes:
-+            return unavailable("CLOSURE_SOURCE_INVALID:" + module_id)
-+        if len(snapshot.raw) > _MAX_SOURCE_BYTES:
-+            return unavailable("CLOSURE_SOURCE_BYTE_LIMIT:" + module_id)
-+        total += len(snapshot.raw)
-+        if total > _MAX_TOTAL_BYTES:
-+            return unavailable("CLOSURE_TOTAL_BYTE_LIMIT")
-+        indexed_hash = index.source_fingerprints_by_module.get(module_id)
-+        if (
-+            type(indexed_hash) is not str
-+            or snapshot.source_fingerprint != indexed_hash
-+            or hashlib.sha256(snapshot.raw).hexdigest() != indexed_hash
-+        ):
-+            return unavailable("CLOSURE_SOURCE_DIGEST_MISMATCH:" + module_id)
-+        mode = modes[module_id]
-+        if type(mode) is not str or mode not in _ACCEPTED_MODES:
-+            return unavailable("CLOSURE_AST_MODE_INVALID:" + module_id)
-+        selected_snapshots[module_id] = snapshot
-+        selected_modes[module_id] = mode
++    try:
++        parsed_sources = {
++            module_id: parse_source_snapshot(
++                binding.source_snapshots[module_id],
++                module_id,
++            )
++            for module_id in binding.reachable_modules
++        }
++    except (
++        SourceError,
++        SyntaxError,
++        ValueError,
++        TypeError,
++        RecursionError,
++        OverflowError,
++    ):
++        return unavailable(
++            "ORIGINAL_SOURCE_AST_UNAVAILABLE"
++        )
 +
-+    return OriginalWorkerCycleClosureBinding(
-+        status="SELECTED_CLOSURES_CONSISTENT_NON_ATOMIC",
++    try:
++        evidence = build_source_bound_cycle_evidence(
++            hard_edges,
++            parsed_sources,
++        )
++
++        manifest = prepare_cycle_source_manifest(
++            hard_edges,
++            index.source_fingerprints_by_module,
++            snapshot,
++            evidence,
++            binding.source_snapshots,
++        )
++    except (
++        SourceError,
++        SyntaxError,
++        ValueError,
++        TypeError,
++        RecursionError,
++        OverflowError,
++    ):
++        return unavailable(
++            "SOURCE_EVIDENCE_PREPARATION_FAILED"
++        )
++
++    if (
++        type(manifest.source_manifest_sha256) is not str
++        or len(manifest.source_manifest_sha256) != 64
++        or not manifest.components
++        or any(
++            component.preparation_state
++            != "PREPARED_UNPUBLISHED"
++            for component in manifest.components
++        )
++    ):
++        return unavailable(
++            "P1C0_SOURCE_EVIDENCE_UNAVAILABLE"
++        )
++
++    if manifest.authority != (
++        "PREPARED_ONLY_NOT_CANONICALLY_PUBLISHED"
++    ):
++        return unavailable(
++            "PREPARED_AUTHORITY_INVALID"
++        )
++
++    if tuple(
++        component.members
++        for component in manifest.components
++    ) != binding.cyclic_components:
++        return unavailable(
++            "SCC_COMPONENT_IDENTITY_MISMATCH"
++        )
++
++    return OriginalWorkerManifestPreparation(
++        status="PREPARED_UNPUBLISHED_NON_ATOMIC",
 +        reason=None,
-+        cyclic_components=components,
-+        reachable_modules=selected,
-+        source_snapshots=selected_snapshots,
-+        ast_modes=tuple(sorted(selected_modes.items())),
-+        retained_raw_bytes=total,
++        manifest=manifest,
++        source_modules=binding.reachable_modules,
 +    )
 ```
 
-### `tests/test_original_worker_cycle_closure_binding.py`
+### `tests/test_original_worker_manifest_preparation.py`
 
 ```diff
-diff --git a/tests/test_original_worker_cycle_closure_binding.py b/tests/test_original_worker_cycle_closure_binding.py
+diff --git a/tests/test_original_worker_manifest_preparation.py b/tests/test_original_worker_manifest_preparation.py
 new file mode 100644
-index 0000000..2fca506
+index 0000000..0a4c5fb
 --- /dev/null
-+++ b/tests/test_original_worker_cycle_closure_binding.py
-@@ -0,0 +1,166 @@
-+"""P1D2B: pure SCC-closure binding of opted-in original indexer bytes."""
++++ b/tests/test_original_worker_manifest_preparation.py
+@@ -0,0 +1,277 @@
++"""P1D2C: original-worker evidence reaches P1C0 preparation only."""
 +
 +from __future__ import annotations
 +
-+import hashlib
 +from dataclasses import replace
 +from pathlib import Path
 +
 +import pytest
 +
-+from contextor.core.cycle_semantics.original_worker_binding import (
-+    assess_original_worker_cycle_closure,
++from contextor.core.cycle_semantics.original_worker_preparation import (
++    prepare_original_worker_cycle_manifest,
 +)
 +from contextor.core.source import SourceSnapshot
 +from contextor.core.symbol_engine.indexer import index_repository
-+
-+
-+_GRAPH = {
-+    "a": {"b", "helper"},
-+    "b": {"a"},
-+    "helper": set(),
-+}
++from tests.test_cycle_semantics_evidence import (
++    PAIR,
++    PASS,
++    _bound,
++)
 +
 +
 +@pytest.fixture(autouse=True)
 +def _inline_index(monkeypatch):
-+    monkeypatch.setenv("CONTEXTOR_DISABLE_PROCESS_POOL", "1")
++    monkeypatch.setenv(
++        "CONTEXTOR_DISABLE_PROCESS_POOL",
++        "1",
++    )
 +
 +
 +def _repo(tmp_path):
 +    root = tmp_path / "repo"
 +    root.mkdir()
-+    (root / "a.py").write_bytes(b"import b\nimport helper\n")
-+    (root / "b.py").write_bytes(b"import a\n")
-+    (root / "helper.py").write_bytes(b"value = 1\n")
++    for module_id, source in PASS.items():
++        (root / f"{module_id}.py").write_bytes(
++            source.encode("utf-8")
++        )
 +    return root
 +
 +
 +def _index(root, *selected):
 +    return index_repository(
-+        str(root), source_capture_module_ids=frozenset(selected),
++        str(root),
++        source_capture_module_ids=frozenset(selected),
 +    )
 +
 +
-+def test_p1d2b_t01_complete_original_indexer_closure(tmp_path, isolated_dirs):
-+    root = _repo(tmp_path)
-+    index = _index(root, "a", "b", "helper")
-+    result = assess_original_worker_cycle_closure(index, _GRAPH)
-+    assert result.status == "SELECTED_CLOSURES_CONSISTENT_NON_ATOMIC"
++def _snapshot():
++    return _bound(PAIR, PASS)[1]
++
++
++def _prepare(index, snapshot=None, graph=None):
++    return prepare_original_worker_cycle_manifest(
++        index,
++        PAIR if graph is None else graph,
++        _snapshot() if snapshot is None else snapshot,
++    )
++
++
++def test_p1d2c_t01_original_bytes_prepare_unpublished_manifest(
++    tmp_path, isolated_dirs,
++):
++    index = _index(_repo(tmp_path), "a", "b")
++    result = _prepare(index)
++
++    assert result.status == (
++        "PREPARED_UNPUBLISHED_NON_ATOMIC"
++    )
 +    assert result.reason is None
-+    assert result.cyclic_components == (("a", "b"),)
-+    assert result.reachable_modules == ("a", "b", "helper")
-+    assert set(result.source_snapshots) == set(result.reachable_modules)
-+    assert set(dict(result.ast_modes)) == set(result.reachable_modules)
-+    assert result.retained_raw_bytes == sum(
-+        len(item.raw) for item in result.source_snapshots.values()
++    assert result.source_modules == ("a", "b")
++
++    manifest = result.manifest
++    assert manifest is not None
++    assert manifest.source_manifest_sha256 is not None
++    assert len(manifest.source_manifest_sha256) == 64
++    assert manifest.authority == (
++        "PREPARED_ONLY_NOT_CANONICALLY_PUBLISHED"
 +    )
-+    for module_id, snapshot in result.source_snapshots.items():
-+        assert snapshot.raw == (root / f"{module_id}.py").read_bytes()
-+        assert hashlib.sha256(snapshot.raw).hexdigest() == (
-+            index.source_fingerprints_by_module[module_id]
++    assert len(manifest.components) == 1
++    assert manifest.components[0].members == ("a", "b")
++    assert manifest.components[0].preparation_state == (
++        "PREPARED_UNPUBLISHED"
++    )
++
++
++def test_p1d2c_t02_default_capture_remains_unavailable(
++    tmp_path, isolated_dirs,
++):
++    index = index_repository(str(_repo(tmp_path)))
++    result = _prepare(index)
++
++    assert result.status == "UNAVAILABLE"
++    assert result.reason == (
++        "BINDING_INDEX_CAPTURE_NOT_COMPLETE"
++    )
++    assert result.manifest is None
++    assert result.source_modules == ()
++
++
++def test_p1d2c_t03_missing_capture_cannot_prepare(
++    tmp_path, isolated_dirs,
++):
++    index = _index(_repo(tmp_path), "a")
++    result = _prepare(index)
++
++    assert result.status == "UNAVAILABLE"
++    assert result.reason == (
++        "BINDING_CLOSURE_CAPTURE_MISSING:b"
++    )
++    assert result.manifest is None
++
++
++def test_p1d2c_t04_modified_worker_bytes_rejected(
++    tmp_path, isolated_dirs,
++):
++    index = _index(_repo(tmp_path), "a", "b")
++    altered = dict(index.original_worker_source_snapshots)
++    previous = altered["a"]
++
++    altered["a"] = SourceSnapshot(
++        raw=b"forged",
++        source_fingerprint=previous.source_fingerprint,
++    )
++
++    result = _prepare(
++        replace(
++            index,
++            original_worker_source_snapshots=altered,
++        )
++    )
++
++    assert result.status == "UNAVAILABLE"
++    assert result.reason == (
++        "BINDING_CLOSURE_SOURCE_DIGEST_MISMATCH:a"
++    )
++    assert result.manifest is None
++
++
++def test_p1d2c_t05_inconsistent_semantic_graph_rejected(
++    tmp_path, isolated_dirs,
++):
++    index = _index(_repo(tmp_path), "a", "b")
++    snapshot = replace(
++        _snapshot(),
++        graph_sha256="0" * 64,
++    )
++
++    result = _prepare(index, snapshot=snapshot)
++
++    assert result.status == "UNAVAILABLE"
++    assert result.reason == (
++        "P1C0_SOURCE_EVIDENCE_UNAVAILABLE"
++    )
++    assert result.manifest is None
++
++
++def test_p1d2c_t06_partial_semantics_rejected(
++    tmp_path, isolated_dirs,
++):
++    index = _index(_repo(tmp_path), "a", "b")
++    snapshot = replace(
++        _snapshot(),
++        coverage_status="PARTIAL_SOURCE_EVIDENCE",
++        source_issues=(
++            ("a", "SOURCE_CHANGED_DURING_READ"),
++        ),
++    )
++
++    result = _prepare(index, snapshot=snapshot)
++
++    assert result.status == "UNAVAILABLE"
++    assert result.reason == (
++        "P1C0_SOURCE_EVIDENCE_UNAVAILABLE"
++    )
++    assert result.manifest is None
++
++
++def test_p1d2c_t07_no_cyclic_component_no_manifest(
++    tmp_path, isolated_dirs,
++):
++    index = _index(_repo(tmp_path), "a", "b")
++    graph = {
++        "a": {"b"},
++        "b": set(),
++    }
++
++    result = _prepare(index, graph=graph)
++
++    assert result.status == "UNAVAILABLE"
++    assert result.reason == (
++        "BINDING_NO_CYCLIC_COMPONENTS"
++    )
++    assert result.manifest is None
++
++
++def test_p1d2c_t08_warm_cache_is_explicit(
++    tmp_path, isolated_dirs,
++):
++    root = _repo(tmp_path)
++    index_repository(str(root))
++    index = _index(root, "a", "b")
++
++    assert set(
++        index.original_worker_ast_modes.values()
++    ) == {
++        "CACHE_SHA256_EQUIVALENT",
++    }
++
++    result = _prepare(index)
++
++    assert result.status == (
++        "PREPARED_UNPUBLISHED_NON_ATOMIC"
++    )
++    assert result.manifest is not None
++
++
++def test_p1d2c_t09_no_filesystem_read_during_preparation(
++    tmp_path, isolated_dirs, monkeypatch,
++):
++    index = _index(_repo(tmp_path), "a", "b")
++    snapshot = _snapshot()
++
++    def forbidden_read(self):
++        raise AssertionError(
++            "manifest preparation attempted filesystem read"
++        )
++
++    monkeypatch.setattr(
++        Path,
++        "read_bytes",
++        forbidden_read,
++    )
++
++    result = _prepare(
++        index,
++        snapshot=snapshot,
++    )
++
++    assert result.status == (
++        "PREPARED_UNPUBLISHED_NON_ATOMIC"
++    )
++
++
++def test_p1d2c_t10_invalid_snapshot_rejected(
++    tmp_path, isolated_dirs,
++):
++    index = _index(_repo(tmp_path), "a", "b")
++
++    with pytest.raises(TypeError):
++        prepare_original_worker_cycle_manifest(
++            index,
++            PAIR,
++            None,
 +        )
 +
 +
-+def test_p1d2b_t02_default_index_not_authorized(tmp_path, isolated_dirs):
-+    index = index_repository(str(_repo(tmp_path)))
-+    result = assess_original_worker_cycle_closure(index, _GRAPH)
-+    assert result.status == "UNAVAILABLE"
-+    assert result.reason == "INDEX_CAPTURE_NOT_COMPLETE"
-+    assert result.source_snapshots == {}
-+    assert result.retained_raw_bytes == 0
-+
-+
-+def test_p1d2b_t03_missing_closure_source_rejects_all(tmp_path, isolated_dirs):
-+    index = _index(_repo(tmp_path), "a", "b")
-+    result = assess_original_worker_cycle_closure(index, _GRAPH)
-+    assert result.reason == "CLOSURE_CAPTURE_MISSING:helper"
-+    assert result.source_snapshots == {}
-+    assert result.ast_modes == ()
-+
-+
-+def test_p1d2b_t04_tampered_original_bytes_rejected(tmp_path, isolated_dirs):
-+    index = _index(_repo(tmp_path), "a", "b", "helper")
-+    altered = dict(index.original_worker_source_snapshots)
-+    old = altered["a"]
-+    altered["a"] = SourceSnapshot(b"forged", old.source_fingerprint)
-+    forged_index = replace(index, original_worker_source_snapshots=altered)
-+    result = assess_original_worker_cycle_closure(forged_index, _GRAPH)
-+    assert result.reason == "CLOSURE_SOURCE_DIGEST_MISMATCH:a"
-+    assert result.source_snapshots == {}
-+
-+
-+def test_p1d2b_t05_invalid_ast_mode_rejected(tmp_path, isolated_dirs):
-+    index = _index(_repo(tmp_path), "a", "b", "helper")
-+    modes = dict(index.original_worker_ast_modes)
-+    modes["b"] = "FAKE_AST_MODE"
-+    result = assess_original_worker_cycle_closure(
-+        replace(index, original_worker_ast_modes=modes), _GRAPH,
-+    )
-+    assert result.reason == "CLOSURE_AST_MODE_INVALID:b"
-+    assert result.source_snapshots == {}
-+
-+
-+def test_p1d2b_t06_nonindexed_reachable_module_rejected(tmp_path, isolated_dirs):
-+    index = _index(_repo(tmp_path), "a", "b", "helper")
-+    graph = {"a": {"b", "ghost"}, "b": {"a"}, "ghost": set()}
-+    result = assess_original_worker_cycle_closure(index, graph)
-+    assert result.reason == "CLOSURE_MODULE_NOT_INDEXED:ghost"
-+    assert result.source_snapshots == {}
-+
-+
-+def test_p1d2b_t07_closure_above_selection_budget_rejected(tmp_path, isolated_dirs):
-+    index = _index(_repo(tmp_path), "a", "b", "helper")
-+    graph = {"a": {"a", *(f"x{i}" for i in range(16))}}
-+    result = assess_original_worker_cycle_closure(index, graph)
-+    assert result.reason == "CLOSURE_MODULE_LIMIT"
-+    assert result.source_snapshots == {}
-+
-+
-+def test_p1d2b_t08_no_cycle_does_not_claim_evidence(tmp_path, isolated_dirs):
-+    index = _index(_repo(tmp_path), "a", "b", "helper")
-+    result = assess_original_worker_cycle_closure(index, {
-+        "a": {"helper"}, "helper": set(), "b": set(),
-+    })
-+    assert result.reason == "NO_CYCLIC_COMPONENTS"
-+    assert result.source_snapshots == {}
-+
-+
-+def test_p1d2b_t09_multiple_sccs_no_partial_success(tmp_path, isolated_dirs):
-+    root = _repo(tmp_path)
-+    (root / "c.py").write_bytes(b"import d\n")
-+    (root / "d.py").write_bytes(b"import c\n")
-+    graph = {**_GRAPH, "c": {"d"}, "d": {"c"}}
-+    index = _index(root, "a", "b", "helper", "c", "d")
-+    valid = assess_original_worker_cycle_closure(index, graph)
-+    assert valid.status == "SELECTED_CLOSURES_CONSISTENT_NON_ATOMIC"
-+    assert valid.cyclic_components == (("a", "b"), ("c", "d"))
-+    assert valid.reachable_modules == ("a", "b", "c", "d", "helper")
-+    invalid = assess_original_worker_cycle_closure(
-+        _index(root, "a", "b", "helper", "c"), graph,
-+    )
-+    assert invalid.reason == "CLOSURE_CAPTURE_MISSING:d"
-+    assert invalid.source_snapshots == {}
-+
-+
-+def test_p1d2b_t10_warm_cache_equivalence_explicit(tmp_path, isolated_dirs):
-+    root = _repo(tmp_path)
-+    index_repository(str(root))
-+    index = _index(root, "a", "b", "helper")
-+    result = assess_original_worker_cycle_closure(index, _GRAPH)
-+    assert result.status == "SELECTED_CLOSURES_CONSISTENT_NON_ATOMIC"
-+    assert set(dict(result.ast_modes).values()) == {"CACHE_SHA256_EQUIVALENT"}
-+
-+
-+def test_p1d2b_t11_binding_performs_no_filesystem_reads(
-+    tmp_path, isolated_dirs, monkeypatch,
++def test_p1d2c_t11_deterministic_preparation(
++    tmp_path, isolated_dirs,
 +):
-+    root = _repo(tmp_path)
-+    index = _index(root, "a", "b", "helper")
++    index = _index(_repo(tmp_path), "a", "b")
++    snapshot = _snapshot()
 +
-+    def forbidden_read(self):
-+        raise AssertionError("binding performed a new filesystem read")
++    before = repr((index, snapshot))
 +
-+    monkeypatch.setattr(Path, "read_bytes", forbidden_read)
-+    result = assess_original_worker_cycle_closure(index, _GRAPH)
-+    assert result.status == "SELECTED_CLOSURES_CONSISTENT_NON_ATOMIC"
++    first = _prepare(
++        index,
++        snapshot=snapshot,
++    )
++    second = _prepare(
++        index,
++        snapshot=snapshot,
++    )
++
++    assert first == second
++    assert first.status == (
++        "PREPARED_UNPUBLISHED_NON_ATOMIC"
++    )
++    assert repr((index, snapshot)) == before
 ```
 
-## P1D2B_TEST_RESULTS
+## P1D2C_TEST_RESULTS
 
-- DIRECT_EVIDENCE: New file defines 11 P1D2B tests. The exact requested focused invocation returned `63 passed in 15.25s`; no failures.
+- DIRECT_EVIDENCE: Exact requested command returned exit 0: `136 passed in 14.55s`. No failures.
 
 ## FOCUSED_NON_REGRESSION
 
-- DIRECT_EVIDENCE: `& .\.venv\Scripts\python.exe -m pytest -q tests/test_original_worker_cycle_closure_binding.py tests/test_indexer_original_capture_handoff.py tests/test_indexer_worker_source_capture.py tests/test_cycle_semantics_selective_worker_capture.py tests/test_index_fusion.py` returned exit 0, 63/63 passed. The prior four-file set contributed 52 tests. No FULL run or test on the active repository was performed.
+- DIRECT_EVIDENCE: `pytest -q tests/test_original_worker_manifest_preparation.py tests/test_original_worker_cycle_closure_binding.py tests/test_indexer_original_capture_handoff.py tests/test_indexer_worker_source_capture.py tests/test_cycle_semantics_selective_worker_capture.py tests/test_cycle_semantics_evidence.py` completed with 136 passed. No FULL analysis or active-repository capture worker was run.
 
-## PY_COMPILE_AND_WHITESPACE
+## PY_COMPILE_RESULTS
 
-- DIRECT_EVIDENCE: `py_compile` on both new files returned exit 0. `git diff --no-index --check -- /dev/null` on each new file emitted no whitespace diagnostics; exit 1 denotes the expected difference from `/dev/null`. `git diff --check` on tracked changes emitted no whitespace diagnostics. Git warned that LF may become CRLF on a future checkout; no source content mismatch was found.
+- DIRECT_EVIDENCE: `py_compile` on both newly created files returned exit 0.
+- DIRECT_EVIDENCE: New files passed `git diff --no-index --check` with no whitespace diagnostics (exit 1 reflects comparison against `/dev/null`). Tracked `git diff --check` returned 0. Git emitted only its LF-to-CRLF checkout warning.
 
-## CANONICAL_WATCHER_AND_FRESHNESS
+## CANONICAL_WATCHER_OBSERVATIONS
 
-- DIRECT_EVIDENCE: Pre-edit canonical revision 672. `get_live_events(after_revision=672)` returned a continuous `desktop_watcher` UPDATED event for the new production file at revision 673; subsequent read after 673 returned the test-file UPDATED event at revision 674. `resync_required=false`. At revision 674, Contextor `get_symbol_implementation(mode=preview)` resolved both new symbols with `workspace_sync=verified`. Cycles family: fresh, count 16 DFS back-edge paths. `cycle_semantics`: stale. No manual `update_file` was called.
+- DIRECT_EVIDENCE: Pre-edit canonical revision 674. Continuous watcher events: revision 675 `UPDATED` for `original_worker_preparation.py`; revision 676 `UPDATED` for its test. `resync_required=false`.
+- DIRECT_EVIDENCE: At revision 676, Contextor read-only `get_symbol_implementation(mode=preview)` resolved both new symbols with `workspace_sync=verified`; cycles fresh, count 16; `cycle_semantics=stale`. No manual `update_file` or forced refresh was used.
 
-## ORIGINAL_SOURCE_CAPTURE_PROOF_LIMITS
+## PREPARED_MANIFEST_AUTHORITY_LIMITS
 
-- CODE_PATH_PROVED: The new binding checks the caller-supplied index and hard-edge closure against opted-in original worker captures, indexed SHA-256 values, accepted AST modes and 16-module/2 MiB-per-source/32 MiB-total limits. It returns no partial snapshots on failure. Successful status explicitly says `NON_ATOMIC`. It does not establish cross-file atomicity or canonical graph ownership.
-- CONTRACT_PROVED by isolated tests: complete closure, missing/default capture, tampered bytes/mode, nonindexed module, limit, no cycle, multiple SCCs, warm-cache equivalence and no binding-time filesystem read.
+- CODE_PATH_PROVED: New function consumes caller-supplied P1D2B binding, parses the captured bytes in memory, builds source-bound evidence and calls existing P1C0 preparation. It fails closed on binding, parsing, evidence, authority, digest-shape and SCC identity failures.
+- CONTRACT_PROVED: Tests cover successful prepared-only manifest, default/missing/tampered capture, graph and partial-semantic mismatch, no cycle, warm-cache label, no filesystem read during preparation, invalid snapshot type and deterministic/nonmutating behavior.
+- DIRECT_EVIDENCE: Returned authority remains `PREPARED_ONLY_NOT_CANONICALLY_PUBLISHED`; preparation state remains `PREPARED_UNPUBLISHED`. This does not create a durable receipt, publish a generation, authenticate graph ownership, establish cross-file source atomicity, certify an installed LIVE generation or establish runtime import safety.
 
-## RUNTIME_ADOPTION_LIMITS
+## UNVERIFIED_RUNTIME_BEHAVIOR
 
-- UNKNOWN: Watcher indexing and verified source equality do not establish which implementation is loaded in the active LIVE process. No restart, reload, installed-generation verification, publication, runtime import-safety test or SAFE certification occurred.
+- UNKNOWN: Whether the active runtime loaded the new implementation. Watcher indexing and verified source sync prove indexed disk content only. No restart, reload, publication, LIVE generation certification or runtime import-safety action was performed.
 
 ## FINAL_VERDICT
 
-- DIRECT_EVIDENCE: Literal files created, exact-content comparison passed, 63 focused tests passed, compiler passed and both watcher events were observed. CODE_PATH_PROVED / CONTRACT_PROVED: the selected in-memory SCC closure binding works under the supplied non-atomic limits in isolated tests. UNKNOWN: active loaded-code adoption and generation/publication authority. STOP after P1D2B.
+P1D2C completed within its exact two-file scope. Literal source comparison, compilation, 136 focused tests and watcher verification passed. Evidence supports PREPARED ONLY, NON_ATOMIC behavior; publication and runtime certification remain unclaimed. STOP after P1D2C.
