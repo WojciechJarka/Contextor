@@ -1,3 +1,149 @@
+## 2026-10-26 Patch — Canonical Analysis Parity, Cycle Semantics and LIVE Publication Integration
+
+Consolidated the October 10–26 development work covering canonical FULL/LIVE consistency, incremental analysis correctness, Python cycle-semantics evidence, source-bound publication, MCP diagnostics and bounded profiling.
+
+### Canonical FULL, LIVE and incremental analysis consistency
+
+- Strengthened canonical parity between fresh FULL analysis and incremental LIVE updates, including dependency graphs, artifact consumption, module usage, persistent identities, collision facts, lineage, cached analytics and architectural layer reports.
+
+- Added isolated comparison tests for multi-step incremental mutations against independently recomputed FULL baselines, detecting differences in canonical state, freshness markers, tracked files, source hashes and persisted generation metadata.
+
+- Reconciled FULL FileState tracking with the exact currently indexed source domain. Removed obsolete tracked entries and covered source additions, deletions and changed indexing domains without relying on stale prior-generation file records.
+
+- Corrected incremental dependency-graph handling for package initializers, re-exports and package-level bindings, including cases where `from pkg import name` changes its resolution after an initializer edit.
+
+- Extended graph-cache identity to account for package re-export binding facts, preventing reuse of graph results produced from incompatible package-binding information.
+
+- Improved canonical reference resolution and artifact-usage consistency across package initializers, dotted module references, imported symbols and re-exported names.
+
+- Made bounded reference-detail normalization deterministic across differing input orders, preserving stable selection of details while retaining existing output limits.
+
+- Corrected incremental artifact-consumer maintenance for newly introduced and removed symbols, including FULL-compatible zero-consumer records and updates to unchanged defining modules when consumer relationships change.
+
+- Strengthened module-usage manifest maintenance with source SHA-256 and semantic-version tracking, preserving copy-on-write isolation and avoiding unnecessary recomputation of unrelated module facts.
+
+- Improved incremental collision-fact reconstruction and canonical parity for module additions, deletions and symbol changes, keeping collision ownership and derived diagnostics aligned with fresh FULL analysis.
+
+- Improved incremental architectural layer information, dependency topology and cached analytics after graph changes, including package-initializer mutations.
+
+- Added failure-atomicity guards around direct incremental-engine commits. Ordinary commit failures restore the previous canonical state, tracked FileState entries, module-usage manifests and affected persistent-registry state rather than exposing partial changes.
+
+- Expanded Desktop watcher, MCP update and direct incremental-engine integration tests, comparing resulting canonical states against fresh FULL baselines in isolated repositories.
+
+- Separated the full-analysis lease implementation from its coordination interface while preserving cross-process single-writer admission, cancellation and ownership semantics.
+
+### Python cycle-semantics foundation
+
+- Introduced a dedicated `contextor.core.cycle_semantics` analysis package, separating structural cycle detection from source-attributed import diagnostics, initialization-order modeling and canonical publication authority.
+
+- Added deterministic strongly connected component (SCC) analysis. Structural DFS cycle paths are now explicitly distinguished from cyclic SCCs, preventing multiple reported paths through one component from being interpreted as independent semantic classifications.
+
+- Added source-attributed cyclic import-site analysis, including lexical candidates, module-level versus function-scoped activation, guarded imports, indirect package-import candidates and unresolved edges.
+
+- Added bounded analysis of conditional import behavior, re-export relationships, import guards, single-edge cycle closures, weighted closure evidence, activation candidates and diagnostic groupings.
+
+- Added immutable cycle-semantics contracts containing graph fingerprints, source-coverage information, source issues, structural import evidence and explicit runtime-execution limitations.
+
+- Integrated cycle-semantics materialization into FULL analysis and canonical repository state, with independently tracked `fresh`, `stale` and `deferred` lifecycle states.
+
+- Added incremental cycle-semantics invalidation so source or graph changes cannot silently preserve stale semantic evidence as current.
+
+- Added historical cycle-semantics reports and bounded public projections, with per-SCC structural and lexical diagnostic categories, source-coverage information, candidate activation paths and explicit provenance limitations.
+
+- Extended `get_project_architecture` with cycle-semantics views and component selection, distinguishing completed historical report evidence from current LIVE freshness-gated observations.
+
+- Added an experimental, bounded initialization-order model for supported Python imports and top-level bindings, tracking module states, initialization order, available names and early-binding hazards without executing analyzed application code.
+
+- Added restricted package-aware import-model research and tests covering regular package initializers, child-module binding, selected passive function/class constructs and import-order differences. These standalone modeling capabilities are not equivalent to general support throughout the source-bound FULL publication pipeline.
+
+- Introduced the model classifications `MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS`, `MODEL_INTERNAL_EARLY_BINDING_HAZARD` and `INDETERMINATE`, with explicit entry-coverage and evidence requirements. A model PASS is not a certificate of Python runtime import safety.
+
+### Original worker source evidence and manifest preparation — P1D2A–G
+
+- Added opt-in capture of original indexer-worker source bytes, preserving historical indexing behavior when source capture is not requested.
+
+- Introduced bounded capture and SCC-closure selection: at most 16 selected source modules, 2 MiB per module and 32 MiB across the selected source cohort.
+
+- Added checks connecting selected worker bytes to source fingerprints, parsed ASTs, cyclic SCC membership and hard-graph reachable module closures.
+
+- Added source-bound model evidence and immutable prepared manifests carrying SCC membership, raw-source and AST signatures, graph identity and supported model classifications.
+
+- Added independent verification of reindex plans and second-pass indexed results, rejecting changed source fingerprints, graph drift and inconsistent module inventories.
+
+- Integrated optional second-pass source capture and manifest preparation into `ContextorFacade.analyze_project` through `cycle_source_preparation_preview=False` by default.
+
+- Added a source-completeness gate that prevents a nominally fresh but incomplete cycle-semantics snapshot from triggering unsupported source preparation.
+
+- Preserved cancellation propagation and conservative failure behavior when source capture, AST parsing, closure validation, reindexing or model assessment is unavailable.
+
+- Kept prepared manifests ephemeral and unpublished by default, using `PREPARED_ONLY_NOT_CANONICALLY_PUBLISHED` authority until an explicit canonical publication operation succeeds.
+
+### Canonical manifest co-publication and LIVE verification — P1D2H–L
+
+- Extended `save_engine_state` with an optional prepared-manifest handoff to the existing canonical snapshot store, without changing historical calls that omit the argument.
+
+- Added a separate `cycle_source_publication_opt_in=False` parameter to FULL analysis. Publication requires explicit preview preparation and a separate explicit publication opt-in; preview alone remains unpublished.
+
+- Added final canonical-state checks before manifest forwarding, including semantic freshness, complete source evidence, module-domain consistency, graph fingerprints and absence of required resynchronization.
+
+- Integrated prepared SCC manifests with the canonical store's existing generation commit, allowing the store alone to seal a `CanonicalCycleManifestReceipt`.
+
+- Bound publication receipts to the committed `revision`, `state_id`, `repo_id` and `root_path`, with authority `COMMITTED_PREPARED_CLAIMS_NOT_SOURCE_CERTIFIED`.
+
+- Preserved fail-closed behavior for forged, inconsistent or stale manifests. A rejected manifest does not create a new committed generation or trigger a fallback publication without that manifest.
+
+- Prevented later generations from inheriting earlier cycle receipts without new explicit preparation and publication. Incremental updates clear receipts before updating and persisting changed state.
+
+- Verified receipt continuity across real FULL preparation, canonical persistence, isolated LIVE installation and recovery from committed snapshots.
+
+- Added real localhost IPC integration tests for `LiveStateClient.verify_installed_cycle_generation`, checking exact generation, repository, service-instance and graph identities against the installed receipt.
+
+- Kept LIVE installed-claim verification lock-scoped and identity-only, rejecting unexpected caller-supplied source bytes and returning controlled unavailable reasons when evidence does not match.
+
+- Verified automatic FULL publication through the official `publish_committed_and_wait` path, canonical mutation queue, exact publication job, authenticated authority identity and installed-generation verification.
+
+- Confirmed committed-publication idempotency: submitting the same generation again reuses its existing publication job rather than creating duplicate publication events.
+
+- Preserved ordinary FULL canonical snapshot publication independently of cycle receipt publication. Without the explicit cycle opt-in, the canonical generation remains receipt-free.
+
+### MCP diagnostics, analysis status and bounded profiling
+
+- Extended cycle-diagnostic retrieval with read-only, bounded projections over existing canonical and historical evidence, including explicit freshness, source-coverage and publication-binding limitations.
+
+- Added conservative LIVE cycle-diagnostic observations that verify available authority and revision continuity without treating independently observed filesystem hashes as an atomic source transaction.
+
+- Improved MCP analysis-job status and publication reconciliation, including exact job identity, generation, idempotency key, service-instance and process-start checks before accepting publication completion evidence.
+
+- Strengthened MCP incremental update handling and public status reporting around canonical mutation admission, persistence, asynchronous job completion and recovery-sensitive state.
+
+- Extended `contextor_profile_analysis` with `catalog` and `probe` modes while retaining the existing full-analysis profiling mode.
+
+- Added a fixed registry of bounded atomic profiling operations, including `reports.summary`, `live.ping` and `snapshot.metadata`, with explicit scope/preset selection, sequential samples, warmup control and summary or span-level results.
+
+- Kept atomic profiling read-only for its selected operations, bounded result size and error reporting, and prevented arbitrary source, function or symbol execution through the profiling interface.
+
+- Updated MCP documentation and architectural guidance to describe the expanded cycle evidence, analysis-status behavior and profiling contracts.
+
+### Verification, acceptance and remaining limitations
+
+- Expanded isolated regression coverage for canonical FULL/incremental parity, file-domain reconciliation, failed-commit rollback, package resolution, collision consistency, source evidence, cycle semantics, canonical publication and LIVE IPC.
+
+- Completed the P1D2L official FULL-to-LIVE publication checkpoint with 6/6 new tests and 255/255 focused regression tests passing. These are focused isolated tests, not a new repository-wide regression certification.
+
+- Completed the P1D2M acceptance review and reran two existing unsupported-package tests, both passing. The review accepted the opt-in integration path while explicitly rejecting claims of general Python import-cycle classification coverage.
+
+- Current cycle-semantics classification remains limited by supported AST/import constructs, source-capture bounds, non-atomic source observations and incomplete coverage of realistic package-level initialization.
+
+- The restricted package-aware research model does not yet make the canonical P1D2 source-bound manifest path capable of classifying arbitrary dotted package imports or module-level function definitions.
+
+- Contextor's observed 16 structural DFS cycle paths must not be equated with 16 independently assessed SCCs. The inspected historical report contained two cyclic SCCs, but current canonical cycle semantics was stale and current per-SCC model classifications were unavailable.
+
+- The existing user-facing historical cycle reports expose structural and lexical diagnostics, not a complete current, generation-bound explanation of source-bound model classifications for every SCC.
+
+- Active application loaded-code adoption, original worker source ownership, repository-wide atomic source capture and arbitrary Python runtime import safety remain unverified.
+
+- P1D2 is accepted as an isolated opt-in integration milestone, not as general semantic safety certification. No active-repository FULL analysis or active LIVE service restart was performed as part of the final acceptance stage.
+
 ## 2026-10-09 Patch - L37/L38 and A3C recovery hardening
 
 Completed the L37/L38 durable-verified canonical publication and persistence-first publication/recovery work. A3C now finalizes recovery certificates on the owner thread, bounds certificate expiry and fences mutations until recovery admission is certified. The watcher performs trusted rebaseline and defers updates during recovery; GUI recovery incidents retain generation-aware handling.
