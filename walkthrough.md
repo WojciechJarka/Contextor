@@ -1,52 +1,61 @@
-# CONTEXTOR_P1D2K_REAL_IPC_INSTALLED_CYCLE_GENERATION
+# CONTEXTOR_P1D2L_FULL_OFFICIAL_COMMITTED_PUBLICATION
 
 ## PREFLIGHT_RESULT
 
-DIRECT_EVIDENCE: Initial HEAD `dd49d28cc873cff089c21edc6d9843af5d03ea93`, clean worktree. Contextor MCP resolved `CanonicalLiveServer`, `LiveStateClient`, `assess_live_installed_prepared_claims`, `verify_co_published_cycle_manifest`, and `save_snapshot` at revision 691 with `workspace_sync=verified`. Local source confirmed constructor arguments `committed_snapshot_reader`, `updater`, `persister`, `authority_identity`; localhost endpoint, `serve_forever`, `close`; client `ping`, `publish`, `update_file`, `request`, and `verify_installed_cycle_generation`. The latter supplies endpoint `service_instance_id`. Server dispatch rejects extra payload fields and calls `assess_live_installed_prepared_claims` under `self._lock`; helper exposes `INSTALLED_PREPARED_CLAIMS_MATCH_EXPECTED_GENERATION`. P1D2J helpers `_full`, `_committed`, `_receipt` exist. New test path absent. PREFLIGHT_MISMATCH=NONE.
+DIRECT_EVIDENCE: Initial HEAD `d902f0fec40fa0606cab9e48fe9942287ea695bb`, clean worktree. Contextor MCP resolved `ContextorFacade.analyze_project`, `publish_committed_and_wait`, `CanonicalLiveServer`, `LiveStateClient`, `save_snapshot`, and `ensure_repository_identity` at revision 692 with `workspace_sync=verified`. Local source confirmed the two explicit FULL flags; `save_engine_state` persistence; subsequent import of `contextor.core.live_state.connect`; `publish_committed_and_wait` with repo_id, state_id, revision and origin; its `submit_committed_publish`, `mutation_status` and `authority_status` calls; required service_instance_id and process_start_identity; server's committed_snapshot_reader, repository_identity_reader and authority_identity; repository identity and central registry directory; P1D2J helper exports; P1D2K installed-generation verification. New test path absent. PREFLIGHT_MISMATCH=NONE.
 
 ## NATIVE_CODEX_LITERAL_EDITS
 
-DIRECT_EVIDENCE: Created only the exact architect-supplied test through native Codex `apply_patch`. Literal test source matched the attachment after newline normalization.
+DIRECT_EVIDENCE: Created only the architect-supplied test through native Codex `apply_patch`. The test source matched the attachment exactly after newline normalization.
 
 ## FILES_CHANGED
 
-- `tests/test_original_worker_real_ipc_generation.py`
+- `tests/test_original_worker_official_full_live_publication.py`
 
-`walkthrough.md` is this report; no production or existing test file changed.
+`walkthrough.md` is this report. No production or existing test file changed.
 
 ## ACTUAL_NEW_TEST_CONTENT
 
 Full actual new-file diff:
 
 ```diff
-diff --git a/tests/test_original_worker_real_ipc_generation.py b/tests/test_original_worker_real_ipc_generation.py
+diff --git a/tests/test_original_worker_official_full_live_publication.py b/tests/test_original_worker_official_full_live_publication.py
 new file mode 100644
-index 0000000..6f31764
+index 0000000..6869657
 --- /dev/null
-+++ b/tests/test_original_worker_real_ipc_generation.py
-@@ -0,0 +1,516 @@
-+"""P1D2K: real localhost IPC verification of installed SCC claims."""
++++ b/tests/test_original_worker_official_full_live_publication.py
+@@ -0,0 +1,595 @@
++"""P1D2L: actual FULL committed-publication queue over isolated IPC."""
 +
 +from __future__ import annotations
 +
 +from contextlib import contextmanager
++from dataclasses import replace
++from pathlib import Path
 +from threading import Thread
-+from types import SimpleNamespace
 +from uuid import uuid4
 +
 +import pytest
 +
-+from contextor.core.analysis.state_manager import (
-+    save_engine_state,
-+)
++import contextor.core.live_state as live_state
++import contextor.core.cycle_semantics.original_worker_preparation as preparation_module
++
 +from contextor.core.live_state.ipc import (
 +    CanonicalLiveServer,
 +    LiveStateClient,
 +)
++from contextor.core.live_state.publication_receipt import (
++    committed_publication_key,
++    publish_committed_and_wait,
++)
 +from contextor.core.live_state.store import (
 +    locked_committed_snapshot,
++    read_metadata,
 +)
 +from contextor.core.paths import repo_cache_dir
++from contextor.core.repository_identity import (
++    ensure_repository_identity,
++)
 +
 +from tests.test_original_worker_full_preparation_optin import (
 +    _flat_repo,
@@ -70,57 +79,82 @@ index 0000000..6f31764
 +
 +
 +@contextmanager
-+def _socket_server(
++def _official_live(
 +    root,
++    monkeypatch,
 +    *,
-+    updater=None,
-+    persister=None,
++    complete_authority=True,
 +):
-+    cache = repo_cache_dir(root)
-+    _state, metadata = _committed(root)
++    root = Path(root).resolve()
 +
-+    service_instance_id = (
-+        "p1d2k-isolated-" + uuid4().hex
++    identity, _registry_directory = (
++        ensure_repository_identity(root)
 +    )
++
++    service_id = "p1d2l-service-" + uuid4().hex
++
++    authority = {
++        "repo_id": identity.repo_id,
++        "root_path": identity.root_path,
++        "service_instance_id": service_id,
++    }
++
++    if complete_authority:
++        authority["process_start_identity"] = (
++            "p1d2l-process-" + uuid4().hex
++        )
++
++    cache = repo_cache_dir(root)
 +
 +    server = CanonicalLiveServer(
 +        committed_snapshot_reader=(
 +            lambda: locked_committed_snapshot(
 +                cache,
-+                expected_repo_id=metadata.repo_id,
-+                expected_root_path=metadata.root_path,
++                expected_repo_id=identity.repo_id,
++                expected_root_path=identity.root_path,
 +            )
 +        ),
-+        updater=updater,
-+        persister=persister,
-+        authority_identity={
-+            "repo_id": metadata.repo_id,
-+            "root_path": metadata.root_path,
-+            "service_instance_id": service_instance_id,
-+        },
++        repository_identity_reader=lambda: identity,
++        authority_identity=authority,
 +    )
 +
 +    assert server.endpoint.host == "127.0.0.1"
-+    assert server.endpoint.service_instance_id == (
-+        service_instance_id
-+    )
++    assert server.endpoint.service_instance_id == service_id
 +
 +    worker = Thread(
 +        target=server.serve_forever,
-+        name="p1d2k-isolated-live",
++        name="p1d2l-isolated-live",
 +        daemon=True,
 +    )
 +
 +    worker.start()
 +
 +    client = LiveStateClient(server.endpoint)
++    connect_calls = []
++
++    def isolated_connect(path):
++        selected = Path(path).resolve()
++        assert selected == root
++
++        connect_calls.append(selected)
++
++        return client
++
++    monkeypatch.setattr(
++        live_state,
++        "connect",
++        isolated_connect,
++    )
 +
 +    try:
-+        ping = client.ping()
++        assert client.ping()["status"] == "ok"
 +
-+        assert ping["status"] == "ok"
-+
-+        yield client, server
++        yield (
++            client,
++            server,
++            identity,
++            connect_calls,
++        )
 +
 +    finally:
 +        closed = server.close()
@@ -142,246 +176,327 @@ index 0000000..6f31764
 +    )
 +
 +
-+def _publish(client, state):
-+    answer = client.publish(
-+        state,
-+        origin="p1d2k_isolated_test",
++def _require_success(result, metadata, server):
++    assert result.live_publish_status == "success"
++    assert result.live_publish_revision == (
++        metadata.revision
++    )
++    assert result.live_publish_expected_revision == (
++        metadata.revision
++    )
++    assert result.live_publish_expected_state_id == (
++        metadata.state_id
++    )
++    assert result.live_publish_service_instance_id == (
++        server.endpoint.service_instance_id
++    )
++    assert result.live_publish_process_start_identity == (
++        server.endpoint.process_start_identity
 +    )
 +
-+    assert answer["status"] == "ok"
-+    assert answer["source"] == "committed_snapshot"
++    assert isinstance(
++        result.live_publish_job_id,
++        str,
++    )
++    assert result.live_publish_job_id
 +
-+    return answer
++    assert result.live_publish_idempotency_key == (
++        committed_publication_key(
++            metadata.repo_id,
++            metadata.state_id,
++            metadata.revision,
++        )
++    )
 +
 +
-+def test_p1d2k_t01_real_ipc_positive_generation(
-+    tmp_path, isolated_dirs,
++def test_p1d2l_t01_real_full_automatic_queue_publication(
++    tmp_path, isolated_dirs, monkeypatch,
 +):
 +    root = _flat_repo(tmp_path)
 +
-+    result = _full(
++    with _official_live(
 +        root,
-+        preview=True,
-+        publish=True,
-+    )
++        monkeypatch,
++    ) as (client, server, identity, calls):
 +
-+    preview = result.cycle_source_preparation_preview
++        result = _full(
++            root,
++            preview=True,
++            publish=True,
++        )
 +
-+    assert preview.status == (
-+        "PREPARED_UNPUBLISHED_NON_ATOMIC"
-+    )
-+    assert preview.manifest is not None
++        state, metadata = _committed(root)
++        receipt = _receipt(state, metadata)
 +
-+    committed, metadata = _committed(root)
-+    receipt = _receipt(committed, metadata)
++        assert metadata.repo_id == identity.repo_id
 +
-+    with _socket_server(root) as (client, server):
-+        published = _publish(client, committed)
++        _require_success(result, metadata, server)
 +
-+        assert published["revision"] == metadata.revision
++        assert calls == [root.resolve()]
 +
-+        checked = _verify(
++        job = client.mutation_status(
++            result.live_publish_job_id
++        )
++
++        assert job["status"] == "ok"
++        assert job["state"] == "completed"
++        assert job["requested_state_id"] == (
++            metadata.state_id
++        )
++        assert job["requested_revision"] == (
++            metadata.revision
++        )
++        assert job["response"]["status"] == "ok"
++        assert job["response"]["revision"] == (
++            metadata.revision
++        )
++
++        installed = client.snapshot()
++
++        assert installed["status"] == "ok"
++        assert installed["revision"] == (
++            metadata.revision
++        )
++        assert _receipt(
++            installed["state"],
++            metadata,
++        ) == receipt
++
++        verified = _verify(
 +            client,
-+            committed,
++            state,
 +            metadata,
 +        )
 +
-+        assert checked["status"] == "ok"
-+        assert checked["binding_state"] == (
++        assert verified["status"] == "ok"
++        assert verified["binding_state"] == (
 +            "INSTALLED_PREPARED_CLAIMS_MATCH_EXPECTED_GENERATION"
 +        )
-+        assert checked["revision"] == metadata.revision
-+        assert checked["state_id"] == metadata.state_id
-+        assert checked["repo_id"] == metadata.repo_id
-+        assert checked["root_path"] == metadata.root_path
-+
-+        assert checked["service_instance_id"] == (
-+            server.endpoint.service_instance_id
-+        )
-+
-+        assert checked["graph_sha256"] == (
-+            preview.manifest.graph_sha256
-+        )
-+        assert checked["source_manifest_sha256"] == (
-+            preview.manifest.source_manifest_sha256
-+        )
-+        assert checked["model_claims_sha256"] == (
++        assert verified["model_claims_sha256"] == (
 +            receipt.model_claims_sha256
 +        )
 +
-+        assert checked["activity_epoch"]
++        assert verified["service_instance_id"] == (
++            server.endpoint.service_instance_id
++        )
++
++
++def test_p1d2l_t02_preview_only_automatic_publish_no_receipt(
++    tmp_path, isolated_dirs, monkeypatch,
++):
++    root = _flat_repo(tmp_path)
++
++    with _official_live(
++        root,
++        monkeypatch,
++    ) as (client, server, _identity, calls):
++
++        result = _full(
++            root,
++            preview=True,
++            publish=False,
++        )
 +
 +        assert (
-+            "LIVE_OWNER_LOCK_SCOPED_INSTALLED_PREPARED_CLAIMS"
-+            in checked["authority"]
++            result.cycle_source_preparation_preview.status
++            == "PREPARED_UNPUBLISHED_NON_ATOMIC"
 +        )
 +
-+        assert "source_snapshots" not in checked
-+        assert "source_bytes" not in checked
++        state, metadata = _committed(root)
 +
++        _require_success(result, metadata, server)
 +
-+def test_p1d2k_t02_preview_only_no_ipc_claim(
-+    tmp_path, isolated_dirs,
-+):
-+    root = _flat_repo(tmp_path)
++        assert calls == [root.resolve()]
++        assert state.cycle_source_publication is None
 +
-+    result = _full(
-+        root,
-+        preview=True,
-+        publish=False,
-+    )
++        installed = client.snapshot()
 +
-+    assert result.cycle_source_preparation_preview.status == (
-+        "PREPARED_UNPUBLISHED_NON_ATOMIC"
-+    )
++        assert installed["status"] == "ok"
++        assert installed["revision"] == (
++            metadata.revision
++        )
++        assert (
++            installed["state"].cycle_source_publication
++            is None
++        )
 +
-+    committed, metadata = _committed(root)
-+
-+    assert committed.cycle_source_publication is None
-+
-+    with _socket_server(root) as (client, _server):
-+        _publish(client, committed)
-+
-+        checked = _verify(
++        verified = _verify(
 +            client,
-+            committed,
++            state,
 +            metadata,
 +        )
 +
-+        assert checked["status"] == "unavailable"
-+        assert checked["reason"] == (
++        assert verified["status"] == "unavailable"
++        assert verified["reason"] == (
 +            "CO_PUBLISHED_RECEIPT_UNAVAILABLE"
 +        )
-+        assert checked["revision"] == metadata.revision
-+        assert "binding_state" not in checked
 +
 +
-+def test_p1d2k_t03_wrong_identity_fails_closed(
-+    tmp_path, isolated_dirs,
++def test_p1d2l_t03_rejected_manifest_no_next_job(
++    tmp_path, isolated_dirs, monkeypatch,
 +):
 +    root = _flat_repo(tmp_path)
 +
-+    _full(
++    with _official_live(
 +        root,
-+        preview=True,
-+        publish=True,
-+    )
++        monkeypatch,
++    ) as (client, server, _identity, calls):
 +
-+    committed, metadata = _committed(root)
-+    receipt = _receipt(committed, metadata)
-+
-+    with _socket_server(root) as (client, server):
-+        _publish(client, committed)
-+
-+        common = {
-+            "expected_revision": metadata.revision,
-+            "expected_state_id": metadata.state_id,
-+            "expected_repo_id": metadata.repo_id,
-+            "expected_root_path": metadata.root_path,
-+            "expected_graph_sha256": (
-+                receipt.prepared_manifest.graph_sha256
-+            ),
-+            "expected_service_instance_id": (
-+                server.endpoint.service_instance_id
-+            ),
-+        }
-+
-+        cases = (
-+            (
-+                "expected_service_instance_id",
-+                "another-service-instance",
-+                "LIVE_INSTANCE_MISMATCH",
-+            ),
-+            (
-+                "expected_repo_id",
-+                "another-repository",
-+                "LIVE_REPOSITORY_MISMATCH",
-+            ),
-+            (
-+                "expected_revision",
-+                metadata.revision + 1,
-+                "INSTALLED_GENERATION_MISMATCH",
-+            ),
-+            (
-+                "expected_graph_sha256",
-+                "0" * 64,
-+                "INSTALLED_GRAPH_IDENTITY_MISMATCH",
-+            ),
++        initial_result = _full(
++            root,
++            preview=True,
++            publish=True,
 +        )
 +
-+        for field, invalid, reason in cases:
-+            payload = dict(common)
-+            payload[field] = invalid
++        initial_state, initial_metadata = _committed(
++            root
++        )
++        old_receipt = _receipt(
++            initial_state,
++            initial_metadata,
++        )
 +
-+            response = client.request(
-+                "verify_installed_cycle_generation",
-+                **payload,
++        _require_success(
++            initial_result,
++            initial_metadata,
++            server,
++        )
++
++        initial_job_id = (
++            initial_result.live_publish_job_id
++        )
++
++        original = (
++            preparation_module
++            .prepare_original_worker_cycle_manifest
++        )
++
++        def forged(*args, **kwargs):
++            prepared = original(*args, **kwargs)
++
++            if prepared.manifest is None:
++                return prepared
++
++            return replace(
++                prepared,
++                manifest=replace(
++                    prepared.manifest,
++                    source_manifest_sha256="f" * 64,
++                ),
 +            )
 +
-+            assert response["status"] == "unavailable"
-+            assert response["reason"] == reason
-+
-+        valid = _verify(
-+            client,
-+            committed,
-+            metadata,
++        monkeypatch.setattr(
++            preparation_module,
++            "prepare_original_worker_cycle_manifest",
++            forged,
 +        )
 +
-+        assert valid["status"] == "ok"
++        failed = _full(
++            root,
++            preview=True,
++            publish=True,
++        )
++
++        assert failed.live_publish_status == (
++            "not_attempted"
++        )
++
++        assert read_metadata(
++            repo_cache_dir(root)
++        ) == initial_metadata
++
++        installed = client.snapshot()
++
++        assert installed["status"] == "ok"
++        assert installed["revision"] == (
++            initial_metadata.revision
++        )
++
++        assert _receipt(
++            installed["state"],
++            initial_metadata,
++        ) == old_receipt
++
++        job = client.mutation_status(initial_job_id)
++
++        assert job["status"] == "ok"
++        assert job["state"] == "completed"
++
++        events = client.get_events(
++            after_revision=0,
++            limit=None,
++        )
++
++        assert events["status"] == "ok"
++        assert [
++            event["revision"]
++            for event in events["events"]
++            if event["operation"] == "publish"
++        ] == [initial_metadata.revision]
++
++        assert calls == [
++            root.resolve(),
++        ]
 +
 +
-+def test_p1d2k_t04_later_default_full_replaces_ipc_claim(
-+    tmp_path, isolated_dirs,
++def test_p1d2l_t04_default_full_replaces_receipt(
++    tmp_path, isolated_dirs, monkeypatch,
 +):
 +    root = _flat_repo(tmp_path)
 +
-+    _full(
++    with _official_live(
 +        root,
-+        preview=True,
-+        publish=True,
-+    )
++        monkeypatch,
++    ) as (client, server, _identity, calls):
 +
-+    first, first_metadata = _committed(root)
-+    _receipt(first, first_metadata)
++        first_result = _full(
++            root,
++            preview=True,
++            publish=True,
++        )
 +
-+    with _socket_server(root) as (client, _server):
-+        _publish(client, first)
++        first_state, first_metadata = _committed(
++            root
++        )
 +
-+        assert _verify(
-+            client,
-+            first,
++        _receipt(first_state, first_metadata)
++        _require_success(
++            first_result,
 +            first_metadata,
-+        )["status"] == "ok"
++            server,
++        )
 +
-+        _full(root)
++        second_result = _full(root)
 +
-+        second, second_metadata = _committed(root)
++        second_state, second_metadata = _committed(
++            root
++        )
 +
 +        assert second_metadata.revision == (
 +            first_metadata.revision + 1
 +        )
-+        assert second.cycle_source_publication is None
++        assert second_state.cycle_source_publication is None
 +
-+        published = _publish(client, second)
-+
-+        assert published["revision"] == (
-+            second_metadata.revision
++        _require_success(
++            second_result,
++            second_metadata,
++            server,
 +        )
 +
-+        old = _verify(
++        previous = _verify(
 +            client,
-+            first,
++            first_state,
 +            first_metadata,
 +        )
 +
-+        assert old["status"] == "unavailable"
-+        assert old["reason"] == (
++        assert previous["status"] == "unavailable"
++        assert previous["reason"] == (
 +            "INSTALLED_GENERATION_MISMATCH"
 +        )
 +
 +        current = _verify(
 +            client,
-+            second,
++            second_state,
 +            second_metadata,
 +        )
 +
@@ -390,207 +505,175 @@ index 0000000..6f31764
 +            "CO_PUBLISHED_RECEIPT_UNAVAILABLE"
 +        )
 +
++        assert calls == [
++            root.resolve(),
++            root.resolve(),
++        ]
 +
-+def test_p1d2k_t05_incremental_ipc_update_invalidates(
-+    tmp_path, isolated_dirs,
++
++def test_p1d2l_t05_incomplete_authority_not_verified(
++    tmp_path, isolated_dirs, monkeypatch,
 +):
 +    root = _flat_repo(tmp_path)
 +
-+    _full(
++    with _official_live(
 +        root,
-+        preview=True,
-+        publish=True,
-+    )
++        monkeypatch,
++        complete_authority=False,
++    ) as (client, server, _identity, calls):
 +
-+    initial, initial_metadata = _committed(root)
-+    _receipt(initial, initial_metadata)
-+
-+    def updater(candidate, path):
-+        assert candidate.cycle_source_publication is None
-+
-+        candidate.cycle_semantics_state = "stale"
-+        candidate.cycle_semantics_invalidation_reason = (
-+            "SOURCE_CHANGED"
++        assert (
++            server.endpoint.process_start_identity
++            is None
 +        )
 +
-+        return SimpleNamespace(
-+            status="UPDATED",
-+            file_path=path,
++        result = _full(
++            root,
++            preview=True,
++            publish=True,
 +        )
 +
-+    def persister(candidate, revision):
-+        assert candidate.cycle_source_publication is None
++        state, metadata = _committed(root)
 +
-+        saved = save_engine_state(
-+            candidate,
-+            str(repo_cache_dir(root)),
-+            initial_metadata.state_id,
-+            writer="desktop",
-+            repo_id=initial_metadata.repo_id,
-+            root_path=str(root.resolve()),
-+            exact_revision=revision,
-+            file_state_payload={
-+                "_meta": {
-+                    "state_id": initial_metadata.state_id,
-+                    "revision": revision,
-+                },
-+                "files": {},
-+            },
++        _receipt(state, metadata)
++
++        assert result.live_publish_status == (
++            "unverified_authority_changed"
 +        )
++        assert result.live_publish_revision is None
++        assert result.live_publish_job_id is None
 +
-+        if saved is None:
-+            raise RuntimeError(
-+                "isolated incremental persistence failed"
-+            )
++        assert calls == [root.resolve()]
 +
-+    with _socket_server(
++        active = client.snapshot()
++
++        assert active["status"] == "ok"
++        assert active["revision"] == 0
++        assert active["state"] is None
++
++        assert state.cycle_source_publication is not None
++
++
++def test_p1d2l_t06_repeated_committed_job_is_idempotent(
++    tmp_path, isolated_dirs, monkeypatch,
++):
++    root = _flat_repo(tmp_path)
++
++    with _official_live(
 +        root,
-+        updater=updater,
-+        persister=persister,
-+    ) as (client, _server):
-+        _publish(client, initial)
++        monkeypatch,
++    ) as (client, server, _identity, calls):
 +
-+        assert _verify(
++        result = _full(
++            root,
++            preview=True,
++            publish=True,
++        )
++
++        state, metadata = _committed(root)
++
++        _receipt(state, metadata)
++        _require_success(result, metadata, server)
++
++        before = client.get_events(
++            after_revision=0,
++            limit=None,
++        )
++
++        assert before["status"] == "ok"
++
++        repeated = publish_committed_and_wait(
 +            client,
-+            initial,
-+            initial_metadata,
-+        )["status"] == "ok"
-+
-+        changed = client.update_file(
-+            "a.py",
-+            origin="p1d2k_isolated_test",
++            repo_id=metadata.repo_id,
++            state_id=metadata.state_id,
++            revision=metadata.revision,
++            origin="desktop_analysis",
 +        )
 +
-+        assert changed["status"] == "ok"
-+        assert changed["revision"] == (
-+            initial_metadata.revision + 1
++        assert repeated["live_publish_status"] == (
++            "success"
++        )
++        assert repeated["live_publish_revision"] == (
++            metadata.revision
++        )
++        assert repeated["live_publish_job_id"] == (
++            result.live_publish_job_id
++        )
++        assert (
++            repeated["live_publish_idempotency_key"]
++            == result.live_publish_idempotency_key
 +        )
 +
-+        updated, updated_metadata = _committed(root)
-+
-+        assert updated_metadata.revision == (
-+            initial_metadata.revision + 1
-+        )
-+        assert updated.cycle_source_publication is None
-+        assert updated.cycle_semantics_state == "stale"
-+
-+        old = _verify(
-+            client,
-+            initial,
-+            initial_metadata,
++        after = client.get_events(
++            after_revision=0,
++            limit=None,
 +        )
 +
-+        assert old["status"] == "unavailable"
-+        assert old["reason"] == (
-+            "INSTALLED_GENERATION_MISMATCH"
-+        )
++        assert after["status"] == "ok"
++        assert after["events"] == before["events"]
 +
 +        current = _verify(
 +            client,
-+            updated,
-+            updated_metadata,
-+        )
-+
-+        assert current["status"] == "unavailable"
-+        assert current["reason"] == (
-+            "REQUIRED_CYCLE_FAMILY_NOT_FRESH"
-+        )
-+
-+
-+def test_p1d2k_t06_extra_source_payload_refused(
-+    tmp_path, isolated_dirs,
-+):
-+    root = _flat_repo(tmp_path)
-+
-+    _full(
-+        root,
-+        preview=True,
-+        publish=True,
-+    )
-+
-+    committed, metadata = _committed(root)
-+    receipt = _receipt(committed, metadata)
-+
-+    with _socket_server(root) as (client, server):
-+        _publish(client, committed)
-+
-+        rejected = client.request(
-+            "verify_installed_cycle_generation",
-+            expected_revision=metadata.revision,
-+            expected_state_id=metadata.state_id,
-+            expected_repo_id=metadata.repo_id,
-+            expected_root_path=metadata.root_path,
-+            expected_graph_sha256=(
-+                receipt.prepared_manifest.graph_sha256
-+            ),
-+            expected_service_instance_id=(
-+                server.endpoint.service_instance_id
-+            ),
-+            source_capture_bytes=b"untrusted source bytes",
-+        )
-+
-+        assert rejected["status"] == "unavailable"
-+        assert rejected["reason"] == (
-+            "INVALID_GENERATION_CHECK_PAYLOAD"
-+        )
-+
-+        valid = _verify(
-+            client,
-+            committed,
++            state,
 +            metadata,
 +        )
 +
-+        assert valid["status"] == "ok"
++        assert current["status"] == "ok"
++        assert calls == [root.resolve()]
 ```
 
 ## PY_COMPILE_RESULT
 
-DIRECT_EVIDENCE: `python -m py_compile tests/test_original_worker_real_ipc_generation.py` exited 0.
+DIRECT_EVIDENCE: `python -m py_compile tests/test_original_worker_official_full_live_publication.py` exited 0.
 
-## P1D2K_TEST_RESULTS
+## P1D2L_TEST_RESULTS
 
-DIRECT_EVIDENCE: Six new tests passed in 10.56s.
+DIRECT_EVIDENCE: Six new tests passed in 12.16s.
 
 ## FOCUSED_REGRESSION_RESULTS
 
-DIRECT_EVIDENCE: Exact 17-file focused regression command from the task: 249 passed in 62.98s.
+DIRECT_EVIDENCE: Exact 18-file focused regression command from the task: 255 passed in 70.74s.
 
-## REAL_LOCALHOST_IPC_TRANSPORT
+## ACTUAL_FULL_PUBLISH_CALL_PATH
 
-CONTRACT_PROVED: All six tests started an isolated `CanonicalLiveServer.serve_forever` thread on `127.0.0.1`, used `LiveStateClient(server.endpoint)` with ping and socket requests, then closed and joined the server. They used only temporary repositories and stores.
+CODE_PATH_PROVED: `analyze_project` saves through `save_engine_state`, then imports `connect` and invokes `publish_committed_and_wait` on successful persistence. T01 exercised that path against an isolated localhost server and temporary repository.
 
-## POSITIVE_INSTALLED_GENERATION_CHECK
+## CANONICAL_QUEUE_ADMISSION
 
-CONTRACT_PROVED: T01 ran real FULL on a temporary repo, committed a receipt-bearing snapshot, installed it through IPC, and matched revision, state_id, repo_id, root_path, service_instance_id, graph digest, source-manifest digest, model-claims digest and activity_epoch in the owner response. The observation is lock-scoped at reply time.
+CONTRACT_PROVED: T01 observed a completed mutation job with requested state_id/revision, success response and matching idempotency key. The isolated server used its real committed publication queue and store reader.
 
-## PREVIEW_ONLY_NEGATIVE_CHECK
+## COMMITTED_GENERATION_INSTALLATION
 
-CONTRACT_PROVED: T02 prepared a preview without publication; IPC verification returned `CO_PUBLISHED_RECEIPT_UNAVAILABLE`.
+CONTRACT_PROVED: T01 read the installed snapshot, verified the same-generation receipt, and received `INSTALLED_PREPARED_CLAIMS_MATCH_EXPECTED_GENERATION` from the LIVE owner.
 
-## FOREIGN_IDENTITY_REJECTIONS
+## PREVIEW_ONLY_PUBLICATION_BEHAVIOR
 
-CONTRACT_PROVED: T03 rejected foreign service instance, repository, revision and graph digest with their specified unavailable reasons; the valid request still passed.
+CONTRACT_PROVED: T02 observed successful ordinary FULL publication through the queue with no prepared cycle receipt; installed-generation verification returned `CO_PUBLISHED_RECEIPT_UNAVAILABLE`.
 
-## NEXT_GENERATION_INVALIDATION
+## FAILED_MANIFEST_NO_NEXT_JOB
 
-CONTRACT_PROVED: T04 installed a later default FULL generation without a receipt. Verification of the old generation returned `INSTALLED_GENERATION_MISMATCH`; the current generation returned `CO_PUBLISHED_RECEIPT_UNAVAILABLE`.
+CONTRACT_PROVED: T03's forged manifest failed the next store commit, left metadata and installed generation unchanged, kept the first job completed, and showed only one publish event and one `connect` call.
 
-## INCREMENTAL_INVALIDATION
+## LATER_DEFAULT_FULL_GENERATION
 
-CONTRACT_PROVED: T05 used isolated IPC `update_file`. The candidate receipt was cleared before updater and persister; old generation verification failed and current stale-cycle generation returned `REQUIRED_CYCLE_FAMILY_NOT_FRESH`.
+CONTRACT_PROVED: T04 installed a second default FULL generation without a receipt. Old generation verification returned `INSTALLED_GENERATION_MISMATCH`; current generation returned `CO_PUBLISHED_RECEIPT_UNAVAILABLE`.
 
-## UNTRUSTED_PAYLOAD_REJECTION
+## INCOMPLETE_SERVICE_IDENTITY
 
-CONTRACT_PROVED: T06 sent extra source bytes to the verification operation and received `INVALID_GENERATION_CHECK_PAYLOAD`; a subsequent identity-only request passed.
+CONTRACT_PROVED: T05 omitted process_start_identity from the isolated endpoint. FULL committed its durable receipt, but `publish_committed_and_wait` returned `unverified_authority_changed` with no job and no installed state.
+
+## IDEMPOTENT_PUBLICATION_JOB
+
+CONTRACT_PROVED: T06 repeated `publish_committed_and_wait` for the same committed generation. It returned the existing job/idempotency key, produced no additional events and left installed verification successful.
 
 ## CANONICAL_WATCHER_OBSERVATIONS
 
-DIRECT_EVIDENCE: `get_live_events(after_revision=691)` returned one continuous `desktop_watcher` update for the new test at revision 692, with `resync_required=false`. Contextor source read for `CanonicalLiveServer` returned `workspace_sync=verified` at revision 692; `cycle_semantics` family remained stale.
+DIRECT_EVIDENCE: `get_live_events(after_revision=692)` returned one continuous `desktop_watcher` update for the new test at revision 693, with `resync_required=false`. Contextor source read of `ContextorFacade.analyze_project` returned `workspace_sync=verified` at revision 693; the cycle_semantics family was stale.
 
 ## ACTIVE_RUNTIME_ADOPTION_LIMITS
 
-UNKNOWN: Whether the active application/runtime process loaded any of these implementations. Watcher indexing and isolated socket tests do not prove active application adoption. No existing LIVE service was contacted, restarted or mutated.
+UNKNOWN: Whether the active application process adopted source implementations. Watcher indexing and isolated localhost tests do not prove active application adoption. No existing LIVE endpoint was contacted, restarted, reloaded or mutated.
 
 ## FINAL_VERDICT
 
-CONTRACT_PROVED: P1D2K's six isolated real localhost IPC tests and specified regression set passed. DIRECT_EVIDENCE: No production changes, no active repository FULL, and no active service manipulation. UNKNOWN: original worker source-owner authentication, repository-wide atomic capture, arbitrary Python import safety, and state continuity after an IPC verification reply. STOP after P1D2K and await architect assessment.
+CONTRACT_PROVED: P1D2L's six isolated official-publication tests and specified regression set passed. DIRECT_EVIDENCE: No production changes or active-repository FULL. UNKNOWN: cross-file source atomicity, worker byte provenance authentication, Python import execution safety and receipt authority beyond committed prepared claims. STOP after P1D2L; await architect assessment.
