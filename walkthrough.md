@@ -1,113 +1,44 @@
-# CONTEXTOR_P1D2I_EXPLICIT_FULL_CYCLE_MANIFEST_COPUBLICATION
+# CONTEXTOR_P1D2J_FULL_TO_CANONICAL_LIVE_RECEIPT_CONTINUITY
 
 ## PREFLIGHT_RESULT
 
-DIRECT_EVIDENCE: Initial HEAD `5f8ebbfa1bbb919078932852abbc740f4f5662e5`, clean worktree. Contextor MCP resolved `ContextorFacade.analyze_project` at lines 558-1568 with `workspace_sync=verified`, revision 687. The local source had the exact signature, strict preview boolean validation, P1D2G completeness path, preview result assignment, `RepositoryAnalysisState` construction, and the exact `save_engine_state` call anchor. `save_engine_state` accepted `prepared_cycle_manifest: Any = None`. `save_snapshot` accepted that argument and called `seal_prepared_cycle_manifest` under `_acquire_lock`, before metadata commit. The new test path was absent. `PREFLIGHT_MISMATCH=NONE`.
+DIRECT_EVIDENCE: Initial HEAD `21a41a654268a323cffce8074a8dfa9634ab708f`, clean worktree. Contextor MCP resolved the requested facade, state manager, store save/load, publication verifier, and `CanonicalLiveServer` in `ipc.py` at canonical revision 690 with `workspace_sync=verified`. Local source confirmed the P1D2I opt-in validation and manifest forwarding, store-owned sealing, and exact existing `_flat_repo`, `_server`, `_publish` helpers. `_server` uses `locked_committed_snapshot` against an isolated cache; `_publish` dispatches the server's actual `publish` operation. New test path absent. PREFLIGHT_MISMATCH=NONE.
 
 ## NATIVE_CODEX_LITERAL_EDITS
 
-DIRECT_EVIDENCE: Applied the three architect-authored facade replacements and created the supplied test file using native Codex `apply_patch`. No other production or test path was edited.
+DIRECT_EVIDENCE: Created only the architect-supplied test using native Codex `apply_patch`. Exact test content matched the attachment after newline normalization.
 
 ## FILES_CHANGED
 
-- `contextor/core/api/facade.py`
-- `tests/test_original_worker_full_receipt_optin.py`
+- `tests/test_original_worker_full_to_live_receipt.py`
 
-`walkthrough.md` is this report and is excluded from source/test diffs.
-
-## ACTUAL_FACADE_DIFF
-
-```diff
-diff --git a/contextor/core/api/facade.py b/contextor/core/api/facade.py
-index d017562..9a7a0b1 100644
---- a/contextor/core/api/facade.py
-+++ b/contextor/core/api/facade.py
-@@ -566,0 +567 @@ class ContextorFacade:
-+        cycle_source_publication_opt_in: bool = False,
-@@ -594,0 +596,14 @@ class ContextorFacade:
-+        if type(cycle_source_publication_opt_in) is not bool:
-+            raise ValueError(
-+                "cycle_source_publication_opt_in must be bool"
-+            )
-+
-+        if (
-+            cycle_source_publication_opt_in
-+            and not cycle_source_preparation_preview
-+        ):
-+            raise ValueError(
-+                "cycle_source_publication_opt_in requires "
-+                "cycle_source_preparation_preview=True"
-+            )
-+
-@@ -1368,0 +1384,37 @@ class ContextorFacade:
-+            store_manifest_kwargs = {}
-+
-+            if (
-+                cycle_source_publication_opt_in
-+                and cycle_source_preparation is not None
-+                and cycle_source_preparation.status
-+                == "PREPARED_UNPUBLISHED_NON_ATOMIC"
-+                and cycle_source_preparation.reason is None
-+                and cycle_source_preparation.manifest is not None
-+                and state.cycle_semantics is cycle_semantics
-+                and state.cycle_semantics_state == "fresh"
-+                and state.cycles_state == "fresh"
-+                and state.cycle_semantics.coverage_status
-+                == "FILESYSTEM_STABLE_NON_ATOMIC"
-+                and not state.cycle_semantics.source_issues
-+                and getattr(state, "resync_required", False) is False
-+                and state.dependency_graph is graph
-+                and set(state.modules) == set(index.modules)
-+            ):
-+                from contextor.core.cycle_semantics.contracts import (
-+                    fingerprint_hard_edges,
-+                )
-+
-+                try:
-+                    canonical_graph_sha256 = fingerprint_hard_edges(
-+                        state.dependency_graph.hard_edges
-+                    )
-+                except (AttributeError, TypeError, ValueError):
-+                    canonical_graph_sha256 = None
-+
-+                if canonical_graph_sha256 == (
-+                    cycle_source_preparation.manifest.graph_sha256
-+                ):
-+                    store_manifest_kwargs[
-+                        "prepared_cycle_manifest"
-+                    ] = cycle_source_preparation.manifest
-+
-@@ -1378,0 +1431 @@ class ContextorFacade:
-+                **store_manifest_kwargs,
-```
+`walkthrough.md` is this report; no production or existing test file changed.
 
 ## ACTUAL_NEW_TEST_CONTENT
 
-The following is the full actual new-file diff.
+Full actual new-file diff:
 
 ```diff
-diff --git a/tests/test_original_worker_full_receipt_optin.py b/tests/test_original_worker_full_receipt_optin.py
+diff --git a/tests/test_original_worker_full_to_live_receipt.py b/tests/test_original_worker_full_to_live_receipt.py
 new file mode 100644
-index 0000000..c18e6fe
+index 0000000..3a5eb9a
 --- /dev/null
-+++ b/tests/test_original_worker_full_receipt_optin.py
-@@ -0,0 +1,412 @@
-+"""P1D2I: explicitly publish prepared FULL claims with one generation."""
++++ b/tests/test_original_worker_full_to_live_receipt.py
+@@ -0,0 +1,465 @@
++"""P1D2J: FULL-produced receipts across isolated canonical LIVE."""
 +
 +from __future__ import annotations
 +
++import pickle
 +from dataclasses import replace
++from types import SimpleNamespace
 +
 +import pytest
 +
-+import contextor.core.api.facade as facade_module
 +import contextor.core.cycle_semantics.original_worker_preparation as preparation_module
 +
-+from contextor.core.analysis.process_pool_lifecycle import (
-+    terminate_active_process_pools,
-+)
 +from contextor.core.analysis.state_manager import (
-+    load_engine_state,
++    save_engine_state,
 +)
 +from contextor.core.api.facade import ContextorFacade
 +from contextor.core.cycle_semantics.publication_binding import (
@@ -115,52 +46,62 @@ index 0000000..c18e6fe
 +    CanonicalCycleManifestReceipt,
 +    verify_co_published_cycle_manifest,
 +)
-+from contextor.core.live_state.store import read_metadata
++from contextor.core.live_state.store import (
++    load_snapshot,
++    read_metadata,
++)
 +from contextor.core.paths import repo_cache_dir
 +
 +from tests.test_original_worker_full_preparation_optin import (
 +    _flat_repo,
-+    _package_repo,
++)
++from tests.test_cycle_semantics_publication_live_integration import (
++    _publish,
++    _server,
 +)
 +
 +
 +@pytest.fixture(autouse=True)
-+def _inline_by_default(monkeypatch):
++def _inline_index(monkeypatch):
 +    monkeypatch.setenv(
 +        "CONTEXTOR_DISABLE_PROCESS_POOL",
 +        "1",
 +    )
 +
 +
-+def _run(root, *, preview=False, publication=False):
++def _full(root, *, publish=False, preview=False):
 +    errors, result = ContextorFacade.analyze_project(
 +        str(root),
 +        cycle_source_preparation_preview=preview,
-+        cycle_source_publication_opt_in=publication,
++        cycle_source_publication_opt_in=publish,
 +    )
 +    assert result is not None
 +    assert isinstance(errors, list)
 +    return result
 +
 +
-+def _persisted(root):
++def _committed(root):
 +    cache = repo_cache_dir(root)
 +    metadata = read_metadata(cache)
 +
 +    assert metadata is not None
 +
-+    state = load_engine_state(
-+        str(cache),
++    loaded = load_snapshot(
++        cache,
 +        metadata.state_id,
 +        expected_repo_id=metadata.repo_id,
 +        expected_root_path=str(root.resolve()),
 +    )
 +
-+    assert state is not None
++    assert loaded is not None
++
++    state, loaded_metadata = loaded
++    assert loaded_metadata == metadata
++
 +    return state, metadata
 +
 +
-+def _assert_same_generation_receipt(state, metadata):
++def _receipt(state, metadata):
 +    receipt = state.cycle_source_publication
 +
 +    assert isinstance(
@@ -184,54 +125,25 @@ index 0000000..c18e6fe
 +    return receipt
 +
 +
-+def test_p1d2i_t01_default_full_remains_receipt_free(
++def _installed(server):
++    answer = server._dispatch({
++        "operation": "snapshot",
++    })
++
++    assert answer["status"] == "ok"
++
++    return answer["state"], answer["revision"]
++
++
++def test_p1d2j_t01_full_receipt_installs_in_live(
 +    tmp_path, isolated_dirs,
 +):
 +    root = _flat_repo(tmp_path)
 +
-+    errors, result = ContextorFacade.analyze_project(
-+        str(root)
-+    )
-+
-+    assert result is not None
-+    assert isinstance(errors, list)
-+    assert not hasattr(
-+        result,
-+        "cycle_source_preparation_preview",
-+    )
-+
-+    state, metadata = _persisted(root)
-+
-+    assert metadata.revision >= 1
-+    assert state.cycle_source_publication is None
-+
-+
-+def test_p1d2i_t02_preview_only_remains_unpublished(
-+    tmp_path, isolated_dirs,
-+):
-+    root = _flat_repo(tmp_path)
-+    result = _run(root, preview=True)
-+
-+    preview = result.cycle_source_preparation_preview
-+
-+    assert preview.status == (
-+        "PREPARED_UNPUBLISHED_NON_ATOMIC"
-+    )
-+    assert preview.manifest is not None
-+
-+    state, _metadata = _persisted(root)
-+
-+    assert state.cycle_source_publication is None
-+
-+
-+def test_p1d2i_t03_explicit_full_same_generation_receipt(
-+    tmp_path, isolated_dirs,
-+):
-+    root = _flat_repo(tmp_path)
-+    result = _run(
++    result = _full(
 +        root,
 +        preview=True,
-+        publication=True,
++        publish=True,
 +    )
 +
 +    preview = result.cycle_source_preparation_preview
@@ -239,177 +151,99 @@ index 0000000..c18e6fe
 +    assert preview.status == (
 +        "PREPARED_UNPUBLISHED_NON_ATOMIC"
 +    )
-+    assert preview.reason is None
 +    assert preview.manifest is not None
-+    assert preview.manifest.authority == (
-+        "PREPARED_ONLY_NOT_CANONICALLY_PUBLISHED"
++
++    committed, metadata = _committed(root)
++    durable_receipt = _receipt(committed, metadata)
++
++    assert durable_receipt.prepared_manifest == (
++        preview.manifest
 +    )
 +
-+    state, metadata = _persisted(root)
++    with _server(repo_cache_dir(root)) as server:
++        published = _publish(server, committed)
 +
-+    assert state.cycle_semantics_state == "fresh"
-+    assert state.cycles_state == "fresh"
++        assert published["status"] == "ok"
++        assert published["source"] == "committed_snapshot"
++        assert published["revision"] == metadata.revision
 +
-+    receipt = _assert_same_generation_receipt(
-+        state,
-+        metadata,
-+    )
++        active, revision = _installed(server)
 +
-+    assert receipt.prepared_manifest == preview.manifest
-+    assert receipt.prepared_manifest.graph_sha256 == (
-+        state.cycle_semantics.graph_sha256
-+    )
-+    assert receipt.prepared_manifest.components[0].members == (
-+        "a",
-+        "b",
-+    )
++        assert revision == metadata.revision
++        assert active is not committed
++        assert active.cycle_semantics_state == "fresh"
++        assert active.cycles_state == "fresh"
 +
-+    assert (
-+        "cycle_source_preparation_preview"
-+        not in result.summary_data
-+    )
-+    assert not hasattr(
-+        state,
-+        "cycle_source_preparation_preview",
-+    )
++        active_receipt = _receipt(active, metadata)
 +
-+
-+def test_p1d2i_t04_publication_requires_preview(
-+    tmp_path, isolated_dirs,
-+):
-+    root = _flat_repo(tmp_path)
-+
-+    with pytest.raises(
-+        ValueError,
-+        match="requires cycle_source_preparation_preview",
-+    ):
-+        _run(
-+            root,
-+            preview=False,
-+            publication=True,
++        assert active_receipt == durable_receipt
++        assert active_receipt.prepared_manifest == (
++            preview.manifest
 +        )
 +
-+    assert read_metadata(repo_cache_dir(root)) is None
 +
-+
-+def test_p1d2i_t05_invalid_publication_argument_rejected(
++def test_p1d2j_t02_preview_only_installs_without_receipt(
 +    tmp_path, isolated_dirs,
 +):
 +    root = _flat_repo(tmp_path)
 +
-+    for invalid in (None, 0, 1, "yes", [], {}):
-+        with pytest.raises(
-+            ValueError,
-+            match="cycle_source_publication_opt_in must be bool",
-+        ):
-+            ContextorFacade.analyze_project(
-+                str(root),
-+                cycle_source_preparation_preview=True,
-+                cycle_source_publication_opt_in=invalid,
-+            )
-+
-+    assert read_metadata(repo_cache_dir(root)) is None
-+
-+
-+def test_p1d2i_t06_unsupported_package_not_published(
-+    tmp_path, isolated_dirs,
-+):
-+    root = _package_repo(tmp_path)
-+
-+    result = _run(
++    result = _full(
 +        root,
 +        preview=True,
-+        publication=True,
 +    )
 +
 +    preview = result.cycle_source_preparation_preview
 +
-+    assert preview.status == "UNAVAILABLE"
-+    assert preview.reason == (
-+        "P1C0_SOURCE_EVIDENCE_UNAVAILABLE"
++    assert preview.status == (
++        "PREPARED_UNPUBLISHED_NON_ATOMIC"
 +    )
-+    assert preview.manifest is None
++    assert preview.manifest is not None
 +
-+    state, _metadata = _persisted(root)
-+    assert state.cycle_source_publication is None
++    committed, metadata = _committed(root)
 +
++    assert committed.cycle_source_publication is None
 +
-+def test_p1d2i_t07_acyclic_repository_not_published(
-+    tmp_path, isolated_dirs,
-+):
-+    root = _flat_repo(tmp_path)
-+    (root / "b.py").write_bytes(b"value = 2\n")
++    with _server(repo_cache_dir(root)) as server:
++        published = _publish(server, committed)
 +
-+    result = _run(
-+        root,
-+        preview=True,
-+        publication=True,
-+    )
++        assert published["status"] == "ok"
++        assert published["revision"] == metadata.revision
 +
-+    preview = result.cycle_source_preparation_preview
++        active, revision = _installed(server)
 +
-+    assert preview.status == "UNAVAILABLE"
-+    assert preview.reason == "PLAN_NO_CYCLIC_COMPONENTS"
-+    assert preview.manifest is None
-+
-+    state, _metadata = _persisted(root)
-+    assert state.cycle_source_publication is None
++        assert revision == metadata.revision
++        assert active.cycle_source_publication is None
++        assert active.cycle_semantics_state == "fresh"
 +
 +
-+def test_p1d2i_t08_second_pass_source_drift_not_published(
++def test_p1d2j_t03_rejected_next_full_preserves_live(
 +    tmp_path, isolated_dirs, monkeypatch,
 +):
 +    root = _flat_repo(tmp_path)
-+    original = facade_module.index_repository
 +
-+    def drifted(*args, **kwargs):
-+        if kwargs.get("source_capture_module_ids") is not None:
-+            (root / "helper.py").write_bytes(
-+                b"value = 300\n"
-+            )
-+        return original(*args, **kwargs)
-+
-+    monkeypatch.setattr(
-+        facade_module,
-+        "index_repository",
-+        drifted,
-+    )
-+
-+    result = _run(
++    _full(
 +        root,
 +        preview=True,
-+        publication=True,
++        publish=True,
 +    )
 +
-+    preview = result.cycle_source_preparation_preview
-+
-+    assert preview.status == "UNAVAILABLE"
-+    assert preview.reason == "VERIFY_REINDEX_SOURCE_CHANGED"
-+    assert preview.manifest is None
-+
-+    state, _metadata = _persisted(root)
-+    assert state.cycle_source_publication is None
-+
-+
-+def test_p1d2i_t09_invalid_manifest_rejects_store_commit(
-+    tmp_path, isolated_dirs, monkeypatch,
-+):
-+    root = _flat_repo(tmp_path)
++    committed, metadata = _committed(root)
++    old_receipt = _receipt(committed, metadata)
 +
 +    original = (
 +        preparation_module.prepare_original_worker_cycle_manifest
 +    )
 +
 +    def forged(*args, **kwargs):
-+        result = original(*args, **kwargs)
++        prepared = original(*args, **kwargs)
 +
-+        if result.manifest is None:
-+            return result
++        if prepared.manifest is None:
++            return prepared
 +
 +        return replace(
-+            result,
++            prepared,
 +            manifest=replace(
-+                result.manifest,
++                prepared.manifest,
 +                source_manifest_sha256="f" * 64,
 +            ),
 +        )
@@ -420,144 +254,288 @@ index 0000000..c18e6fe
 +        forged,
 +    )
 +
-+    result = _run(
-+        root,
-+        preview=True,
-+        publication=True,
-+    )
++    with _server(repo_cache_dir(root)) as server:
++        assert _publish(server, committed)["status"] == "ok"
 +
-+    preview = result.cycle_source_preparation_preview
++        previous_active, previous_revision = _installed(
++            server
++        )
 +
-+    assert preview.status == (
-+        "PREPARED_UNPUBLISHED_NON_ATOMIC"
-+    )
-+    assert preview.manifest is not None
++        result = _full(
++            root,
++            preview=True,
++            publish=True,
++        )
 +
-+    assert read_metadata(repo_cache_dir(root)) is None
-+    assert result.live_publish_status == "not_attempted"
++        assert result.live_publish_status == (
++            "not_attempted"
++        )
++
++        current_metadata = read_metadata(
++            repo_cache_dir(root)
++        )
++
++        assert current_metadata == metadata
++
++        active, revision = _installed(server)
++
++        assert revision == previous_revision
++        assert active is previous_active
++        assert _receipt(active, metadata) == old_receipt
++
++    restored, restored_metadata = _committed(root)
++
++    assert restored_metadata == metadata
++    assert _receipt(restored, metadata) == old_receipt
 +
 +
-+def test_p1d2i_t10_next_full_without_optin_drops_receipt(
++def test_p1d2j_t04_default_full_replaces_live_receipt(
 +    tmp_path, isolated_dirs,
 +):
 +    root = _flat_repo(tmp_path)
 +
-+    _run(
++    _full(
 +        root,
 +        preview=True,
-+        publication=True,
++        publish=True,
 +    )
 +
-+    first_state, first_metadata = _persisted(root)
++    first, first_metadata = _committed(root)
++    old_receipt = _receipt(first, first_metadata)
 +
-+    first_receipt = _assert_same_generation_receipt(
-+        first_state,
-+        first_metadata,
++    with _server(repo_cache_dir(root)) as server:
++        assert _publish(server, first)["status"] == "ok"
++
++        previous_active, previous_revision = _installed(
++            server
++        )
++
++        assert previous_revision == first_metadata.revision
++
++        _full(root)
++
++        second, second_metadata = _committed(root)
++
++        assert second_metadata.revision == (
++            first_metadata.revision + 1
++        )
++        assert second.cycle_source_publication is None
++
++        published = _publish(server, second)
++
++        assert published["status"] == "ok"
++        assert published["revision"] == (
++            second_metadata.revision
++        )
++
++        active, revision = _installed(server)
++
++        assert revision == second_metadata.revision
++        assert active.cycle_source_publication is None
++
++        assert _receipt(
++            previous_active,
++            first_metadata,
++        ) == old_receipt
++
++
++def test_p1d2j_t05_incremental_update_invalidates_receipt(
++    tmp_path, isolated_dirs,
++):
++    root = _flat_repo(tmp_path)
++
++    _full(
++        root,
++        preview=True,
++        publish=True,
 +    )
 +
-+    _run(root)
++    first, first_metadata = _committed(root)
++    old_receipt = _receipt(first, first_metadata)
 +
-+    second_state, second_metadata = _persisted(root)
++    observed = []
++
++    def updater(candidate, path):
++        observed.append(
++            candidate.cycle_source_publication
++        )
++
++        candidate.cycle_semantics_state = "stale"
++        candidate.cycle_semantics_invalidation_reason = (
++            "SOURCE_CHANGED"
++        )
++
++        return SimpleNamespace(
++            status="UPDATED",
++            file_path=path,
++        )
++
++    def persister(candidate, revision):
++        assert candidate.cycle_source_publication is None
++
++        metadata = save_engine_state(
++            candidate,
++            str(repo_cache_dir(root)),
++            first_metadata.state_id,
++            writer="desktop",
++            repo_id=first_metadata.repo_id,
++            root_path=str(root.resolve()),
++            exact_revision=revision,
++            file_state_payload={
++                "_meta": {
++                    "state_id": first_metadata.state_id,
++                    "revision": revision,
++                },
++                "files": {},
++            },
++        )
++
++        if metadata is None:
++            raise RuntimeError(
++                "isolated incremental persistence failed"
++            )
++
++    with _server(
++        repo_cache_dir(root),
++        updater=updater,
++        persister=persister,
++    ) as server:
++        assert _publish(server, first)["status"] == "ok"
++
++        previous_active, previous_revision = _installed(
++            server
++        )
++
++        changed = server._dispatch({
++            "operation": "update_file",
++            "file_path": "a.py",
++            "origin": "p1d2j_isolated_test",
++        })
++
++        assert changed["status"] == "ok"
++        assert changed["revision"] == (
++            previous_revision + 1
++        )
++        assert observed == [None]
++
++        active, revision = _installed(server)
++
++        assert revision == previous_revision + 1
++        assert active is not previous_active
++        assert active.cycle_source_publication is None
++        assert active.cycle_semantics_state == "stale"
++
++        assert _receipt(
++            previous_active,
++            first_metadata,
++        ) == old_receipt
++
++    restored, second_metadata = _committed(root)
 +
 +    assert second_metadata.revision == (
 +        first_metadata.revision + 1
 +    )
-+    assert second_state.cycle_source_publication is None
-+    assert first_state.cycle_source_publication == first_receipt
++    assert restored.cycle_source_publication is None
 +
 +
-+def test_p1d2i_t11_process_pool_explicit_publication(
-+    tmp_path, isolated_dirs, monkeypatch,
++def test_p1d2j_t06_tampered_durable_receipt_not_installed(
++    tmp_path, isolated_dirs,
 +):
 +    root = _flat_repo(tmp_path)
 +
-+    monkeypatch.delenv(
-+        "CONTEXTOR_DISABLE_PROCESS_POOL",
-+        raising=False,
++    _full(
++        root,
++        preview=True,
++        publish=True,
 +    )
 +
-+    terminate_active_process_pools(timeout=1.0)
++    committed, metadata = _committed(root)
 +
-+    try:
-+        result = _run(
-+            root,
-+            preview=True,
-+            publication=True,
-+        )
++    _receipt(committed, metadata)
 +
-+        preview = result.cycle_source_preparation_preview
++    cache = repo_cache_dir(root)
++    state_file = cache / metadata.state_file
 +
-+        assert preview.status == (
-+            "PREPARED_UNPUBLISHED_NON_ATOMIC"
-+        )
-+        assert preview.manifest is not None
++    payload = pickle.loads(
++        state_file.read_bytes()
++    )
 +
-+        state, metadata = _persisted(root)
++    original_receipt = (
++        payload["state"].cycle_source_publication
++    )
 +
-+        receipt = _assert_same_generation_receipt(
-+            state,
-+            metadata,
-+        )
++    payload["state"].cycle_source_publication = replace(
++        original_receipt,
++        revision=metadata.revision + 100,
++    )
 +
-+        assert receipt.prepared_manifest == preview.manifest
-+        assert state.cycle_semantics_state == "fresh"
++    state_file.write_bytes(
++        pickle.dumps(payload)
++    )
 +
-+    finally:
-+        terminate_active_process_pools(timeout=1.0)
++    recovered, recovered_metadata = _committed(root)
++
++    assert recovered_metadata == metadata
++    assert recovered.cycle_source_publication is None
++
++    with _server(cache) as server:
++        published = _publish(server, committed)
++
++        assert published["status"] == "ok"
++        assert published["source"] == "committed_snapshot"
++        assert published["revision"] == metadata.revision
++
++        active, revision = _installed(server)
++
++        assert revision == metadata.revision
++        assert active.cycle_source_publication is None
++        assert active.cycle_semantics is not None
 ```
 
 ## PY_COMPILE_RESULT
 
-DIRECT_EVIDENCE: `python -m py_compile contextor/core/api/facade.py tests/test_original_worker_full_receipt_optin.py` exited 0.
+DIRECT_EVIDENCE: `python -m py_compile tests/test_original_worker_full_to_live_receipt.py` exited 0.
 
-## P1D2I_TEST_RESULTS
+## P1D2J_TEST_RESULTS
 
-DIRECT_EVIDENCE: `pytest -q tests/test_original_worker_full_receipt_optin.py`: 11 passed in 38.96s.
+DIRECT_EVIDENCE: Six new tests passed in 10.62s.
 
 ## FOCUSED_REGRESSION_RESULTS
 
-DIRECT_EVIDENCE: Exact 15-file focused command from the task: 237 passed in 72.35s. No full suite and no FULL on the active Contextor repository.
+DIRECT_EVIDENCE: Exact 16-file focused regression command from the task: 243 passed in 64.03s.
 
-## DEFAULT_FULL_INVARIANTS
+## FULL_TO_STORE_TO_LIVE_CONTINUITY
 
-CONTRACT_PROVED: T01 observed no preview attribute and no persisted receipt for default FULL. Both options default to False.
+CONTRACT_PROVED: T01 ran real FULL against a temporary repository, loaded the committed store generation, verified its receipt, used isolated `CanonicalLiveServer` publish dispatch, and verified same-generation receipt after installation.
 
-## PREVIEW_ONLY_INVARIANTS
+## PREVIEW_ONLY_NO_RECEIPT
 
-CONTRACT_PROVED: T02 observed prepared preview with no persisted receipt.
+CONTRACT_PROVED: T02 found a prepared preview but no durable or installed receipt.
 
-## EXPLICIT_PUBLICATION_OPT_IN
+## FAILED_NEXT_GENERATION_ROLLBACK
 
-CODE_PATH_PROVED: Facade forwards `prepared_cycle_manifest` only when both opt-ins and literal state/graph/freshness conditions pass. It calls `save_engine_state`; the store remains the only sealer.
+CONTRACT_PROVED: T03's forged second-generation manifest failed the store write; committed metadata and isolated LIVE installation retained the previous generation and receipt.
 
-## SAME_GENERATION_RECEIPT
+## DEFAULT_FULL_RECEIPT_INVALIDATION
 
-CONTRACT_PROVED: T03 matched persisted receipt revision, state_id, repo_id, root_path, prepared manifest, graph digest, and verifier against committed metadata.
+CONTRACT_PROVED: T04's later default FULL committed and installed a receipt-free generation while the earlier installed object retained its earlier receipt.
 
-## FAIL_CLOSED_CASES
+## ISOLATED_INCREMENTAL_INVALIDATION
 
-CONTRACT_PROVED: T04-T08 rejected missing preview, invalid opt-in values, unsupported package, acyclic repository, and second-pass source drift; no receipt was published.
+CONTRACT_PROVED: T05's isolated incremental update cleared the receipt before the updater and persister, advanced one generation, and left the prior object unchanged.
 
-## REJECTED_MANIFEST_NO_COMMIT
+## TAMPERED_DURABLE_RECEIPT
 
-CONTRACT_PROVED: T09 forged manifest caused no store metadata commit and LIVE publication remained `not_attempted`.
-
-## LATER_GENERATION_INVALIDATION
-
-CONTRACT_PROVED: T10 observed a later default FULL generation without a receipt, while the earlier in-memory state retained its earlier receipt.
-
-## PROCESS_POOL_VERIFICATION
-
-CONTRACT_PROVED: T11 passed with the process pool enabled and verified the persisted receipt against its generation.
+CONTRACT_PROVED: T06 altered an isolated durable pickle receipt's revision. Store load discarded the invalid receipt; isolated LIVE installed the committed generation without resurrecting it.
 
 ## CANONICAL_WATCHER_OBSERVATIONS
 
-DIRECT_EVIDENCE: `get_live_events(after_revision=687)` returned `latest_revision=687`, `continuity=continuous`, `resync_required=false`, zero events. The subsequent Contextor symbol read returned `workspace_sync=out_of_sync` for edited facade source. No watcher adoption event was observed.
+DIRECT_EVIDENCE: `get_live_events(after_revision=690)` returned one continuous `desktop_watcher` update for the new test file at revision 691, `resync_required=false`. A Contextor source read for `ContextorFacade.analyze_project` returned `workspace_sync=verified` at revision 691; `cycle_semantics` family was stale.
 
 ## ACTIVE_RUNTIME_ADOPTION_LIMITS
 
-UNKNOWN: Active LIVE loaded-code adoption of this facade edit is unproved. Source changes and isolated tests do not establish runtime adoption. Restart/reload may be needed before an active-runtime certification; none was performed.
+UNKNOWN: Whether the active application process loaded these source implementations. Watcher indexing and isolated pytest do not prove application runtime adoption. No existing LIVE service was contacted, restarted, or reloaded.
 
 ## FINAL_VERDICT
 
-CONTRACT_PROVED: Literal P1D2I implementation and specified focused tests passed. DIRECT_EVIDENCE: `git diff --check` for facade exited 0. UNKNOWN: active LIVE adoption and repository-wide source atomicity/authentication/import safety. STOP after P1D2I; await explicit `proceduj`.
+CONTRACT_PROVED: P1D2J's six isolated integration tests and the specified focused regression set passed. DIRECT_EVIDENCE: No production edits and no active-repository FULL. UNKNOWN: cross-file atomic source capture, authenticated source origin, Python import execution safety, and SAFE status. STOP after P1D2J; await architect assessment and explicit `proceduj`.
