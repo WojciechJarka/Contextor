@@ -564,6 +564,7 @@ class ContextorFacade:
         owner: str = "desktop_analysis",
         *,
         cycle_source_preparation_preview: bool = False,
+        cycle_source_publication_opt_in: bool = False,
     ) -> list:
         """
         Analyzes full project hierarchy, builds dependency graph, evaluates
@@ -590,6 +591,20 @@ class ContextorFacade:
         if type(cycle_source_preparation_preview) is not bool:
             raise ValueError(
                 "cycle_source_preparation_preview must be bool"
+            )
+
+        if type(cycle_source_publication_opt_in) is not bool:
+            raise ValueError(
+                "cycle_source_publication_opt_in must be bool"
+            )
+
+        if (
+            cycle_source_publication_opt_in
+            and not cycle_source_preparation_preview
+        ):
+            raise ValueError(
+                "cycle_source_publication_opt_in requires "
+                "cycle_source_preparation_preview=True"
             )
 
         cycle_source_preparation = None
@@ -1366,6 +1381,43 @@ class ContextorFacade:
                 component_started,
             )
 
+            store_manifest_kwargs = {}
+
+            if (
+                cycle_source_publication_opt_in
+                and cycle_source_preparation is not None
+                and cycle_source_preparation.status
+                == "PREPARED_UNPUBLISHED_NON_ATOMIC"
+                and cycle_source_preparation.reason is None
+                and cycle_source_preparation.manifest is not None
+                and state.cycle_semantics is cycle_semantics
+                and state.cycle_semantics_state == "fresh"
+                and state.cycles_state == "fresh"
+                and state.cycle_semantics.coverage_status
+                == "FILESYSTEM_STABLE_NON_ATOMIC"
+                and not state.cycle_semantics.source_issues
+                and getattr(state, "resync_required", False) is False
+                and state.dependency_graph is graph
+                and set(state.modules) == set(index.modules)
+            ):
+                from contextor.core.cycle_semantics.contracts import (
+                    fingerprint_hard_edges,
+                )
+
+                try:
+                    canonical_graph_sha256 = fingerprint_hard_edges(
+                        state.dependency_graph.hard_edges
+                    )
+                except (AttributeError, TypeError, ValueError):
+                    canonical_graph_sha256 = None
+
+                if canonical_graph_sha256 == (
+                    cycle_source_preparation.manifest.graph_sha256
+                ):
+                    store_manifest_kwargs[
+                        "prepared_cycle_manifest"
+                    ] = cycle_source_preparation.manifest
+
             component_started = time.monotonic()
             meta = save_engine_state(
                 state,
@@ -1376,6 +1428,7 @@ class ContextorFacade:
                 root_path=path,
                 exact_revision=target_revision,
                 file_state_payload=file_state_payload,
+                **store_manifest_kwargs,
             )
             emit_stage_component_end(
                 "persistence",
