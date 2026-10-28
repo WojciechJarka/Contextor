@@ -11,6 +11,11 @@ from collections.abc import Mapping
 from dataclasses import dataclass, replace
 
 from contextor.core.cycle_semantics.package_layout import build_package_layout
+from contextor.core.cycle_semantics.typing_guard import (
+    RecognizedTypingGuard,
+    matches_typing_guard,
+    recognize_typing_guard,
+)
 
 
 @dataclass(frozen=True)
@@ -180,6 +185,7 @@ def _compile(
     logical: str,
     package: bool,
     _depth: int = 0,
+    typing_guard: RecognizedTypingGuard | None = None,
 ) -> tuple[_Step, ...] | None:
     steps: list[_Step] = []
 
@@ -187,6 +193,25 @@ def _compile(
         return None
 
     for stmt in tree.body:
+        if (
+            _depth == 0
+            and typing_guard is not None
+            and stmt is typing_guard.marker_statement
+        ):
+            steps.append(
+                _Step(
+                    "TYPING_MARKER_IMPORT",
+                    target="typing",
+                    symbol="TYPE_CHECKING",
+                    binding=(
+                        "TYPE_CHECKING"
+                        if typing_guard.form == "NAME"
+                        else "typing"
+                    ),
+                )
+            )
+            continue
+
         if isinstance(stmt, ast.Import):
             for alias in stmt.names:
                 if (
@@ -305,6 +330,15 @@ def _compile(
                     if condition.value
                     else stmt.orelse
                 )
+            elif (
+                _depth == 0
+                and typing_guard is not None
+                and matches_typing_guard(
+                    condition,
+                    typing_guard.form,
+                )
+            ):
+                selected = stmt.orelse
             else:
                 if (
                     not isinstance(condition, ast.Compare)
@@ -655,7 +689,17 @@ def evaluate_package_import_order(
         if not valid_chain(name):
             return result("UNKNOWN", name)
 
-        program = _compile(tree, name, name in packages)
+        indexed_id = nodes[name].indexed_module_ids[0]
+        typing_guard = recognize_typing_guard(
+            indexed_sources[indexed_id],
+            frozenset(indexed_sources),
+        )
+        program = _compile(
+            tree,
+            name,
+            name in packages,
+            typing_guard=typing_guard,
+        )
 
         if program is None:
             return result("UNKNOWN", name)
@@ -780,7 +824,24 @@ def evaluate_package_import_order(
 
         step = steps[index]
 
-        if step.op in {
+        if step.op == "TYPING_MARKER_IMPORT":
+            if not step.binding:
+                return result("UNKNOWN")
+
+            namespaces[module][step.binding] = (
+                "\x00TYPING_MARKER:" + module + ":" + step.binding
+            )
+
+            events.append(
+                PackageModelEvent(
+                    module,
+                    "TYPING_MARKER_IMPORT",
+                    target="typing",
+                    symbol="TYPE_CHECKING",
+                )
+            )
+
+        elif step.op in {
             "IMPORT",
             "FROM",
             "PREPARE_FROM_MEMBER",

@@ -15,6 +15,7 @@ from contextor.core.cycle_semantics.evidence import (
     assess_index_bound_scc_models,
     build_source_bound_cycle_evidence,
 )
+from contextor.core.cycle_semantics.edge_sites import analyze_cyclic_import_sites
 from contextor.core.cycle_semantics.generation_manifest import MANIFEST_VERSION
 from contextor.core.cycle_semantics.initialization_model import ImportOrderAssessment
 from contextor.core.cycle_semantics.materialization import materialize_cycle_semantics
@@ -35,6 +36,7 @@ from contextor.core.cycle_semantics.publication_binding import (
 )
 from contextor.core.cycle_semantics.scenarios import analyze_cycle_scenarios
 from contextor.core.cycle_semantics.source_proof import assess_scc_source_bytes
+from contextor.core.cycle_semantics.typing_guard import recognize_typing_guard
 from contextor.core.graph.graph import build_graph
 from contextor.core.graph.resolver import (
     build_trie,
@@ -134,6 +136,53 @@ D2A_INITIALIZER_SAFE = {
     "pkg/__init__.py": (
         "value = 1\n"
         "from . import a\n"
+    ),
+}
+
+D2B_NAME_SAFE = {
+    "pkg/__init__.py": "pass\n",
+    "pkg/a.py": (
+        "from typing import TYPE_CHECKING\n"
+        "if TYPE_CHECKING:\n"
+        "    import pkg.b\n"
+        "value = 1\n"
+    ),
+    "pkg/b.py": "from pkg.a import value\n",
+}
+
+D2B_ATTR_SAFE = {
+    "pkg/__init__.py": "pass\n",
+    "pkg/a.py": (
+        "import typing\n"
+        "if typing.TYPE_CHECKING:\n"
+        "    import pkg.b\n"
+        "value = 1\n"
+    ),
+    "pkg/b.py": "from pkg.a import value\n",
+}
+
+D2B_ELSE_HAZARD = {
+    "pkg/__init__.py": "pass\n",
+    "pkg/a.py": (
+        "from typing import TYPE_CHECKING\n"
+        "if TYPE_CHECKING:\n"
+        "    pass\n"
+        "else:\n"
+        "    import pkg.b\n"
+        "value = 1\n"
+    ),
+    "pkg/b.py": "from pkg.a import value\n",
+}
+
+D2B_ELSE_SAFE = {
+    **D2B_ELSE_HAZARD,
+    "pkg/a.py": (
+        "from typing import TYPE_CHECKING\n"
+        "value = 1\n"
+        "if TYPE_CHECKING:\n"
+        "    pass\n"
+        "else:\n"
+        "    import pkg.b\n"
     ),
 }
 
@@ -1245,6 +1294,276 @@ def test_p1d3_d2a_official_isolated_full_receipt(
         assert result.cycle_source_preparation_preview.status == (
             "PREPARED_UNPUBLISHED_NON_ATOMIC"
         ), result.cycle_source_preparation_preview.reason
+        state, metadata = _persisted(root)
+        receipt = state.cycle_source_publication
+        assert receipt.version == PUBLICATION_BINDING_VERSION
+        assert receipt.prepared_manifest.version == MANIFEST_VERSION
+        component = receipt.prepared_manifest.components[0]
+        assert component.model_kind == "REGULAR_PACKAGE"
+        assert component.model_classification == "MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS"
+        assert verify_co_published_cycle_manifest(
+            state, revision=metadata.revision,
+            state_id=metadata.state_id, repo_id=metadata.repo_id,
+            root_path=metadata.root_path,
+        )
+        assert result.live_publish_status == "success"
+        assert calls == [root.resolve()]
+
+
+def _assert_p1d3_d2b_supported_fixture(
+    tmp_path, isolated_dirs, fixture, expected, expected_branch,
+):
+    root = write_synthetic_repository(tmp_path / "repo", fixture)
+    index, graph, captured, parsed, evidence, snapshot = _d2a_source_evidence(root)
+    assert graph.hard_edges == {
+        "pkg.__init__": set(),
+        "pkg.a": {"pkg.b"},
+        "pkg.b": {"pkg.a"},
+    }
+    assert all(
+        not getattr(item, "type_only", False)
+        for item in index.modules["pkg.a"].imports
+    )
+    assert any(
+        item.module == "pkg.b" and not getattr(item, "type_only", False)
+        for item in index.modules["pkg.a"].imports
+    )
+    site_report = analyze_cyclic_import_sites(graph.hard_edges, parsed)
+    site_edge = next(
+        edge
+        for edge in site_report.components[0].internal_edges
+        if edge.source == "pkg.a" and edge.target == "pkg.b"
+    )
+    assert site_edge.status == "LEXICAL_CANDIDATES"
+    assert site_edge.sites[0].controls[0].kind == "IF"
+    assert site_edge.sites[0].controls[0].branch == expected_branch
+    assert set(evidence.scenarios.components[0].members) == {"pkg.a", "pkg.b"}
+    scenario = evidence.scenarios.components[0]
+    assert scenario.model_kind == "REGULAR_PACKAGE"
+    assert scenario.coverage == "COMPLETE_FRESH_MEMBER_ENTRIES"
+    if fixture is D2B_ELSE_HAZARD:
+        assert scenario.classification == "MODEL_INTERNAL_EARLY_BINDING_HAZARD"
+    else:
+        assert scenario.classification == "MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS"
+    guard = recognize_typing_guard(
+        parsed["pkg.a"].tree,
+        frozenset(index.modules),
+    )
+    assert guard is not None
+    assert any(
+        event.operation == "TYPING_MARKER_IMPORT"
+        and event.target == "typing"
+        and event.symbol == "TYPE_CHECKING"
+        for assessment in scenario.entry_assessments
+        for event in assessment.events
+    )
+    assessment_a = next(
+        item for item in scenario.entry_assessments
+        if item.entry_module == "pkg.a"
+    )
+    starts_b = any(
+        event.operation == "START_IMPORT" and event.target == "pkg.b"
+        for event in assessment_a.events
+    )
+    assert starts_b is any(
+        fixture is candidate
+        for candidate in (D2B_ELSE_HAZARD, D2B_ELSE_SAFE)
+    )
+    for entry, succeeds in expected.items():
+        actual = run_synthetic_import(root, entry)
+        assert (actual.returncode == 0) is succeeds
+        modeled = next(
+            item for item in scenario.entry_assessments
+            if item.entry_module == entry
+        )
+        assert (modeled.outcome == "MODEL_PASS") is succeeds
+        if fixture is D2B_ELSE_HAZARD and entry == "pkg.a":
+            assert "partially initialized module" in actual.stderr
+    p0 = assess_index_bound_scc_models(
+        graph.hard_edges, captured.source_fingerprints_by_module,
+        snapshot, evidence,
+    )
+    assert p0[0].evidence_state == "DECLARED_INPUTS_CONSISTENT"
+    p1b = assess_scc_source_bytes(
+        graph.hard_edges, captured.source_fingerprints_by_module,
+        snapshot, evidence, captured.original_worker_source_snapshots,
+    )
+    assert p1b[0].bytes_state == "BYTE_AST_CONSISTENT_NON_ATOMIC"
+
+
+def test_p1d3_d2b_name_guard_inactive(tmp_path, isolated_dirs):
+    _assert_p1d3_d2b_supported_fixture(
+        tmp_path, isolated_dirs, D2B_NAME_SAFE,
+        {"pkg.a": True, "pkg.b": True}, "BODY",
+    )
+
+
+def test_p1d3_d2b_attribute_guard_inactive(tmp_path, isolated_dirs):
+    _assert_p1d3_d2b_supported_fixture(
+        tmp_path, isolated_dirs, D2B_ATTR_SAFE,
+        {"pkg.a": True, "pkg.b": True}, "BODY",
+    )
+
+
+def test_p1d3_d2b_else_activates_import(tmp_path, isolated_dirs):
+    _assert_p1d3_d2b_supported_fixture(
+        tmp_path, isolated_dirs, D2B_ELSE_HAZARD,
+        {"pkg.a": False, "pkg.b": True}, "ELSE",
+    )
+
+
+def test_p1d3_d2b_else_reordered_safe(tmp_path, isolated_dirs):
+    _assert_p1d3_d2b_supported_fixture(
+        tmp_path, isolated_dirs, D2B_ELSE_SAFE,
+        {"pkg.a": True, "pkg.b": True}, "ELSE",
+    )
+
+
+@pytest.mark.parametrize("name,source,extra", [
+    ("N01-no-marker", "if TYPE_CHECKING:\n    import pkg.b\n", {}),
+    ("N02-assigned-before", "TYPE_CHECKING = True\nfrom typing import TYPE_CHECKING\nif TYPE_CHECKING:\n    import pkg.b\n", {}),
+    ("N03-assigned-after", "from typing import TYPE_CHECKING\nif TYPE_CHECKING:\n    import pkg.b\nTYPE_CHECKING = True\n", {}),
+    ("N04-aliased-name", "from typing import TYPE_CHECKING as TC\nif TYPE_CHECKING:\n    import pkg.b\n", {}),
+    ("N05-aliased-module", "import typing as t\nif typing.TYPE_CHECKING:\n    import pkg.b\n", {}),
+    ("N06-not", "from typing import TYPE_CHECKING\nif not TYPE_CHECKING:\n    import pkg.b\n", {}),
+    ("N07-is-false", "from typing import TYPE_CHECKING\nif TYPE_CHECKING is False:\n    import pkg.b\n", {}),
+    ("N08-equals-false", "import typing\nif typing.TYPE_CHECKING == False:\n    import pkg.b\n", {}),
+    ("N09-function-marker", "def load():\n    from typing import TYPE_CHECKING\nif TYPE_CHECKING:\n    import pkg.b\n", {}),
+    ("N10-class-marker", "class C:\n    from typing import TYPE_CHECKING\nif TYPE_CHECKING:\n    import pkg.b\n", {}),
+    ("N11-attribute-reassigned", "import typing\ntyping.TYPE_CHECKING = True\nif typing.TYPE_CHECKING:\n    import pkg.b\n", {}),
+    ("N12-shadow-import", "from typing import TYPE_CHECKING\nfrom other import TYPE_CHECKING\nif TYPE_CHECKING:\n    import pkg.b\n", {}),
+    ("N13-local-typing-module", D2B_NAME_SAFE["pkg/a.py"], {"typing.py": "pass\n"}),
+    ("N14-local-typing-package", D2B_NAME_SAFE["pkg/a.py"], {"typing/__init__.py": "pass\n"}),
+    ("N15-marker-after-import", "import pkg.b\nfrom typing import TYPE_CHECKING\nif TYPE_CHECKING:\n    pass\n", {}),
+    ("N16-marker-conditional", "if True:\n    from typing import TYPE_CHECKING\nif TYPE_CHECKING:\n    import pkg.b\n", {}),
+    ("N17-marker-duplicated", "from typing import TYPE_CHECKING\nfrom typing import TYPE_CHECKING\nif TYPE_CHECKING:\n    import pkg.b\n", {}),
+    ("N18-nested-guard", "from typing import TYPE_CHECKING\nif TYPE_CHECKING:\n    if TYPE_CHECKING:\n        import pkg.b\n", {}),
+])
+def test_p1d3_d2b_unsupported_typing_guards(
+    tmp_path, isolated_dirs, name, source, extra,
+):
+    fixture = {
+        "pkg/__init__.py": "pass\n",
+        "pkg/a.py": source,
+        "pkg/b.py": "from pkg.a import value\n",
+        **extra,
+    }
+    root = write_synthetic_repository(tmp_path / name, fixture)
+    index, graph = _d2a_canonical_index_graph(root)
+    trees = {
+        module: ast.parse((root / item.path).read_text(encoding="utf-8"))
+        for module, item in index.modules.items()
+    }
+    assert recognize_typing_guard(
+        trees["pkg.a"], frozenset(index.modules),
+    ) is None
+    scenarios = analyze_cycle_scenarios(graph.hard_edges, trees)
+    assert all(
+        component.classification != "MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS"
+        for component in scenarios.components
+    )
+    plan = plan_original_worker_reindex(index, graph.hard_edges)
+    if plan.status == "READY_FOR_REINDEX_NON_ATOMIC":
+        captured = index_repository(
+            str(root), source_capture_module_ids=plan.selected_module_ids,
+        )
+        prepared = prepare_original_worker_cycle_manifest(
+            captured, graph.hard_edges, _snapshot(root, index, graph),
+        )
+        assert (
+            prepared.manifest is None
+            or prepared.manifest.source_manifest_sha256 is None
+        )
+
+
+def test_p1d3_d2b_original_worker_prepares_v2(tmp_path, isolated_dirs):
+    root = write_synthetic_repository(tmp_path / "repo", D2B_NAME_SAFE)
+    index, graph, captured, _, evidence, snapshot = _d2a_source_evidence(root)
+    prepared = prepare_original_worker_cycle_manifest(
+        captured, graph.hard_edges, snapshot,
+    )
+    assert prepared.status == "PREPARED_UNPUBLISHED_NON_ATOMIC"
+    assert prepared.manifest.version == "cycle-source-manifest/2"
+    component = prepared.manifest.components[0]
+    assert component.model_kind == "REGULAR_PACKAGE"
+    assert component.model_classification == "MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS"
+    assert tuple(row[0] for row in component.source_signatures) == (
+        "pkg.__init__", "pkg.a", "pkg.b",
+    )
+    assert component.model_evidence_sha256
+
+
+def test_p1d3_d2b_forged_marker_event_rejected(
+    tmp_path, isolated_dirs,
+):
+    root = write_synthetic_repository(tmp_path / "repo", D2B_NAME_SAFE)
+    _, graph, captured, _, evidence, snapshot = _d2a_source_evidence(root)
+    scenario = evidence.scenarios.components[0]
+    assessment = next(
+        item for item in scenario.entry_assessments
+        if any(event.operation == "TYPING_MARKER_IMPORT" for event in item.events)
+    )
+    event = next(
+        item for item in assessment.events
+        if item.operation == "TYPING_MARKER_IMPORT"
+    )
+    forged_assessment = replace(
+        assessment,
+        events=tuple(
+            replace(item, operation="FORGED_TYPING_MARKER_IMPORT")
+            if item is event else item
+            for item in assessment.events
+        ),
+    )
+    forged_scenario = replace(
+        scenario,
+        entry_assessments=tuple(
+            forged_assessment if item is assessment else item
+            for item in scenario.entry_assessments
+        ),
+    )
+    component = evidence.components[0]
+    subgraph = tuple(
+        (module, tuple(sorted(graph.hard_edges[module])))
+        for module in component.reachable_modules
+    )
+    forged_component = replace(
+        component,
+        evidence_token=_component_token(
+            component.members, subgraph,
+            component.source_signatures, forged_scenario,
+        ),
+    )
+    forged = replace(
+        evidence,
+        components=(forged_component,),
+        scenarios=replace(evidence.scenarios, components=(forged_scenario,)),
+    )
+    p0 = assess_index_bound_scc_models(
+        graph.hard_edges, captured.source_fingerprints_by_module,
+        snapshot, forged,
+    )
+    assert p0[0].evidence_state == "DECLARED_INPUTS_CONSISTENT"
+    p1b = assess_scc_source_bytes(
+        graph.hard_edges, captured.source_fingerprints_by_module,
+        snapshot, forged, captured.original_worker_source_snapshots,
+    )
+    assert p1b[0].reason == "MODEL_REPLAY_MISMATCH"
+
+
+@pytest.mark.live
+def test_p1d3_d2b_official_isolated_full_receipt(
+    tmp_path, isolated_dirs, monkeypatch,
+):
+    root = write_synthetic_repository(tmp_path / "repo", D2B_NAME_SAFE)
+    with _official_live(root, monkeypatch) as (client, server, identity, calls):
+        _, result = ContextorFacade.analyze_project(
+            str(root), cycle_source_preparation_preview=True,
+            cycle_source_publication_opt_in=True,
+        )
+        assert result.cycle_source_preparation_preview.status == (
+            "PREPARED_UNPUBLISHED_NON_ATOMIC"
+        )
         state, metadata = _persisted(root)
         receipt = state.cycle_source_publication
         assert receipt.version == PUBLICATION_BINDING_VERSION

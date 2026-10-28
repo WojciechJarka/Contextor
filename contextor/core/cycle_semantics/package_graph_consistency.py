@@ -7,6 +7,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 
 from .model_identity import indexed_to_logical_module, logical_to_indexed_module
+from .typing_guard import recognize_typing_guard
 
 
 @dataclass(frozen=True)
@@ -246,7 +247,17 @@ def assess_package_graph_consistency(
 
     for module_id in evidence_source_modules:
         expected: set[str] = set()
+        typing_guard = recognize_typing_guard(
+            sources[module_id],
+            indexed,
+        )
         for node in ast.walk(sources[module_id]):
+            if (
+                typing_guard is not None
+                and node is typing_guard.marker_statement
+            ):
+                continue
+
             if isinstance(node, ast.Import):
                 for alias in node.names:
                     if not all(part.isidentifier() for part in alias.name.split(".")):
