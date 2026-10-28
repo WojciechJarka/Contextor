@@ -38,7 +38,10 @@ from contextor.core.cycle_semantics.publication_binding import (
 )
 from contextor.core.cycle_semantics.scenarios import analyze_cycle_scenarios
 from contextor.core.cycle_semantics.source_proof import assess_scc_source_bytes
-from contextor.core.cycle_semantics.typing_guard import recognize_typing_guard
+from contextor.core.cycle_semantics.typing_guard import (
+    _typing_guard_passive_initializer,
+    recognize_typing_guard,
+)
 from contextor.core.graph.graph import build_graph
 from contextor.core.graph.resolver import (
     build_trie,
@@ -199,6 +202,131 @@ D2B2_MIXED_ACTIVE = {
     ),
     "pkg/b.py": "from pkg.a import value\n",
 }
+
+D2B3_TYPED_SIDE_NAME = {
+    "pkg/__init__.py": "pass\n",
+    "pkg/a.py": (
+        "from typing import TYPE_CHECKING\n"
+        "if TYPE_CHECKING:\n"
+        "    import pkg.c\n"
+        "value = 1\n"
+        "import pkg.b\n"
+    ),
+    "pkg/b.py": "from pkg.a import value\n",
+    "pkg/c.py": "pass\n",
+}
+
+D2B3_TYPED_SIDE_ATTRIBUTE = {
+    **D2B3_TYPED_SIDE_NAME,
+    "pkg/a.py": (
+        "import typing\n"
+        "if typing.TYPE_CHECKING:\n"
+        "    import pkg.c\n"
+        "value = 1\n"
+        "import pkg.b\n"
+    ),
+}
+
+D2B3_SOURCE_BOUND_NEGATIVES = [
+    (
+        "N01-no-marker",
+        "if TYPE_CHECKING:\n    import pkg.c\nvalue = 1\nimport pkg.b\n",
+        "pass\n", {},
+    ),
+    (
+        "N02-aliased-marker",
+        "from typing import TYPE_CHECKING as TC\n"
+        "if TC:\n    import pkg.c\nvalue = 1\nimport pkg.b\n",
+        "pass\n", {},
+    ),
+    (
+        "N03-negated-guard",
+        "from typing import TYPE_CHECKING\n"
+        "if not TYPE_CHECKING:\n    import pkg.c\n"
+        "value = 1\nimport pkg.b\n",
+        "pass\n", {},
+    ),
+    (
+        "N04-nested-import",
+        "from typing import TYPE_CHECKING\n"
+        "if TYPE_CHECKING:\n    if True:\n        import pkg.c\n"
+        "value = 1\nimport pkg.b\n",
+        "pass\n", {},
+    ),
+    (
+        "N05-from-import",
+        "from typing import TYPE_CHECKING\n"
+        "if TYPE_CHECKING:\n    from pkg import c\n"
+        "value = 1\nimport pkg.b\n",
+        "pass\n", {},
+    ),
+    (
+        "N06-aliased-import",
+        "from typing import TYPE_CHECKING\n"
+        "if TYPE_CHECKING:\n    import pkg.c as child\n"
+        "value = 1\nimport pkg.b\n",
+        "pass\n", {},
+    ),
+    (
+        "N07-multiple-guards",
+        "from typing import TYPE_CHECKING\n"
+        "if TYPE_CHECKING:\n    pass\n"
+        "if TYPE_CHECKING:\n    import pkg.c\n"
+        "value = 1\nimport pkg.b\n",
+        "pass\n", {},
+    ),
+    (
+        "N08-globals-prefix",
+        "from typing import TYPE_CHECKING\n"
+        'globals()["TYPE_CHECKING"] = True\n'
+        "if TYPE_CHECKING:\n    import pkg.c\n"
+        "value = 1\nimport pkg.b\n",
+        "pass\n", {},
+    ),
+    (
+        "N09-setattr-prefix",
+        "import typing\n"
+        'setattr(typing, "TYPE_CHECKING", True)\n'
+        "if typing.TYPE_CHECKING:\n    import pkg.c\n"
+        "value = 1\nimport pkg.b\n",
+        "pass\n", {},
+    ),
+    (
+        "N10-nonpassive-parent",
+        D2B3_TYPED_SIDE_NAME["pkg/a.py"],
+        "import typing\ntyping.TYPE_CHECKING = True\n", {},
+    ),
+    (
+        "N11-missing-parent",
+        D2B3_TYPED_SIDE_NAME["pkg/a.py"],
+        None, {},
+    ),
+    (
+        "N12-local-typing-module",
+        D2B3_TYPED_SIDE_NAME["pkg/a.py"],
+        "pass\n", {"typing.py": "pass\n"},
+    ),
+    (
+        "N13-local-typing-package",
+        D2B3_TYPED_SIDE_NAME["pkg/a.py"],
+        "pass\n", {"typing/__init__.py": "pass\n"},
+    ),
+    (
+        "N14-active-same-target",
+        D2B3_TYPED_SIDE_NAME["pkg/a.py"].replace(
+            "import pkg.b\n", "import pkg.c\nimport pkg.b\n",
+        ),
+        "pass\n", {},
+    ),
+    (
+        "N15-else-import",
+        "from typing import TYPE_CHECKING\n"
+        "if TYPE_CHECKING:\n    pass\n"
+        "else:\n    import pkg.c\n"
+        "value = 1\nimport pkg.b\n",
+        "pass\n", {},
+    ),
+]
 
 
 @pytest.fixture(autouse=True)
@@ -918,6 +1046,268 @@ def _d2a_source_evidence(root):
     evidence = build_source_bound_cycle_evidence(graph.hard_edges, parsed)
     snapshot = _snapshot(root, index, graph)
     return index, graph, captured, parsed, evidence, snapshot
+
+
+def _assert_d2b3_typed_side_evidence(root):
+    index, graph, captured, parsed, evidence, snapshot = _d2a_source_evidence(root)
+    assert graph.hard_edges == {
+        "pkg.__init__": set(),
+        "pkg.a": {"pkg.b"},
+        "pkg.b": {"pkg.a"},
+        "pkg.c": set(),
+    }
+    assert graph.soft_edges == {
+        "pkg.__init__": set(),
+        "pkg.a": {"pkg.c"},
+        "pkg.b": set(),
+        "pkg.c": set(),
+    }
+    imports_c = [
+        item for item in index.modules["pkg.a"].imports
+        if item.module == "pkg.c" and not item.is_from_import
+    ]
+    imports_b = [
+        item for item in index.modules["pkg.a"].imports
+        if item.module == "pkg.b" and not item.is_from_import
+    ]
+    assert len(imports_c) == len(imports_b) == 1
+    assert imports_c[0].type_only is True
+    assert imports_b[0].type_only is False
+
+    closure = compute_cycle_model_source_closures(graph.hard_edges)
+    assert len(closure) == 1
+    assert closure[0].members == ("pkg.a", "pkg.b")
+    assert closure[0].evidence_source_modules == (
+        "pkg.__init__", "pkg.a", "pkg.b",
+    )
+    assert "pkg.c" not in closure[0].evidence_source_modules
+    plan = plan_original_worker_reindex(index, graph.hard_edges)
+    assert plan.status == "READY_FOR_REINDEX_NON_ATOMIC"
+    assert plan.selected_module_ids == frozenset(
+        closure[0].evidence_source_modules
+    )
+    assert captured.original_worker_capture_status == (
+        "ALL_SELECTED_CAPTURED_NON_ATOMIC"
+    )
+    assert set(captured.original_worker_source_snapshots) == set(
+        closure[0].evidence_source_modules
+    )
+    assert set(parsed) == set(closure[0].evidence_source_modules)
+
+    consistency = assess_package_graph_consistency(
+        graph.hard_edges,
+        {module_id: source.tree for module_id, source in parsed.items()},
+        closure[0].evidence_source_modules,
+    )
+    assert consistency.status == "CONSISTENT"
+    assert consistency.reason is None
+
+    scenario = evidence.scenarios.components[0]
+    assert scenario.members == ("pkg.a", "pkg.b")
+    assert scenario.model_kind == "REGULAR_PACKAGE"
+    assert scenario.classification == "MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS"
+    assert scenario.coverage == "COMPLETE_FRESH_MEMBER_ENTRIES"
+    assert not any(
+        event.operation == "START_IMPORT" and event.target == "pkg.c"
+        for assessment in scenario.entry_assessments
+        for event in assessment.events
+    )
+    for entry in ("pkg.a", "pkg.b"):
+        assert run_synthetic_import(root, entry).returncode == 0
+
+    p0 = assess_index_bound_scc_models(
+        graph.hard_edges,
+        captured.source_fingerprints_by_module,
+        snapshot,
+        evidence,
+    )
+    assert len(p0) == 1
+    assert p0[0].evidence_state == "DECLARED_INPUTS_CONSISTENT"
+    p1b = assess_scc_source_bytes(
+        graph.hard_edges,
+        captured.source_fingerprints_by_module,
+        snapshot,
+        evidence,
+        captured.original_worker_source_snapshots,
+    )
+    assert len(p1b) == 1
+    assert p1b[0].bytes_state == "BYTE_AST_CONSISTENT_NON_ATOMIC"
+
+    captured_facts = materialize_reexport_facts_by_module(
+        captured.modules,
+        captured.reference_facts_by_module,
+    )
+    captured_trie = build_trie(captured.modules.keys())
+    captured_package_root = detect_package_root(
+        captured.modules, captured_trie,
+    )
+    captured_graph = build_graph(
+        captured.modules,
+        trie=captured_trie,
+        package_root=captured_package_root,
+        reexport_facts_by_module=captured_facts,
+    )
+    assert captured_graph.hard_edges == graph.hard_edges
+    assert captured_graph.soft_edges == graph.soft_edges
+    return index, graph, parsed, closure[0].evidence_source_modules
+
+
+def test_p1d3_d2b3_name_typed_side_import(tmp_path, isolated_dirs):
+    root = write_synthetic_repository(
+        tmp_path / "repo", D2B3_TYPED_SIDE_NAME,
+    )
+    _assert_d2b3_typed_side_evidence(root)
+
+
+def test_p1d3_d2b3_attribute_typed_side_import(tmp_path, isolated_dirs):
+    root = write_synthetic_repository(
+        tmp_path / "repo", D2B3_TYPED_SIDE_ATTRIBUTE,
+    )
+    _, graph, _, _ = _assert_d2b3_typed_side_evidence(root)
+    name_root = write_synthetic_repository(
+        tmp_path / "name", D2B3_TYPED_SIDE_NAME,
+    )
+    _, name_graph = _d2a_canonical_index_graph(name_root)
+    assert graph.hard_edges == name_graph.hard_edges
+    assert graph.soft_edges == name_graph.soft_edges
+
+
+def test_p1d3_d2b3_forged_hard_graph_rejected(tmp_path, isolated_dirs):
+    root = write_synthetic_repository(
+        tmp_path / "repo", D2B3_TYPED_SIDE_NAME,
+    )
+    _, graph, parsed, source_modules = _assert_d2b3_typed_side_evidence(root)
+    trees = {module_id: source.tree for module_id, source in parsed.items()}
+
+    missing = {
+        module_id: set(targets)
+        for module_id, targets in graph.hard_edges.items()
+    }
+    missing["pkg.a"].remove("pkg.b")
+    missing_result = assess_package_graph_consistency(
+        missing, trees, source_modules,
+    )
+    assert missing_result.status == "INDETERMINATE"
+    assert missing_result.reason == "GRAPH_SOURCE_IMPORT_MISMATCH"
+
+    extra = {
+        module_id: set(targets)
+        for module_id, targets in graph.hard_edges.items()
+    }
+    extra["pkg.a"].add("pkg.c")
+    extra_result = assess_package_graph_consistency(
+        extra, trees, source_modules,
+    )
+    assert extra_result.status == "INDETERMINATE"
+    assert extra_result.reason == "GRAPH_SOURCE_IMPORT_MISMATCH"
+
+
+@pytest.mark.parametrize(
+    "case,source,parent,extra",
+    D2B3_SOURCE_BOUND_NEGATIVES,
+    ids=[item[0] for item in D2B3_SOURCE_BOUND_NEGATIVES],
+)
+def test_p1d3_d2b3_source_bound_negative_matrix(
+    tmp_path, isolated_dirs, case, source, parent, extra,
+):
+    fixture = {
+        "pkg/a.py": source,
+        "pkg/b.py": D2B3_TYPED_SIDE_NAME["pkg/b.py"],
+        "pkg/c.py": "pass\n",
+        **extra,
+    }
+    if parent is not None:
+        fixture["pkg/__init__.py"] = parent
+    root = write_synthetic_repository(tmp_path / case, fixture)
+    index, graph = _d2a_canonical_index_graph(root)
+    assert "pkg.b" in graph.hard_edges["pkg.a"]
+    imports_c = [
+        item for item in index.modules["pkg.a"].imports
+        if item.module == "pkg.c" and not item.is_from_import
+    ]
+    if case == "N05-from-import":
+        assert any(
+            item.module == "pkg" and item.is_from_import and not item.type_only
+            for item in index.modules["pkg.a"].imports
+        )
+    elif case == "N14-active-same-target":
+        assert len(imports_c) == 2
+        assert [item.type_only for item in imports_c] == [True, False]
+        assert "pkg.c" in graph.soft_edges["pkg.a"]
+        assert "pkg.c" in graph.hard_edges["pkg.a"]
+    else:
+        assert imports_c
+        assert all(item.type_only is False for item in imports_c)
+        assert "pkg.c" in graph.hard_edges["pkg.a"]
+
+    trees = {
+        module_id: ast.parse((root / module.path).read_text(encoding="utf-8"))
+        for module_id, module in index.modules.items()
+    }
+    closure = compute_cycle_model_source_closures(graph.hard_edges)
+    source_modules = (
+        closure[0].evidence_source_modules
+        if closure else ("pkg.a",)
+    )
+    forged = {
+        module_id: set(targets)
+        for module_id, targets in graph.hard_edges.items()
+    }
+    required_target = "pkg.c" if "pkg.c" in forged["pkg.a"] else "pkg.b"
+    forged["pkg.a"].remove(required_target)
+    result = assess_package_graph_consistency(
+        forged, trees, source_modules,
+    )
+    assert result.status != "CONSISTENT"
+    if case == "N14-active-same-target":
+        assert result.reason == "GRAPH_SOURCE_IMPORT_MISMATCH"
+
+
+@pytest.mark.parametrize(
+    "case,parent_source",
+    [
+        ("P01-typing-mutation", "import typing\ntyping.TYPE_CHECKING = True\n"),
+        ("P02-setattr-mutation", 'import typing\nsetattr(typing, "TYPE_CHECKING", True)\n'),
+        ("P03-exec", 'exec("x = 1")\n'),
+    ],
+)
+def test_p1d3_d2b3_parent_passivity_replay(
+    tmp_path, isolated_dirs, case, parent_source,
+):
+    assert _typing_guard_passive_initializer(ast.parse(parent_source)) is False
+    fixture = {
+        **D2B3_TYPED_SIDE_NAME,
+        "pkg/__init__.py": parent_source,
+    }
+    root = write_synthetic_repository(tmp_path / case, fixture)
+    index, graph = _d2a_canonical_index_graph(root)
+    guarded = [
+        item for item in index.modules["pkg.a"].imports
+        if item.module == "pkg.c" and not item.is_from_import
+    ]
+    assert len(guarded) == 1
+    assert guarded[0].type_only is False
+    assert "pkg.c" in graph.hard_edges["pkg.a"]
+    assert "pkg.b" in graph.hard_edges["pkg.a"]
+    trees = {
+        module_id: ast.parse((root / module.path).read_text(encoding="utf-8"))
+        for module_id, module in index.modules.items()
+    }
+    forged = {
+        module_id: set(targets)
+        for module_id, targets in graph.hard_edges.items()
+    }
+    forged["pkg.a"].remove("pkg.c")
+    consistency = assess_package_graph_consistency(
+        forged, trees, ("pkg.a",),
+    )
+    assert consistency.status == "INDETERMINATE"
+    assert consistency.reason == "GRAPH_SOURCE_IMPORT_MISMATCH"
+    scenarios = analyze_cycle_scenarios(graph.hard_edges, trees)
+    assert all(
+        component.classification != "MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS"
+        for component in scenarios.components
+    )
 
 
 def _assert_d2b2_inactive_no_hard_scc(
@@ -1734,6 +2124,15 @@ def test_p1d3_d2b2_active_import_dominates_type_only(
     assert graph.hard_edges["pkg.a"] == {"pkg.b"}
     assert graph.hard_edges["pkg.b"] == {"pkg.a"}
     assert graph.soft_edges["pkg.a"] == {"pkg.b"}
+    closure = compute_cycle_model_source_closures(graph.hard_edges)
+    assert len(closure) == 1
+    consistency = assess_package_graph_consistency(
+        graph.hard_edges,
+        {module_id: source.tree for module_id, source in parsed.items()},
+        closure[0].evidence_source_modules,
+    )
+    assert consistency.status == "CONSISTENT"
+    assert consistency.reason is None
     assert captured.original_worker_capture_status == (
         "ALL_SELECTED_CAPTURED_NON_ATOMIC"
     )
@@ -1809,3 +2208,50 @@ def test_p1d3_d2b2_dissolved_scc_does_not_publish_receipt(
         preview = result.cycle_source_preparation_preview
         assert preview is None or preview.manifest is None
         assert getattr(state, "cycle_source_publication", None) is None
+
+
+@pytest.mark.live
+def test_p1d3_d2b3_official_isolated_full_receipt(
+    tmp_path, isolated_dirs, monkeypatch,
+):
+    root = write_synthetic_repository(
+        tmp_path / "repo", D2B3_TYPED_SIDE_NAME,
+    )
+    index, graph, captured, parsed, evidence, snapshot = _d2a_source_evidence(root)
+    assert graph.hard_edges["pkg.a"] == {"pkg.b"}
+    assert graph.hard_edges["pkg.b"] == {"pkg.a"}
+    assert graph.soft_edges["pkg.a"] == {"pkg.c"}
+    assert captured.original_worker_capture_status == (
+        "ALL_SELECTED_CAPTURED_NON_ATOMIC"
+    )
+    assert set(captured.original_worker_source_snapshots) == {
+        "pkg.__init__", "pkg.a", "pkg.b",
+    }
+    with _official_live(root, monkeypatch) as (client, server, identity, calls):
+        _, result = ContextorFacade.analyze_project(
+            str(root), cycle_source_preparation_preview=True,
+            cycle_source_publication_opt_in=True,
+        )
+        assert result.cycle_source_preparation_preview.status == (
+            "PREPARED_UNPUBLISHED_NON_ATOMIC"
+        )
+        state, metadata = _persisted(root)
+        receipt = state.cycle_source_publication
+        assert receipt.version == PUBLICATION_BINDING_VERSION == (
+            "cycle-prepared-co-publication/2"
+        )
+        assert receipt.prepared_manifest.version == MANIFEST_VERSION == (
+            "cycle-source-manifest/2"
+        )
+        component = receipt.prepared_manifest.components[0]
+        assert component.model_kind == "REGULAR_PACKAGE"
+        assert component.model_classification == (
+            "MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS"
+        )
+        assert verify_co_published_cycle_manifest(
+            state, revision=metadata.revision,
+            state_id=metadata.state_id, repo_id=metadata.repo_id,
+            root_path=metadata.root_path,
+        )
+        assert result.live_publish_status == "success"
+        assert calls == [root.resolve()]

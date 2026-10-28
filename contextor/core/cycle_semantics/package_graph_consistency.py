@@ -7,7 +7,12 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 
 from .model_identity import indexed_to_logical_module, logical_to_indexed_module
-from .typing_guard import recognize_typing_guard
+from .typing_guard import (
+    _typing_guard_parent_initializers,
+    _typing_guard_passive_initializer,
+    recognize_typing_guard,
+    type_only_candidate_statement_ids,
+)
 
 
 @dataclass(frozen=True)
@@ -251,6 +256,34 @@ def assess_package_graph_consistency(
             sources[module_id],
             indexed,
         )
+        type_only_ids = (
+            type_only_candidate_statement_ids(
+                sources[module_id],
+                indexed,
+            )
+        )
+
+        parents_proved = all(
+            (
+                parent_id in indexed
+                and isinstance(
+                    sources.get(parent_id),
+                    ast.Module,
+                )
+                and _typing_guard_passive_initializer(
+                    sources[parent_id]
+                )
+            )
+            for parent_id in (
+                _typing_guard_parent_initializers(
+                    module_id
+                )
+            )
+        )
+
+        if not parents_proved:
+            type_only_ids = frozenset()
+
         for node in ast.walk(sources[module_id]):
             if (
                 typing_guard is not None
@@ -269,7 +302,10 @@ def assess_package_graph_consistency(
                         return unknown("AMBIGUOUS_PACKAGE_TARGET")
                     if "." in alias.name and not regular_parents(alias.name):
                         return unknown("MISSING_REQUIRED_INITIALIZER")
-                    if resolved != module_id:
+                    if (
+                        resolved != module_id
+                        and id(node) not in type_only_ids
+                    ):
                         expected.add(resolved)
             elif isinstance(node, ast.ImportFrom):
                 if any(alias.name == "*" for alias in node.names):

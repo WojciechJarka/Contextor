@@ -253,3 +253,233 @@ def recognize_typing_guard(
             return None
 
     return RecognizedTypingGuard(form, marker_statement)
+
+
+def _safe_typing_guard_prefix_statement(
+    statement: ast.stmt,
+) -> bool:
+    if isinstance(statement, ast.Pass):
+        return True
+
+    if (
+        isinstance(statement, ast.Expr)
+        and isinstance(
+            statement.value,
+            ast.Constant,
+        )
+        and type(statement.value.value) is str
+    ):
+        return True
+
+    if isinstance(statement, ast.Assign):
+        if (
+            len(statement.targets) != 1
+            or not isinstance(
+                statement.targets[0],
+                ast.Name,
+            )
+            or not isinstance(
+                statement.value,
+                ast.Constant,
+            )
+        ):
+            return False
+
+        binding = statement.targets[0].id
+
+        return (
+            binding.isidentifier()
+            and not binding.startswith("__")
+            and binding not in {
+                "TYPE_CHECKING",
+                "typing",
+            }
+            and type(
+                statement.value.value
+            ) in {
+                type(None),
+                bool,
+                int,
+                float,
+                complex,
+                str,
+                bytes,
+            }
+        )
+
+    return False
+
+
+def _typing_guard_passive_initializer(
+    tree: ast.AST,
+) -> bool:
+    if not isinstance(tree, ast.Module):
+        return False
+
+    allowed_types = {
+        type(None),
+        bool,
+        int,
+        float,
+        complex,
+        str,
+        bytes,
+    }
+
+    for position, statement in enumerate(
+        tree.body
+    ):
+        if isinstance(statement, ast.Pass):
+            continue
+
+        if (
+            position == 0
+            and isinstance(statement, ast.Expr)
+            and isinstance(
+                statement.value,
+                ast.Constant,
+            )
+            and type(
+                statement.value.value
+            ) is str
+        ):
+            continue
+
+        if isinstance(statement, ast.Assign):
+            if (
+                len(statement.targets) != 1
+                or not isinstance(
+                    statement.targets[0],
+                    ast.Name,
+                )
+                or not isinstance(
+                    statement.value,
+                    ast.Constant,
+                )
+            ):
+                return False
+
+            binding = statement.targets[0].id
+
+            if (
+                not binding.isidentifier()
+                or binding.startswith("__")
+                or binding in {
+                    "typing",
+                    "TYPE_CHECKING",
+                }
+                or type(
+                    statement.value.value
+                ) not in allowed_types
+            ):
+                return False
+
+            continue
+
+        return False
+
+    return True
+
+
+def _typing_guard_parent_initializers(
+    module_id: str,
+) -> tuple[str, ...]:
+    logical = (
+        module_id.removesuffix(".__init__")
+        if module_id.endswith(".__init__")
+        else module_id
+    )
+
+    parts = logical.split(".")
+
+    return tuple(
+        ".".join(parts[:length]) + ".__init__"
+        for length in range(1, len(parts))
+    )
+
+
+def type_only_candidate_statement_ids(
+    tree: ast.AST,
+    indexed_ids: frozenset[str],
+) -> frozenset[int]:
+    guard = recognize_typing_guard(
+        tree,
+        indexed_ids,
+    )
+
+    if (
+        guard is None
+        or not isinstance(tree, ast.Module)
+    ):
+        return frozenset()
+
+    marker_position = next(
+        (
+            position
+            for position, statement
+            in enumerate(tree.body)
+            if statement is guard.marker_statement
+        ),
+        None,
+    )
+
+    if marker_position is None:
+        return frozenset()
+
+    matching_guards = [
+        (position, statement)
+        for position, statement
+        in enumerate(tree.body)
+        if (
+            isinstance(statement, ast.If)
+            and matches_typing_guard(
+                statement.test,
+                guard.form,
+            )
+        )
+    ]
+
+    if len(matching_guards) != 1:
+        return frozenset()
+
+    guard_position, guard_statement = (
+        matching_guards[0]
+    )
+
+    if guard_position <= marker_position:
+        return frozenset()
+
+    if not all(
+        _safe_typing_guard_prefix_statement(
+            statement
+        )
+        for statement in tree.body[
+            marker_position + 1:
+            guard_position
+        ]
+    ):
+        return frozenset()
+
+    selected: set[int] = set()
+
+    for statement in guard_statement.body:
+        if (
+            not isinstance(statement, ast.Import)
+            or len(statement.names) != 1
+        ):
+            continue
+
+        alias = statement.names[0]
+        parts = alias.name.split(".")
+
+        if (
+            alias.asname is None
+            and len(parts) > 1
+            and all(
+                part.isidentifier()
+                for part in parts
+            )
+        ):
+            selected.add(id(statement))
+
+    return frozenset(selected)

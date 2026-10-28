@@ -33,8 +33,12 @@ from contextor.core.analysis.test_context import (
     is_test_context_candidate,
 )
 from contextor.core.cycle_semantics.typing_guard import (
+    _safe_typing_guard_prefix_statement,
+    _typing_guard_parent_initializers,
+    _typing_guard_passive_initializer,
     matches_typing_guard,
     recognize_typing_guard,
+    type_only_candidate_statement_ids,
 )
 from contextor.core.domain.imports import (
     ImportRef,
@@ -282,149 +286,6 @@ class AdvancedImportVisitor(ast.NodeVisitor):
         )
 
 
-def _safe_typing_guard_prefix_statement(
-    statement: ast.stmt,
-) -> bool:
-    if isinstance(statement, ast.Pass):
-        return True
-
-    if (
-        isinstance(statement, ast.Expr)
-        and isinstance(
-            statement.value,
-            ast.Constant,
-        )
-        and type(statement.value.value) is str
-    ):
-        return True
-
-    if isinstance(statement, ast.Assign):
-        if (
-            len(statement.targets) != 1
-            or not isinstance(
-                statement.targets[0],
-                ast.Name,
-            )
-            or not isinstance(
-                statement.value,
-                ast.Constant,
-            )
-        ):
-            return False
-
-        binding = statement.targets[0].id
-
-        return (
-            binding.isidentifier()
-            and not binding.startswith("__")
-            and binding not in {
-                "TYPE_CHECKING",
-                "typing",
-            }
-            and type(
-                statement.value.value
-            ) in {
-                type(None),
-                bool,
-                int,
-                float,
-                complex,
-                str,
-                bytes,
-            }
-        )
-
-    return False
-
-
-def _typing_guard_passive_initializer(
-    tree: ast.AST,
-) -> bool:
-    if not isinstance(tree, ast.Module):
-        return False
-
-    allowed_types = {
-        type(None),
-        bool,
-        int,
-        float,
-        complex,
-        str,
-        bytes,
-    }
-
-    for position, statement in enumerate(
-        tree.body
-    ):
-        if isinstance(statement, ast.Pass):
-            continue
-
-        if (
-            position == 0
-            and isinstance(statement, ast.Expr)
-            and isinstance(
-                statement.value,
-                ast.Constant,
-            )
-            and type(
-                statement.value.value
-            ) is str
-        ):
-            continue
-
-        if isinstance(statement, ast.Assign):
-            if (
-                len(statement.targets) != 1
-                or not isinstance(
-                    statement.targets[0],
-                    ast.Name,
-                )
-                or not isinstance(
-                    statement.value,
-                    ast.Constant,
-                )
-            ):
-                return False
-
-            binding = statement.targets[0].id
-
-            if (
-                not binding.isidentifier()
-                or binding.startswith("__")
-                or binding in {
-                    "typing",
-                    "TYPE_CHECKING",
-                }
-                or type(
-                    statement.value.value
-                ) not in allowed_types
-            ):
-                return False
-
-            continue
-
-        return False
-
-    return True
-
-
-def _typing_guard_parent_initializers(
-    module_id: str,
-) -> tuple[str, ...]:
-    logical = (
-        module_id.removesuffix(".__init__")
-        if module_id.endswith(".__init__")
-        else module_id
-    )
-
-    parts = logical.split(".")
-
-    return tuple(
-        ".".join(parts[:length]) + ".__init__"
-        for length in range(1, len(parts))
-    )
-
-
 def read_imports(
     file_path: Path,
     *,
@@ -448,54 +309,12 @@ def read_imports(
     except SourceError as exc:
         return None, str(exc)
 
-    type_only_statement_ids: set[int] = set()
-    guard = recognize_typing_guard(tree, frozenset())
-    if guard is not None and isinstance(tree, ast.Module):
-        marker_position = next(
-            (
-                position
-                for position, statement in enumerate(tree.body)
-                if statement is guard.marker_statement
-            ),
-            None,
+    type_only_statement_ids = (
+        type_only_candidate_statement_ids(
+            tree,
+            frozenset(),
         )
-        if marker_position is not None:
-            matching_guards = [
-                (position, statement)
-                for position, statement in enumerate(tree.body)
-                if (
-                    isinstance(statement, ast.If)
-                    and matches_typing_guard(
-                        statement.test,
-                        guard.form,
-                    )
-                )
-            ]
-            if len(matching_guards) == 1:
-                guard_position, guard_statement = matching_guards[0]
-                if (
-                    guard_position > marker_position
-                    and all(
-                        _safe_typing_guard_prefix_statement(statement)
-                        for statement in tree.body[
-                            marker_position + 1:guard_position
-                        ]
-                    )
-                ):
-                    for body_statement in guard_statement.body:
-                        if (
-                            not isinstance(body_statement, ast.Import)
-                            or len(body_statement.names) != 1
-                        ):
-                            continue
-                        alias = body_statement.names[0]
-                        parts = alias.name.split(".")
-                        if (
-                            alias.asname is None
-                            and len(parts) > 1
-                            and all(part.isidentifier() for part in parts)
-                        ):
-                            type_only_statement_ids.add(id(body_statement))
+    )
 
     visitor = AdvancedImportVisitor(
         frozenset(type_only_statement_ids)
