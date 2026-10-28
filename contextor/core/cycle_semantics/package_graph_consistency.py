@@ -220,6 +220,30 @@ def assess_package_graph_consistency(
 
         return valid_body(tree.body, 0)
 
+    def initializer_direct_child_binding(
+        initializer_id: str,
+        member: str,
+    ) -> bool:
+        if not restricted_relative_initializer(
+            initializer_id
+        ):
+            return False
+
+        initializer = sources.get(initializer_id)
+
+        if not isinstance(initializer, ast.Module):
+            return False
+
+        return any(
+            isinstance(statement, ast.ImportFrom)
+            and statement.level == 1
+            and statement.module is None
+            and len(statement.names) == 1
+            and statement.names[0].name == member
+            and statement.names[0].asname is None
+            for statement in initializer.body
+        )
+
     for module_id in evidence_source_modules:
         expected: set[str] = set()
         for node in ast.walk(sources[module_id]):
@@ -273,7 +297,19 @@ def assess_package_graph_consistency(
                         child = target(base + "." + alias.name)
                         if child is None:
                             return unknown("MISSING_INDEXED_TARGET")
-                        if child != module_id:
+
+                        suppressed_by_canonical_reexport = (
+                            module_id != resolved
+                            and initializer_direct_child_binding(
+                                resolved,
+                                alias.name,
+                            )
+                        )
+
+                        if (
+                            child != module_id
+                            and not suppressed_by_canonical_reexport
+                        ):
                             expected.add(child)
 
         if expected != set(hard_edges[module_id]):

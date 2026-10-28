@@ -36,6 +36,13 @@ from contextor.core.cycle_semantics.publication_binding import (
 from contextor.core.cycle_semantics.scenarios import analyze_cycle_scenarios
 from contextor.core.cycle_semantics.source_proof import assess_scc_source_bytes
 from contextor.core.graph.graph import build_graph
+from contextor.core.graph.resolver import (
+    build_trie,
+    detect_package_root,
+)
+from contextor.core.reference.shared import (
+    materialize_reexport_facts_by_module,
+)
 from contextor.core.source import parse_source_snapshot
 from contextor.core.symbol_engine.indexer import index_repository
 from tests.cycle_semantics_lab import run_synthetic_import, write_synthetic_repository
@@ -811,8 +818,35 @@ def test_p1d3_d1_official_isolated_full_receipt(
         assert calls == [root.resolve()]
 
 
+def _d2a_canonical_index_graph(root):
+    index = index_repository(str(root))
+
+    facts = materialize_reexport_facts_by_module(
+        index.modules,
+        index.reference_facts_by_module,
+    )
+
+    trie = build_trie(index.modules.keys())
+
+    package_root = detect_package_root(
+        index.modules,
+        trie,
+    )
+
+    graph = build_graph(
+        index.modules,
+        trie=trie,
+        package_root=package_root,
+        reexport_facts_by_module=facts,
+    )
+
+    return index, graph
+
+
 def _d2a_source_evidence(root):
-    index, graph = _indexed(root)
+    index, graph = _d2a_canonical_index_graph(
+        root
+    )
     _, captured = _captured(root, index, graph)
     parsed = {
         module: parse_source_snapshot(snapshot, module)
@@ -829,7 +863,7 @@ def test_p1d3_d2a_active_initializer_chain_verified(tmp_path, isolated_dirs):
     assert {name: set(targets) for name, targets in graph.hard_edges.items()} == {
         "pkg.__init__": {"pkg.a"},
         "pkg.a": {"pkg.__init__", "pkg.b"},
-        "pkg.b": {"pkg.__init__", "pkg.a"},
+        "pkg.b": {"pkg.__init__"},
     }
     closure = compute_cycle_model_source_closures(graph.hard_edges)
     assert len(closure) == 1
@@ -858,6 +892,138 @@ def test_p1d3_d2a_active_initializer_chain_verified(tmp_path, isolated_dirs):
     assert p1b[0].bytes_state == "BYTE_AST_CONSISTENT_NON_ATOMIC"
     for entry in ("pkg", "pkg.a", "pkg.b"):
         assert run_synthetic_import(root, entry).returncode == 0
+
+
+def test_p1d3_d2a_canonical_reexport_edge_rule(
+    tmp_path,
+    isolated_dirs,
+):
+    root = write_synthetic_repository(
+        tmp_path / "repo",
+        D2A_ACTIVE_CHAIN,
+    )
+
+    index, graph = _d2a_canonical_index_graph(
+        root
+    )
+
+    trees = {
+        module: ast.parse(
+            (root / item.path).read_text(
+                encoding="utf-8"
+            )
+        )
+        for module, item in index.modules.items()
+    }
+
+    closure = compute_cycle_model_source_closures(
+        graph.hard_edges
+    )
+
+    assert len(closure) == 1
+
+    members = closure[0].evidence_source_modules
+
+    assert assess_package_graph_consistency(
+        graph.hard_edges,
+        trees,
+        members,
+    ).status == "CONSISTENT"
+
+    assert graph.hard_edges["pkg.__init__"] == {
+        "pkg.a"
+    }
+
+    assert graph.hard_edges["pkg.a"] == {
+        "pkg.__init__",
+        "pkg.b",
+    }
+
+    assert graph.hard_edges["pkg.b"] == {
+        "pkg.__init__"
+    }
+
+    with_extra = {
+        name: set(targets)
+        for name, targets in graph.hard_edges.items()
+    }
+
+    with_extra["pkg.b"].add("pkg.a")
+
+    result_extra = assess_package_graph_consistency(
+        with_extra,
+        trees,
+        members,
+    )
+
+    assert result_extra.status == "INDETERMINATE"
+    assert result_extra.reason == (
+        "GRAPH_SOURCE_IMPORT_MISMATCH"
+    )
+
+    with_missing = {
+        name: set(targets)
+        for name, targets in graph.hard_edges.items()
+    }
+
+    with_missing["pkg.a"].remove("pkg.b")
+
+    result_missing = assess_package_graph_consistency(
+        with_missing,
+        trees,
+        members,
+    )
+
+    assert result_missing.status == "INDETERMINATE"
+    assert result_missing.reason == (
+        "GRAPH_SOURCE_IMPORT_MISMATCH"
+    )
+
+    with_missing_initializer = {
+        name: set(targets)
+        for name, targets in graph.hard_edges.items()
+    }
+
+    with_missing_initializer[
+        "pkg.__init__"
+    ].remove("pkg.a")
+
+    result_initializer = (
+        assess_package_graph_consistency(
+            with_missing_initializer,
+            trees,
+            members,
+        )
+    )
+
+    assert result_initializer.status == (
+        "INDETERMINATE"
+    )
+
+    assert result_initializer.reason == (
+        "GRAPH_SOURCE_IMPORT_MISMATCH"
+    )
+
+
+def test_p1d3_d2a_nested_initializer_import_does_not_suppress_child(
+    tmp_path, isolated_dirs,
+):
+    root = write_synthetic_repository(tmp_path / "repo", {
+        "pkg/__init__.py": "if True:\n    from . import a\n",
+        "pkg/a.py": "from . import b\n",
+        "pkg/b.py": "from . import a\n",
+    })
+    index, graph = _d2a_canonical_index_graph(root)
+    trees = {
+        module: ast.parse((root / item.path).read_text(encoding="utf-8"))
+        for module, item in index.modules.items()
+    }
+    closure = compute_cycle_model_source_closures(graph.hard_edges)
+    assert len(closure) == 1
+    assert "pkg.a" in graph.hard_edges["pkg.b"]
+    assert assess_package_graph_consistency(
+        graph.hard_edges, trees, closure[0].evidence_source_modules,
+    ).status == "CONSISTENT"
 
 
 def test_p1d3_d2a_initializer_reordering(tmp_path, isolated_dirs):
@@ -924,7 +1090,7 @@ def test_p1d3_d2a_initializer_restrictions(tmp_path, isolated_dirs, initializer)
         "pkg/__init__.py": initializer,
         "pkg/a.py": "import pkg\nvalue = 1\n",
     })
-    index, graph = _indexed(root)
+    index, graph = _d2a_canonical_index_graph(root)
     trees = {
         name: ast.parse((root / module.path).read_text(encoding="utf-8"))
         for name, module in index.modules.items()
@@ -956,7 +1122,7 @@ def test_p1d3_d2a_literal_initializer_branches(tmp_path, isolated_dirs):
             "pkg/__init__.py": f"if {literal}:\n    from . import a\n",
             "pkg/a.py": "import pkg\n",
         })
-        index, graph = _indexed(root)
+        index, graph = _d2a_canonical_index_graph(root)
         trees = {
             module: ast.parse((root / item.path).read_text(encoding="utf-8"))
             for module, item in index.modules.items()
@@ -982,7 +1148,7 @@ def test_p1d3_d2a_literal_initializer_branches(tmp_path, isolated_dirs):
 
 def test_p1d3_d2a_rejects_forged_graph(tmp_path, isolated_dirs):
     root = write_synthetic_repository(tmp_path / "repo", D2A_ACTIVE_CHAIN)
-    index, graph = _indexed(root)
+    index, graph = _d2a_canonical_index_graph(root)
     altered = {name: set(targets) for name, targets in graph.hard_edges.items()}
     altered["pkg.a"].remove("pkg.b")
     trees = {
