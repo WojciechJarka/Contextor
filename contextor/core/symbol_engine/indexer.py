@@ -32,6 +32,10 @@ from contextor.core.analysis.test_context import (
     _extract_test_file_facts,
     is_test_context_candidate,
 )
+from contextor.core.cycle_semantics.typing_guard import (
+    matches_typing_guard,
+    recognize_typing_guard,
+)
 from contextor.core.domain.imports import (
     ImportRef,
 )
@@ -65,6 +69,7 @@ SYMBOL_FACTS_SCHEMA_VERSION = 2
 REFERENCE_FACTS_SCHEMA_VERSION = 1
 COLLISION_FACTS_SCHEMA_VERSION = 1
 TEST_FACTS_SCHEMA_VERSION = 1
+IMPORT_CLASSIFICATION_SEMANTICS_VERSION = 1
 _SYMBOL_FACTS_AVAILABLE = "available"
 _SYMBOL_FACTS_FAILURE = "failure"
 _SYMBOL_FACTS_NOT_COMPUTED = "not_computed"
@@ -210,11 +215,17 @@ class AdvancedImportVisitor(ast.NodeVisitor):
         import x
     """
 
-    def __init__(self):
+    def __init__(
+        self,
+        type_only_statement_ids: frozenset[int] | None = None,
+    ):
 
         self.found_imports: list[ImportRef] = []
 
         self._in_function_depth = 0
+        self._type_only_statement_ids = frozenset(
+            type_only_statement_ids or ()
+        )
 
     def visit_FunctionDef(self, node):
 
@@ -231,6 +242,16 @@ class AdvancedImportVisitor(ast.NodeVisitor):
     def visit_Import(self, node):
 
         is_local = self._in_function_depth > 0
+        type_only = False
+        if (
+            id(node) in self._type_only_statement_ids
+            and len(node.names) == 1
+            and node.names[0].asname is None
+        ):
+            parts = node.names[0].name.split(".")
+            type_only = len(parts) > 1 and all(
+                part.isidentifier() for part in parts
+            )
 
         for item in node.names:
             self.found_imports.append(
@@ -240,6 +261,7 @@ class AdvancedImportVisitor(ast.NodeVisitor):
                     names=[],
                     is_from_import=False,
                     is_local=is_local,
+                    type_only=type_only,
                 )
             )
 
@@ -283,7 +305,46 @@ def read_imports(
     except SourceError as exc:
         return None, str(exc)
 
-    visitor = AdvancedImportVisitor()
+    type_only_statement_ids: set[int] = set()
+    guard = recognize_typing_guard(tree, frozenset())
+    if guard is not None and isinstance(tree, ast.Module):
+        marker_position = next(
+            (
+                position
+                for position, statement in enumerate(tree.body)
+                if statement is guard.marker_statement
+            ),
+            None,
+        )
+        if marker_position is not None:
+            for statement in tree.body[marker_position + 1:]:
+                if (
+                    not isinstance(statement, ast.If)
+                    or not matches_typing_guard(
+                        statement.test,
+                        guard.form,
+                    )
+                ):
+                    continue
+
+                for body_statement in statement.body:
+                    if (
+                        not isinstance(body_statement, ast.Import)
+                        or len(body_statement.names) != 1
+                    ):
+                        continue
+                    alias = body_statement.names[0]
+                    parts = alias.name.split(".")
+                    if (
+                        alias.asname is None
+                        and len(parts) > 1
+                        and all(part.isidentifier() for part in parts)
+                    ):
+                        type_only_statement_ids.add(id(body_statement))
+
+    visitor = AdvancedImportVisitor(
+        frozenset(type_only_statement_ids)
+    )
 
     visitor.visit(tree)
 
@@ -553,6 +614,16 @@ def _process_single_file(
     cache_get_started = time.monotonic()
     cached_data = cache.get(path, source_bytes=source_snapshot.raw)
     cache_get_ms = (time.monotonic() - cache_get_started) * 1000.0
+    if (
+        cached_data is not None
+        and (
+            type(cached_data.get("import_classification_semantics_version"))
+            is not int
+            or cached_data.get("import_classification_semantics_version")
+            != IMPORT_CLASSIFICATION_SEMANTICS_VERSION
+        )
+    ):
+        cached_data = None
 
     lineage_facts = None
     lineage_cache_hit = False
@@ -924,6 +995,9 @@ def _process_single_file(
             "imports": [dataclasses.asdict(imp) for imp in imports or []],
             "error": error,
             "lineage_facts": serialize_extracted_lineage_source_facts(lineage_facts),
+            "import_classification_semantics_version": (
+                IMPORT_CLASSIFICATION_SEMANTICS_VERSION
+            ),
         }
         if symbol_facts and symbol_facts.get("status") == _SYMBOL_FACTS_AVAILABLE:
             cache_data["symbol_facts"] = symbol_facts
@@ -1927,6 +2001,24 @@ def index_repository(
         progress_callback(0, total_files, "Start...")
 
     completed = 0
+
+    def _finalize_type_only_imports() -> None:
+        if "typing" not in modules and "typing.__init__" not in modules:
+            return
+
+        for module_id, module in modules.items():
+            if not any(import_ref.type_only for import_ref in module.imports):
+                continue
+            modules[module_id] = dataclasses.replace(
+                module,
+                imports=[
+                    dataclasses.replace(import_ref, type_only=False)
+                    if import_ref.type_only
+                    else import_ref
+                    for import_ref in module.imports
+                ],
+            )
+
     if os.environ.get("CONTEXTOR_DISABLE_PROCESS_POOL") == "1":
         for path in files_to_process:
             res = _process_single_file(
@@ -1976,6 +2068,7 @@ def index_repository(
         emit_worker_timing_evidence("inline")
         emit_parent_timing_evidence("inline")
         emit_lineage_extract_timing()
+        _finalize_type_only_imports()
         return RepositoryIndex(
             modules=modules,
             skipped=sorted(skipped, key=lambda item: item.path),
@@ -2225,6 +2318,7 @@ def index_repository(
     emit_parent_timing_evidence("process_pool")
     emit_lineage_extract_timing()
 
+    _finalize_type_only_imports()
     return RepositoryIndex(
         modules=modules,
         skipped=sorted(skipped, key=lambda item: item.path),

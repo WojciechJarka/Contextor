@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 import copy
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 
@@ -29,6 +30,7 @@ from contextor.core.cycle_semantics.package_graph_consistency import (
 )
 from contextor.core.cycle_semantics.original_worker_preparation import prepare_original_worker_cycle_manifest
 from contextor.core.cycle_semantics.original_worker_reindex_planning import plan_original_worker_reindex
+from contextor.core.cycle_semantics.package_model import evaluate_package_import_order
 from contextor.core.cycle_semantics.publication_binding import (
     PUBLICATION_BINDING_VERSION,
     seal_prepared_cycle_manifest,
@@ -45,7 +47,7 @@ from contextor.core.graph.resolver import (
 from contextor.core.reference.shared import (
     materialize_reexport_facts_by_module,
 )
-from contextor.core.source import parse_source_snapshot
+from contextor.core.source import parse_source_snapshot, read_source_snapshot
 from contextor.core.symbol_engine.indexer import index_repository
 from tests.cycle_semantics_lab import run_synthetic_import, write_synthetic_repository
 from tests.test_original_worker_full_receipt_optin import _persisted
@@ -184,6 +186,18 @@ D2B_ELSE_SAFE = {
         "else:\n"
         "    import pkg.b\n"
     ),
+}
+
+D2B2_MIXED_ACTIVE = {
+    "pkg/__init__.py": "pass\n",
+    "pkg/a.py": (
+        "from typing import TYPE_CHECKING\n"
+        "if TYPE_CHECKING:\n"
+        "    import pkg.b\n"
+        "import pkg.b\n"
+        "value = 1\n"
+    ),
+    "pkg/b.py": "from pkg.a import value\n",
 }
 
 
@@ -906,6 +920,100 @@ def _d2a_source_evidence(root):
     return index, graph, captured, parsed, evidence, snapshot
 
 
+def _assert_d2b2_inactive_no_hard_scc(
+    tmp_path, fixture, expected, expected_branch,
+):
+    root = write_synthetic_repository(tmp_path / "repo", fixture)
+    index, graph = _d2a_canonical_index_graph(root)
+    assert graph.hard_edges == {
+        "pkg.__init__": set(),
+        "pkg.a": set(),
+        "pkg.b": {"pkg.a"},
+    }
+    assert graph.soft_edges == {
+        "pkg.__init__": set(),
+        "pkg.a": {"pkg.b"},
+        "pkg.b": set(),
+    }
+
+    imports_b = [
+        item for item in index.modules["pkg.a"].imports
+        if item.module == "pkg.b" and not item.is_from_import
+    ]
+    assert len(imports_b) == 1
+    assert imports_b[0].type_only is True
+    assert imports_b[0].is_local is False
+    typing_imports = [
+        item for item in index.modules["pkg.a"].imports
+        if item.module == "typing"
+    ]
+    assert len(typing_imports) == 1
+    assert typing_imports[0].type_only is False
+    assert typing_imports[0].is_from_import is (fixture is D2B_NAME_SAFE)
+
+    source_snapshots = {
+        module_id: read_source_snapshot(Path(root, module.path))
+        for module_id, module in index.modules.items()
+    }
+    parsed = {
+        module_id: parse_source_snapshot(snapshot, module_id)
+        for module_id, snapshot in source_snapshots.items()
+    }
+    source_trees = {
+        module_id: source.tree
+        for module_id, source in parsed.items()
+    }
+    guard = recognize_typing_guard(
+        source_trees["pkg.a"],
+        frozenset(index.modules),
+    )
+    assert guard is not None
+
+    site_report = analyze_cyclic_import_sites(graph.hard_edges, parsed)
+    assert not any(
+        {"pkg.a", "pkg.b"}.issubset(set(component.members))
+        for component in site_report.components
+    )
+    scenarios = analyze_cycle_scenarios(graph.hard_edges, source_trees)
+    assert scenarios.components == ()
+
+    for entry, succeeds in expected.items():
+        modeled = evaluate_package_import_order(source_trees, entry)
+        actual = run_synthetic_import(root, entry)
+        assert (modeled.outcome == "MODEL_PASS") is succeeds
+        assert (actual.returncode == 0) is succeeds
+        if entry == "pkg.a":
+            assert any(
+                event.operation == "TYPING_MARKER_IMPORT"
+                for event in modeled.events
+            )
+            assert not any(
+                event.operation == "START_IMPORT"
+                and event.target == "pkg.b"
+                for event in modeled.events
+            )
+
+    assert expected_branch == "BODY"
+    evidence = build_source_bound_cycle_evidence(graph.hard_edges, parsed)
+    assert evidence.components == ()
+    snapshot = _snapshot(root, index, graph)
+    p0 = assess_index_bound_scc_models(
+        graph.hard_edges,
+        index.source_fingerprints_by_module,
+        snapshot,
+        evidence,
+    )
+    assert p0 == ()
+    plan = plan_original_worker_reindex(index, graph.hard_edges)
+    assert plan.status == "UNAVAILABLE"
+    assert plan.reason == "NO_CYCLIC_COMPONENTS"
+    prepared = prepare_original_worker_cycle_manifest(
+        index, graph.hard_edges, snapshot,
+    )
+    assert prepared.manifest is None
+    assert prepared.status != "PREPARED_UNPUBLISHED_NON_ATOMIC"
+
+
 def test_p1d3_d2a_active_initializer_chain_verified(tmp_path, isolated_dirs):
     root = write_synthetic_repository(tmp_path / "repo", D2A_ACTIVE_CHAIN)
     index, graph, captured, parsed, evidence, snapshot = _d2a_source_evidence(root)
@@ -1313,6 +1421,15 @@ def test_p1d3_d2a_official_isolated_full_receipt(
 def _assert_p1d3_d2b_supported_fixture(
     tmp_path, isolated_dirs, fixture, expected, expected_branch,
 ):
+    if fixture is D2B_NAME_SAFE or fixture is D2B_ATTR_SAFE:
+        _assert_d2b2_inactive_no_hard_scc(
+            tmp_path,
+            fixture,
+            expected,
+            expected_branch,
+        )
+        return
+
     root = write_synthetic_repository(tmp_path / "repo", fixture)
     index, graph, captured, parsed, evidence, snapshot = _d2a_source_evidence(root)
     assert graph.hard_edges == {
@@ -1477,7 +1594,7 @@ def test_p1d3_d2b_unsupported_typing_guards(
 
 
 def test_p1d3_d2b_original_worker_prepares_v2(tmp_path, isolated_dirs):
-    root = write_synthetic_repository(tmp_path / "repo", D2B_NAME_SAFE)
+    root = write_synthetic_repository(tmp_path / "repo", D2B_ELSE_SAFE)
     index, graph, captured, _, evidence, snapshot = _d2a_source_evidence(root)
     prepared = prepare_original_worker_cycle_manifest(
         captured, graph.hard_edges, snapshot,
@@ -1496,7 +1613,7 @@ def test_p1d3_d2b_original_worker_prepares_v2(tmp_path, isolated_dirs):
 def test_p1d3_d2b_forged_marker_event_rejected(
     tmp_path, isolated_dirs,
 ):
-    root = write_synthetic_repository(tmp_path / "repo", D2B_NAME_SAFE)
+    root = write_synthetic_repository(tmp_path / "repo", D2B_ELSE_SAFE)
     _, graph, captured, _, evidence, snapshot = _d2a_source_evidence(root)
     scenario = evidence.scenarios.components[0]
     assessment = next(
@@ -1555,7 +1672,7 @@ def test_p1d3_d2b_forged_marker_event_rejected(
 def test_p1d3_d2b_official_isolated_full_receipt(
     tmp_path, isolated_dirs, monkeypatch,
 ):
-    root = write_synthetic_repository(tmp_path / "repo", D2B_NAME_SAFE)
+    root = write_synthetic_repository(tmp_path / "repo", D2B_ELSE_SAFE)
     with _official_live(root, monkeypatch) as (client, server, identity, calls):
         _, result = ContextorFacade.analyze_project(
             str(root), cycle_source_preparation_preview=True,
@@ -1578,3 +1695,117 @@ def test_p1d3_d2b_official_isolated_full_receipt(
         )
         assert result.live_publish_status == "success"
         assert calls == [root.resolve()]
+
+
+def test_p1d3_d2b_else_source_order_changes_evidence_token(
+    tmp_path, isolated_dirs,
+):
+    hazard_root = write_synthetic_repository(
+        tmp_path / "hazard", D2B_ELSE_HAZARD,
+    )
+    safe_root = write_synthetic_repository(
+        tmp_path / "safe", D2B_ELSE_SAFE,
+    )
+    _, hazard_graph, _, _, hazard_evidence, _ = _d2a_source_evidence(
+        hazard_root,
+    )
+    _, safe_graph, _, _, safe_evidence, _ = _d2a_source_evidence(
+        safe_root,
+    )
+    assert hazard_graph.hard_edges == safe_graph.hard_edges
+    assert hazard_evidence.components[0].evidence_token != (
+        safe_evidence.components[0].evidence_token
+    )
+
+
+def test_p1d3_d2b2_active_import_dominates_type_only(
+    tmp_path, isolated_dirs,
+):
+    root = write_synthetic_repository(
+        tmp_path / "repo", D2B2_MIXED_ACTIVE,
+    )
+    index, graph, captured, parsed, evidence, snapshot = _d2a_source_evidence(root)
+    imports_b = [
+        item for item in index.modules["pkg.a"].imports
+        if item.module == "pkg.b" and not item.is_from_import
+    ]
+    assert len(imports_b) == 2
+    assert [item.type_only for item in imports_b] == [True, False]
+    assert graph.hard_edges["pkg.a"] == {"pkg.b"}
+    assert graph.hard_edges["pkg.b"] == {"pkg.a"}
+    assert graph.soft_edges["pkg.a"] == {"pkg.b"}
+    assert captured.original_worker_capture_status == (
+        "ALL_SELECTED_CAPTURED_NON_ATOMIC"
+    )
+
+    captured_reexport_facts = materialize_reexport_facts_by_module(
+        captured.modules,
+        captured.reference_facts_by_module,
+    )
+    captured_trie = build_trie(captured.modules.keys())
+    captured_package_root = detect_package_root(
+        captured.modules,
+        captured_trie,
+    )
+    captured_graph = build_graph(
+        captured.modules,
+        trie=captured_trie,
+        package_root=captured_package_root,
+        reexport_facts_by_module=captured_reexport_facts,
+    )
+    assert captured_graph.hard_edges == graph.hard_edges
+    assert captured_graph.soft_edges == graph.soft_edges
+    assert captured.modules["pkg.a"].imports == index.modules["pkg.a"].imports
+
+    scenario = evidence.scenarios.components[0]
+    assert scenario.classification == "MODEL_INTERNAL_EARLY_BINDING_HAZARD"
+    assert scenario.coverage == "COMPLETE_FRESH_MEMBER_ENTRIES"
+    assessment_a = next(
+        item for item in scenario.entry_assessments
+        if item.entry_module == "pkg.a"
+    )
+    assessment_b = next(
+        item for item in scenario.entry_assessments
+        if item.entry_module == "pkg.b"
+    )
+    assert assessment_a.outcome == "EARLY_BINDING_HAZARD"
+    assert assessment_b.outcome == "MODEL_PASS"
+    actual_a = run_synthetic_import(root, "pkg.a")
+    actual_b = run_synthetic_import(root, "pkg.b")
+    assert actual_a.returncode != 0
+    assert "partially initialized module" in actual_a.stderr
+    assert actual_b.returncode == 0
+
+    p0 = assess_index_bound_scc_models(
+        graph.hard_edges,
+        captured.source_fingerprints_by_module,
+        snapshot,
+        evidence,
+    )
+    assert len(p0) == 1
+    assert p0[0].evidence_state == "DECLARED_INPUTS_CONSISTENT"
+    p1b = assess_scc_source_bytes(
+        graph.hard_edges,
+        captured.source_fingerprints_by_module,
+        snapshot,
+        evidence,
+        captured.original_worker_source_snapshots,
+    )
+    assert len(p1b) == 1
+    assert p1b[0].bytes_state == "BYTE_AST_CONSISTENT_NON_ATOMIC"
+
+
+@pytest.mark.live
+def test_p1d3_d2b2_dissolved_scc_does_not_publish_receipt(
+    tmp_path, isolated_dirs, monkeypatch,
+):
+    root = write_synthetic_repository(tmp_path / "repo", D2B_NAME_SAFE)
+    with _official_live(root, monkeypatch):
+        _, result = ContextorFacade.analyze_project(
+            str(root), cycle_source_preparation_preview=True,
+            cycle_source_publication_opt_in=True,
+        )
+        state, _ = _persisted(root)
+        preview = result.cycle_source_preparation_preview
+        assert preview is None or preview.manifest is None
+        assert getattr(state, "cycle_source_publication", None) is None

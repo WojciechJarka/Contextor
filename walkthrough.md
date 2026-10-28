@@ -1,259 +1,634 @@
-# CONTEXTOR P1D3-D2B-1 — TYPE_CHECKING IMPORT-TIME ACTIVATION MODEL
+# CONTEXTOR — P1D3-D2B-2 CONSERVATIVE TYPE_ONLY EDGE CLASSIFICATION
 
 ## 1. EXECUTIVE VERDICT
 
-**GO (scoped D2B-1 acceptance).** The four supported forms passed their synthetic graph/model/CPython checks; the 18-case unsupported matrix failed closed; original-worker P0/P1B, manifest v2, forged-event replay, and isolated official FULL receipt assertions passed. The exact focused suite completed with 271 passed, 0 failed, 0 skipped. This is not a claim about arbitrary Python runtime state or active LIVE code adoption.
+**GO for the scoped D2B-2 implementation and focused acceptance gates.** The implementation and synthetic-repository tests meet the supplied literal specification on the executed focused suite. This is a repository source/test result only; it does not establish general Python runtime safety, active LIVE behavior, active service code adoption, or success of the global test suite.
 
-Evidence: DIRECT_EVIDENCE — focused pytest output; CODE_PATH_PROVED — changed source diff; CONTRACT_PROVED — assertions in the named regression tests.
+Evidence labels used below:
 
-## 2. INITIAL/FINAL HEAD AND WORKTREE
+- **DIRECT_EVIDENCE** — observed command/test output or exact repository state during this task.
+- **CODE_PATH_PROVED** — behavior established by current implementation/source inspection.
+- **CONTRACT_PROVED** — behavior required by the supplied task contract or exercised by contract-focused assertions.
+- **INFERENCE** — conclusion drawn from the direct/code evidence, bounded to the stated scope.
+- **UNKNOWN** — not established by this task.
 
-- Initial HEAD: `5c8badd975a73956742dfde0f4244183954d3c01`.
-- Final HEAD: `5c8badd975a73956742dfde0f4244183954d3c01` (unchanged; no Git mutation).
-- At task start the source/test worktree was clean. Final worktree contains the three authorized modified files, the authorized new module, and this report.
-- No commit, checkout, reset, clean, push, active service restart, active LIVE mutation, or active-repository FULL was performed.
+## 2. INITIAL / FINAL HEAD
 
-Evidence: DIRECT_EVIDENCE — `git rev-parse HEAD` and `git status --short`.
+- **DIRECT_EVIDENCE** Initial HEAD before edits: `5109fb40cb8328c0deaf3acc0df7d3d09f9339ee`.
+- **DIRECT_EVIDENCE** Final HEAD: `5109fb40cb8328c0deaf3acc0df7d3d09f9339ee` (unchanged; no Git mutation).
+- **DIRECT_EVIDENCE** Initial worktree was clean before this task's edits.
 
-## 3. EXACT PRODUCTION CHANGES
+## 3. WORKTREE STATUS
 
-- `contextor/core/cycle_semantics/typing_guard.py`: pure AST recognizer; exact NAME and ATTRIBUTE marker/condition forms; rejects shadowing, reassignment, duplicate/nested/non-top-level guards, unsupported indexed `typing`, and unsupported import bindings. No filesystem, indexer, graph, `sys.modules`, or Python `typing` imports.
-- `contextor/core/cycle_semantics/package_graph_consistency.py`: skips only the recognizer-returned marker AST node by object identity when deriving expected internal edges. The guarded import occurrences remain subject to existing graph resolution and final equality.
-- `contextor/core/cycle_semantics/package_model.py`: optional final `_compile(..., typing_guard=None)` argument; records a marker event; selects the `else` suite for an exact top-level positive guard under the restricted standard-library convention; emits a private NUL-prefixed binding sentinel without importing `typing` into modeled indexed module state.
+Final task changes are limited to the two authorized existing files, one authorized new test file and this required report:
 
-Evidence: CODE_PATH_PROVED — full source diffs below; DIRECT_EVIDENCE — tests preserve the lexical hard graph and model activation behavior.
+- `contextor/core/symbol_engine/indexer.py` — modified.
+- `tests/test_p1d3_package_cycle_integration.py` — modified.
+- `tests/test_p1d3_d2b2_type_only.py` — added.
+- `walkthrough.md` — overwritten with this report; its self-diff is excluded below.
 
-## 4. SHARED AST RECOGNIZER
+No other user changes were present at the initial status check. HEAD stayed fixed. `git diff --check` passed after the final report was written. See §§24–25 for the file list and complete zero-context diffs of every changed source/test file.
 
-`matches_typing_guard(condition, form)` and `recognize_typing_guard(tree, indexed_ids)` are implemented in the new pure module. Recognition requires an actual `ast.Module`, a `frozenset` indexed identity collection without `typing` or `typing.__init__`, exactly one supported direct marker import, an allowed pre-marker prefix (initial literal docstring and/or `pass` only), and one or more direct top-level matching guards after the marker. The binding audit rejects protected-name writes, deletes, imports, definitions, argument/declaration/exception/pattern bindings and ATTRIBUTE-form writes to `typing.TYPE_CHECKING`. Nested matching guards and non-exact expressions are rejected.
+## 4. SOURCE-LOCAL CLASSIFICATION
 
-Evidence: CODE_PATH_PROVED — `typing_guard.py`; CONTRACT_PROVED — negative matrix and supported-form tests.
+- **CODE_PATH_PROVED** `read_imports` uses the existing pure `recognize_typing_guard(tree, frozenset())` recognizer when an AST tree is available. If it returns no guard, the candidate identity set remains empty.
+- **CODE_PATH_PROVED** On a recognized marker, the implementation scans direct module-body statements after the marker, matches only the exact positive guard form, and scans only direct statements in that guard's body. It does not descend into nested control flow or the `else` branch, and it does not rewrite the AST.
+- **CODE_PATH_PROVED** Only a direct `ast.Import` with exactly one dotted identifier alias and no `as` binding is authorized. The visitor authorizes by AST node identity, not line or module string. `ImportFrom`, nested imports, unsupported syntax and unauthorized statements retain `type_only=False`.
+- **CODE_PATH_PROVED** Existing `is_local` determination, import extraction order and one-`ImportRef`-per-alias behavior are retained. The authorized classification is applied to the exact visited `ast.Import` node.
+- **DIRECT_EVIDENCE** The focused negative matrix exercises N01–N24, including missing/assigned/aliased/late/duplicate/conditional markers, nested/function/class/try/else imports, `ImportFrom`, multiple aliases, `as` aliases, undotted imports, and both local typing shadow forms. All assertions passed in the final focused run.
 
-## 5. NAME GUARD
+## 5. REPOSITORY-WIDE TYPING VETO
 
-`from typing import TYPE_CHECKING` followed by `if TYPE_CHECKING:` is recognized only when the local indexed identity set does not shadow `typing`. Compilation emits `TYPING_MARKER_IMPORT`; the positive `pkg.b` body is inactive in the restricted model. The canonical hard edge and lexical import occurrence remain present. The synthetic CPython observations agreed for fresh entries `pkg.a` and `pkg.b`.
+- **CODE_PATH_PROVED** A private finalizer examines the completed module dictionary. If it contains `typing` or `typing.__init__`, it clears every candidate `type_only` flag by creating equivalent frozen `ImportRef` values with `dataclasses.replace`, then replacing each affected frozen `Module` with its imports updated.
+- **CODE_PATH_PROVED** The finalizer runs before `RepositoryIndex` construction at both the inline and process-pool result paths. It does not consult host `sys.modules` and does not alter source fingerprints, paths, module identities or other index facts.
+- **DIRECT_EVIDENCE** Synthetic reindex tests add and remove `typing.py` and `typing/__init__.py`; the local module vetoes candidates and removal restores eligible classification. Inline and process-pool shadow-veto outputs were both exercised.
 
-Evidence: DIRECT_EVIDENCE — `test_p1d3_d2b_name_guard_inactive`; CODE_PATH_PROVED — `_compile` and recognizer paths.
+## 6. CACHE SEMANTIC INVALIDATION
 
-## 6. ATTRIBUTE GUARD
+- **CODE_PATH_PROVED** `IMPORT_CLASSIFICATION_SEMANTICS_VERSION = 1` is an internal worker-cache semantic marker. It is written as `import_classification_semantics_version` with exact integer value `1`.
+- **CODE_PATH_PROVED** Immediately after cache lookup, an absent, non-exact-integer or mismatched marker makes cached worker extraction data stale. Extraction reparses the already acquired source snapshot; the original source bytes are not reread just to classify type-only imports. Existing source SHA checks remain in place.
+- **CODE_PATH_PROVED** The marker does not alter `SourceSnapshot`, `RepositoryIndex`, public evidence contracts or other schema versions.
+- **DIRECT_EVIDENCE** Cold and warm cache outputs match for import references, `type_only`, hard/soft graph and SCC signatures. Tests with stale/missing and version-zero cache markers verify re-extraction from the existing source snapshot, parser invocation and cache rewrite. Source-change reindexing also passed.
 
-`import typing` followed by `if typing.TYPE_CHECKING:` follows the same restricted convention. Aliased `typing`, rebinding/shadowing, and a local indexed `typing` module/package fail recognition. The model represents the marker import with its local private sentinel and does not load an indexed `typing` module.
+## 7. INLINE / PROCESS-POOL PARITY
 
-Evidence: DIRECT_EVIDENCE — `test_p1d3_d2b_attribute_guard_inactive` and negative N05/N11/N13/N14; CODE_PATH_PROVED — shared recognizer and package model.
+- **DIRECT_EVIDENCE** Synthetic fixtures were indexed through both the inline and process-pool paths. Comparisons covered final `type_only` classifications, canonical hard edges, soft edges and SCC topology. A repository-wide local-typing shadow veto was included in the process-pool path.
+- **DIRECT_EVIDENCE** The process-pool tests executed successfully in this environment; process-pool coverage was not substituted with inline-only assertions.
+- **CONTRACT_PROVED** The finalizer is applied before the `RepositoryIndex` is returned in each path.
 
-## 7. ELSE EXECUTION
+## 8. CANONICAL HARD / SOFT GRAPH
 
-For either supported positive guard, D2B-1 compiles the `else` suite, preserving source order. `D2B_ELSE_HAZARD` imports `pkg.b` before binding `pkg.a.value`, and the isolated CPython run reports the expected partially initialized module error; the model reports the early-binding hazard. `D2B_ELSE_SAFE` binds `value` before the `else` import and passes in both model and CPython. The lexical control-site branch for these import occurrences is `ELSE`.
+- **CODE_PATH_PROVED** The existing graph builder remains unchanged and consumes `ImportRef.type_only`: resolved internal type-only module imports contribute soft dependencies; ordinary imports contribute hard dependencies.
+- **DIRECT_EVIDENCE** For the eligible NAME and ATTRIBUTE fixtures, the tested graph is exactly:
 
-Evidence: DIRECT_EVIDENCE — `test_p1d3_d2b_else_activates_import` and `test_p1d3_d2b_else_reordered_safe`; INFERENCE — the model’s scope is restricted to the specified ordinary `typing.TYPE_CHECKING is False` convention.
+```text
+hard:
+  pkg.__init__: []
+  pkg.a:        []
+  pkg.b:        [pkg.a]
+soft:
+  pkg.__init__: []
+  pkg.a:        [pkg.b]
+  pkg.b:        []
+```
 
-## 8. GRAPH AND SCC IDENTITY
+The canonical import occurrence remains present, with its source-local `type_only=True` classification where the repository-wide veto does not apply.
 
-All four fixtures produce the exact canonical graph:
+## 9. SAME-TARGET HARD DOMINANCE
 
-- `pkg.__init__`: no hard targets
-- `pkg.a`: hard target `pkg.b`
-- `pkg.b`: hard target `pkg.a`
+- **DIRECT_EVIDENCE** In the mixed fixture, `pkg.a` has two separate `pkg.b` import occurrences in source order with flags `[True, False]`. The graph retains both `pkg.a -> pkg.b` soft and hard targets; the normal import preserves the hard edge. The reverse `pkg.b -> pkg.a` edge creates a real hard SCC.
+- **CODE_PATH_PROVED** No graph-builder changes or target-level hard-edge weakening were made.
 
-The SCC remains `{pkg.a, pkg.b}`. Every positive case is `REGULAR_PACKAGE` with `COMPLETE_FRESH_MEMBER_ENTRIES` coverage. ELSE hazard classifies as `MODEL_INTERNAL_EARLY_BINDING_HAZARD`; the other three classify as `MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS`.
+## 10. NO-SCC HANDLING
 
-Evidence: DIRECT_EVIDENCE — four positive fixture assertions; CONTRACT_PROVED — Facade-equivalent helper used by `_d2a_source_evidence`.
+- **DIRECT_EVIDENCE** For eligible inactive-only NAME and ATTRIBUTE fixtures, `analyze_cycle_scenarios(...).components == ()`; the hard-SCC import-site report has no corresponding `pkg.a/pkg.b` component; source-bound evidence has no components; P0 assessment is empty; planning returns `UNAVAILABLE` with `NO_CYCLIC_COMPONENTS`; prepared manifest is absent.
+- **DIRECT_EVIDENCE** The isolated official-analysis fixture for `D2B_NAME_SAFE` verifies no prepared receipt is persisted for the dissolved SCC.
+- **CONTRACT_PROVED** No positive model assessment, SCC manifest, or receipt is synthesized for a component absent from the canonical hard graph.
 
-## 9. HARD/SOFT EDGE PRESERVATION
+## 11. NEGATIVE MATRIX
 
-The D2B-1 tests assert both original `pkg.a`/`pkg.b` hard dependencies remain, the import reference is not `type_only`, and the lexical cyclic import site remains `LEXICAL_CANDIDATES` with its IF control frame (BODY for inactive-body forms and ELSE for else forms). No soft-edge migration or indexer/provenance edit was made.
+- **DIRECT_EVIDENCE** N01–N24 pass with ineligible imports remaining hard when they resolve internally and no type-only promotion occurs. This includes both local `typing` identity veto variants. The N14 `ImportFrom`, N15 multiple aliases, N16 aliased import and N24 undotted import are not promoted.
+- **DIRECT_EVIDENCE** Existing D2B-1 unsupported-guard rejection tests remain present and pass in the focused integration selection.
 
-Evidence: DIRECT_EVIDENCE — integration assertions and final changed-file list; CODE_PATH_PROVED — only package graph consistency and restricted package model changed.
+## 12. COLD / WARM CACHE
 
-## 10. NEGATIVE MATRIX
+- **DIRECT_EVIDENCE** The fresh-index/warm-cache comparison passes exact import-reference and graph/SCC signature equality for the same synthetic source bytes.
+- **DIRECT_EVIDENCE** Reindex after source edits, after adding/removing `typing.py`, and after adding/removing `typing/__init__.py` passed. Assertions cover preservation of module identity/path/fingerprint and unaffected `ImportRef` fields.
+- **DIRECT_EVIDENCE** Stale cache classifications are not accepted when the semantic marker is absent or set to an older value; extraction uses the source snapshot already read by the worker.
 
-N01–N18 all passed as negative cases: missing marker; marker assignment before/after; aliased marker/module; `not`; `is False`; equality comparison; nested function/class marker; `typing.TYPE_CHECKING` reassignment; marker shadow import; local `typing.py`; local `typing/__init__.py`; effectful import before marker; conditional marker; duplicate marker; nested guard. The recognizer returns `None`; no all-pass positive model classification is accepted; if reindex preparation is ready, the test requires no positive manifest digest.
+## 13. ORIGINAL-WORKER REINDEX
 
-Evidence: DIRECT_EVIDENCE — 18 parametrized case results in the passing focused suite.
+- **DIRECT_EVIDENCE** The active-import mixed fixture is captured by the existing original-worker path. A graph rebuilt from the captured modules and canonical reexport facts exactly matches the index graph's hard and soft edges; captured imports match the original index imports.
+- **DIRECT_EVIDENCE** Capture status is asserted as `ALL_SELECTED_CAPTURED_NON_ATOMIC` for that fixture. The test does not fabricate capture/result objects.
+- **INFERENCE** This establishes the stated synthetic fixture's original-worker reindex parity only; it does not establish active LIVE/runtime adoption.
 
-## 11. LOCAL TYPING SHADOWING
+## 14. D2B-1 TEST MIGRATION
 
-N13 and N14 add a synthetic indexed `typing.py` and `typing/__init__.py` respectively; both cause recognition to fail closed. No external module identity is inferred from source syntax.
+- **DIRECT_EVIDENCE** The prior D2B-1 safe NAME and ATTRIBUTE assertions now separate restricted package-model semantics from canonical graph classification: lexical type-only occurrence and typing marker remain, the `pkg.a -> pkg.b` dependency is soft, the former hard SCC is absent, and fresh-entry package-model results are compared against synthetic CPython subprocess imports.
+- **DIRECT_EVIDENCE** ELSE hazard/safe fixtures retain an actual hard SCC and their model, P0/P1B and manifest assertions. The original-worker v2, forged-marker and official isolated FULL/receipt tests now use `D2B_ELSE_SAFE` so each still exercises a genuine surviving SCC. An evidence-token assertion checks source-order distinction between ELSE hazard/safe cases.
+- **DIRECT_EVIDENCE** No P0/P1B implementation or evidence schema was changed.
 
-Evidence: DIRECT_EVIDENCE — negative test cases; CODE_PATH_PROVED — exact indexed identity guard in `recognize_typing_guard`.
+## 15. CPYTHON DIFFERENTIAL
 
-## 12. CPYTHON DIFFERENTIAL
+- **DIRECT_EVIDENCE** Explicitly authored synthetic package fixtures execute in fresh isolated CPython subprocesses through the existing `run_synthetic_import` harness (`-I -B`). For NAME/ATTRIBUTE cases, restricted package-model fresh-entry outcomes agree with actual subprocess results. In the mixed active-import case, entry through `pkg.a` fails with CPython's partially-initialized-module error and entry through `pkg.b` succeeds, matching the model outcomes.
+- **CONTRACT_PROVED** These runs are differential checks for the authored fixtures; they are not a general Python runtime-safety proof.
 
-The supported tests run each `(root, entry)` observation through the existing synthetic import helper in a subprocess, so each observation receives a fresh interpreter. Results agreed for both safe inactive guards, the active ELSE hazard, and the reordered safe ELSE. Only the temporary synthetic repositories were executed.
+## 16. P0 GENUINE EVIDENCE
 
-Evidence: DIRECT_EVIDENCE — passing test assertions; CODE_PATH_PROVED — `tests/cycle_semantics_lab/__init__.py` `run_synthetic_import` subprocess helper. This does not establish behavior under arbitrary import hooks or external mutation of `typing.TYPE_CHECKING`.
+- **DIRECT_EVIDENCE** The mixed fixture's surviving hard SCC produces one P0 assessment with `evidence_state=DECLARED_INPUTS_CONSISTENT`. ELSE hazard/safe surviving-SCC assertions remain in the integration suite and pass.
+- **DIRECT_EVIDENCE** The dissolved inactive-only SCC produces no P0 component result. No positive evidence is created for that absent component.
 
-## 13. P0 GENUINE EVIDENCE
+## 17. P1B GENUINE REPLAY
 
-For each supported fixture, original-worker captured source fingerprints and evidence pass `assess_index_bound_scc_models` as `DECLARED_INPUTS_CONSISTENT`.
+- **DIRECT_EVIDENCE** The mixed fixture's captured original source snapshots produce one P1B assessment with `bytes_state=BYTE_AST_CONSISTENT_NON_ATOMIC`. Genuine surviving ELSE SCC tests retain the corresponding source-byte checks.
+- **CONTRACT_PROVED** This is non-atomic replay evidence under the existing contract; it is not an atomicity or LIVE proof.
 
-Evidence: DIRECT_EVIDENCE — positive test assertions using `_d2a_source_evidence` and captured worker result.
+## 18. P1B FORGED REPLAY
 
-## 14. P1B GENUINE REPLAY
+- **DIRECT_EVIDENCE** The forged marker-event regression now uses the surviving `D2B_ELSE_SAFE` SCC. It recomputes the caller-controlled evidence token after forging the event and asserts P0 `DECLARED_INPUTS_CONSISTENT` while P1B returns `MODEL_REPLAY_MISMATCH`.
+- **DIRECT_EVIDENCE** The test passed in the focused suite; P0/P1B production code was not modified.
 
-For each supported fixture, captured original-worker source bytes pass `assess_scc_source_bytes` as `BYTE_AST_CONSISTENT_NON_ATOMIC`.
+## 19. MANIFEST V2
 
-Evidence: DIRECT_EVIDENCE — positive test assertions.
+- **DIRECT_EVIDENCE** Original-worker preparation v2 is exercised using the genuine surviving `D2B_ELSE_SAFE` SCC. The existing non-atomic preparation contract remains covered by the focused tests.
+- **DIRECT_EVIDENCE** For dissolved NAME/ATTRIBUTE hard SCCs, the test asserts no prepared manifest and the planner's `NO_CYCLIC_COMPONENTS` result.
+- **UNKNOWN** No additional manifest schema, publication-binding or receipt behavior outside the executed isolated tests was probed.
 
-## 15. P1B FORGED EVENT
+## 20. OFFICIAL ISOLATED FULL
 
-The test changes one real `TYPING_MARKER_IMPORT` event to `FORGED_TYPING_MARKER_IMPORT`, recomputes the caller-controlled component token, and retains the genuine captured source/fingerprints. P0 remains `DECLARED_INPUTS_CONSISTENT`; P1B returns `MODEL_REPLAY_MISMATCH`.
+- **DIRECT_EVIDENCE** The focused suite runs the existing official isolated facade/publication regression with `D2B_ELSE_SAFE`, requiring prepared-unpublished non-atomic output, manifest v2, prepared co-publication v2, model all-fresh-member-entries pass, receipt verification true and `live_publish_status=success` in its isolated harness.
+- **DIRECT_EVIDENCE** A separate isolated NAME-safe analysis asserts the dissolved SCC has no prepared manifest/receipt persisted.
+- **CONTRACT_PROVED** The term “official” here refers to the test's isolated synthetic facade/persistence harness. It does not mean an active Contextor service/LIVE call was performed. No FULL ran against the active repository or active LIVE service.
 
-Evidence: DIRECT_EVIDENCE — `test_p1d3_d2b_forged_marker_event_rejected` passed. The verifier itself was not changed.
+## 21. RECEIPT V2
 
-## 16. MANIFEST V2
+- **DIRECT_EVIDENCE** Receipt v2 verification is exercised by the isolated `D2B_ELSE_SAFE` publication test and passes. The same focused suite verifies no receipt is persisted for the dissolved NAME-safe SCC.
+- **UNKNOWN** This does not certify receipt behavior for any active service or runtime process.
 
-The original-worker preview prepares as `PREPARED_UNPUBLISHED_NON_ATOMIC`, with `cycle-source-manifest/2`, `REGULAR_PACKAGE`, `MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS`, ordered source signatures for `pkg.__init__`, `pkg.a`, and `pkg.b`, and a nonempty model evidence SHA256.
+## 22. REGRESSION RESULTS
 
-Evidence: DIRECT_EVIDENCE — `test_p1d3_d2b_original_worker_prepares_v2` passed.
+- **DIRECT_EVIDENCE** Final specified focused suite result: `304 passed in 54.20s`.
+- **DIRECT_EVIDENCE** The suite included the new D2B-2 tests, package-cycle integration, package-model, scenario, evidence, original-worker preparation, receipt and isolated official-publication tests.
+- **DIRECT_EVIDENCE** No global pytest suite was run. Tests were restricted to synthetic fixtures/isolation used by those focused test modules; no active repository FULL/LIVE mutation was performed.
 
-## 17. OFFICIAL ISOLATED FULL
+### Acceptance gates
 
-The existing official FULL harness was exercised only against the temporary synthetic D2B_NAME_SAFE root. Its assertions for real index/graph, original-worker source capture, positive preparation preview, receipt publication, and successful isolated publish all passed. No active Contextor FULL or active LIVE/Desktop/MCP mutation was performed.
+| Gate | Result | Evidence boundary |
+| --- | --- | --- |
+| G01 NAME-form qualified import is soft | PASS | NAME fixture graph assertions |
+| G02 ATTRIBUTE-form qualified import is soft | PASS | ATTRIBUTE fixture graph assertions |
+| G03 ELSE imports remain hard | PASS | ELSE hazard/safe integration fixtures |
+| G04 Mixed guarded/active imports preserve hard edge | PASS | Mixed fixture has separate `[True, False]` occurrences and hard plus soft target |
+| G05 Exact source occurrence distinction is preserved | PASS | Node-identity authorization and ordered mixed-import assertion |
+| G06 Unsupported import forms are not promoted | PASS | N01–N24 negative matrix |
+| G07 Local `typing.py` veto | PASS | Add/remove shadow reindex tests |
+| G08 Local `typing/__init__.py` veto | PASS | Add/remove shadow reindex tests |
+| G09 Inline/process-pool parity | PASS | Both execution paths compared on synthetic fixtures |
+| G10 Cold/warm cache parity | PASS | Import, hard/soft edge and SCC signatures compared |
+| G11 Stale classification cache rejected | PASS | Missing/version-zero cache semantic marker regressions |
+| G12 Original-worker reindex reproduces canonical graph | PASS | Captured modules and canonical reexport graph compared |
+| G13 Inactive-only hard SCC disappears without fabricated MODEL_PASS | PASS | No scenarios/P0 components or receipt for NAME/ATTRIBUTE safe cases |
+| G14 Planner handles `NO_CYCLIC_COMPONENTS` | PASS | Exact status/reason asserted |
+| G15 Genuine surviving hard SCC retains fresh-entry model assessments | PASS | ELSE and mixed surviving-SCC model regressions |
+| G16 P0/P1B validate genuine surviving-SCC evidence | PASS | Genuine surviving SCC assertions in integration tests |
+| G17 P1B rejects forged model events | PASS | Forged marker-event regression asserts `MODEL_REPLAY_MISMATCH` |
+| G18 Isolated FULL and receipt v2 for surviving SCC | PASS | `D2B_ELSE_SAFE` isolated publication/receipt test |
+| G19 No receipt for dissolved SCC | PASS | NAME-safe isolated analysis checks no persisted receipt |
+| G20 D1/D2A/D2B-1 regression semantics | PASS | Named regression files included in final focused command |
+| G21 No unauthorized production changes | PASS | Final changed source/test paths match allowlist |
+| G22 No active FULL/LIVE mutation | PASS | Only focused isolated synthetic tests were run |
 
-Evidence: DIRECT_EVIDENCE — `test_p1d3_d2b_official_isolated_full_receipt` passed; test is marked live but uses `_official_live(root, ...)` with an isolated temporary root.
+**DIRECT_EVIDENCE** These are scoped acceptance results from the listed assertions and focused test command, not global-suite or active-runtime certification.
 
-## 18. RECEIPT V2
+## 23. EXACT COMMANDS / EXIT CODES
 
-The isolated receipt uses `cycle-prepared-co-publication/2` and carries `cycle-source-manifest/2`; co-publication receipt verification succeeds and `live_publish_status == success` for the isolated synthetic service harness.
+Commands ran from `C:\Temp\Contextor_Repo` using the repository virtual environment:
 
-Evidence: CONTRACT_PROVED — test asserts `PUBLICATION_BINDING_VERSION` (source constant `cycle-prepared-co-publication/2`) and manifest v2; DIRECT_EVIDENCE — isolated test passed. This is not evidence of active LIVE adoption.
+```text
+& .\.venv\Scripts\python.exe -m py_compile contextor/core/symbol_engine/indexer.py
+EXIT CODE: 0
 
-## 19. REGRESSION RESULTS
+& .\.venv\Scripts\python.exe -m pytest -q tests/test_p1d3_d2b2_type_only.py tests/test_p1d3_package_cycle_integration.py tests/test_cycle_semantics_package_model.py tests/test_cycle_semantics_scenarios.py tests/test_cycle_semantics_evidence.py tests/test_original_worker_full_preparation_optin.py tests/test_original_worker_full_receipt_optin.py tests/test_original_worker_official_full_live_publication.py
+EXIT CODE: 0
+RESULT: 304 passed in 54.20s
 
-The specified seven-file focused suite passed all 271 tests, including existing D1/D2A, package model, scenario/evidence, preparation, receipt and official isolated publication regressions. No tests were skipped in the final output. No global pytest was run.
+git diff --check
+EXIT CODE: 0
+```
 
-A preceding run of the same focused suite had 269 passed and two failures because the new control-site assertion expected `BODY` for both ELSE fixtures. The observed value was correctly `ELSE`; the final test expectations now preserve `BODY` for the two inactive-body fixtures and `ELSE` for both ELSE fixtures, and the final suite passes. No production behavior or assertion was relaxed.
+During test authoring, the first D2B-2 test-file run exposed three assertion/fixture issues (missing `monkeypatch` fixture arguments and an incorrect expected module-presence assertion); these were corrected in the authorized test files. The first integration selection exposed an incorrect helper assumption for the ATTRIBUTE marker fixture; it was corrected. The subsequent combined focused runs and final eight-file suite passed. These were test-authoring failures, not unresolved production failures.
 
-## 20. EXACT COMMANDS/EXIT CODES
+## 24. FILES_CHANGED
 
-1. `& .\.venv\Scripts\python.exe -m pytest -q tests/test_cycle_semantics_package_model.py tests/test_p1d3_package_cycle_integration.py tests/test_cycle_semantics_scenarios.py tests/test_cycle_semantics_evidence.py tests/test_original_worker_full_preparation_optin.py tests/test_original_worker_full_receipt_optin.py tests/test_original_worker_official_full_live_publication.py`
-   - Exit code: 0
-   - Result: 271 passed, 0 failed, 0 skipped in 54.69s.
-2. `& .\.venv\Scripts\python.exe -m py_compile contextor/core/cycle_semantics/typing_guard.py contextor/core/cycle_semantics/package_graph_consistency.py contextor/core/cycle_semantics/package_model.py`
-   - Exit code: 0.
-3. `git diff --check`
-   - Exit code: 0. Git printed existing working-copy LF-to-CRLF notices for the two modified tracked files; no whitespace error was reported.
-4. `git rev-parse HEAD`
-   - Exit code: 0; HEAD remained `5c8badd975a73956742dfde0f4244183954d3c01`.
+1. `contextor/core/symbol_engine/indexer.py` — production source, authorized.
+2. `tests/test_p1d3_package_cycle_integration.py` — test changes, authorized.
+3. `tests/test_p1d3_d2b2_type_only.py` — new test file, authorized.
+4. `walkthrough.md` — required task report, overwritten; self-diff omitted to avoid recursive report content.
 
-## 21. FILES_CHANGED
+No other production, test or documentation file was changed. The complete actual source/test diffs follow in §25.
 
-- NEW production: `contextor/core/cycle_semantics/typing_guard.py`
-- MODIFIED production: `contextor/core/cycle_semantics/package_graph_consistency.py`
-- MODIFIED production: `contextor/core/cycle_semantics/package_model.py`
-- MODIFIED test: `tests/test_p1d3_package_cycle_integration.py`
-- Report: `walkthrough.md` (report file; its self-diff is omitted)
+## 25. FULL ACTUAL_DIFF
 
-No other source, test, or documentation file was changed.
+The following are complete zero-context Git diffs, including every added and removed line for each changed source/test file. The report file's own diff is intentionally excluded.
 
-## 22. FULL ACTUAL_DIFF
+### `contextor/core/symbol_engine/indexer.py`
 
-The following are the complete Git diffs for every source/test file changed in this task. The report does not include its own diff.
+### `tests/test_p1d3_package_cycle_integration.py`
 
-```diff
-diff --git a/contextor/core/cycle_semantics/package_graph_consistency.py b/contextor/core/cycle_semantics/package_graph_consistency.py
-index 790c857..964e414 100644
---- a/contextor/core/cycle_semantics/package_graph_consistency.py
-+++ b/contextor/core/cycle_semantics/package_graph_consistency.py
-@@ -9,0 +10 @@ from .model_identity import indexed_to_logical_module, logical_to_indexed_module
-+from .typing_guard import recognize_typing_guard
-@@ -248,0 +250,4 @@ def assess_package_graph_consistency(
-+        typing_guard = recognize_typing_guard(
-+            sources[module_id],
-+            indexed,
-+        )
-@@ -249,0 +255,6 @@ def assess_package_graph_consistency(
-+            if (
-+                typing_guard is not None
-+                and node is typing_guard.marker_statement
-+            ):
-+                continue
-+
-diff --git a/contextor/core/cycle_semantics/package_model.py b/contextor/core/cycle_semantics/package_model.py
-index aede764..5d9a8c6 100644
---- a/contextor/core/cycle_semantics/package_model.py
-+++ b/contextor/core/cycle_semantics/package_model.py
-@@ -13,0 +14,5 @@ from contextor.core.cycle_semantics.package_layout import build_package_layout
+### `tests/test_p1d3_d2b2_type_only.py` (new file)
+
+## 26. CONTRACT CONFLICTS
+
+- **DIRECT_EVIDENCE** No exact requirement/code-contract conflict remained in the implemented scope. Both result-return paths, the existing resolver behavior, original-worker reindex, and test harness contracts were exercised by focused checks.
+- **UNKNOWN** This is not an assessment of untested environments, external import hooks, or arbitrary Python runtime behavior.
+
+## 27. UNKNOWN / UNSUPPORTED
+
+- **UNKNOWN** Whether any active Contextor MCP/LIVE process has adopted the changed `indexer.py` implementation. No live endpoint, process reload or restart was used in this stage.
+- **UNKNOWN** Whether arbitrary dynamic import behavior, custom import hooks, environment differences or runtime side effects outside the explicit fixtures alter a program's behavior.
+- **UNKNOWN** Global test-suite status; global pytest was prohibited and not run.
+- **UNKNOWN** Compatibility outside the existing source/index/cache contracts and focused schema-preservation assertions.
+
+## 28. FINAL GO / PARTIAL / NO_GO
+
+**GO — scoped D2B-2 implementation.** The authorized production file and tests implement the specified conservative classification, repository-wide typing identity veto, stale-cache semantic invalidation and inline/process-pool finalization. The focused acceptance/regression suite passed (`304 passed`). No unauthorized source/test/docs files, Git state changes, active FULL/LIVE operations, restarts, or schema changes occurred.
+
+This verdict is bounded to the supplied D2B-2 scope and focused evidence. It makes no claim of global suite success, general Python runtime safety, or active LIVE/runtime adoption. Stop here; do not start D2B-3 or any later stage without a new explicit `proceduj`.
+
+````diff
+diff --git a/contextor/core/symbol_engine/indexer.py b/contextor/core/symbol_engine/indexer.py
+index e3d9488..73fd28d 100644
+--- a/contextor/core/symbol_engine/indexer.py
++++ b/contextor/core/symbol_engine/indexer.py
+@@ -34,0 +35,4 @@ from contextor.core.analysis.test_context import (
 +from contextor.core.cycle_semantics.typing_guard import (
-+    RecognizedTypingGuard,
 +    matches_typing_guard,
 +    recognize_typing_guard,
 +)
-@@ -182,0 +188 @@ def _compile(
-+    typing_guard: RecognizedTypingGuard | None = None,
-@@ -189,0 +196,19 @@ def _compile(
+@@ -67,0 +72 @@ TEST_FACTS_SCHEMA_VERSION = 1
++IMPORT_CLASSIFICATION_SEMANTICS_VERSION = 1
+@@ -213 +218,4 @@ class AdvancedImportVisitor(ast.NodeVisitor):
+-    def __init__(self):
++    def __init__(
++        self,
++        type_only_statement_ids: frozenset[int] | None = None,
++    ):
+@@ -217,0 +226,3 @@ class AdvancedImportVisitor(ast.NodeVisitor):
++        self._type_only_statement_ids = frozenset(
++            type_only_statement_ids or ()
++        )
+@@ -233,0 +245,10 @@ class AdvancedImportVisitor(ast.NodeVisitor):
++        type_only = False
 +        if (
-+            _depth == 0
-+            and typing_guard is not None
-+            and stmt is typing_guard.marker_statement
++            id(node) in self._type_only_statement_ids
++            and len(node.names) == 1
++            and node.names[0].asname is None
 +        ):
-+            steps.append(
-+                _Step(
-+                    "TYPING_MARKER_IMPORT",
-+                    target="typing",
-+                    symbol="TYPE_CHECKING",
-+                    binding=(
-+                        "TYPE_CHECKING"
-+                        if typing_guard.form == "NAME"
-+                        else "typing"
-+                    ),
-+                )
++            parts = node.names[0].name.split(".")
++            type_only = len(parts) > 1 and all(
++                part.isidentifier() for part in parts
 +            )
-+            continue
-+
-@@ -307,0 +333,9 @@ def _compile(
-+            elif (
-+                _depth == 0
-+                and typing_guard is not None
-+                and matches_typing_guard(
-+                    condition,
-+                    typing_guard.form,
-+                )
-+            ):
-+                selected = stmt.orelse
-@@ -658 +692,11 @@ def evaluate_package_import_order(
--        program = _compile(tree, name, name in packages)
-+        indexed_id = nodes[name].indexed_module_ids[0]
-+        typing_guard = recognize_typing_guard(
-+            indexed_sources[indexed_id],
-+            frozenset(indexed_sources),
+@@ -242,0 +264 @@ class AdvancedImportVisitor(ast.NodeVisitor):
++                    type_only=type_only,
+@@ -286 +308,40 @@ def read_imports(
+-    visitor = AdvancedImportVisitor()
++    type_only_statement_ids: set[int] = set()
++    guard = recognize_typing_guard(tree, frozenset())
++    if guard is not None and isinstance(tree, ast.Module):
++        marker_position = next(
++            (
++                position
++                for position, statement in enumerate(tree.body)
++                if statement is guard.marker_statement
++            ),
++            None,
 +        )
-+        program = _compile(
-+            tree,
-+            name,
-+            name in packages,
-+            typing_guard=typing_guard,
++        if marker_position is not None:
++            for statement in tree.body[marker_position + 1:]:
++                if (
++                    not isinstance(statement, ast.If)
++                    or not matches_typing_guard(
++                        statement.test,
++                        guard.form,
++                    )
++                ):
++                    continue
++
++                for body_statement in statement.body:
++                    if (
++                        not isinstance(body_statement, ast.Import)
++                        or len(body_statement.names) != 1
++                    ):
++                        continue
++                    alias = body_statement.names[0]
++                    parts = alias.name.split(".")
++                    if (
++                        alias.asname is None
++                        and len(parts) > 1
++                        and all(part.isidentifier() for part in parts)
++                    ):
++                        type_only_statement_ids.add(id(body_statement))
++
++    visitor = AdvancedImportVisitor(
++        frozenset(type_only_statement_ids)
++    )
+@@ -555,0 +617,10 @@ def _process_single_file(
++    if (
++        cached_data is not None
++        and (
++            type(cached_data.get("import_classification_semantics_version"))
++            is not int
++            or cached_data.get("import_classification_semantics_version")
++            != IMPORT_CLASSIFICATION_SEMANTICS_VERSION
 +        )
-@@ -783 +827,18 @@ def evaluate_package_import_order(
--        if step.op in {
-+        if step.op == "TYPING_MARKER_IMPORT":
-+            if not step.binding:
-+                return result("UNKNOWN")
++    ):
++        cached_data = None
+@@ -926,0 +998,3 @@ def _process_single_file(
++            "import_classification_semantics_version": (
++                IMPORT_CLASSIFICATION_SEMANTICS_VERSION
++            ),
+@@ -1929,0 +2004,18 @@ def index_repository(
 +
-+            namespaces[module][step.binding] = (
-+                "\x00TYPING_MARKER:" + module + ":" + step.binding
++    def _finalize_type_only_imports() -> None:
++        if "typing" not in modules and "typing.__init__" not in modules:
++            return
++
++        for module_id, module in modules.items():
++            if not any(import_ref.type_only for import_ref in module.imports):
++                continue
++            modules[module_id] = dataclasses.replace(
++                module,
++                imports=[
++                    dataclasses.replace(import_ref, type_only=False)
++                    if import_ref.type_only
++                    else import_ref
++                    for import_ref in module.imports
++                ],
 +            )
 +
-+            events.append(
-+                PackageModelEvent(
-+                    module,
-+                    "TYPING_MARKER_IMPORT",
-+                    target="typing",
-+                    symbol="TYPE_CHECKING",
-+                )
-+            )
-+
-+        elif step.op in {
+@@ -1978,0 +2071 @@ def index_repository(
++        _finalize_type_only_imports()
+@@ -2227,0 +2321 @@ def index_repository(
++    _finalize_type_only_imports()
 diff --git a/tests/test_p1d3_package_cycle_integration.py b/tests/test_p1d3_package_cycle_integration.py
-index 050ff01..9985068 100644
+index 9985068..b2a90ac 100644
 --- a/tests/test_p1d3_package_cycle_integration.py
 +++ b/tests/test_p1d3_package_cycle_integration.py
-@@ -17,0 +18 @@ from contextor.core.cycle_semantics.evidence import (
-+from contextor.core.cycle_semantics.edge_sites import analyze_cyclic_import_sites
-@@ -37,0 +39 @@ from contextor.core.cycle_semantics.source_proof import assess_scc_source_bytes
-+from contextor.core.cycle_semantics.typing_guard import recognize_typing_guard
-@@ -139,0 +142,47 @@ D2A_INITIALIZER_SAFE = {
+@@ -7,0 +8 @@ from dataclasses import replace
++from pathlib import Path
+@@ -31,0 +33 @@ from contextor.core.cycle_semantics.original_worker_reindex_planning import plan
++from contextor.core.cycle_semantics.package_model import evaluate_package_import_order
+@@ -48 +50 @@ from contextor.core.reference.shared import (
+-from contextor.core.source import parse_source_snapshot
++from contextor.core.source import parse_source_snapshot, read_source_snapshot
+@@ -188,0 +191,12 @@ D2B_ELSE_SAFE = {
++D2B2_MIXED_ACTIVE = {
++    "pkg/__init__.py": "pass\n",
++    "pkg/a.py": (
++        "from typing import TYPE_CHECKING\n"
++        "if TYPE_CHECKING:\n"
++        "    import pkg.b\n"
++        "import pkg.b\n"
++        "value = 1\n"
++    ),
++    "pkg/b.py": "from pkg.a import value\n",
++}
++
+@@ -908,0 +923,94 @@ def _d2a_source_evidence(root):
++def _assert_d2b2_inactive_no_hard_scc(
++    tmp_path, fixture, expected, expected_branch,
++):
++    root = write_synthetic_repository(tmp_path / "repo", fixture)
++    index, graph = _d2a_canonical_index_graph(root)
++    assert graph.hard_edges == {
++        "pkg.__init__": set(),
++        "pkg.a": set(),
++        "pkg.b": {"pkg.a"},
++    }
++    assert graph.soft_edges == {
++        "pkg.__init__": set(),
++        "pkg.a": {"pkg.b"},
++        "pkg.b": set(),
++    }
++
++    imports_b = [
++        item for item in index.modules["pkg.a"].imports
++        if item.module == "pkg.b" and not item.is_from_import
++    ]
++    assert len(imports_b) == 1
++    assert imports_b[0].type_only is True
++    assert imports_b[0].is_local is False
++    typing_imports = [
++        item for item in index.modules["pkg.a"].imports
++        if item.module == "typing"
++    ]
++    assert len(typing_imports) == 1
++    assert typing_imports[0].type_only is False
++    assert typing_imports[0].is_from_import is (fixture is D2B_NAME_SAFE)
++
++    source_snapshots = {
++        module_id: read_source_snapshot(Path(root, module.path))
++        for module_id, module in index.modules.items()
++    }
++    parsed = {
++        module_id: parse_source_snapshot(snapshot, module_id)
++        for module_id, snapshot in source_snapshots.items()
++    }
++    source_trees = {
++        module_id: source.tree
++        for module_id, source in parsed.items()
++    }
++    guard = recognize_typing_guard(
++        source_trees["pkg.a"],
++        frozenset(index.modules),
++    )
++    assert guard is not None
++
++    site_report = analyze_cyclic_import_sites(graph.hard_edges, parsed)
++    assert not any(
++        {"pkg.a", "pkg.b"}.issubset(set(component.members))
++        for component in site_report.components
++    )
++    scenarios = analyze_cycle_scenarios(graph.hard_edges, source_trees)
++    assert scenarios.components == ()
++
++    for entry, succeeds in expected.items():
++        modeled = evaluate_package_import_order(source_trees, entry)
++        actual = run_synthetic_import(root, entry)
++        assert (modeled.outcome == "MODEL_PASS") is succeeds
++        assert (actual.returncode == 0) is succeeds
++        if entry == "pkg.a":
++            assert any(
++                event.operation == "TYPING_MARKER_IMPORT"
++                for event in modeled.events
++            )
++            assert not any(
++                event.operation == "START_IMPORT"
++                and event.target == "pkg.b"
++                for event in modeled.events
++            )
++
++    assert expected_branch == "BODY"
++    evidence = build_source_bound_cycle_evidence(graph.hard_edges, parsed)
++    assert evidence.components == ()
++    snapshot = _snapshot(root, index, graph)
++    p0 = assess_index_bound_scc_models(
++        graph.hard_edges,
++        index.source_fingerprints_by_module,
++        snapshot,
++        evidence,
++    )
++    assert p0 == ()
++    plan = plan_original_worker_reindex(index, graph.hard_edges)
++    assert plan.status == "UNAVAILABLE"
++    assert plan.reason == "NO_CYCLIC_COMPONENTS"
++    prepared = prepare_original_worker_cycle_manifest(
++        index, graph.hard_edges, snapshot,
++    )
++    assert prepared.manifest is None
++    assert prepared.status != "PREPARED_UNPUBLISHED_NON_ATOMIC"
++
++
+@@ -1315,0 +1424,9 @@ def _assert_p1d3_d2b_supported_fixture(
++    if fixture is D2B_NAME_SAFE or fixture is D2B_ATTR_SAFE:
++        _assert_d2b2_inactive_no_hard_scc(
++            tmp_path,
++            fixture,
++            expected,
++            expected_branch,
++        )
++        return
++
+@@ -1480 +1597 @@ def test_p1d3_d2b_original_worker_prepares_v2(tmp_path, isolated_dirs):
+-    root = write_synthetic_repository(tmp_path / "repo", D2B_NAME_SAFE)
++    root = write_synthetic_repository(tmp_path / "repo", D2B_ELSE_SAFE)
+@@ -1499 +1616 @@ def test_p1d3_d2b_forged_marker_event_rejected(
+-    root = write_synthetic_repository(tmp_path / "repo", D2B_NAME_SAFE)
++    root = write_synthetic_repository(tmp_path / "repo", D2B_ELSE_SAFE)
+@@ -1558 +1675 @@ def test_p1d3_d2b_official_isolated_full_receipt(
+-    root = write_synthetic_repository(tmp_path / "repo", D2B_NAME_SAFE)
++    root = write_synthetic_repository(tmp_path / "repo", D2B_ELSE_SAFE)
+@@ -1580,0 +1698,114 @@ def test_p1d3_d2b_official_isolated_full_receipt(
++
++
++def test_p1d3_d2b_else_source_order_changes_evidence_token(
++    tmp_path, isolated_dirs,
++):
++    hazard_root = write_synthetic_repository(
++        tmp_path / "hazard", D2B_ELSE_HAZARD,
++    )
++    safe_root = write_synthetic_repository(
++        tmp_path / "safe", D2B_ELSE_SAFE,
++    )
++    _, hazard_graph, _, _, hazard_evidence, _ = _d2a_source_evidence(
++        hazard_root,
++    )
++    _, safe_graph, _, _, safe_evidence, _ = _d2a_source_evidence(
++        safe_root,
++    )
++    assert hazard_graph.hard_edges == safe_graph.hard_edges
++    assert hazard_evidence.components[0].evidence_token != (
++        safe_evidence.components[0].evidence_token
++    )
++
++
++def test_p1d3_d2b2_active_import_dominates_type_only(
++    tmp_path, isolated_dirs,
++):
++    root = write_synthetic_repository(
++        tmp_path / "repo", D2B2_MIXED_ACTIVE,
++    )
++    index, graph, captured, parsed, evidence, snapshot = _d2a_source_evidence(root)
++    imports_b = [
++        item for item in index.modules["pkg.a"].imports
++        if item.module == "pkg.b" and not item.is_from_import
++    ]
++    assert len(imports_b) == 2
++    assert [item.type_only for item in imports_b] == [True, False]
++    assert graph.hard_edges["pkg.a"] == {"pkg.b"}
++    assert graph.hard_edges["pkg.b"] == {"pkg.a"}
++    assert graph.soft_edges["pkg.a"] == {"pkg.b"}
++    assert captured.original_worker_capture_status == (
++        "ALL_SELECTED_CAPTURED_NON_ATOMIC"
++    )
++
++    captured_reexport_facts = materialize_reexport_facts_by_module(
++        captured.modules,
++        captured.reference_facts_by_module,
++    )
++    captured_trie = build_trie(captured.modules.keys())
++    captured_package_root = detect_package_root(
++        captured.modules,
++        captured_trie,
++    )
++    captured_graph = build_graph(
++        captured.modules,
++        trie=captured_trie,
++        package_root=captured_package_root,
++        reexport_facts_by_module=captured_reexport_facts,
++    )
++    assert captured_graph.hard_edges == graph.hard_edges
++    assert captured_graph.soft_edges == graph.soft_edges
++    assert captured.modules["pkg.a"].imports == index.modules["pkg.a"].imports
++
++    scenario = evidence.scenarios.components[0]
++    assert scenario.classification == "MODEL_INTERNAL_EARLY_BINDING_HAZARD"
++    assert scenario.coverage == "COMPLETE_FRESH_MEMBER_ENTRIES"
++    assessment_a = next(
++        item for item in scenario.entry_assessments
++        if item.entry_module == "pkg.a"
++    )
++    assessment_b = next(
++        item for item in scenario.entry_assessments
++        if item.entry_module == "pkg.b"
++    )
++    assert assessment_a.outcome == "EARLY_BINDING_HAZARD"
++    assert assessment_b.outcome == "MODEL_PASS"
++    actual_a = run_synthetic_import(root, "pkg.a")
++    actual_b = run_synthetic_import(root, "pkg.b")
++    assert actual_a.returncode != 0
++    assert "partially initialized module" in actual_a.stderr
++    assert actual_b.returncode == 0
++
++    p0 = assess_index_bound_scc_models(
++        graph.hard_edges,
++        captured.source_fingerprints_by_module,
++        snapshot,
++        evidence,
++    )
++    assert len(p0) == 1
++    assert p0[0].evidence_state == "DECLARED_INPUTS_CONSISTENT"
++    p1b = assess_scc_source_bytes(
++        graph.hard_edges,
++        captured.source_fingerprints_by_module,
++        snapshot,
++        evidence,
++        captured.original_worker_source_snapshots,
++    )
++    assert len(p1b) == 1
++    assert p1b[0].bytes_state == "BYTE_AST_CONSISTENT_NON_ATOMIC"
++
++
++@pytest.mark.live
++def test_p1d3_d2b2_dissolved_scc_does_not_publish_receipt(
++    tmp_path, isolated_dirs, monkeypatch,
++):
++    root = write_synthetic_repository(tmp_path / "repo", D2B_NAME_SAFE)
++    with _official_live(root, monkeypatch):
++        _, result = ContextorFacade.analyze_project(
++            str(root), cycle_source_preparation_preview=True,
++            cycle_source_publication_opt_in=True,
++        )
++        state, _ = _persisted(root)
++        preview = result.cycle_source_preparation_preview
++        assert preview is None or preview.manifest is None
++        assert getattr(state, "cycle_source_publication", None) is None
+diff --git a/tests/test_p1d3_d2b2_type_only.py b/tests/test_p1d3_d2b2_type_only.py
+new file mode 100644
+index 0000000..00baa48
+--- /dev/null
++++ b/tests/test_p1d3_d2b2_type_only.py
+@@ -0,0 +1,489 @@
++"""D2B-2 indexer classification, cache and execution-mode regressions."""
++
++from __future__ import annotations
++
++import ast
++import json
++from dataclasses import replace
++from pathlib import Path
++
++import pytest
++
++from contextor.core.analysis.cache_manager import CacheManager
++from contextor.core.cycle_semantics.scenarios import analyze_cycle_scenarios
++from contextor.core.graph.graph import build_graph
++from contextor.core.graph.resolver import build_trie, detect_package_root
++from contextor.core.reference.shared import materialize_reexport_facts_by_module
++from contextor.core.symbol_engine import indexer
++from tests.cycle_semantics_lab import write_synthetic_repository
++
++
 +D2B_NAME_SAFE = {
 +    "pkg/__init__.py": "pass\n",
 +    "pkg/a.py": (
@@ -265,584 +640,462 @@ index 050ff01..9985068 100644
 +    "pkg/b.py": "from pkg.a import value\n",
 +}
 +
-+D2B_ATTR_SAFE = {
-+    "pkg/__init__.py": "pass\n",
-+    "pkg/a.py": (
-+        "import typing\n"
-+        "if typing.TYPE_CHECKING:\n"
-+        "    import pkg.b\n"
-+        "value = 1\n"
++D2B2_NEGATIVE_CASES = [
++    ("N01-no-marker", "if TYPE_CHECKING:\n    import pkg.b\n", {}, {"pkg.b"}),
++    (
++        "N02-assigned-before",
++        "TYPE_CHECKING = True\nfrom typing import TYPE_CHECKING\n"
++        "if TYPE_CHECKING:\n    import pkg.b\n",
++        {}, {"pkg.b"},
 +    ),
-+    "pkg/b.py": "from pkg.a import value\n",
-+}
-+
-+D2B_ELSE_HAZARD = {
-+    "pkg/__init__.py": "pass\n",
-+    "pkg/a.py": (
-+        "from typing import TYPE_CHECKING\n"
-+        "if TYPE_CHECKING:\n"
-+        "    pass\n"
-+        "else:\n"
-+        "    import pkg.b\n"
-+        "value = 1\n"
++    (
++        "N03-assigned-after",
++        "from typing import TYPE_CHECKING\nif TYPE_CHECKING:\n"
++        "    import pkg.b\nTYPE_CHECKING = True\n",
++        {}, {"pkg.b"},
 +    ),
-+    "pkg/b.py": "from pkg.a import value\n",
-+}
-+
-+D2B_ELSE_SAFE = {
-+    **D2B_ELSE_HAZARD,
-+    "pkg/a.py": (
-+        "from typing import TYPE_CHECKING\n"
-+        "value = 1\n"
-+        "if TYPE_CHECKING:\n"
-+        "    pass\n"
-+        "else:\n"
-+        "    import pkg.b\n"
++    (
++        "N04-aliased-marker",
++        "from typing import TYPE_CHECKING as TC\nif TYPE_CHECKING:\n"
++        "    import pkg.b\n",
++        {}, {"pkg.b"},
 +    ),
-+}
++    (
++        "N05-aliased-typing",
++        "import typing as t\nif typing.TYPE_CHECKING:\n"
++        "    import pkg.b\n",
++        {}, {"pkg.b"},
++    ),
++    (
++        "N06-negated",
++        "from typing import TYPE_CHECKING\nif not TYPE_CHECKING:\n"
++        "    import pkg.b\n",
++        {}, {"pkg.b"},
++    ),
++    (
++        "N07-is-false",
++        "from typing import TYPE_CHECKING\nif TYPE_CHECKING is False:\n"
++        "    import pkg.b\n",
++        {}, {"pkg.b"},
++    ),
++    (
++        "N08-equals-false",
++        "import typing\nif typing.TYPE_CHECKING == False:\n"
++        "    import pkg.b\n",
++        {}, {"pkg.b"},
++    ),
++    (
++        "N09-nested-if-import",
++        "from typing import TYPE_CHECKING\nif TYPE_CHECKING:\n"
++        "    if True:\n        import pkg.b\n",
++        {}, {"pkg.b"},
++    ),
++    (
++        "N10-function-import",
++        "from typing import TYPE_CHECKING\nif TYPE_CHECKING:\n"
++        "    def load():\n        import pkg.b\n",
++        {}, {"pkg.b"},
++    ),
++    (
++        "N11-class-import",
++        "from typing import TYPE_CHECKING\nif TYPE_CHECKING:\n"
++        "    class Loader:\n        import pkg.b\n",
++        {}, {"pkg.b"},
++    ),
++    (
++        "N12-try-import",
++        "from typing import TYPE_CHECKING\nif TYPE_CHECKING:\n"
++        "    try:\n        import pkg.b\n"
++        "    except ImportError:\n        pass\n",
++        {}, {"pkg.b"},
++    ),
++    (
++        "N13-else-import",
++        "from typing import TYPE_CHECKING\nif TYPE_CHECKING:\n"
++        "    pass\nelse:\n    import pkg.b\n",
++        {}, {"pkg.b"},
++    ),
++    (
++        "N14-from-import",
++        "from typing import TYPE_CHECKING\nif TYPE_CHECKING:\n"
++        "    from pkg import b\n",
++        {}, {"pkg.__init__"},
++    ),
++    (
++        "N15-multiple-aliases",
++        "from typing import TYPE_CHECKING\nif TYPE_CHECKING:\n"
++        "    import pkg.b, pkg.c\n",
++        {"pkg/c.py": "pass\n"}, {"pkg.b", "pkg.c"},
++    ),
++    (
++        "N16-as-alias",
++        "from typing import TYPE_CHECKING\nif TYPE_CHECKING:\n"
++        "    import pkg.b as child\n",
++        {}, {"pkg.b"},
++    ),
++    (
++        "N17-local-typing-module",
++        D2B_NAME_SAFE["pkg/a.py"],
++        {"typing.py": "pass\n"}, {"pkg.b"},
++    ),
++    (
++        "N18-local-typing-package",
++        D2B_NAME_SAFE["pkg/a.py"],
++        {"typing/__init__.py": "pass\n"}, {"pkg.b"},
++    ),
++    (
++        "N19-marker-after-effect",
++        "import pkg.b\nfrom typing import TYPE_CHECKING\n"
++        "if TYPE_CHECKING:\n    pass\n",
++        {}, {"pkg.b"},
++    ),
++    (
++        "N20-duplicate-marker",
++        "from typing import TYPE_CHECKING\nfrom typing import TYPE_CHECKING\n"
++        "if TYPE_CHECKING:\n    import pkg.b\n",
++        {}, {"pkg.b"},
++    ),
++    (
++        "N21-conditional-marker",
++        "if True:\n    from typing import TYPE_CHECKING\n"
++        "if TYPE_CHECKING:\n    import pkg.b\n",
++        {}, {"pkg.b"},
++    ),
++    (
++        "N22-marker-shadow-import",
++        "from typing import TYPE_CHECKING\nfrom other import TYPE_CHECKING\n"
++        "if TYPE_CHECKING:\n    import pkg.b\n",
++        {}, {"pkg.b"},
++    ),
++    (
++        "N23-nested-guard",
++        "from typing import TYPE_CHECKING\nif TYPE_CHECKING:\n"
++        "    if TYPE_CHECKING:\n        import pkg.b\n",
++        {}, {"pkg.b"},
++    ),
++    (
++        "N24-undotted-import",
++        "from typing import TYPE_CHECKING\nif TYPE_CHECKING:\n"
++        "    import pkg\n",
++        {}, {"pkg.__init__"},
++    ),
++]
 +
-@@ -1261,0 +1311,270 @@ def test_p1d3_d2a_official_isolated_full_receipt(
++
++@pytest.fixture(autouse=True)
++def _inline_workers(monkeypatch):
++    monkeypatch.setenv("CONTEXTOR_DISABLE_PROCESS_POOL", "1")
 +
 +
-+def _assert_p1d3_d2b_supported_fixture(
-+    tmp_path, isolated_dirs, fixture, expected, expected_branch,
-+):
-+    root = write_synthetic_repository(tmp_path / "repo", fixture)
-+    index, graph, captured, parsed, evidence, snapshot = _d2a_source_evidence(root)
-+    assert graph.hard_edges == {
-+        "pkg.__init__": set(),
-+        "pkg.a": {"pkg.b"},
-+        "pkg.b": {"pkg.a"},
-+    }
-+    assert all(
-+        not getattr(item, "type_only", False)
-+        for item in index.modules["pkg.a"].imports
++def _index_graph(root):
++    index = indexer.index_repository(str(root))
++    reexport_facts = materialize_reexport_facts_by_module(
++        index.modules,
++        index.reference_facts_by_module,
 +    )
-+    assert any(
-+        item.module == "pkg.b" and not getattr(item, "type_only", False)
-+        for item in index.modules["pkg.a"].imports
++    trie = build_trie(index.modules.keys())
++    package_root = detect_package_root(index.modules, trie)
++    graph = build_graph(
++        index.modules,
++        trie=trie,
++        package_root=package_root,
++        reexport_facts_by_module=reexport_facts,
 +    )
-+    site_report = analyze_cyclic_import_sites(graph.hard_edges, parsed)
-+    site_edge = next(
-+        edge
-+        for edge in site_report.components[0].internal_edges
-+        if edge.source == "pkg.a" and edge.target == "pkg.b"
-+    )
-+    assert site_edge.status == "LEXICAL_CANDIDATES"
-+    assert site_edge.sites[0].controls[0].kind == "IF"
-+    assert site_edge.sites[0].controls[0].branch == expected_branch
-+    assert set(evidence.scenarios.components[0].members) == {"pkg.a", "pkg.b"}
-+    scenario = evidence.scenarios.components[0]
-+    assert scenario.model_kind == "REGULAR_PACKAGE"
-+    assert scenario.coverage == "COMPLETE_FRESH_MEMBER_ENTRIES"
-+    if fixture is D2B_ELSE_HAZARD:
-+        assert scenario.classification == "MODEL_INTERNAL_EARLY_BINDING_HAZARD"
-+    else:
-+        assert scenario.classification == "MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS"
-+    guard = recognize_typing_guard(
-+        parsed["pkg.a"].tree,
-+        frozenset(index.modules),
-+    )
-+    assert guard is not None
-+    assert any(
-+        event.operation == "TYPING_MARKER_IMPORT"
-+        and event.target == "typing"
-+        and event.symbol == "TYPE_CHECKING"
-+        for assessment in scenario.entry_assessments
-+        for event in assessment.events
-+    )
-+    assessment_a = next(
-+        item for item in scenario.entry_assessments
-+        if item.entry_module == "pkg.a"
-+    )
-+    starts_b = any(
-+        event.operation == "START_IMPORT" and event.target == "pkg.b"
-+        for event in assessment_a.events
-+    )
-+    assert starts_b is any(
-+        fixture is candidate
-+        for candidate in (D2B_ELSE_HAZARD, D2B_ELSE_SAFE)
-+    )
-+    for entry, succeeds in expected.items():
-+        actual = run_synthetic_import(root, entry)
-+        assert (actual.returncode == 0) is succeeds
-+        modeled = next(
-+            item for item in scenario.entry_assessments
-+            if item.entry_module == entry
++    return index, graph
++
++
++def _import_signature(index):
++    return tuple(
++        (
++            module_id,
++            tuple(
++                (
++                    item.module,
++                    item.level,
++                    tuple(item.names),
++                    item.is_from_import,
++                    item.is_local,
++                    item.type_only,
++                )
++                for item in module.imports
++            ),
 +        )
-+        assert (modeled.outcome == "MODEL_PASS") is succeeds
-+        if fixture is D2B_ELSE_HAZARD and entry == "pkg.a":
-+            assert "partially initialized module" in actual.stderr
-+    p0 = assess_index_bound_scc_models(
-+        graph.hard_edges, captured.source_fingerprints_by_module,
-+        snapshot, evidence,
-+    )
-+    assert p0[0].evidence_state == "DECLARED_INPUTS_CONSISTENT"
-+    p1b = assess_scc_source_bytes(
-+        graph.hard_edges, captured.source_fingerprints_by_module,
-+        snapshot, evidence, captured.original_worker_source_snapshots,
-+    )
-+    assert p1b[0].bytes_state == "BYTE_AST_CONSISTENT_NON_ATOMIC"
-+
-+
-+def test_p1d3_d2b_name_guard_inactive(tmp_path, isolated_dirs):
-+    _assert_p1d3_d2b_supported_fixture(
-+        tmp_path, isolated_dirs, D2B_NAME_SAFE,
-+        {"pkg.a": True, "pkg.b": True}, "BODY",
++        for module_id, module in sorted(index.modules.items())
 +    )
 +
 +
-+def test_p1d3_d2b_attribute_guard_inactive(tmp_path, isolated_dirs):
-+    _assert_p1d3_d2b_supported_fixture(
-+        tmp_path, isolated_dirs, D2B_ATTR_SAFE,
-+        {"pkg.a": True, "pkg.b": True}, "BODY",
++def _scc_signature(index, graph):
++    trees = {
++        module_id: ast.parse(
++            Path(module.absolute_path).read_text(encoding="utf-8")
++        )
++        for module_id, module in index.modules.items()
++    }
++    report = analyze_cycle_scenarios(graph.hard_edges, trees)
++    return tuple(tuple(component.members) for component in report.components)
++
++
++def _graph_signature(index, graph):
++    return (
++        tuple(
++            (module_id, tuple(sorted(targets)))
++            for module_id, targets in sorted(graph.hard_edges.items())
++        ),
++        tuple(
++            (module_id, tuple(sorted(targets)))
++            for module_id, targets in sorted(graph.soft_edges.items())
++        ),
++        _scc_signature(index, graph),
 +    )
 +
 +
-+def test_p1d3_d2b_else_activates_import(tmp_path, isolated_dirs):
-+    _assert_p1d3_d2b_supported_fixture(
-+        tmp_path, isolated_dirs, D2B_ELSE_HAZARD,
-+        {"pkg.a": False, "pkg.b": True}, "ELSE",
++def _cache_data(root: Path, source: Path) -> dict:
++    manager = CacheManager(str(root))
++    return json.loads(
++        manager._get_cache_file_path(source).read_text(encoding="utf-8")
++    )["data"]
++
++
++def test_cold_and_warm_worker_cache_match_type_only_graph(
++    tmp_path, isolated_dirs, monkeypatch,
++):
++    root = write_synthetic_repository(tmp_path / "repo", D2B_NAME_SAFE)
++    cold_index, cold_graph = _index_graph(root)
++    cold_imports = _import_signature(cold_index)
++    cold_graph_signature = _graph_signature(cold_index, cold_graph)
++    source = root / "pkg" / "a.py"
++    cached = _cache_data(root, source)
++    assert cached["import_classification_semantics_version"] == 1
++    assert next(
++        item for item in cached["imports"] if item["module"] == "pkg.b"
++    )["type_only"] is True
++
++    indexer._CACHE_MANAGERS.pop(str(root.resolve()), None)
++
++    def unexpected_parse(*args, **kwargs):
++        raise AssertionError("current warm cache must not parse source")
++
++    monkeypatch.setattr(indexer, "parse_source_snapshot", unexpected_parse)
++    warm_index, warm_graph = _index_graph(root)
++
++    assert _import_signature(warm_index) == cold_imports
++    assert _graph_signature(warm_index, warm_graph) == cold_graph_signature
++
++
++@pytest.mark.parametrize("stored_version", [None, 0], ids=["absent", "old"])
++def test_stale_import_classification_cache_reparses_same_snapshot(
++    tmp_path, isolated_dirs, stored_version, monkeypatch,
++):
++    root = write_synthetic_repository(tmp_path / "repo", D2B_NAME_SAFE)
++    indexer.index_repository(str(root))
++    source = root / "pkg" / "a.py"
++    cached = _cache_data(root, source)
++    for item in cached["imports"]:
++        if item["module"] == "pkg.b":
++            item["type_only"] = False
++    if stored_version is None:
++        cached.pop("import_classification_semantics_version", None)
++    else:
++        cached["import_classification_semantics_version"] = stored_version
++    CacheManager(str(root)).set(source, cached)
++    indexer._CACHE_MANAGERS.pop(str(root.resolve()), None)
++
++    real_read = indexer.read_source_snapshot
++    real_parse = indexer.parse_source_snapshot
++    read_calls = []
++    parse_calls = []
++
++    def tracked_read(path):
++        read_calls.append(Path(path).resolve())
++        return real_read(path)
++
++    def tracked_parse(snapshot, path):
++        parse_calls.append(Path(path).resolve())
++        return real_parse(snapshot, path)
++
++    monkeypatch.setattr(indexer, "read_source_snapshot", tracked_read)
++    monkeypatch.setattr(indexer, "parse_source_snapshot", tracked_parse)
++    result = indexer.index_repository(str(root))
++
++    assert len(read_calls) == 3
++    assert len(set(read_calls)) == 3
++    assert parse_calls == [(root / "pkg" / "a.py").resolve()]
++    assert any(
++        item.module == "pkg.b" and item.type_only
++        for item in result.modules["pkg.a"].imports
 +    )
++    rewritten = _cache_data(root, source)
++    assert rewritten["import_classification_semantics_version"] == 1
++    assert next(
++        item for item in rewritten["imports"] if item["module"] == "pkg.b"
++    )["type_only"] is True
 +
 +
-+def test_p1d3_d2b_else_reordered_safe(tmp_path, isolated_dirs):
-+    _assert_p1d3_d2b_supported_fixture(
-+        tmp_path, isolated_dirs, D2B_ELSE_SAFE,
-+        {"pkg.a": True, "pkg.b": True}, "ELSE",
++def test_source_changes_and_typing_shadow_add_remove_reclassify(
++    tmp_path, isolated_dirs,
++):
++    root = write_synthetic_repository(tmp_path / "repo", D2B_NAME_SAFE)
++    original_bytes = (root / "pkg" / "a.py").read_bytes()
++    initial, initial_graph = _index_graph(root)
++    source_fingerprint = initial.source_fingerprints_by_module["pkg.a"]
++    initial_module = initial.modules["pkg.a"]
++    initial_imports = tuple(initial_module.imports)
++    assert next(
++        item for item in initial.modules["pkg.a"].imports
++        if item.module == "pkg.b"
++    ).type_only is True
++    assert initial_graph.soft_edges["pkg.a"] == {"pkg.b"}
++
++    source = root / "pkg" / "a.py"
++    source.write_text("value = 1\n", encoding="utf-8")
++    changed, changed_graph = _index_graph(root)
++    assert all(not item.type_only for item in changed.modules["pkg.a"].imports)
++    assert changed_graph.soft_edges["pkg.a"] == set()
++    assert "pkg.b" not in changed_graph.hard_edges["pkg.a"]
++
++    source.write_bytes(original_bytes)
++    restored, restored_graph = _index_graph(root)
++    assert restored.source_fingerprints_by_module["pkg.a"] == source_fingerprint
++    assert next(
++        item for item in restored.modules["pkg.a"].imports
++        if item.module == "pkg.b"
++    ).type_only is True
++    assert restored_graph.soft_edges["pkg.a"] == {"pkg.b"}
++
++    simple_shadow = root / "typing.py"
++    simple_shadow.write_text("pass\n", encoding="utf-8")
++    shadowed, shadowed_graph = _index_graph(root)
++    assert "typing" in shadowed.modules
++    assert shadowed.source_fingerprints_by_module["pkg.a"] == source_fingerprint
++    assert all(not item.type_only for item in shadowed.modules["pkg.a"].imports)
++    shadowed_module = shadowed.modules["pkg.a"]
++    assert (
++        shadowed_module.module_id,
++        shadowed_module.path,
++        shadowed_module.absolute_path,
++    ) == (
++        initial_module.module_id,
++        initial_module.path,
++        initial_module.absolute_path,
 +    )
++    assert [replace(item, type_only=False) for item in initial_imports] == (
++        shadowed_module.imports
++    )
++    assert "pkg.b" in shadowed_graph.hard_edges["pkg.a"]
++    assert next(
++        item for item in _cache_data(root, source)["imports"]
++        if item["module"] == "pkg.b"
++    )["type_only"] is True
++
++    simple_shadow.unlink()
++    unshadowed, unshadowed_graph = _index_graph(root)
++    assert "pkg.b" in unshadowed.modules
++    assert next(
++        item for item in unshadowed.modules["pkg.a"].imports
++        if item.module == "pkg.b"
++    ).type_only is True
++    assert unshadowed_graph.soft_edges["pkg.a"] == {"pkg.b"}
++
++    package_shadow = root / "typing" / "__init__.py"
++    package_shadow.parent.mkdir(parents=True, exist_ok=True)
++    package_shadow.write_text("pass\n", encoding="utf-8")
++    package_shadowed, package_graph = _index_graph(root)
++    assert "typing.__init__" in package_shadowed.modules
++    assert all(
++        not item.type_only
++        for item in package_shadowed.modules["pkg.a"].imports
++    )
++    assert "pkg.b" in package_graph.hard_edges["pkg.a"]
++
++    package_shadow.unlink()
++    package_shadow.parent.rmdir()
++    package_unshadowed, package_unshadowed_graph = _index_graph(root)
++    assert next(
++        item for item in package_unshadowed.modules["pkg.a"].imports
++        if item.module == "pkg.b"
++    ).type_only is True
++    assert package_unshadowed_graph.soft_edges["pkg.a"] == {"pkg.b"}
 +
 +
-+@pytest.mark.parametrize("name,source,extra", [
-+    ("N01-no-marker", "if TYPE_CHECKING:\n    import pkg.b\n", {}),
-+    ("N02-assigned-before", "TYPE_CHECKING = True\nfrom typing import TYPE_CHECKING\nif TYPE_CHECKING:\n    import pkg.b\n", {}),
-+    ("N03-assigned-after", "from typing import TYPE_CHECKING\nif TYPE_CHECKING:\n    import pkg.b\nTYPE_CHECKING = True\n", {}),
-+    ("N04-aliased-name", "from typing import TYPE_CHECKING as TC\nif TYPE_CHECKING:\n    import pkg.b\n", {}),
-+    ("N05-aliased-module", "import typing as t\nif typing.TYPE_CHECKING:\n    import pkg.b\n", {}),
-+    ("N06-not", "from typing import TYPE_CHECKING\nif not TYPE_CHECKING:\n    import pkg.b\n", {}),
-+    ("N07-is-false", "from typing import TYPE_CHECKING\nif TYPE_CHECKING is False:\n    import pkg.b\n", {}),
-+    ("N08-equals-false", "import typing\nif typing.TYPE_CHECKING == False:\n    import pkg.b\n", {}),
-+    ("N09-function-marker", "def load():\n    from typing import TYPE_CHECKING\nif TYPE_CHECKING:\n    import pkg.b\n", {}),
-+    ("N10-class-marker", "class C:\n    from typing import TYPE_CHECKING\nif TYPE_CHECKING:\n    import pkg.b\n", {}),
-+    ("N11-attribute-reassigned", "import typing\ntyping.TYPE_CHECKING = True\nif typing.TYPE_CHECKING:\n    import pkg.b\n", {}),
-+    ("N12-shadow-import", "from typing import TYPE_CHECKING\nfrom other import TYPE_CHECKING\nif TYPE_CHECKING:\n    import pkg.b\n", {}),
-+    ("N13-local-typing-module", D2B_NAME_SAFE["pkg/a.py"], {"typing.py": "pass\n"}),
-+    ("N14-local-typing-package", D2B_NAME_SAFE["pkg/a.py"], {"typing/__init__.py": "pass\n"}),
-+    ("N15-marker-after-import", "import pkg.b\nfrom typing import TYPE_CHECKING\nif TYPE_CHECKING:\n    pass\n", {}),
-+    ("N16-marker-conditional", "if True:\n    from typing import TYPE_CHECKING\nif TYPE_CHECKING:\n    import pkg.b\n", {}),
-+    ("N17-marker-duplicated", "from typing import TYPE_CHECKING\nfrom typing import TYPE_CHECKING\nif TYPE_CHECKING:\n    import pkg.b\n", {}),
-+    ("N18-nested-guard", "from typing import TYPE_CHECKING\nif TYPE_CHECKING:\n    if TYPE_CHECKING:\n        import pkg.b\n", {}),
-+])
-+def test_p1d3_d2b_unsupported_typing_guards(
-+    tmp_path, isolated_dirs, name, source, extra,
++def test_inline_and_process_pool_classification_parity(
++    tmp_path, isolated_dirs, monkeypatch,
++):
++    inline_root = write_synthetic_repository(
++        tmp_path / "inline", D2B_NAME_SAFE,
++    )
++    monkeypatch.setenv("CONTEXTOR_DISABLE_PROCESS_POOL", "1")
++    inline_index, inline_graph = _index_graph(inline_root)
++
++    pool_root = write_synthetic_repository(
++        tmp_path / "pool", D2B_NAME_SAFE,
++    )
++    monkeypatch.delenv("CONTEXTOR_DISABLE_PROCESS_POOL", raising=False)
++    pool_index, pool_graph = _index_graph(pool_root)
++
++    assert _import_signature(pool_index) == _import_signature(inline_index)
++    assert _graph_signature(pool_index, pool_graph) == (
++        _graph_signature(inline_index, inline_graph)
++    )
++    assert pool_index.original_worker_capture_status == "NOT_REQUESTED"
++
++
++def test_inline_and_process_pool_typing_shadow_veto_parity(
++    tmp_path, isolated_dirs, monkeypatch,
 +):
 +    fixture = {
++        **D2B_NAME_SAFE,
++        "typing.py": "pass\n",
++    }
++    inline_root = write_synthetic_repository(
++        tmp_path / "inline", fixture,
++    )
++    monkeypatch.setenv("CONTEXTOR_DISABLE_PROCESS_POOL", "1")
++    inline_index, inline_graph = _index_graph(inline_root)
++
++    pool_root = write_synthetic_repository(
++        tmp_path / "pool", fixture,
++    )
++    monkeypatch.delenv("CONTEXTOR_DISABLE_PROCESS_POOL", raising=False)
++    pool_index, pool_graph = _index_graph(pool_root)
++
++    assert _import_signature(pool_index) == _import_signature(inline_index)
++    assert _graph_signature(pool_index, pool_graph) == (
++        _graph_signature(inline_index, inline_graph)
++    )
++    assert all(
++        not item.type_only for item in pool_index.modules["pkg.a"].imports
++    )
++    assert "pkg.b" in pool_graph.hard_edges["pkg.a"]
++
++
++@pytest.mark.parametrize(
++    "case,source,extra,expected_hard_targets",
++    D2B2_NEGATIVE_CASES,
++    ids=[item[0] for item in D2B2_NEGATIVE_CASES],
++)
++def test_unsupported_imports_remain_non_type_only_and_hard(
++    tmp_path, isolated_dirs, case, source, extra, expected_hard_targets,
++):
++    files = {
 +        "pkg/__init__.py": "pass\n",
 +        "pkg/a.py": source,
 +        "pkg/b.py": "from pkg.a import value\n",
 +        **extra,
 +    }
-+    root = write_synthetic_repository(tmp_path / name, fixture)
-+    index, graph = _d2a_canonical_index_graph(root)
-+    trees = {
-+        module: ast.parse((root / item.path).read_text(encoding="utf-8"))
-+        for module, item in index.modules.items()
-+    }
-+    assert recognize_typing_guard(
-+        trees["pkg.a"], frozenset(index.modules),
-+    ) is None
-+    scenarios = analyze_cycle_scenarios(graph.hard_edges, trees)
-+    assert all(
-+        component.classification != "MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS"
-+        for component in scenarios.components
-+    )
-+    plan = plan_original_worker_reindex(index, graph.hard_edges)
-+    if plan.status == "READY_FOR_REINDEX_NON_ATOMIC":
-+        captured = index_repository(
-+            str(root), source_capture_module_ids=plan.selected_module_ids,
-+        )
-+        prepared = prepare_original_worker_cycle_manifest(
-+            captured, graph.hard_edges, _snapshot(root, index, graph),
-+        )
-+        assert (
-+            prepared.manifest is None
-+            or prepared.manifest.source_manifest_sha256 is None
-+        )
++    root = write_synthetic_repository(tmp_path / case, files)
++    index, graph = _index_graph(root)
 +
++    imports = index.modules["pkg.a"].imports
++    assert imports
++    assert all(item.type_only is False for item in imports)
++    assert expected_hard_targets.issubset(graph.hard_edges["pkg.a"])
++    if case == "N10-function-import":
++        assert next(item for item in imports if item.module == "pkg.b").is_local
++    if case == "N14-from-import":
++        assert any(item.module == "pkg" and item.is_from_import for item in imports)
++    if case == "N15-multiple-aliases":
++        assert [item.module for item in imports if item.module in {"pkg.b", "pkg.c"}] == [
++            "pkg.b", "pkg.c",
++        ]
 +
-+def test_p1d3_d2b_original_worker_prepares_v2(tmp_path, isolated_dirs):
-+    root = write_synthetic_repository(tmp_path / "repo", D2B_NAME_SAFE)
-+    index, graph, captured, _, evidence, snapshot = _d2a_source_evidence(root)
-+    prepared = prepare_original_worker_cycle_manifest(
-+        captured, graph.hard_edges, snapshot,
-+    )
-+    assert prepared.status == "PREPARED_UNPUBLISHED_NON_ATOMIC"
-+    assert prepared.manifest.version == "cycle-source-manifest/2"
-+    component = prepared.manifest.components[0]
-+    assert component.model_kind == "REGULAR_PACKAGE"
-+    assert component.model_classification == "MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS"
-+    assert tuple(row[0] for row in component.source_signatures) == (
-+        "pkg.__init__", "pkg.a", "pkg.b",
-+    )
-+    assert component.model_evidence_sha256
-+
-+
-+def test_p1d3_d2b_forged_marker_event_rejected(
-+    tmp_path, isolated_dirs,
-+):
-+    root = write_synthetic_repository(tmp_path / "repo", D2B_NAME_SAFE)
-+    _, graph, captured, _, evidence, snapshot = _d2a_source_evidence(root)
-+    scenario = evidence.scenarios.components[0]
-+    assessment = next(
-+        item for item in scenario.entry_assessments
-+        if any(event.operation == "TYPING_MARKER_IMPORT" for event in item.events)
-+    )
-+    event = next(
-+        item for item in assessment.events
-+        if item.operation == "TYPING_MARKER_IMPORT"
-+    )
-+    forged_assessment = replace(
-+        assessment,
-+        events=tuple(
-+            replace(item, operation="FORGED_TYPING_MARKER_IMPORT")
-+            if item is event else item
-+            for item in assessment.events
-+        ),
-+    )
-+    forged_scenario = replace(
-+        scenario,
-+        entry_assessments=tuple(
-+            forged_assessment if item is assessment else item
-+            for item in scenario.entry_assessments
-+        ),
-+    )
-+    component = evidence.components[0]
-+    subgraph = tuple(
-+        (module, tuple(sorted(graph.hard_edges[module])))
-+        for module in component.reachable_modules
-+    )
-+    forged_component = replace(
-+        component,
-+        evidence_token=_component_token(
-+            component.members, subgraph,
-+            component.source_signatures, forged_scenario,
-+        ),
-+    )
-+    forged = replace(
-+        evidence,
-+        components=(forged_component,),
-+        scenarios=replace(evidence.scenarios, components=(forged_scenario,)),
-+    )
-+    p0 = assess_index_bound_scc_models(
-+        graph.hard_edges, captured.source_fingerprints_by_module,
-+        snapshot, forged,
-+    )
-+    assert p0[0].evidence_state == "DECLARED_INPUTS_CONSISTENT"
-+    p1b = assess_scc_source_bytes(
-+        graph.hard_edges, captured.source_fingerprints_by_module,
-+        snapshot, forged, captured.original_worker_source_snapshots,
-+    )
-+    assert p1b[0].reason == "MODEL_REPLAY_MISMATCH"
-+
-+
-+@pytest.mark.live
-+def test_p1d3_d2b_official_isolated_full_receipt(
-+    tmp_path, isolated_dirs, monkeypatch,
-+):
-+    root = write_synthetic_repository(tmp_path / "repo", D2B_NAME_SAFE)
-+    with _official_live(root, monkeypatch) as (client, server, identity, calls):
-+        _, result = ContextorFacade.analyze_project(
-+            str(root), cycle_source_preparation_preview=True,
-+            cycle_source_publication_opt_in=True,
-+        )
-+        assert result.cycle_source_preparation_preview.status == (
-+            "PREPARED_UNPUBLISHED_NON_ATOMIC"
-+        )
-+        state, metadata = _persisted(root)
-+        receipt = state.cycle_source_publication
-+        assert receipt.version == PUBLICATION_BINDING_VERSION
-+        assert receipt.prepared_manifest.version == MANIFEST_VERSION
-+        component = receipt.prepared_manifest.components[0]
-+        assert component.model_kind == "REGULAR_PACKAGE"
-+        assert component.model_classification == "MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS"
-+        assert verify_co_published_cycle_manifest(
-+            state, revision=metadata.revision,
-+            state_id=metadata.state_id, repo_id=metadata.repo_id,
-+            root_path=metadata.root_path,
-+        )
-+        assert result.live_publish_status == "success"
-+        assert calls == [root.resolve()]
-diff --git a/contextor/core/cycle_semantics/typing_guard.py b/contextor/core/cycle_semantics/typing_guard.py
-new file mode 100644
-index 0000000..705df06
---- /dev/null
-+++ b/contextor/core/cycle_semantics/typing_guard.py
-@@ -0,0 +1,255 @@
-+"""Pure recognition of the restricted typing.TYPE_CHECKING idiom."""
-+
-+from __future__ import annotations
-+
-+import ast
-+from dataclasses import dataclass
-+
-+
-+@dataclass(frozen=True)
-+class RecognizedTypingGuard:
-+    form: str
-+    marker_statement: ast.Import | ast.ImportFrom
-+
-+
-+def matches_typing_guard(
-+    condition: ast.AST,
-+    form: str,
-+) -> bool:
-+    if form == "NAME":
-+        return (
-+            isinstance(condition, ast.Name)
-+            and condition.id == "TYPE_CHECKING"
-+        )
-+
-+    if form == "ATTRIBUTE":
-+        return (
-+            isinstance(condition, ast.Attribute)
-+            and condition.attr == "TYPE_CHECKING"
-+            and isinstance(condition.value, ast.Name)
-+            and condition.value.id == "typing"
-+        )
-+
-+    return False
-+
-+
-+def recognize_typing_guard(
-+    tree: ast.Module,
-+    indexed_ids: frozenset[str],
-+) -> RecognizedTypingGuard | None:
-+    if not isinstance(tree, ast.Module) or not isinstance(indexed_ids, frozenset):
-+        return None
-+
-+    if "typing" in indexed_ids or "typing.__init__" in indexed_ids:
-+        return None
-+
-+    markers: list[tuple[int, ast.Import | ast.ImportFrom, str]] = []
-+    for position, statement in enumerate(tree.body):
-+        if (
-+            isinstance(statement, ast.ImportFrom)
-+            and statement.module == "typing"
-+            and statement.level == 0
-+            and len(statement.names) == 1
-+            and statement.names[0].name == "TYPE_CHECKING"
-+            and statement.names[0].asname is None
-+        ):
-+            markers.append((position, statement, "NAME"))
-+        elif (
-+            isinstance(statement, ast.Import)
-+            and len(statement.names) == 1
-+            and statement.names[0].name == "typing"
-+            and statement.names[0].asname is None
-+        ):
-+            markers.append((position, statement, "ATTRIBUTE"))
-+
-+    if len(markers) != 1:
-+        return None
-+
-+    marker_position, marker_statement, form = markers[0]
-+    protected_name = "TYPE_CHECKING" if form == "NAME" else "typing"
-+
-+    for position, statement in enumerate(tree.body[:marker_position]):
-+        if isinstance(statement, ast.Pass):
-+            continue
-+        if (
-+            position == 0
-+            and isinstance(statement, ast.Expr)
-+            and isinstance(statement.value, ast.Constant)
-+            and type(statement.value.value) is str
-+        ):
-+            continue
-+        return None
-+
-+    top_level_guards = {
-+        id(statement)
-+        for statement in tree.body
-+        if isinstance(statement, ast.If)
-+        and matches_typing_guard(statement.test, form)
-+    }
-+    guard_positions = [
-+        position
-+        for position, statement in enumerate(tree.body)
-+        if isinstance(statement, ast.If)
-+        and matches_typing_guard(statement.test, form)
-+    ]
-+    if not guard_positions or any(
-+        position <= marker_position for position in guard_positions
-+    ):
-+        return None
-+
-+    class BindingAudit(ast.NodeVisitor):
-+        valid = True
-+
-+        def reject(self) -> None:
-+            self.valid = False
-+
-+        def visit_Name(self, node: ast.Name) -> None:
-+            if node.id == protected_name and isinstance(
-+                node.ctx, (ast.Store, ast.Del)
-+            ):
-+                self.reject()
-+            self.generic_visit(node)
-+
-+        def visit_Import(self, node: ast.Import) -> None:
-+            for alias in node.names:
-+                bound = alias.asname or alias.name.split(".", 1)[0]
-+                if bound == protected_name:
-+                    if node is marker_statement:
-+                        continue
-+                    self.reject()
-+                if (
-+                    form == "ATTRIBUTE"
-+                    and alias.name == "typing"
-+                    and node is not marker_statement
-+                ):
-+                    self.reject()
-+
-+        def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
-+            for alias in node.names:
-+                bound = alias.asname or alias.name
-+                if bound == protected_name:
-+                    if node is marker_statement:
-+                        continue
-+                    self.reject()
-+                if (
-+                    node.module == "typing"
-+                    and any(alias.name == "TYPE_CHECKING" for alias in node.names)
-+                    and node is not marker_statement
-+                ):
-+                    self.reject()
-+                if alias.name == "*":
-+                    self.reject()
-+
-+        def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
-+            if node.name == protected_name:
-+                self.reject()
-+            self._visit_arguments(node.args)
-+            self.generic_visit(node)
-+
-+        def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
-+            if node.name == protected_name:
-+                self.reject()
-+            self._visit_arguments(node.args)
-+            self.generic_visit(node)
-+
-+        def visit_Lambda(self, node: ast.Lambda) -> None:
-+            self._visit_arguments(node.args)
-+            self.generic_visit(node)
-+
-+        def _visit_arguments(self, arguments: ast.arguments) -> None:
-+            if any(
-+                argument.arg == protected_name
-+                for argument in (
-+                    *arguments.posonlyargs,
-+                    *arguments.args,
-+                    *arguments.kwonlyargs,
-+                )
-+            ) or (
-+                arguments.vararg is not None
-+                and arguments.vararg.arg == protected_name
-+            ) or (
-+                arguments.kwarg is not None
-+                and arguments.kwarg.arg == protected_name
-+            ):
-+                self.reject()
-+
-+        def visit_ClassDef(self, node: ast.ClassDef) -> None:
-+            if node.name == protected_name:
-+                self.reject()
-+            self.generic_visit(node)
-+
-+        def visit_Global(self, node: ast.Global) -> None:
-+            if protected_name in node.names:
-+                self.reject()
-+
-+        def visit_Nonlocal(self, node: ast.Nonlocal) -> None:
-+            if protected_name in node.names:
-+                self.reject()
-+
-+        def visit_ExceptHandler(self, node: ast.ExceptHandler) -> None:
-+            if node.name == protected_name:
-+                self.reject()
-+            self.generic_visit(node)
-+
-+        def visit_Attribute(self, node: ast.Attribute) -> None:
-+            if (
-+                form == "ATTRIBUTE"
-+                and node.attr == "TYPE_CHECKING"
-+                and isinstance(node.value, ast.Name)
-+                and node.value.id == "typing"
-+                and isinstance(node.ctx, (ast.Store, ast.Del))
-+            ):
-+                self.reject()
-+            self.generic_visit(node)
-+
-+        def visit_MatchAs(self, node: ast.MatchAs) -> None:
-+            if node.name == protected_name:
-+                self.reject()
-+            self.generic_visit(node)
-+
-+        def visit_MatchStar(self, node: ast.MatchStar) -> None:
-+            if node.name == protected_name:
-+                self.reject()
-+            self.generic_visit(node)
-+
-+        def visit_MatchMapping(self, node: ast.MatchMapping) -> None:
-+            if node.rest == protected_name:
-+                self.reject()
-+            self.generic_visit(node)
-+
-+        def visit_TypeAlias(self, node: ast.AST) -> None:
-+            name = getattr(node, "name", None)
-+            if isinstance(name, ast.Name) and name.id == protected_name:
-+                self.reject()
-+            self.generic_visit(node)
-+
-+    audit = BindingAudit()
-+    audit.visit(tree)
-+    if not audit.valid:
-+        return None
-+
-+    if form == "ATTRIBUTE":
-+        for node in ast.walk(tree):
-+            if isinstance(node, ast.Attribute) and (
-+                node.attr == "TYPE_CHECKING"
-+                and isinstance(node.value, ast.Name)
-+                and node.value.id == "typing"
-+                and isinstance(node.ctx, (ast.Store, ast.Del))
-+            ):
-+                return None
-+
-+    module_guards = {
-+        id(statement)
-+        for statement in tree.body
-+        if isinstance(statement, ast.If)
-+        and matches_typing_guard(statement.test, form)
-+    }
-+    for node in ast.walk(tree):
-+        if (
-+            isinstance(node, ast.If)
-+            and matches_typing_guard(node.test, form)
-+            and id(node) not in module_guards
-+        ):
-+            return None
-+
-+    return RecognizedTypingGuard(form, marker_statement)
-```
-
-## 23. CONTRACT CONFLICTS
-
-None observed during implementation or the specified validations. The four expected lexical control branches were preserved; ELSE imports report an `ELSE` control frame, as expected from their actual AST locations.
-
-## 24. UNSUPPORTED RUNTIME ASSUMPTIONS
-
-The model uses the explicitly restricted ordinary standard-library convention that `typing.TYPE_CHECKING` is false. It does not authenticate arbitrary `sys.modules`, import hooks, monkeypatches, external process state, or active loaded-code identity. General Python runtime safety and active Contextor runtime adoption remain UNKNOWN and are not claimed.
-
-## 25. FINAL GO/PARTIAL/NO_GO
-
-**GO for the scoped D2B-1 contract and acceptance gates.** All specified focused tests and syntax/whitespace checks passed. The result does not authorize or implement D2B-2, try/except semantics, hard-to-soft edge migration, persistent schema changes, or active runtime adoption certification. Stop at D2B-1 pending the next explicit `proceduj`.
+````
