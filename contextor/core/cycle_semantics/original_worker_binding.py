@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from contextor.core.source import SourceSnapshot
 
 from .scc import analyze_import_cycle_topology
+from .model_source_closure import compute_cycle_model_source_closures
 
 
 _CAPTURE_STATUS = "ALL_SELECTED_CAPTURED_NON_ATOMIC"
@@ -30,7 +31,7 @@ class OriginalWorkerCycleClosureBinding:
     status: str
     reason: str | None
     cyclic_components: tuple[tuple[str, ...], ...]
-    reachable_modules: tuple[str, ...]
+    reachable_modules: tuple[str, ...]  # Evidence-source closure, including initializers.
     source_snapshots: dict[str, SourceSnapshot]
     ast_modes: tuple[tuple[str, str], ...]
     retained_raw_bytes: int
@@ -94,26 +95,11 @@ def assess_original_worker_cycle_closure(
     ):
         return unavailable("INDEX_CAPTURE_SHAPE_INVALID")
 
-    adjacency: dict[str, tuple[str, ...]] = {}
-    for module_id, targets in hard_edges.items():
-        adjacency[module_id] = tuple(sorted(set(targets)))
-    for targets in tuple(adjacency.values()):
-        for target in targets:
-            adjacency.setdefault(target, ())
-
     required: set[str] = set()
-    components = tuple(
-        component.members
-        for component in topology.cyclic_components
-    )
-    for members in components:
-        pending = list(members)
-        required.update(members)
-        while pending:
-            for target in adjacency[pending.pop()]:
-                if target not in required:
-                    required.add(target)
-                    pending.append(target)
+    closures = compute_cycle_model_source_closures(hard_edges)
+    components = tuple(closure.members for closure in closures)
+    for closure in closures:
+        required.update(closure.evidence_source_modules)
         if len(required) > _MAX_MODULES:
             return unavailable("CLOSURE_MODULE_LIMIT")
 

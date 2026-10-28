@@ -43,6 +43,7 @@ def _package_repo(tmp_path):
     (pkg / "__init__.py").write_bytes(b"")
     (pkg / "a.py").write_bytes(
         b"import pkg.b\n"
+        b"@unknown_decorator\n"
         b"def fa():\n"
         b"    return 1\n"
     )

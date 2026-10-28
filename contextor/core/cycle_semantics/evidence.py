@@ -10,7 +10,7 @@ import ast
 import hashlib
 import json
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import Any
 
 from contextor.core.source import ParsedSourceInput
@@ -18,11 +18,14 @@ from contextor.core.source import ParsedSourceInput
 from .contracts import CycleSemanticsSnapshot, fingerprint_hard_edges
 from .scc import analyze_import_cycle_topology
 from .initialization_model import ImportOrderAssessment
+from .package_model import PackageImportAssessment
+from .model_source_closure import compute_cycle_model_source_closures
+from .model_identity import indexed_to_logical_module, logical_to_indexed_module
 from .scenarios import (
     CycleComponentScenarios, CycleScenarioReport, analyze_cycle_scenarios,
 )
 
-EVIDENCE_SEMANTIC_VERSION = "cycle-semantics-evidence/1"
+EVIDENCE_SEMANTIC_VERSION = "cycle-semantics-evidence/2"
 _MISSING = "MISSING"
 
 
@@ -40,6 +43,24 @@ class ComponentSourceEvidence:
     classification: str
     coverage: str
     reason: str | None
+    model_kind: str = "FLAT_MODULE"
+
+
+def _scenario_fingerprint(scenario: CycleComponentScenarios) -> str:
+    return _digest(asdict(scenario))
+
+
+def _component_token(
+    members: tuple[str, ...],
+    subgraph: tuple[tuple[str, tuple[str, ...]], ...],
+    signatures: tuple[tuple[str, str, str], ...],
+    scenario: CycleComponentScenarios,
+) -> str:
+    return _digest((
+        EVIDENCE_SEMANTIC_VERSION, members, subgraph, signatures,
+        scenario.model_kind, scenario.evidence_scope,
+        _scenario_fingerprint(scenario),
+    ))
 
 
 @dataclass(frozen=True)
@@ -153,6 +174,7 @@ def assess_index_bound_scc_models(
     cyclic_members = tuple(sorted(
         member for component in components for member in component.members
     ))
+    closures = compute_cycle_model_source_closures(hard_edges)
     outputs: list[SCCModelEvidenceAssessment] = []
     for position, (structural, scenario, evidence) in enumerate(zip(
         components, source_evidence.scenarios.components,
@@ -191,14 +213,7 @@ def assess_index_bound_scc_models(
             outputs.append(result(members, "SCENARIO_EVIDENCE_MISMATCH"))
             continue
 
-        closure = set(members)
-        pending = list(members)
-        while pending:
-            for target in adjacency[pending.pop()]:
-                if target not in closure:
-                    closure.add(target)
-                    pending.append(target)
-        expected_closure = tuple(sorted(closure))
+        expected_closure = closures[position].evidence_source_modules
         signatures = evidence.source_signatures
         if not isinstance(signatures, tuple) or any(
             not isinstance(row, tuple) or len(row) != 3
@@ -231,9 +246,7 @@ def assess_index_bound_scc_models(
             outputs.append(result(members, "SOURCE_INDEX_FINGERPRINT_MISMATCH:" + bad_source))
             continue
         subgraph = tuple((node, adjacency[node]) for node in expected_closure)
-        expected_token = _digest((
-            EVIDENCE_SEMANTIC_VERSION, members, subgraph, signatures,
-        ))
+        expected_token = _component_token(members, subgraph, signatures, scenario)
         if evidence.evidence_token != expected_token:
             outputs.append(result(members, "COMPONENT_EVIDENCE_TOKEN_MISMATCH"))
             continue
@@ -253,14 +266,31 @@ def assess_index_bound_scc_models(
         ):
             outputs.append(result(members, "SNAPSHOT_SOURCE_IDENTITY_MISMATCH"))
             continue
+        model_contracts = {
+            "FLAT_MODULE": (
+                ImportOrderAssessment,
+                "RESTRICTED_FLAT_MODULE_MODEL",
+                "CLOSED_FLAT_MODULE_FRESH_ENTRY_MODEL",
+                members,
+            ),
+            "REGULAR_PACKAGE": (
+                PackageImportAssessment,
+                "RESTRICTED_REGULAR_PACKAGE_MODEL",
+                "CLOSED_REGULAR_PACKAGE_FRESH_ENTRY_MODEL",
+                tuple(indexed_to_logical_module(member) for member in members),
+            ),
+        }
+        contract = model_contracts.get(scenario.model_kind)
         if (
-            scenario.evidence_scope != "CLOSED_FLAT_MODULE_FRESH_ENTRY_MODEL"
+            contract is None
+            or evidence.model_kind != scenario.model_kind
+            or scenario.evidence_scope != contract[2]
             or scenario.coverage != "COMPLETE_FRESH_MEMBER_ENTRIES"
             or not isinstance(scenario.entry_assessments, tuple)
-            or any(not isinstance(a, ImportOrderAssessment)
-                   for a in scenario.entry_assessments)
-            or tuple(a.entry_module for a in scenario.entry_assessments) != members
-            or any(a.evidence_scope != "RESTRICTED_FLAT_MODULE_MODEL"
+            or any(type(a) is not contract[0] for a in scenario.entry_assessments)
+            or tuple(a.entry_module for a in scenario.entry_assessments) != contract[3]
+            or len(set(contract[3])) != len(contract[3])
+            or any(a.evidence_scope != contract[1]
                    for a in scenario.entry_assessments)
             or any(a.outcome == "UNKNOWN" for a in scenario.entry_assessments)
         ):
@@ -283,8 +313,15 @@ def assess_index_bound_scc_models(
                 a.outcome == "EARLY_BINDING_HAZARD"
                 and a.events
                 and a.events[-1].operation == "EARLY_BINDING_HAZARD"
-                and a.events[-1].module in member_set
-                and a.events[-1].target in member_set
+                and a.events[-1].target == a.target_module
+                and (
+                    logical_to_indexed_module(a.events[-1].module, frozenset(adjacency))
+                    if scenario.model_kind == "REGULAR_PACKAGE" else a.events[-1].module
+                ) in member_set
+                and (
+                    logical_to_indexed_module(a.events[-1].target, frozenset(adjacency))
+                    if scenario.model_kind == "REGULAR_PACKAGE" else a.events[-1].target
+                ) in member_set
                 for a in scenario.entry_assessments
             ):
                 outputs.append(SCCModelEvidenceAssessment(
@@ -530,26 +567,17 @@ def build_source_bound_cycle_evidence(
     source_manifest = tuple((name, *signatures[name]) for name in sorted(signatures))
 
     components: list[ComponentSourceEvidence] = []
-    for component in report.components:
-        visited = set(component.members)
-        pending = list(component.members)
-        while pending:
-            for target in adjacency[pending.pop()]:
-                if target not in visited:
-                    visited.add(target)
-                    pending.append(target)
-        closure = tuple(sorted(visited))
+    closures = compute_cycle_model_source_closures(hard_edges)
+    for component, closure_row in zip(report.components, closures):
+        closure = closure_row.evidence_source_modules
         source_signatures = tuple(
             (module, *signatures.get(module, (_MISSING, _MISSING)))
             for module in closure
         )
         subgraph = tuple((node, adjacency[node]) for node in closure)
-        token = _digest((
-            EVIDENCE_SEMANTIC_VERSION,
-            component.members,
-            subgraph,
-            source_signatures,
-        ))
+        token = _component_token(
+            component.members, subgraph, source_signatures, component,
+        )
         components.append(ComponentSourceEvidence(
             members=component.members,
             reachable_modules=closure,
@@ -558,6 +586,7 @@ def build_source_bound_cycle_evidence(
             classification=component.classification,
             coverage=component.coverage,
             reason=component.reason,
+            model_kind=component.model_kind,
         ))
 
     return SourceBoundCycleEvidence(

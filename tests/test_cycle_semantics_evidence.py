@@ -14,6 +14,7 @@ from contextor.core.source import (
 from contextor.core.cycle_semantics.evidence import (
     EVIDENCE_SEMANTIC_VERSION,
     _digest,
+    _component_token,
     SCCModelEvidenceAssessment,
     SCCGenerationModelAssessment,
     assess_index_bound_scc_models as assess,
@@ -322,7 +323,7 @@ def test_p0_t11_unknown_entry_in_scc():
     source = replace(evidence, scenarios=report)
     result = assess(PAIR, index, snapshot, source)
     assert result[0].model_classification == "INDETERMINATE"
-    assert result[0].evidence_state == "INCOMPLETE_EVIDENCE"
+    assert result[0].evidence_state == "EVIDENCE_MISMATCH"
 
 
 def test_p0_t12_independent_sccs_do_not_share_pass():
@@ -446,8 +447,8 @@ def test_p0_t18_entry_model_scope_must_match(sources):
 
     result = assess(PAIR, index, snapshot, changed_evidence)
     assert result[0].model_classification == "INDETERMINATE"
-    assert result[0].evidence_state == "INCOMPLETE_EVIDENCE"
-    assert result[0].reason == "INCOMPLETE_MEMBER_ENTRY_ASSESSMENTS"
+    assert result[0].evidence_state == "EVIDENCE_MISMATCH"
+    assert result[0].reason == "COMPONENT_EVIDENCE_TOKEN_MISMATCH"
 
 
 def _p1_case(sources=PASS):
@@ -708,12 +709,12 @@ def test_p1b_t04_forged_ast_signature_and_token():
     altered = replace(
         component,
         source_signatures=forged,
-        evidence_token=_digest((
-            EVIDENCE_SEMANTIC_VERSION,
+        evidence_token=_component_token(
             component.members,
             subgraph,
             forged,
-        )),
+            evidence.scenarios.components[0],
+        ),
     )
     spoofed = replace(
         evidence, components=(altered,),

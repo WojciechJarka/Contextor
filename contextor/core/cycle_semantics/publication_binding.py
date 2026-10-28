@@ -21,9 +21,12 @@ from .generation_manifest import (
     _digest,
 )
 from .scc import analyze_import_cycle_topology
+from .model_source_closure import compute_cycle_model_source_closures
 
 
-PUBLICATION_BINDING_VERSION = "cycle-prepared-co-publication/1"
+PUBLICATION_BINDING_VERSION = "cycle-prepared-co-publication/2"
+_LEGACY_MANIFEST_VERSION = "cycle-source-manifest/1"
+_LEGACY_BINDING_VERSION = "cycle-prepared-co-publication/1"
 PUBLICATION_AUTHORITY = (
     "COMMITTED_PREPARED_CLAIMS_NOT_SOURCE_CERTIFIED"
 )
@@ -48,12 +51,16 @@ class CanonicalCycleManifestReceipt:
 def _validated_claim_digest(
     state: Any,
     manifest: PreparedCycleSourceManifest,
+    *,
+    legacy: bool = False,
 ) -> str:
     """Validate declarations, not source-byte authenticity."""
     if type(manifest) is not PreparedCycleSourceManifest:
         raise ValueError("prepared manifest contract missing")
     if (
-        manifest.version != MANIFEST_VERSION
+        manifest.version != (
+            _LEGACY_MANIFEST_VERSION if legacy else MANIFEST_VERSION
+        )
         or manifest.authority
         != "PREPARED_ONLY_NOT_CANONICALLY_PUBLISHED"
         or not isinstance(manifest.source_manifest_sha256, str)
@@ -112,7 +119,8 @@ def _validated_claim_digest(
     accepted: dict[str, tuple[str, str]] = {}
     claims = []
 
-    for structural, prepared in zip(cyclic, manifest.components):
+    closures = compute_cycle_model_source_closures(hard_edges)
+    for position, (structural, prepared) in enumerate(zip(cyclic, manifest.components)):
         if (
             type(prepared) is not PreparedSCCSourceBinding
             or prepared.members != structural.members
@@ -121,19 +129,36 @@ def _validated_claim_digest(
             or prepared.reason is not None
             or prepared.model_classification not in _ALLOWED_MODELS
             or type(prepared.source_signatures) is not tuple
+            or (
+                legacy and (
+                    prepared.model_kind != "FLAT_MODULE"
+                    or prepared.model_evidence_sha256 is not None
+                )
+            )
+            or (
+                not legacy and (
+                    prepared.model_kind not in {"FLAT_MODULE", "REGULAR_PACKAGE"}
+                    or type(prepared.model_evidence_sha256) is not str
+                    or len(prepared.model_evidence_sha256) != 64
+                    or any(c not in "0123456789abcdef"
+                           for c in prepared.model_evidence_sha256)
+                )
+            )
         ):
             raise ValueError(
                 "prepared SCC claims are inconsistent"
             )
 
-        closure = set(structural.members)
-        pending = list(structural.members)
-
-        while pending:
-            for target in adjacency[pending.pop()]:
-                if target not in closure:
-                    closure.add(target)
-                    pending.append(target)
+        if legacy:
+            closure = set(structural.members)
+            pending = list(structural.members)
+            while pending:
+                for target in adjacency[pending.pop()]:
+                    if target not in closure:
+                        closure.add(target)
+                        pending.append(target)
+        else:
+            closure = set(closures[position].evidence_source_modules)
 
         rows = prepared.source_signatures
         if (
@@ -175,9 +200,10 @@ def _validated_claim_digest(
             accepted[name] = signature
 
         claims.append((
-            prepared.members,
-            prepared.model_classification,
-            rows,
+            (prepared.members, prepared.model_classification, rows)
+            if legacy else
+            (prepared.members, prepared.model_classification,
+             prepared.model_kind, prepared.model_evidence_sha256, rows)
         ))
 
     observed = dict(snapshot.observed_source_fingerprints)
@@ -204,9 +230,12 @@ def _validated_claim_digest(
         for name in sorted(accepted)
     )
     expected_manifest_hash = _digest((
-        MANIFEST_VERSION,
+        _LEGACY_MANIFEST_VERSION if legacy else MANIFEST_VERSION,
         graph_hash,
-        tuple(component.members for component in cyclic),
+        (
+            tuple(component.members for component in cyclic)
+            if legacy else tuple(claims)
+        ),
         ordered_sources,
     ))
     if manifest.source_manifest_sha256 != expected_manifest_hash:
@@ -217,7 +246,7 @@ def _validated_claim_digest(
     # Bind model CLAIMS independently of the source digest.
     # This does not authenticate model execution or source origin.
     return _digest((
-        PUBLICATION_BINDING_VERSION,
+        _LEGACY_BINDING_VERSION if legacy else PUBLICATION_BINDING_VERSION,
         graph_hash,
         expected_manifest_hash,
         tuple(claims),
@@ -286,14 +315,37 @@ def verify_co_published_cycle_manifest(
     if type(receipt) is not CanonicalCycleManifestReceipt:
         return False
 
+    if (
+        type(revision) is not int or revision < 1
+        or type(state_id) is not str or not state_id
+        or type(repo_id) is not str
+        or type(root_path) is not str
+        or getattr(state, "revision", None) != revision
+        or getattr(state, "state_id", None) != state_id
+    ):
+        return False
+
+    if receipt.version not in {
+        PUBLICATION_BINDING_VERSION, _LEGACY_BINDING_VERSION,
+    }:
+        return False
+    legacy = receipt.version == _LEGACY_BINDING_VERSION
+    if receipt.prepared_manifest.version != (
+        _LEGACY_MANIFEST_VERSION if legacy else MANIFEST_VERSION
+    ):
+        return False
     try:
-        expected = seal_prepared_cycle_manifest(
-            state,
-            receipt.prepared_manifest,
+        digest = _validated_claim_digest(
+            state, receipt.prepared_manifest, legacy=legacy,
+        )
+        expected = CanonicalCycleManifestReceipt(
+            prepared_manifest=receipt.prepared_manifest,
+            model_claims_sha256=digest,
             revision=revision,
             state_id=state_id,
             repo_id=repo_id,
             root_path=root_path,
+            version=receipt.version,
         )
     except (
         TypeError,

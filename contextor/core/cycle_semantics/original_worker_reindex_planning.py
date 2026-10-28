@@ -14,6 +14,7 @@ from .contracts import fingerprint_hard_edges
 from .original_worker_binding import (
     assess_original_worker_cycle_closure,
 )
+from .model_source_closure import compute_cycle_model_source_closures
 from .scc import analyze_import_cycle_topology
 
 
@@ -96,25 +97,9 @@ def plan_original_worker_reindex(
     if not topology.cyclic_components:
         return unavailable("NO_CYCLIC_COMPONENTS")
 
-    adjacency = {
-        name: tuple(sorted(set(targets)))
-        for name, targets in hard_edges.items()
-    }
-    for targets in tuple(adjacency.values()):
-        for target in targets:
-            adjacency.setdefault(target, ())
-
     selected: set[str] = set()
-
-    for component in topology.cyclic_components:
-        pending = list(component.members)
-        selected.update(component.members)
-
-        while pending:
-            for target in adjacency[pending.pop()]:
-                if target not in selected:
-                    selected.add(target)
-                    pending.append(target)
+    for closure in compute_cycle_model_source_closures(hard_edges):
+        selected.update(closure.evidence_source_modules)
 
         if len(selected) > _MAX_SELECTED:
             return unavailable("CLOSURE_MODULE_LIMIT")

@@ -10,6 +10,10 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 
 from .initialization_model import ImportOrderAssessment, evaluate_flat_import_order
+from .package_model import PackageImportAssessment, evaluate_package_import_order
+from .model_source_closure import compute_cycle_model_source_closures
+from .model_identity import indexed_to_logical_module, logical_to_indexed_module
+from .package_graph_consistency import assess_package_graph_consistency
 from .scc import CyclicImportComponent, ImportCycleTopology, analyze_import_cycle_topology
 
 MAX_COMPONENT_ENTRIES = 64
@@ -24,8 +28,9 @@ class CycleComponentScenarios:
     classification: str
     coverage: str
     reason: str | None
-    entry_assessments: tuple[ImportOrderAssessment, ...]
+    entry_assessments: tuple[ImportOrderAssessment | PackageImportAssessment, ...]
     evidence_scope: str = "CLOSED_FLAT_MODULE_FRESH_ENTRY_MODEL"
+    model_kind: str = "FLAT_MODULE"
 
 
 @dataclass(frozen=True)
@@ -72,7 +77,8 @@ def _component_result(
     *,
     coverage: str,
     reason: str | None = None,
-    assessments: tuple[ImportOrderAssessment, ...] = (),
+    assessments: tuple[ImportOrderAssessment | PackageImportAssessment, ...] = (),
+    model_kind: str = "FLAT_MODULE",
 ) -> CycleComponentScenarios:
     return CycleComponentScenarios(
         members=component.members,
@@ -81,6 +87,12 @@ def _component_result(
         coverage=coverage,
         reason=reason,
         entry_assessments=assessments,
+        evidence_scope=(
+            "CLOSED_REGULAR_PACKAGE_FRESH_ENTRY_MODEL"
+            if model_kind == "REGULAR_PACKAGE"
+            else "CLOSED_FLAT_MODULE_FRESH_ENTRY_MODEL"
+        ),
+        model_kind=model_kind,
     )
 
 
@@ -103,7 +115,8 @@ def analyze_cycle_scenarios(
             adjacency.setdefault(target, frozenset())
 
     output: list[CycleComponentScenarios] = []
-    for component in topology.cyclic_components:
+    closures = compute_cycle_model_source_closures(hard_edges)
+    for component, source_closure in zip(topology.cyclic_components, closures):
         if len(component.members) > MAX_COMPONENT_ENTRIES:
             output.append(_component_result(
                 component, "INDETERMINATE", coverage="NONE",
@@ -111,7 +124,7 @@ def analyze_cycle_scenarios(
             ))
             continue
 
-        reachable = _closure(component.members, adjacency)
+        reachable = set(source_closure.evidence_source_modules)
         if any(name not in modules or not isinstance(modules[name], ast.Module)
                for name in reachable):
             output.append(_component_result(
@@ -145,28 +158,68 @@ def analyze_cycle_scenarios(
 
         # The graph and AST must describe the exact same import targets.
         # No name-based exceptions and no guessed package resolution.
-        if any(
+        flat_applicable = not any(
             _declared_import_targets(modules[name]) != set(adjacency[name])
             for name in reachable
-        ):
-            output.append(_component_result(
-                component, "INDETERMINATE", coverage="NONE",
-                reason="GRAPH_SOURCE_IMPORT_MISMATCH",
-            ))
-            continue
+        )
 
         sources = {name: modules[name] for name in sorted(reachable)}
-        assessments = tuple(
-            evaluate_flat_import_order(sources, entry)
-            for entry in component.members
-        )
+        model_kind = "FLAT_MODULE"
+        if flat_applicable:
+            assessments = tuple(
+                evaluate_flat_import_order(sources, entry)
+                for entry in component.members
+            )
+        else:
+            if not any("." in name for name in reachable):
+                output.append(_component_result(
+                    component, "INDETERMINATE", coverage="NONE",
+                    reason="GRAPH_SOURCE_IMPORT_MISMATCH",
+                ))
+                continue
+            consistency = assess_package_graph_consistency(
+                hard_edges, sources, source_closure.evidence_source_modules,
+            )
+            if consistency.status != "CONSISTENT":
+                output.append(_component_result(
+                    component, "INDETERMINATE", coverage="NONE",
+                    reason=consistency.reason,
+                    model_kind="REGULAR_PACKAGE",
+                ))
+                continue
+            indexed = frozenset(hard_edges)
+            if any(
+                logical_to_indexed_module(indexed_to_logical_module(member), indexed)
+                != member
+                for member in component.members
+            ):
+                output.append(_component_result(
+                    component, "INDETERMINATE", coverage="NONE",
+                    reason="AMBIGUOUS_PACKAGE_TARGET",
+                    model_kind="REGULAR_PACKAGE",
+                ))
+                continue
+            model_kind = "REGULAR_PACKAGE"
+            assessments = tuple(
+                evaluate_package_import_order(
+                    sources, indexed_to_logical_module(entry),
+                )
+                for entry in component.members
+            )
         member_set = set(component.members)
         internal_hazard = any(
             result.outcome == "EARLY_BINDING_HAZARD"
             and result.events
             and result.events[-1].operation == "EARLY_BINDING_HAZARD"
-            and result.events[-1].module in member_set
-            and result.events[-1].target in member_set
+            and (
+                logical_to_indexed_module(result.events[-1].module, frozenset(hard_edges))
+                if model_kind == "REGULAR_PACKAGE" else result.events[-1].module
+            ) in member_set
+            and (
+                logical_to_indexed_module(result.events[-1].target, frozenset(hard_edges))
+                if model_kind == "REGULAR_PACKAGE" else result.events[-1].target
+            ) in member_set
+            and result.events[-1].target == result.target_module
             for result in assessments
         )
         if internal_hazard:
@@ -189,6 +242,7 @@ def analyze_cycle_scenarios(
         output.append(_component_result(
             component, classification, coverage=coverage,
             reason=reason, assessments=assessments,
+            model_kind=model_kind,
         ))
 
     return CycleScenarioReport(topology, tuple(output))

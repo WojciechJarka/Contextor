@@ -13,6 +13,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 
 from contextor.core.source import (
+    ParsedSourceInput,
     SourceError,
     SourceSnapshot,
     parse_source_snapshot,
@@ -22,6 +23,8 @@ from .contracts import CycleSemanticsSnapshot
 from .evidence import (
     SourceBoundCycleEvidence,
     assess_index_bound_scc_models,
+    build_source_bound_cycle_evidence,
+    _scenario_fingerprint,
 )
 
 
@@ -82,7 +85,7 @@ def assess_scc_source_bytes(
 
     # Reuse parsed hashes for closure members shared by SCCs.
     # Cache is execution-local and does not certify generation.
-    cache: dict[str, tuple[str, str | None]] = {}
+    cache: dict[str, tuple[str, str | None, ParsedSourceInput | None]] = {}
 
     for position, model in enumerate(model_results):
         members = model.members
@@ -182,7 +185,7 @@ def assess_scc_source_bytes(
                         module,
                     )
                 except SourceError:
-                    cache[module] = (actual, None)
+                    cache[module] = (actual, None, None)
                 else:
                     ast_hash = hashlib.sha256(
                         ast.dump(
@@ -191,7 +194,7 @@ def assess_scc_source_bytes(
                         ).encode("utf-8")
                     ).hexdigest()
 
-                    cache[module] = (actual, ast_hash)
+                    cache[module] = (actual, ast_hash, parsed)
 
             observed_ast = cache[module][1]
 
@@ -206,6 +209,37 @@ def assess_scc_source_bytes(
                     "SOURCE_AST_BYTES_MISMATCH:" + module
                 )
                 break
+
+        if outcome is None:
+            parsed_sources = {
+                module: cache[module][2]
+                for module in closure
+            }
+            try:
+                replay = build_source_bound_cycle_evidence(
+                    hard_edges, parsed_sources,
+                )
+                replay_scenario = replay.scenarios.components[position]
+                supplied_scenario = source_evidence.scenarios.components[position]
+                replay_component = replay.components[position]
+                supplied_component = source_evidence.components[position]
+            except (TypeError, ValueError, KeyError, IndexError, RecursionError, OverflowError):
+                outcome = unavailable("MODEL_REPLAY_UNAVAILABLE")
+            else:
+                if replay_scenario.reason in {
+                    "ENTRY_BUDGET_EXCEEDED",
+                    "STATEMENT_BUDGET_EXCEEDED",
+                    "AST_NODE_BUDGET_EXCEEDED",
+                }:
+                    outcome = unavailable("MODEL_REPLAY_UNAVAILABLE")
+                elif (
+                    replay_scenario != supplied_scenario
+                    or _scenario_fingerprint(replay_scenario)
+                    != _scenario_fingerprint(supplied_scenario)
+                    or replay_component.evidence_token
+                    != supplied_component.evidence_token
+                ):
+                    outcome = mismatch("MODEL_REPLAY_MISMATCH")
 
         if outcome is not None:
             assessments.append(outcome)

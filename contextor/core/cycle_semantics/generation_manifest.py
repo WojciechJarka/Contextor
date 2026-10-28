@@ -20,9 +20,10 @@ from .contracts import (
 )
 from .evidence import SourceBoundCycleEvidence
 from .source_proof import assess_scc_source_bytes
+from .evidence import _scenario_fingerprint
 
 
-MANIFEST_VERSION = "cycle-source-manifest/1"
+MANIFEST_VERSION = "cycle-source-manifest/2"
 _AUTHORITY = "PREPARED_ONLY_NOT_CANONICALLY_PUBLISHED"
 
 
@@ -43,6 +44,8 @@ class PreparedSCCSourceBinding:
     model_classification: str
     preparation_state: str
     reason: str | None
+    model_kind: str = "FLAT_MODULE"
+    model_evidence_sha256: str | None = None
 
 
 @dataclass(frozen=True)
@@ -106,6 +109,8 @@ def prepare_cycle_source_manifest(
                 model_classification="INDETERMINATE",
                 preparation_state="UNAVAILABLE",
                 reason=check.reason or "P1B_EVIDENCE_UNAVAILABLE",
+                model_kind=source_evidence.scenarios.components[position].model_kind,
+                model_evidence_sha256=None,
             ))
             continue
 
@@ -133,6 +138,8 @@ def prepare_cycle_source_manifest(
                 model_classification="INDETERMINATE",
                 preparation_state="UNAVAILABLE",
                 reason="SOURCE_MANIFEST_CONFLICT:" + conflict,
+                model_kind=source_evidence.scenarios.components[position].model_kind,
+                model_evidence_sha256=None,
             ))
             continue
 
@@ -145,6 +152,10 @@ def prepare_cycle_source_manifest(
             model_classification=check.model_classification,
             preparation_state="PREPARED_UNPUBLISHED",
             reason=None,
+            model_kind=source_evidence.scenarios.components[position].model_kind,
+            model_evidence_sha256=_scenario_fingerprint(
+                source_evidence.scenarios.components[position]
+            ),
         ))
 
     # A global manifest digest must not imply completeness
@@ -157,10 +168,13 @@ def prepare_cycle_source_manifest(
         manifest_hash: str | None = _digest((
             MANIFEST_VERSION,
             graph_hash,
-            tuple(
-                component.members
-                for component in prepared
-            ),
+            tuple((
+                component.members,
+                component.model_classification,
+                component.model_kind,
+                component.model_evidence_sha256,
+                component.source_signatures,
+            ) for component in prepared),
             ordered_sources,
         ))
     else:
