@@ -73,7 +73,7 @@ SYMBOL_FACTS_SCHEMA_VERSION = 2
 REFERENCE_FACTS_SCHEMA_VERSION = 1
 COLLISION_FACTS_SCHEMA_VERSION = 1
 TEST_FACTS_SCHEMA_VERSION = 1
-IMPORT_CLASSIFICATION_SEMANTICS_VERSION = 3
+IMPORT_CLASSIFICATION_SEMANTICS_VERSION = 4
 _SYMBOL_FACTS_AVAILABLE = "available"
 _SYMBOL_FACTS_FAILURE = "failure"
 _SYMBOL_FACTS_NOT_COMPUTED = "not_computed"
@@ -284,6 +284,95 @@ class AdvancedImportVisitor(ast.NodeVisitor):
                 is_local=is_local,
             )
         )
+
+
+def _possible_project_typing_marker_mutation(
+    tree: ast.AST,
+) -> bool:
+    if not isinstance(tree, ast.Module):
+        return True
+
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Attribute)
+            and node.attr == "TYPE_CHECKING"
+            and isinstance(
+                node.ctx,
+                (ast.Store, ast.Del),
+            )
+        ):
+            return True
+
+        if (
+            isinstance(node, ast.Subscript)
+            and isinstance(
+                node.ctx,
+                (ast.Store, ast.Del),
+            )
+            and isinstance(
+                node.slice,
+                ast.Constant,
+            )
+            and type(node.slice.value) is str
+            and node.slice.value == "TYPE_CHECKING"
+        ):
+            return True
+
+        if not isinstance(node, ast.Call):
+            continue
+
+        if (
+            isinstance(node.func, ast.Name)
+            and node.func.id == "exec"
+        ):
+            return True
+
+        if (
+            isinstance(node.func, ast.Name)
+            and node.func.id
+            in {"setattr", "delattr"}
+            and len(node.args) >= 2
+            and isinstance(
+                node.args[1],
+                ast.Constant,
+            )
+            and type(node.args[1].value) is str
+            and node.args[1].value
+            == "TYPE_CHECKING"
+        ):
+            return True
+
+        if (
+            isinstance(node.func, ast.Attribute)
+            and node.func.attr
+            in {
+                "update",
+                "setdefault",
+                "__setitem__",
+            }
+        ):
+            receiver = node.func.value
+
+            if (
+                isinstance(receiver, ast.Call)
+                and isinstance(
+                    receiver.func,
+                    ast.Name,
+                )
+                and receiver.func.id
+                in {"globals", "vars"}
+                and not receiver.args
+                and not receiver.keywords
+            ):
+                return True
+
+            if (
+                isinstance(receiver, ast.Attribute)
+                and receiver.attr == "__dict__"
+            ):
+                return True
+
+    return False
 
 
 def read_imports(
@@ -540,6 +629,7 @@ def _process_single_file(
             "imports": None,
             "error": str(exc),
             "typing_guard_initializer_passive": False,
+            "typing_guard_marker_mutation": True,
             "filename": path.name,
             "symbol_facts": None,
             "reference_facts": None,
@@ -601,6 +691,11 @@ def _process_single_file(
                     "typing_guard_initializer_passive"
                 )
             ) is not bool
+            or type(
+                cached_data.get(
+                    "typing_guard_marker_mutation"
+                )
+            ) is not bool
         )
     ):
         cached_data = None
@@ -609,6 +704,11 @@ def _process_single_file(
         cached_data["typing_guard_initializer_passive"]
         if cached_data is not None
         else False
+    )
+    typing_guard_marker_mutation = (
+        cached_data["typing_guard_marker_mutation"]
+        if cached_data is not None
+        else True
     )
 
     lineage_facts = None
@@ -668,6 +768,9 @@ def _process_single_file(
                 "typing_guard_initializer_passive": (
                     typing_guard_initializer_passive
                 ),
+                "typing_guard_marker_mutation": (
+                    typing_guard_marker_mutation
+                ),
                 "filename": path.name,
                 "symbol_facts": symbol_facts,
                 "reference_facts": reference_facts,
@@ -709,6 +812,7 @@ def _process_single_file(
             "absolute_path": str(path.resolve()), "imports": None,
             "error": str(exc), "filename": path.name,
             "typing_guard_initializer_passive": False,
+            "typing_guard_marker_mutation": True,
             "symbol_facts": None, "reference_facts": None,
             "collision_facts": None, "collision_facts_status": None,
             "test_facts": None, "test_facts_status": None,
@@ -739,6 +843,12 @@ def _process_single_file(
         typing_guard_initializer_passive = (
             module_id.endswith(".__init__")
             and _typing_guard_passive_initializer(tree)
+        )
+    if cached_data is None:
+        typing_guard_marker_mutation = (
+            _possible_project_typing_marker_mutation(
+                tree
+            )
         )
     lineage_extract_ms = 0.0
     lineage_extract_called = False
@@ -863,6 +973,9 @@ def _process_single_file(
                 rewritten[
                     "typing_guard_initializer_passive"
                 ] = typing_guard_initializer_passive
+                rewritten[
+                    "typing_guard_marker_mutation"
+                ] = typing_guard_marker_mutation
                 rewritten["lineage_facts"] = serialize_extracted_lineage_source_facts(
                     lineage_facts
                 )
@@ -999,6 +1112,9 @@ def _process_single_file(
             "typing_guard_initializer_passive": (
                 typing_guard_initializer_passive
             ),
+            "typing_guard_marker_mutation": (
+                typing_guard_marker_mutation
+            ),
         }
         if symbol_facts and symbol_facts.get("status") == _SYMBOL_FACTS_AVAILABLE:
             cache_data["symbol_facts"] = symbol_facts
@@ -1033,6 +1149,9 @@ def _process_single_file(
         "error": error,
         "typing_guard_initializer_passive": (
             typing_guard_initializer_passive
+        ),
+        "typing_guard_marker_mutation": (
+            typing_guard_marker_mutation
         ),
         "filename": path.name,
         "symbol_facts": symbol_facts,
@@ -1258,6 +1377,10 @@ def index_repository(
         str,
         tuple[bool, str],
     ] = {}
+    marker_mutation_by_module: dict[
+        str,
+        tuple[bool, str],
+    ] = {}
     file_tasks = 0
     source_parse_calls = 0
     source_parse_failures = 0
@@ -1407,6 +1530,36 @@ def index_repository(
                 module_id
             ] = (
                 passive,
+                fingerprint,
+            )
+
+    def record_marker_mutation(
+        result: dict,
+    ) -> None:
+        module_id = result.get("module_id")
+
+        if (
+            type(module_id) is not str
+            or not module_id
+            or result.get("error") is not None
+        ):
+            return
+
+        mutation = result.get(
+            "typing_guard_marker_mutation"
+        )
+        fingerprint = result.get(
+            "source_fingerprint"
+        )
+
+        if (
+            type(mutation) is bool
+            and type(fingerprint) is str
+        ):
+            marker_mutation_by_module[
+                module_id
+            ] = (
+                mutation,
                 fingerprint,
             )
 
@@ -2045,6 +2198,33 @@ def index_repository(
             "typing" in modules
             or "typing.__init__" in modules
         )
+        project_marker_safe = (
+            not skipped
+            and len(marker_mutation_by_module)
+            == len(modules)
+            and all(
+                (
+                    module_id
+                    in marker_mutation_by_module
+                    and type(
+                        marker_mutation_by_module[
+                            module_id
+                        ][0]
+                    ) is bool
+                    and marker_mutation_by_module[
+                        module_id
+                    ][0] is False
+                    and marker_mutation_by_module[
+                        module_id
+                    ][1] == (
+                        source_fingerprints_by_module.get(
+                            module_id
+                        )
+                    )
+                )
+                for module_id in modules
+            )
+        )
 
         for module_id, module in modules.items():
             if not any(
@@ -2084,6 +2264,7 @@ def index_repository(
             if (
                 not typing_shadowed
                 and parents_proved
+                and project_marker_safe
             ):
                 continue
 
@@ -2131,6 +2312,7 @@ def index_repository(
                 )
                 record_indexed_source_fingerprint(res)
                 record_initializer_passivity(res)
+                record_marker_mutation(res)
                 if res.get("symbol_facts") is not None:
                     symbol_facts_by_module[res["module_id"]] = res["symbol_facts"]
                 if res.get("reference_facts") is not None:
@@ -2288,6 +2470,7 @@ def index_repository(
                 )
                 record_indexed_source_fingerprint(res)
                 record_initializer_passivity(res)
+                record_marker_mutation(res)
 
                 if res.get("symbol_facts") is not None:
                     symbol_facts_by_module[

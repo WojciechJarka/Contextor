@@ -227,6 +227,22 @@ D2B3_TYPED_SIDE_ATTRIBUTE = {
     ),
 }
 
+D2B4_INDEXED_LAUNCHER = {
+    "pkg/__init__.py": "pass\n",
+    "pkg/a.py": (
+        "from typing import TYPE_CHECKING\n"
+        "if TYPE_CHECKING:\n"
+        "    import pkg.c\n"
+        "value = 1\n"
+    ),
+    "pkg/c.py": "from pkg.a import value\n",
+    "pkg/launcher.py": (
+        "import typing\n"
+        "typing.TYPE_CHECKING = True\n"
+        "import pkg.a\n"
+    ),
+}
+
 D2B3_SOURCE_BOUND_NEGATIVES = [
     (
         "N01-no-marker",
@@ -1157,6 +1173,32 @@ def test_p1d3_d2b3_name_typed_side_import(tmp_path, isolated_dirs):
         tmp_path / "repo", D2B3_TYPED_SIDE_NAME,
     )
     _assert_d2b3_typed_side_evidence(root)
+
+
+def test_p1d3_d2b4_launcher_source_checker_fails_closed(
+    tmp_path, isolated_dirs,
+):
+    root = write_synthetic_repository(tmp_path / "repo", D2B4_INDEXED_LAUNCHER)
+    index, graph, captured, parsed, evidence, snapshot = _d2a_source_evidence(root)
+    assert graph.hard_edges["pkg.a"] == {"pkg.c"}
+    assert graph.hard_edges["pkg.c"] == {"pkg.a"}
+    closure = compute_cycle_model_source_closures(graph.hard_edges)
+    assert len(closure) == 1
+    assert "pkg.launcher" not in closure[0].evidence_source_modules
+    consistency = assess_package_graph_consistency(
+        graph.hard_edges,
+        {module_id: source.tree for module_id, source in parsed.items()},
+        closure[0].evidence_source_modules,
+    )
+    assert consistency.status == "INDETERMINATE"
+    assert consistency.reason == "GRAPH_SOURCE_IMPORT_MISMATCH"
+    assert evidence.scenarios.components[0].classification != (
+        "MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS"
+    )
+    prepared = prepare_original_worker_cycle_manifest(
+        captured, graph.hard_edges, snapshot,
+    )
+    assert prepared.manifest is None
 
 
 def test_p1d3_d2b3_attribute_typed_side_import(tmp_path, isolated_dirs):
