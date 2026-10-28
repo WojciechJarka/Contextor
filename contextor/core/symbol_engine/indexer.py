@@ -73,7 +73,7 @@ SYMBOL_FACTS_SCHEMA_VERSION = 2
 REFERENCE_FACTS_SCHEMA_VERSION = 1
 COLLISION_FACTS_SCHEMA_VERSION = 1
 TEST_FACTS_SCHEMA_VERSION = 1
-IMPORT_CLASSIFICATION_SEMANTICS_VERSION = 5
+IMPORT_CLASSIFICATION_SEMANTICS_VERSION = 6
 _SYMBOL_FACTS_AVAILABLE = "available"
 _SYMBOL_FACTS_FAILURE = "failure"
 _SYMBOL_FACTS_NOT_COMPUTED = "not_computed"
@@ -567,19 +567,48 @@ def _project_typing_imports_closed(
                 or not target_name
                 or not all(
                     part.isidentifier()
-                    for part
-                    in target_name.split(".")
+                    for part in target_name.split(".")
                 )
             ):
                 return False
 
-            if (
-                target_name not in indexed
-                and (
-                    target_name + ".__init__"
-                ) not in indexed
+            indexed_module = (
+                target_name in indexed
+            )
+
+            indexed_package = (
+                target_name + ".__init__"
+            ) in indexed
+
+            if not (
+                indexed_module
+                or indexed_package
             ):
                 return False
+
+            if (
+                import_ref.is_from_import
+                and indexed_package
+            ):
+                for member in import_ref.names:
+                    if (
+                        type(member) is not str
+                        or not member.isidentifier()
+                        or member.startswith("__")
+                    ):
+                        return False
+
+                    child_name = (
+                        target_name + "." + member
+                    )
+
+                    if (
+                        child_name not in indexed
+                        and (
+                            child_name + ".__init__"
+                        ) not in indexed
+                    ):
+                        return False
 
     return True
 
@@ -2435,6 +2464,7 @@ def index_repository(
     if extra_ignored_dirs:
         ignored_dirs.update(extra_ignored_dirs)
 
+    unindexed_python_sources_present = False
     file_discovery_started = time.monotonic()
 
     files_to_process = []
@@ -2444,7 +2474,11 @@ def index_repository(
         if not path.is_file():
             continue
         rel = path.relative_to(root_path)
-        if any(part in ignored_dirs for part in rel.parts):
+        if any(
+            part in ignored_dirs
+            for part in rel.parts
+        ):
+            unindexed_python_sources_present = True
             continue
         if excludes:
             rel_str = rel.as_posix()
@@ -2455,6 +2489,7 @@ def index_repository(
                     is_excluded = True
                     break
             if is_excluded:
+                unindexed_python_sources_present = True
                 continue
         files_to_process.append(path)
 
@@ -2503,6 +2538,7 @@ def index_repository(
         )
         project_effects_closed = (
             not skipped
+            and not unindexed_python_sources_present
             and len(opaque_effects_by_module)
             == len(modules)
             and all(
