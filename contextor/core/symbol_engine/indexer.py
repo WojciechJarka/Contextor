@@ -20,6 +20,7 @@ from concurrent.futures import as_completed
 from importlib.machinery import (
     BYTECODE_SUFFIXES,
     EXTENSION_SUFFIXES,
+    SOURCE_SUFFIXES,
 )
 from pathlib import Path
 
@@ -77,11 +78,18 @@ SYMBOL_FACTS_SCHEMA_VERSION = 2
 REFERENCE_FACTS_SCHEMA_VERSION = 1
 COLLISION_FACTS_SCHEMA_VERSION = 1
 TEST_FACTS_SCHEMA_VERSION = 1
-IMPORT_CLASSIFICATION_SEMANTICS_VERSION = 8
+IMPORT_CLASSIFICATION_SEMANTICS_VERSION = 9
 _IMPORTABLE_BINARY_SUFFIXES = tuple(
     sorted(
         frozenset(BYTECODE_SUFFIXES)
         | frozenset(EXTENSION_SUFFIXES)
+    )
+)
+_ALTERNATIVE_SOURCE_SUFFIXES = tuple(
+    sorted(
+        suffix
+        for suffix in SOURCE_SUFFIXES
+        if suffix.casefold() != ".py"
     )
 )
 _SYMBOL_FACTS_AVAILABLE = "available"
@@ -2508,8 +2516,11 @@ def index_repository(
                     if os.name == "nt"
                     else suffix
                 )
-                for suffix
-                in _IMPORTABLE_BINARY_SUFFIXES
+                for suffixes in (
+                    _IMPORTABLE_BINARY_SUFFIXES,
+                    _ALTERNATIVE_SOURCE_SUFFIXES,
+                )
+                for suffix in suffixes
             )
 
             if importable_artifact and path.is_file():

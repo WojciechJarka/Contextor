@@ -1,231 +1,236 @@
-# CONTEXTOR P1D3-D2B-6-R1 — implementer report
+# CONTEXTOR P1D3-D2B-7 — implementer report
 
 ## 1. IMPLEMENTER OBSERVATION
-DIRECT_EVIDENCE: Literal untrusted-pycache fail-closed repair implemented in the allowlist. No architectural GO is claimed.
 
-## 2. INITIAL/FINAL HEAD
-DIRECT_EVIDENCE: Initial and final HEAD `0d11e9b399e1e0668b294ec206b4a07afc61ca55`; no Git mutation.
+**DIRECT_EVIDENCE:** Literal bounded D2B-7 implementation completed in authorized paths; architectural acceptance remains with ChatGPT.
 
-## 3. INITIAL/FINAL WORKTREE STATUS
-DIRECT_EVIDENCE: Initially clean. Final: three allowlisted production/test files modified, plus this report.
+## 2. INITIAL / FINAL HEAD
 
-## 4. ROOT CAUSE A — PACKAGE PYCACHE
-DIRECT_EVIDENCE: Isolated CPython resolves `__pycache__/__init__.pyc` as a package initializer over indexed `__pycache__.py`; the former can activate the guarded import before `pkg.a` finishes initializing.
+**DIRECT_EVIDENCE:** Initial and final HEAD `aa503d38534fe2bae47625e377fcceb9008fffd1`.
 
-## 5. ROOT CAUSE B — TAGGED PYCACHE
-DIRECT_EVIDENCE: A correctly tagged unchecked-hash `.pyc`, compiled from different source into `cache_from_source(pkg/launcher.py)`, executes despite unchanged indexed `launcher.py` under `-I -B`.
+## 3. INITIAL / FINAL WORKTREE STATUS
 
-## 6. PREVIOUS D2B-6 CONTRACT CORRECTION
-CONTRACT_PROVED: Architect explicitly superseded the previous C02-C04 soft expectation. C01 remains soft; normal py_compile C02-C04 now retain hard guarded edges.
+**DIRECT_EVIDENCE:** Initial clean. Final modified: `contextor/core/symbol_engine/indexer.py`, `tests/test_p1d3_d2b2_type_only.py`, `tests/test_p1d3_package_cycle_integration.py`, and this report.
 
-## 7. EXACT PRODUCTION DIFF
-CODE_PATH_PROVED: Only the specified pycache exemption block was replaced by unconditional `unindexed_import_artifacts_present = True` for importable files. Enclosing single-pass discovery and finalizer remain unchanged.
+## 4. VERIFIED PRODUCTION BASELINE
 
-## 8. CACHE SEMANTIC VERSION 7 -> 8
-DIRECT_EVIDENCE: `IMPORT_CLASSIFICATION_SEMANTICS_VERSION = 8`; other semantic versions unchanged.
+**CODE_PATH_PROVED:** Pre-edit version 8, binary suffix collection, one `root_path.rglob("*")`, real-file guard, global `unindexed_import_artifacts_present` veto, and no ordinary-pycache exemption.
 
-## 9. NO WORKER FACT CHANGE
-CODE_PATH_PROVED: No worker result or cache field changed; initializer passivity, marker mutation and opaque-effect facts retain their prior meaning and SHA binding.
+## 5. ROOT CAUSE — ALTERNATIVE SOURCE SUFFIX
 
-## 10. NO BINARY READ
-CODE_PATH_PROVED: Production change uses file existence/suffix only; no pyc header/content read or bytecode execution was added.
+**CODE_PATH_PROVED:** Version 8 did not recognize platform-supported non-`.py` source suffixes. Windows CPython recognizes `.pyw`.
 
-## 11. NO EXTRA DISCOVERY PASS
-CODE_PATH_PROVED: One existing `rglob('*')` traversal remains; no additional scan was added.
+## 6. PLATFORM AND SOURCE_SUFFIXES
 
-## 12. K01 SYNTHETIC FIXTURE
-DIRECT_EVIDENCE: Fixture contains indexed `__pycache__.py` and generated sourceless `__pycache__/__init__.pyc`, compiled from a temporary source outside the synthetic repository. No `__pycache__/__init__.py` exists.
+**DIRECT_EVIDENCE:** Windows, `os.name=nt`, CPython 3.10.9, `SOURCE_SUFFIXES=['.py', '.pyw']`.
 
-## 13. K01 CPYTHON LOADER EVIDENCE
-DIRECT_EVIDENCE: Fresh isolated `find_spec('__pycache__').origin` points to sourceless initializer. Before pyc, `pkg.launcher` succeeds; after pyc, `pkg.a` and `pkg.c` succeed independently while `pkg.launcher` fails with partially initialized `pkg.a`.
+## 7. EXACT PRODUCTION CHANGE
 
-## 14. K01 REAL SCC
-DIRECT_EVIDENCE: With pyc present, final guarded import is hard, `pkg.a -> pkg.c` and `pkg.c -> pkg.a` are hard, corresponding soft edge absent, real two-member SCC retained.
+**DIRECT_EVIDENCE:** Imported `SOURCE_SUFFIXES`, added sole `_ALTERNATIVE_SOURCE_SUFFIXES` excluding `.py`, extended existing suffix match, and changed semantics 8 to 9.
 
-## 15. K01 SOFT/HARD/SOFT
-DIRECT_EVIDENCE: Same synthetic repo changes soft → hard → soft with pyc addition/removal; `.py` bytes, indexed module IDs and source SHA values remain unchanged. No worker cache deletion or forced reparse; version 8 throughout.
+## 8. SINGLE-PASS DISCOVERY EVIDENCE
 
-## 16. K02 SYNTHETIC FIXTURE
-DIRECT_EVIDENCE: Indexed `pkg/launcher.py` remains `import pkg.a`; only a tagged pyc under `pkg/__pycache__` is added, compiled from temporary dangerous source outside the synthetic repo.
+**CODE_PATH_PROVED:** Existing single `rglob("*")` traversal and `.py` indexing branch remain. Non-`.py` matching now checks binary and alternative source suffixes.
 
-## 17. K02 UNCHECKED_HASH
-DIRECT_EVIDENCE: Test uses actual `importlib.util.cache_from_source` target and `py_compile.PycInvalidationMode.UNCHECKED_HASH`.
+## 9. GLOBAL VETO REUSE
 
-## 18. K02 CPYTHON EXECUTION EVIDENCE
-DIRECT_EVIDENCE: Fresh `-I -B` launcher succeeds before pyc and fails with partially initialized `pkg.a` after pyc. `find_spec` still points to `launcher.py`, so actual import behavior is the decisive evidence.
+**CODE_PATH_PROVED:** Existing real-file guard sets existing `unindexed_import_artifacts_present`; existing global veto handles ignored directories.
 
-## 19. K02 REAL SCC
-DIRECT_EVIDENCE: Tagged pyc retains hard `pkg.a -> pkg.c`, hard `pkg.c -> pkg.a`, no matching soft edge, and real `{pkg.a,pkg.c}` SCC.
+## 10. CACHE SEMANTICS 8 -> 9
 
-## 20. K02 SOFT/HARD/SOFT
-DIRECT_EVIDENCE: Same repository returns soft → hard → soft after pyc addition/removal, with unchanged `.py` bytes, module IDs and source fingerprints; no cache deletion or forced parse, version 8 throughout.
+**CONTRACT_PROVED:** Current version assertions require 9; stale matrix now includes 8; focused tests passed.
 
-## 21. NORMAL PYCACHE MATRIX C01-C04
-DIRECT_EVIDENCE: Renamed test retains exact C01-C04 fixture construction. C01 has type_only=True and soft edge; C02-C04 have type_only=False and real hard SCC. All assert cache version 8.
+## 11. REAL WINDOWS LOADER EVIDENCE OR EXPLICIT SKIP
 
-## 22. NESTED PYCACHE NEGATIVES
-DIRECT_EVIDENCE: N01-N07 all trigger hard guarded edge and SCC, including `__init__.pyc`, unrelated pyc, ignored directories, interpreter tagged and optimization-tagged filenames. Ordinary worker opaque facts and source fingerprints remain unchanged.
+**DIRECT_EVIDENCE:** Real `.pyw` loader test ran and passed on Windows, without importlib or suffix monkeypatch.
 
-## 23. EXISTING BINARY REGRESSIONS
-CONTRACT_PROVED: Existing A01-A08, sourceless package and native extension tests remain in the focused suite and pass.
+## 12. ACTUAL CPYTHON spec.origin
 
-## 24. ARTIFACT-FREE POSITIVES
-CONTRACT_PROVED: Existing D2B name/attribute, D2B3 typed-side, mixed active, safe prefix/parent and D2B5 complete ImportFrom tests remain in focused suite and pass.
+**DIRECT_EVIDENCE:** Passed assertions: `pkg.launcher` spec origin changes from `pkg/launcher.py` to `pkg/launcher/__init__.pyw`.
 
-## 25. CACHE V7 INVALIDATION
-DIRECT_EVIDENCE: Stale-version matrix now includes absent, 0-7; all are invalidated by the version-8 worker contract. Existing forged-cache regressions pass.
+## 13. ACTUAL CPYTHON IMPORT DIFFERENTIAL
 
-## 26. COLD/WARM PARITY
-DIRECT_EVIDENCE: K01/K02 warm source cache remains valid across binary toggles; only repository-wide final classification changes. Existing focused cold/warm regressions pass.
+**DIRECT_EVIDENCE:** Passed fresh subprocess imports: launcher succeeds before artifact; independent `pkg.a` and `pkg.c` succeed during; launcher fails with partially initialized `pkg.a`.
 
-## 27. INLINE/PROCESS-POOL PARITY
-DIRECT_EVIDENCE: Real inline/pool parity includes safe baseline, K01, K02, normal a/init pycache, native shadow and previous binary cases; ordered ImportRefs, fingerprints, graph and SCC topology match.
+## 14. SOFT -> HARD -> SOFT
 
-## 28. ORIGINAL-WORKER REINDEX
-DIRECT_EVIDENCE: K01/K02 READY planners perform second index with pyc still present. Hard/soft graph, source fingerprints and selected original-worker captures match first pass.
+**DIRECT_EVIDENCE:** Real-loader and synthetic tests passed SOFT/no SCC → HARD/real SCC → SOFT/no SCC assertions.
 
-## 29. SOURCE CHECKER FAIL-CLOSED
-DIRECT_EVIDENCE: K01/K02 checker returns `INDETERMINATE/GRAPH_SOURCE_IMPORT_MISMATCH`; no positive prepared manifest. No binary AST or source closure was fabricated.
+## 15. SYNTHETIC SCANNER TEST
 
-## 30. P0/P1B
-DIRECT_EVIDENCE: K01/K02 tests assert no positive P0/P1B state. Existing artifact-free positive P0/P1B tests pass; no production evidence code changed.
+**DIRECT_EVIDENCE:** Separate scanner test monkeypatches only `_ALTERNATIVE_SOURCE_SUFFIXES=(".pyw",)` and exercises actual indexer.
 
-## 31. MANIFEST V2
-CONTRACT_PROVED: Existing manifest v2 tests pass. K01/K02 do not prepare positive manifests; schema unchanged.
+## 16. IGNORED-DIRECTORY ALTERNATIVE-SOURCE TESTS
 
-## 32. OFFICIAL ISOLATED FULL
-DIRECT_EVIDENCE: Existing artifact-free D2B3 official isolated FULL test passes in the focused suite. No active Contextor FULL.
+**DIRECT_EVIDENCE:** Scanner cases for root, `build/`, `.venv/` passed.
 
-## 33. RECEIPT V2
-CONTRACT_PROVED: Existing isolated receipt v2 regression passes; no binary-artifact receipt fabricated and schema unchanged.
+## 17. UNCHANGED INDEXED SOURCES / FINGERPRINTS
 
-## 34. FOCUSED PYTEST RESULTS
-DIRECT_EVIDENCE: Specified eight-module suite: 531 passed, 1 skipped in 95.47s; exit 0, stopwatch 98.03s. No global suite.
+**DIRECT_EVIDENCE:** Transition tests compare module ID sets, fingerprint maps, and original `.py` bytes. `.pyw` remains unindexed.
 
-## 35. EXACT COMMANDS/EXIT CODES
-DIRECT_EVIDENCE: `.\.venv\Scripts\python.exe -m py_compile contextor/core/symbol_engine/indexer.py`: exit 0, 0.39s. `.\.venv\Scripts\python.exe -m pytest -q tests/test_p1d3_d2b2_type_only.py tests/test_p1d3_package_cycle_integration.py tests/test_cycle_semantics_package_model.py tests/test_cycle_semantics_scenarios.py tests/test_cycle_semantics_evidence.py tests/test_original_worker_full_preparation_optin.py tests/test_original_worker_full_receipt_optin.py tests/test_original_worker_official_full_live_publication.py`: exit 0, stopwatch 98.03s. `git diff --check --` for three source/test paths: exit 0. Separate skip-reason query: exit 0.
+## 18. WARM CACHE AND NO FORCED REPARSE
 
-## 36. FILES_CHANGED
-DIRECT_EVIDENCE: `contextor/core/symbol_engine/indexer.py`; `tests/test_p1d3_d2b2_type_only.py`; `tests/test_p1d3_package_cycle_integration.py`. `walkthrough.md` is the report, excluded from the production/test changed-file list.
+**DIRECT_EVIDENCE:** Real-loader transition patched `parse_source_snapshot` to raise on reparse; warm-cache reindexes passed without cache deletion. Version 9 asserted in all states.
 
-## 37. FULL ACTUAL_DIFF
-Complete unabridged `git diff --no-color` for every FILES_CHANGED path:
+## 19. INLINE / PROCESS-POOL PARITY
+
+**DIRECT_EVIDENCE:** Existing parity matrix extended with alternative source; focused suite passed module IDs, fingerprints, import signatures, hard/soft graph, and SCC comparisons for inline and pool.
+
+## 20. ORIGINAL-WORKER SECOND REINDEX
+
+**DIRECT_EVIDENCE:** Real first index and second `source_capture_module_ids` index passed. Planner READY and capture `ALL_SELECTED_CAPTURED_NON_ATOMIC`; topology and fingerprints match.
+
+## 21. SOURCE CHECKER FAIL-CLOSED
+
+**DIRECT_EVIDENCE:** Checker produced `INDETERMINATE / GRAPH_SOURCE_IMPORT_MISMATCH`.
+
+## 22. P0 / P1B
+
+**DIRECT_EVIDENCE:** Test rejects positive `DECLARED_INPUTS_CONSISTENT` and `BYTE_AST_CONSISTENT_NON_ATOMIC` for mismatch.
+
+## 23. MANIFEST V2
+
+**DIRECT_EVIDENCE:** Mismatched case yields `prepared.manifest is None`; schema unchanged.
+
+## 24. RECEIPT V2
+
+**CONTRACT_PROVED:** Existing focused receipt regressions passed; receipt code/schema unchanged.
+
+## 25. D2B-6/R1 REGRESSION PRESERVATION
+
+**DIRECT_EVIDENCE:** Focused eight-module suite: 538 passed, 1 symlink privilege skip, zero failures.
+
+## 26. CACHE V8 INVALIDATION
+
+**DIRECT_EVIDENCE:** Stale matrix includes version 8; passed under version 9.
+
+## 27. PY_COMPILE RESULT
+
+**DIRECT_EVIDENCE:** `py_compile` exit 0, 0.2723678 s.
+
+## 28. FOCUSED PYTEST RESULTS
+
+**DIRECT_EVIDENCE:** Explicit new tests: 5 passed in 10.79 s, exit 0. Eight-module suite: 538 passed, 1 skipped in 93.91 s, exit 0.
+
+## 29. EXACT COMMANDS / EXIT CODES / DURATIONS
+
+**DIRECT_EVIDENCE:** Commands: `.\.venv\Scripts\python.exe -m py_compile contextor/core/symbol_engine/indexer.py` (exit 0, 0.2723678 s); `.\.venv\Scripts\python.exe -m pytest -q tests/test_p1d3_d2b2_type_only.py::test_p1d3_d2b7_real_windows_alternative_source_loader tests/test_p1d3_d2b2_type_only.py::test_p1d3_d2b7_synthetic_scanner_detection tests/test_p1d3_package_cycle_integration.py::test_p1d3_d2b7_alternative_source_original_worker_fails_closed -x` (exit 0, 5 passed, 10.79 s); `.\.venv\Scripts\python.exe -m pytest -q -rs tests/test_p1d3_d2b2_type_only.py tests/test_p1d3_package_cycle_integration.py tests/test_cycle_semantics_package_model.py tests/test_cycle_semantics_scenarios.py tests/test_cycle_semantics_evidence.py tests/test_original_worker_full_preparation_optin.py tests/test_original_worker_full_receipt_optin.py tests/test_original_worker_official_full_live_publication.py` (exit 0, 538 passed, 1 skipped, pytest 93.91 s, outer 95.4566236 s); `git diff --check -- contextor/core/symbol_engine/indexer.py tests/test_p1d3_d2b2_type_only.py tests/test_p1d3_package_cycle_integration.py` (exit 0).
+
+## 30. PLATFORM SKIPS AND REASONS
+
+**DIRECT_EVIDENCE:** One skip at `tests/test_p1d3_d2b2_type_only.py:973`: directory symlink unavailable, `[WinError 1314] A required privilege is not held by the client`. Real `.pyw` loader test ran.
+
+## 31. FILES_CHANGED
+
+**DIRECT_EVIDENCE:** `contextor/core/symbol_engine/indexer.py`; `tests/test_p1d3_d2b2_type_only.py`; `tests/test_p1d3_package_cycle_integration.py`; `walkthrough.md` (report only).
+
+## 32. FULL ACTUAL_DIFF
+
+**DIRECT_EVIDENCE:** Complete source/test diff inserted below.
 
 ```diff
 diff --git a/contextor/core/symbol_engine/indexer.py b/contextor/core/symbol_engine/indexer.py
-index e6bc43a..2c6dc03 100644
+index 2c6dc03..2790e9e 100644
 --- a/contextor/core/symbol_engine/indexer.py
 +++ b/contextor/core/symbol_engine/indexer.py
-@@ -77,7 +77,7 @@ SYMBOL_FACTS_SCHEMA_VERSION = 2
+@@ -20,6 +20,7 @@ from concurrent.futures import as_completed
+ from importlib.machinery import (
+     BYTECODE_SUFFIXES,
+     EXTENSION_SUFFIXES,
++    SOURCE_SUFFIXES,
+ )
+ from pathlib import Path
+ 
+@@ -77,13 +78,20 @@ SYMBOL_FACTS_SCHEMA_VERSION = 2
  REFERENCE_FACTS_SCHEMA_VERSION = 1
  COLLISION_FACTS_SCHEMA_VERSION = 1
  TEST_FACTS_SCHEMA_VERSION = 1
--IMPORT_CLASSIFICATION_SEMANTICS_VERSION = 7
-+IMPORT_CLASSIFICATION_SEMANTICS_VERSION = 8
+-IMPORT_CLASSIFICATION_SEMANTICS_VERSION = 8
++IMPORT_CLASSIFICATION_SEMANTICS_VERSION = 9
  _IMPORTABLE_BINARY_SUFFIXES = tuple(
      sorted(
          frozenset(BYTECODE_SUFFIXES)
-@@ -2513,22 +2513,7 @@ def index_repository(
+         | frozenset(EXTENSION_SUFFIXES)
+     )
+ )
++_ALTERNATIVE_SOURCE_SUFFIXES = tuple(
++    sorted(
++        suffix
++        for suffix in SOURCE_SUFFIXES
++        if suffix.casefold() != ".py"
++    )
++)
+ _SYMBOL_FACTS_AVAILABLE = "available"
+ _SYMBOL_FACTS_FAILURE = "failure"
+ _SYMBOL_FACTS_NOT_COMPUTED = "not_computed"
+@@ -2508,8 +2516,11 @@ def index_repository(
+                     if os.name == "nt"
+                     else suffix
+                 )
+-                for suffix
+-                in _IMPORTABLE_BINARY_SUFFIXES
++                for suffixes in (
++                    _IMPORTABLE_BINARY_SUFFIXES,
++                    _ALTERNATIVE_SOURCE_SUFFIXES,
++                )
++                for suffix in suffixes
              )
  
              if importable_artifact and path.is_file():
--                rel = path.relative_to(root_path)
--
--                is_bytecode = (
--                    binary_name.endswith(".pyc")
--                )
--
--                in_pycache = any(
--                    part.casefold() == "__pycache__"
--                    for part in rel.parts[:-1]
--                )
--
--                if not (
--                    is_bytecode
--                    and in_pycache
--                ):
--                    unindexed_import_artifacts_present = True
-+                unindexed_import_artifacts_present = True
- 
-             continue
- 
 diff --git a/tests/test_p1d3_d2b2_type_only.py b/tests/test_p1d3_d2b2_type_only.py
-index e7bcbf3..4851dd6 100644
+index 4851dd6..1258d3b 100644
 --- a/tests/test_p1d3_d2b2_type_only.py
 +++ b/tests/test_p1d3_d2b2_type_only.py
-@@ -3,6 +3,7 @@
- from __future__ import annotations
- 
- import ast
-+import importlib.util
- import json
- import py_compile
+@@ -9,7 +9,7 @@ import py_compile
  import subprocess
-@@ -103,6 +104,31 @@ D2B6_SOURCE_SHADOW = {
-     "pkg/launcher.py": "pass\n",
- }
+ import sys
+ from dataclasses import replace
+-from importlib.machinery import EXTENSION_SUFFIXES
++from importlib.machinery import EXTENSION_SUFFIXES, SOURCE_SUFFIXES
+ from pathlib import Path
  
-+D2B6_R1_PYCACHE_PACKAGE = {
-+    "__pycache__.py": "pass\n",
-+    "pkg/__init__.py": "pass\n",
-+    "pkg/a.py": (
-+        "from typing import TYPE_CHECKING\n"
-+        "if TYPE_CHECKING:\n"
-+        "    import pkg.c\n"
-+        "value = 1\n"
-+    ),
-+    "pkg/c.py": "from pkg.a import value\n",
-+    "pkg/launcher.py": "import __pycache__\nimport pkg.a\n",
-+}
-+
-+D2B6_R1_FORGED_TAGGED_CACHE = {
-+    "pkg/__init__.py": "pass\n",
-+    "pkg/a.py": (
-+        "from typing import TYPE_CHECKING\n"
-+        "if TYPE_CHECKING:\n"
-+        "    import pkg.c\n"
-+        "value = 1\n"
-+    ),
-+    "pkg/c.py": "from pkg.a import value\n",
-+    "pkg/launcher.py": "import pkg.a\n",
-+}
-+
- D2B2_R1_GLOBALS_MUTATION = {
-     "pkg/__init__.py": "pass\n",
-     "pkg/a.py": (
-@@ -498,6 +524,143 @@ def _d2b6_spec_origin(root: Path, module: str) -> Path:
+ import pytest
+@@ -524,6 +524,115 @@ def _d2b6_spec_origin(root: Path, module: str) -> Path:
      return Path(result.stdout.strip()).resolve()
  
  
-+def test_p1d3_d2b6_r1_pycache_package_precedence(
++def test_p1d3_d2b7_real_windows_alternative_source_loader(
 +    tmp_path, isolated_dirs, monkeypatch,
 +):
-+    root = write_synthetic_repository(tmp_path / "repo", D2B6_R1_PYCACHE_PACKAGE)
-+    original_bytes = {
++    if ".pyw" not in SOURCE_SUFFIXES:
++        pytest.skip(f"real .pyw loader unavailable: SOURCE_SUFFIXES={SOURCE_SUFFIXES!r}")
++
++    root = write_synthetic_repository(tmp_path / "repo", D2B6_SOURCE_SHADOW)
++    source_bytes = {
 +        relative: (root / relative).read_bytes()
-+        for relative in D2B6_R1_PYCACHE_PACKAGE
++        for relative in D2B6_SOURCE_SHADOW
 +    }
 +    before, before_graph = _index_graph(root)
-+    assert "pkg.c" in before_graph.soft_edges["pkg.a"]
-+    assert "pkg.c" not in before_graph.hard_edges["pkg.a"]
 +    assert _cache_data(root, root / "pkg" / "a.py")[
 +        "import_classification_semantics_version"
-+    ] == 8
++    ] == 9
++    assert _d2b6_spec_origin(root, "pkg.launcher") == (
++        root / "pkg" / "launcher.py"
++    ).resolve()
 +    assert run_synthetic_import(root, "pkg.launcher").returncode == 0
-+
-+    temporary_source = tmp_path / "dangerous_pycache_initializer.py"
-+    temporary_source.write_text(
-+        "import typing\ntyping.TYPE_CHECKING = True\n", encoding="utf-8",
++    assert "pkg.c" in before_graph.soft_edges["pkg.a"]
++    assert "pkg.c" not in before_graph.hard_edges["pkg.a"]
++    assert not any(
++        set(members) == {"pkg.a", "pkg.c"}
++        for members in _scc_signature(before, before_graph)
 +    )
-+    package_directory = root / "__pycache__"
++
++    package_directory = root / "pkg" / "launcher"
 +    package_directory.mkdir()
-+    bytecode = package_directory / "__init__.pyc"
-+    py_compile.compile(str(temporary_source), cfile=str(bytecode), doraise=True)
-+    temporary_source.unlink()
++    alternative_source = package_directory / "__init__.pyw"
++    alternative_source.write_text(
++        "import typing\ntyping.TYPE_CHECKING = True\nimport pkg.a\n",
++        encoding="utf-8",
++    )
 +    assert not (package_directory / "__init__.py").exists()
 +
 +    def unexpected_parse(*args, **kwargs):
-+        raise AssertionError("binary presence must not reparse unchanged source")
++        raise AssertionError("alternative source presence must not reparse indexed source")
 +
 +    monkeypatch.setattr(indexer, "parse_source_snapshot", unexpected_parse)
 +    during, during_graph = _index_graph(root)
@@ -234,8 +239,8 @@ index e7bcbf3..4851dd6 100644
 +    _assert_d2b5_hard_scc(during, during_graph, "pkg.c")
 +    assert _cache_data(root, root / "pkg" / "a.py")[
 +        "import_classification_semantics_version"
-+    ] == 8
-+    assert _d2b6_spec_origin(root, "__pycache__") == bytecode.resolve()
++    ] == 9
++    assert _d2b6_spec_origin(root, "pkg.launcher") == alternative_source.resolve()
 +    assert run_synthetic_import(root, "pkg.a").returncode == 0
 +    assert run_synthetic_import(root, "pkg.c").returncode == 0
 +    failed = run_synthetic_import(root, "pkg.launcher")
@@ -243,7 +248,7 @@ index e7bcbf3..4851dd6 100644
 +    assert "partially initialized module" in failed.stderr
 +    assert "pkg.a" in failed.stderr
 +
-+    bytecode.unlink()
++    alternative_source.unlink()
 +    package_directory.rmdir()
 +    after, after_graph = _index_graph(root)
 +    assert set(after.modules) == set(before.modules)
@@ -255,463 +260,350 @@ index e7bcbf3..4851dd6 100644
 +        for members in _scc_signature(after, after_graph)
 +    )
 +    assert {
-+        relative: (root / relative).read_bytes() for relative in original_bytes
-+    } == original_bytes
++        relative: (root / relative).read_bytes() for relative in source_bytes
++    } == source_bytes
 +    assert _cache_data(root, root / "pkg" / "a.py")[
 +        "import_classification_semantics_version"
-+    ] == 8
++    ] == 9
 +
 +
-+def test_p1d3_d2b6_r1_forged_tagged_unchecked_hash_cache(
-+    tmp_path, isolated_dirs, monkeypatch,
++@pytest.mark.parametrize(
++    "relative",
++    ["unrelated.pyw", "build/unrelated.pyw", ".venv/unrelated.pyw"],
++)
++def test_p1d3_d2b7_synthetic_scanner_detection(
++    tmp_path, isolated_dirs, monkeypatch, relative,
 +):
-+    root = write_synthetic_repository(tmp_path / "repo", D2B6_R1_FORGED_TAGGED_CACHE)
-+    original_bytes = {
-+        relative: (root / relative).read_bytes()
-+        for relative in D2B6_R1_FORGED_TAGGED_CACHE
++    monkeypatch.setattr(indexer, "_ALTERNATIVE_SOURCE_SUFFIXES", (".pyw",))
++    root = write_synthetic_repository(tmp_path / "repo", D2B_NAME_SAFE)
++    source_bytes = {
++        source: (root / source).read_bytes()
++        for source in D2B_NAME_SAFE
 +    }
 +    before, before_graph = _index_graph(root)
-+    assert "pkg.c" in before_graph.soft_edges["pkg.a"]
-+    assert "pkg.c" not in before_graph.hard_edges["pkg.a"]
-+    assert _cache_data(root, root / "pkg" / "a.py")[
-+        "import_classification_semantics_version"
-+    ] == 8
-+    assert run_synthetic_import(root, "pkg.launcher").returncode == 0
-+
-+    temporary_source = tmp_path / "forged_launcher_source.py"
-+    temporary_source.write_text(
-+        "import typing\ntyping.TYPE_CHECKING = True\nimport pkg.a\n",
-+        encoding="utf-8",
-+    )
-+    target_cache_path = Path(
-+        importlib.util.cache_from_source(str(root / "pkg" / "launcher.py"))
-+    )
-+    target_cache_path.parent.mkdir()
-+    py_compile.compile(
-+        str(temporary_source),
-+        cfile=str(target_cache_path),
-+        doraise=True,
-+        invalidation_mode=py_compile.PycInvalidationMode.UNCHECKED_HASH,
-+    )
-+    temporary_source.unlink()
-+    assert target_cache_path.parent == root / "pkg" / "__pycache__"
-+
-+    def unexpected_parse(*args, **kwargs):
-+        raise AssertionError("binary presence must not reparse unchanged source")
-+
-+    monkeypatch.setattr(indexer, "parse_source_snapshot", unexpected_parse)
++    assert "pkg.b" in before_graph.soft_edges["pkg.a"]
++    assert "pkg.b" not in before_graph.hard_edges["pkg.a"]
++    assert _scc_signature(before, before_graph) == ()
++    artifact = root / relative
++    artifact.parent.mkdir(parents=True, exist_ok=True)
++    artifact.write_text("pass\n", encoding="utf-8")
 +    during, during_graph = _index_graph(root)
 +    assert set(during.modules) == set(before.modules)
 +    assert during.source_fingerprints_by_module == before.source_fingerprints_by_module
-+    _assert_d2b5_hard_scc(during, during_graph, "pkg.c")
-+    assert _cache_data(root, root / "pkg" / "a.py")[
-+        "import_classification_semantics_version"
-+    ] == 8
-+    assert _d2b6_spec_origin(root, "pkg.launcher") == (
-+        root / "pkg" / "launcher.py"
-+    ).resolve()
-+    failed = run_synthetic_import(root, "pkg.launcher")
-+    assert failed.returncode != 0
-+    assert "partially initialized module" in failed.stderr
-+    assert "pkg.a" in failed.stderr
-+
-+    target_cache_path.unlink()
-+    target_cache_path.parent.rmdir()
++    _assert_d2b5_hard_scc(during, during_graph, "pkg.b")
++    artifact.unlink()
 +    after, after_graph = _index_graph(root)
 +    assert set(after.modules) == set(before.modules)
 +    assert after.source_fingerprints_by_module == before.source_fingerprints_by_module
-+    assert "pkg.c" in after_graph.soft_edges["pkg.a"]
-+    assert "pkg.c" not in after_graph.hard_edges["pkg.a"]
-+    assert not any(
-+        set(members) == {"pkg.a", "pkg.c"}
-+        for members in _scc_signature(after, after_graph)
-+    )
++    assert "pkg.b" in after_graph.soft_edges["pkg.a"]
++    assert "pkg.b" not in after_graph.hard_edges["pkg.a"]
++    assert _scc_signature(after, after_graph) == ()
 +    assert {
-+        relative: (root / relative).read_bytes() for relative in original_bytes
-+    } == original_bytes
-+    assert _cache_data(root, root / "pkg" / "a.py")[
-+        "import_classification_semantics_version"
-+    ] == 8
++        source: (root / source).read_bytes() for source in source_bytes
++    } == source_bytes
 +
 +
- def test_p1d3_d2b6_sourceless_package_preempts_python_module(
+ def test_p1d3_d2b6_r1_pycache_package_precedence(
      tmp_path, isolated_dirs, monkeypatch,
  ):
-@@ -516,7 +679,7 @@ def test_p1d3_d2b6_sourceless_package_preempts_python_module(
-         for members in _scc_signature(before, before_graph)
-     )
-     cached = _cache_data(root, root / "pkg" / "a.py")
--    assert cached["import_classification_semantics_version"] == 7
-+    assert cached["import_classification_semantics_version"] == 8
+@@ -537,7 +646,7 @@ def test_p1d3_d2b6_r1_pycache_package_precedence(
+     assert "pkg.c" not in before_graph.hard_edges["pkg.a"]
+     assert _cache_data(root, root / "pkg" / "a.py")[
+         "import_classification_semantics_version"
+-    ] == 8
++    ] == 9
+     assert run_synthetic_import(root, "pkg.launcher").returncode == 0
  
-     compiled_source = tmp_path / "launcher_init_source.py"
-     compiled_source.write_text(
-@@ -543,7 +706,7 @@ def test_p1d3_d2b6_sourceless_package_preempts_python_module(
+     temporary_source = tmp_path / "dangerous_pycache_initializer.py"
+@@ -561,7 +670,7 @@ def test_p1d3_d2b6_r1_pycache_package_precedence(
      _assert_d2b5_hard_scc(during, during_graph, "pkg.c")
      assert _cache_data(root, root / "pkg" / "a.py")[
          "import_classification_semantics_version"
--    ] == 7
-+    ] == 8
+-    ] == 8
++    ] == 9
+     assert _d2b6_spec_origin(root, "__pycache__") == bytecode.resolve()
+     assert run_synthetic_import(root, "pkg.a").returncode == 0
+     assert run_synthetic_import(root, "pkg.c").returncode == 0
+@@ -586,7 +695,7 @@ def test_p1d3_d2b6_r1_pycache_package_precedence(
+     } == original_bytes
+     assert _cache_data(root, root / "pkg" / "a.py")[
+         "import_classification_semantics_version"
+-    ] == 8
++    ] == 9
+ 
+ 
+ def test_p1d3_d2b6_r1_forged_tagged_unchecked_hash_cache(
+@@ -602,7 +711,7 @@ def test_p1d3_d2b6_r1_forged_tagged_unchecked_hash_cache(
+     assert "pkg.c" not in before_graph.hard_edges["pkg.a"]
+     assert _cache_data(root, root / "pkg" / "a.py")[
+         "import_classification_semantics_version"
+-    ] == 8
++    ] == 9
+     assert run_synthetic_import(root, "pkg.launcher").returncode == 0
+ 
+     temporary_source = tmp_path / "forged_launcher_source.py"
+@@ -633,7 +742,7 @@ def test_p1d3_d2b6_r1_forged_tagged_unchecked_hash_cache(
+     _assert_d2b5_hard_scc(during, during_graph, "pkg.c")
+     assert _cache_data(root, root / "pkg" / "a.py")[
+         "import_classification_semantics_version"
+-    ] == 8
++    ] == 9
+     assert _d2b6_spec_origin(root, "pkg.launcher") == (
+         root / "pkg" / "launcher.py"
+     ).resolve()
+@@ -658,7 +767,7 @@ def test_p1d3_d2b6_r1_forged_tagged_unchecked_hash_cache(
+     } == original_bytes
+     assert _cache_data(root, root / "pkg" / "a.py")[
+         "import_classification_semantics_version"
+-    ] == 8
++    ] == 9
+ 
+ 
+ def test_p1d3_d2b6_sourceless_package_preempts_python_module(
+@@ -679,7 +788,7 @@ def test_p1d3_d2b6_sourceless_package_preempts_python_module(
+         for members in _scc_signature(before, before_graph)
+     )
+     cached = _cache_data(root, root / "pkg" / "a.py")
+-    assert cached["import_classification_semantics_version"] == 8
++    assert cached["import_classification_semantics_version"] == 9
+ 
+     compiled_source = tmp_path / "launcher_init_source.py"
+     compiled_source.write_text(
+@@ -706,7 +815,7 @@ def test_p1d3_d2b6_sourceless_package_preempts_python_module(
+     _assert_d2b5_hard_scc(during, during_graph, "pkg.c")
+     assert _cache_data(root, root / "pkg" / "a.py")[
+         "import_classification_semantics_version"
+-    ] == 8
++    ] == 9
      assert _d2b6_spec_origin(root, "pkg.launcher") == bytecode.resolve()
      assert run_synthetic_import(root, "pkg.a").returncode == 0
      assert run_synthetic_import(root, "pkg.c").returncode == 0
-@@ -565,7 +728,7 @@ def test_p1d3_d2b6_sourceless_package_preempts_python_module(
+@@ -728,7 +837,7 @@ def test_p1d3_d2b6_sourceless_package_preempts_python_module(
      )
      assert _cache_data(root, root / "pkg" / "a.py")[
          "import_classification_semantics_version"
--    ] == 7
-+    ] == 8
+-    ] == 8
++    ] == 9
      assert {relative: (root / relative).read_bytes() for relative in sources} == sources
  
  
-@@ -629,23 +792,63 @@ def test_p1d3_d2b6_alternative_artifact_matrix(
-         ("C04", "pkg/__init__.py"),
-     ],
- )
--def test_p1d3_d2b6_standard_pycache_remains_soft(
-+def test_p1d3_d2b6_r1_standard_pycache_conservative_veto(
-     tmp_path, isolated_dirs, case, relative,
- ):
-     root = write_synthetic_repository(tmp_path / case, D2B_NAME_SAFE)
-     if relative is not None:
-         py_compile.compile(str(root / relative), doraise=True)
-     index, graph = _index_graph(root)
--    assert next(
-+    guarded = next(
-         item for item in index.modules["pkg.a"].imports
-         if item.module == "pkg.b"
--    ).type_only is True
--    assert "pkg.b" in graph.soft_edges["pkg.a"]
--    assert "pkg.b" not in graph.hard_edges["pkg.a"]
--    assert _scc_signature(index, graph) == ()
-+    )
-+    if case == "C01":
-+        assert guarded.type_only is True
-+        assert "pkg.b" in graph.soft_edges["pkg.a"]
-+        assert "pkg.b" not in graph.hard_edges["pkg.a"]
-+        assert _scc_signature(index, graph) == ()
-+    else:
-+        assert guarded.type_only is False
-+        _assert_d2b5_hard_scc(index, graph, "pkg.b")
+@@ -813,7 +922,7 @@ def test_p1d3_d2b6_r1_standard_pycache_conservative_veto(
+         _assert_d2b5_hard_scc(index, graph, "pkg.b")
      assert _cache_data(root, root / "pkg" / "a.py")[
          "import_classification_semantics_version"
--    ] == 7
-+    ] == 8
-+
-+
-+@pytest.mark.parametrize("case", ["N01", "N02", "N03", "N04", "N05", "N06", "N07"])
-+def test_p1d3_d2b6_r1_nested_pycache_negatives(
-+    tmp_path, isolated_dirs, case,
-+):
-+    root = write_synthetic_repository(tmp_path / case, D2B_NAME_SAFE)
-+    before, before_graph = _index_graph(root)
-+    assert "pkg.b" in before_graph.soft_edges["pkg.a"]
-+    before_facts = {
-+        relative: _cache_data(root, root / relative)["typing_guard_opaque_effects"]
-+        for relative in D2B_NAME_SAFE
-+    }
-+    paths = {
-+        "N01": root / "__pycache__" / "__init__.pyc",
-+        "N02": root / "pkg" / "__pycache__" / "__init__.pyc",
-+        "N03": root / "pkg" / "__pycache__" / "unrelated.pyc",
-+        "N04": root / "build" / "__pycache__" / "hidden.pyc",
-+        "N05": root / ".venv" / "__pycache__" / "hidden.pyc",
-+        "N06": Path(importlib.util.cache_from_source(str(root / "pkg" / "a.py"))),
-+        "N07": Path(importlib.util.cache_from_source(
-+            str(root / "pkg" / "a.py"), optimization="1",
-+        )),
-+    }
-+    artifact = paths[case]
-+    artifact.parent.mkdir(parents=True, exist_ok=True)
-+    artifact.write_bytes(b"not-executable-bytecode")
-+    index, graph = _index_graph(root)
-+    assert set(index.modules) == set(before.modules)
-+    assert index.source_fingerprints_by_module == before.source_fingerprints_by_module
-+    assert {
-+        relative: _cache_data(root, root / relative)["typing_guard_opaque_effects"]
-+        for relative in D2B_NAME_SAFE
-+    } == before_facts
-+    _assert_d2b5_hard_scc(index, graph, "pkg.b")
+-    ] == 8
++    ] == 9
  
  
- def test_p1d3_d2b6_symlinked_directory_veto(
-@@ -667,12 +870,20 @@ def test_p1d3_d2b6_symlinked_directory_veto(
- 
- @pytest.mark.parametrize(
-     "case",
--    ["safe", "sourceless-shadow", "native-shadow", "pycache", "ignored-bytecode"],
-+    [
-+        "safe", "sourceless-shadow", "native-shadow", "pycache",
-+        "ignored-bytecode", "pycache-package", "forged-tagged", "pycache-init",
-+    ],
+ @pytest.mark.parametrize("case", ["N01", "N02", "N03", "N04", "N05", "N06", "N07"])
+@@ -873,13 +982,14 @@ def test_p1d3_d2b6_symlinked_directory_veto(
+     [
+         "safe", "sourceless-shadow", "native-shadow", "pycache",
+         "ignored-bytecode", "pycache-package", "forged-tagged", "pycache-init",
++        "alternative-source",
+     ],
  )
  def test_p1d3_d2b6_inline_process_pool_parity(
      tmp_path, isolated_dirs, monkeypatch, case,
  ):
--    fixture = D2B6_SOURCE_SHADOW if case == "sourceless-shadow" else D2B_NAME_SAFE
-+    fixture = (
-+        D2B6_SOURCE_SHADOW if case == "sourceless-shadow"
-+        else D2B6_R1_PYCACHE_PACKAGE if case == "pycache-package"
-+        else D2B6_R1_FORGED_TAGGED_CACHE if case == "forged-tagged"
-+        else D2B_NAME_SAFE
-+    )
- 
-     def prepare(root, label):
-         if case == "sourceless-shadow":
-@@ -695,6 +906,35 @@ def test_p1d3_d2b6_inline_process_pool_parity(
+     fixture = (
+-        D2B6_SOURCE_SHADOW if case == "sourceless-shadow"
++        D2B6_SOURCE_SHADOW if case in {"sourceless-shadow", "alternative-source"}
+         else D2B6_R1_PYCACHE_PACKAGE if case == "pycache-package"
+         else D2B6_R1_FORGED_TAGGED_CACHE if case == "forged-tagged"
+         else D2B_NAME_SAFE
+@@ -900,6 +1010,13 @@ def test_p1d3_d2b6_inline_process_pool_parity(
+                 doraise=True,
              )
-         elif case == "pycache":
-             py_compile.compile(str(root / "pkg" / "a.py"), doraise=True)
-+        elif case == "pycache-init":
-+            py_compile.compile(str(root / "pkg" / "__init__.py"), doraise=True)
-+        elif case == "pycache-package":
-+            source = tmp_path / (label + "_pycache_package.py")
-+            source.write_text(
-+                "import typing\ntyping.TYPE_CHECKING = True\n", encoding="utf-8",
-+            )
-+            package_directory = root / "__pycache__"
+             source.unlink()
++        elif case == "alternative-source":
++            package_directory = root / "pkg" / "launcher"
 +            package_directory.mkdir()
-+            py_compile.compile(
-+                str(source), cfile=str(package_directory / "__init__.pyc"),
-+                doraise=True,
-+            )
-+            source.unlink()
-+        elif case == "forged-tagged":
-+            source = tmp_path / (label + "_forged_tagged.py")
-+            source.write_text(
++            (package_directory / "__init__.pyw").write_text(
 +                "import typing\ntyping.TYPE_CHECKING = True\nimport pkg.a\n",
 +                encoding="utf-8",
 +            )
-+            target = Path(importlib.util.cache_from_source(
-+                str(root / "pkg" / "launcher.py")
-+            ))
-+            target.parent.mkdir()
-+            py_compile.compile(
-+                str(source), cfile=str(target), doraise=True,
-+                invalidation_mode=py_compile.PycInvalidationMode.UNCHECKED_HASH,
-+            )
-+            source.unlink()
-         elif case == "ignored-bytecode":
-             artifact = root / "build" / "hidden.pyc"
+         elif case == "native-shadow":
+             (root / "pkg" / ("a" + EXTENSION_SUFFIXES[0])).write_bytes(
+                 b"not-a-real-extension"
+@@ -940,6 +1057,9 @@ def test_p1d3_d2b6_inline_process_pool_parity(
              artifact.parent.mkdir()
-@@ -849,7 +1089,7 @@ def test_p1d3_d2b5_source_visibility_toggle(
+             artifact.write_bytes(b"not-executable-bytecode")
+ 
++    if case == "alternative-source" and ".pyw" not in SOURCE_SUFFIXES:
++        monkeypatch.setattr(indexer, "_ALTERNATIVE_SOURCE_SUFFIXES", (".pyw",))
++
+     inline_root = write_synthetic_repository(tmp_path / "inline", fixture)
+     prepare(inline_root, "inline")
+     monkeypatch.setenv("CONTEXTOR_DISABLE_PROCESS_POOL", "1")
+@@ -1089,7 +1209,7 @@ def test_p1d3_d2b5_source_visibility_toggle(
          ))
          assert _cache_data(root, root / "pkg" / "a.py")[
              "import_classification_semantics_version"
--        ] == 7
-+        ] == 8
+-        ] == 8
++        ] == 9
      assert states == [(True, False, True), (False, True, False), (True, False, True)]
      assert (root / "pkg" / "a.py").read_bytes() == original_a
      assert (root / "pkg" / "b.py").read_bytes() == original_b
-@@ -1120,7 +1360,7 @@ def test_p1d3_d2b4_forged_stale_launcher_cache(
+@@ -1360,7 +1480,7 @@ def test_p1d3_d2b4_forged_stale_launcher_cache(
      _index_graph(root)
      source = root / "pkg" / "launcher.py"
      cached = _cache_data(root, source)
--    assert cached["import_classification_semantics_version"] == 7
-+    assert cached["import_classification_semantics_version"] == 8
+-    assert cached["import_classification_semantics_version"] == 8
++    assert cached["import_classification_semantics_version"] == 9
      assert cached["typing_guard_marker_mutation"] is True
      cached["import_classification_semantics_version"] = 3
      cached["typing_guard_marker_mutation"] = False
-@@ -1129,7 +1369,7 @@ def test_p1d3_d2b4_forged_stale_launcher_cache(
+@@ -1369,7 +1489,7 @@ def test_p1d3_d2b4_forged_stale_launcher_cache(
      index, graph = _index_graph(root)
      _assert_d2b4_launcher_graph(index, graph)
      rewritten = _cache_data(root, source)
--    assert rewritten["import_classification_semantics_version"] == 7
-+    assert rewritten["import_classification_semantics_version"] == 8
+-    assert rewritten["import_classification_semantics_version"] == 8
++    assert rewritten["import_classification_semantics_version"] == 9
      assert rewritten["typing_guard_marker_mutation"] is True
  
  
-@@ -1317,7 +1557,7 @@ def test_p1d3_d2b4_r1_forged_stale_opaque_cache(
+@@ -1557,7 +1677,7 @@ def test_p1d3_d2b4_r1_forged_stale_opaque_cache(
      _index_graph(root)
      source = root / "pkg" / "launcher.py"
      cached = _cache_data(root, source)
--    assert cached["import_classification_semantics_version"] == 7
-+    assert cached["import_classification_semantics_version"] == 8
+-    assert cached["import_classification_semantics_version"] == 8
++    assert cached["import_classification_semantics_version"] == 9
      assert cached["typing_guard_marker_mutation"] is False
      assert cached["typing_guard_opaque_effects"] is True
      cached["import_classification_semantics_version"] = 4
-@@ -1327,7 +1567,7 @@ def test_p1d3_d2b4_r1_forged_stale_opaque_cache(
+@@ -1567,7 +1687,7 @@ def test_p1d3_d2b4_r1_forged_stale_opaque_cache(
      index, graph = _index_graph(root)
      _assert_d2b4_launcher_graph(index, graph)
      rewritten = _cache_data(root, source)
--    assert rewritten["import_classification_semantics_version"] == 7
-+    assert rewritten["import_classification_semantics_version"] == 8
+-    assert rewritten["import_classification_semantics_version"] == 8
++    assert rewritten["import_classification_semantics_version"] == 9
      assert rewritten["typing_guard_opaque_effects"] is True
  
  
-@@ -1410,7 +1650,7 @@ def test_cold_and_warm_worker_cache_match_type_only_graph(
+@@ -1650,7 +1770,7 @@ def test_cold_and_warm_worker_cache_match_type_only_graph(
      cold_graph_signature = _graph_signature(cold_index, cold_graph)
      source = root / "pkg" / "a.py"
      cached = _cache_data(root, source)
--    assert cached["import_classification_semantics_version"] == 7
-+    assert cached["import_classification_semantics_version"] == 8
+-    assert cached["import_classification_semantics_version"] == 8
++    assert cached["import_classification_semantics_version"] == 9
      assert next(
          item for item in cached["imports"] if item["module"] == "pkg.b"
      )["type_only"] is True
-@@ -1428,8 +1668,8 @@ def test_cold_and_warm_worker_cache_match_type_only_graph(
+@@ -1668,8 +1788,8 @@ def test_cold_and_warm_worker_cache_match_type_only_graph(
  
  
  @pytest.mark.parametrize(
--    "stored_version", [None, 0, 1, 2, 3, 4, 5, 6],
--    ids=["absent", "version-0", "version-1", "version-2", "version-3", "version-4", "version-5", "version-6"],
-+    "stored_version", [None, 0, 1, 2, 3, 4, 5, 6, 7],
-+    ids=["absent", "version-0", "version-1", "version-2", "version-3", "version-4", "version-5", "version-6", "version-7"],
+-    "stored_version", [None, 0, 1, 2, 3, 4, 5, 6, 7],
+-    ids=["absent", "version-0", "version-1", "version-2", "version-3", "version-4", "version-5", "version-6", "version-7"],
++    "stored_version", [None, 0, 1, 2, 3, 4, 5, 6, 7, 8],
++    ids=["absent", "version-0", "version-1", "version-2", "version-3", "version-4", "version-5", "version-6", "version-7", "version-8"],
  )
  def test_stale_import_classification_cache_reparses_same_snapshot(
      tmp_path, isolated_dirs, stored_version, monkeypatch,
-@@ -1473,7 +1713,7 @@ def test_stale_import_classification_cache_reparses_same_snapshot(
+@@ -1713,7 +1833,7 @@ def test_stale_import_classification_cache_reparses_same_snapshot(
          for item in result.modules["pkg.a"].imports
      )
      rewritten = _cache_data(root, source)
--    assert rewritten["import_classification_semantics_version"] == 7
-+    assert rewritten["import_classification_semantics_version"] == 8
+-    assert rewritten["import_classification_semantics_version"] == 8
++    assert rewritten["import_classification_semantics_version"] == 9
      assert next(
          item for item in rewritten["imports"] if item["module"] == "pkg.b"
      )["type_only"] is True
-@@ -1777,7 +2017,7 @@ def test_d2b2_r1_forged_version_one_cache_is_reparsed(
+@@ -2017,7 +2137,7 @@ def test_d2b2_r1_forged_version_one_cache_is_reparsed(
  
      source = root / "pkg" / "a.py"
      cached = _cache_data(root, source)
--    assert cached["import_classification_semantics_version"] == 7
-+    assert cached["import_classification_semantics_version"] == 8
+-    assert cached["import_classification_semantics_version"] == 8
++    assert cached["import_classification_semantics_version"] == 9
      forged_imports = [
          item for item in cached["imports"] if item["module"] == "pkg.b"
      ]
-@@ -1799,7 +2039,7 @@ def test_d2b2_r1_forged_version_one_cache_is_reparsed(
+@@ -2039,7 +2159,7 @@ def test_d2b2_r1_forged_version_one_cache_is_reparsed(
          for members in _scc_signature(replayed, graph)
      )
      rewritten = _cache_data(root, source)
--    assert rewritten["import_classification_semantics_version"] == 7
-+    assert rewritten["import_classification_semantics_version"] == 8
+-    assert rewritten["import_classification_semantics_version"] == 8
++    assert rewritten["import_classification_semantics_version"] == 9
      assert next(
          item for item in rewritten["imports"] if item["module"] == "pkg.b"
      )["type_only"] is False
-@@ -2011,7 +2251,7 @@ def test_d2b2_r2_worker_success_returns_and_warm_cache(
+@@ -2251,7 +2371,7 @@ def test_d2b2_r2_worker_success_returns_and_warm_cache(
      ]
      assert warm["source_fingerprint"] == cold["source_fingerprint"]
      cached = _cache_data(root, parent)
--    assert cached["import_classification_semantics_version"] == 7
-+    assert cached["import_classification_semantics_version"] == 8
+-    assert cached["import_classification_semantics_version"] == 8
++    assert cached["import_classification_semantics_version"] == 9
      assert type(cached["typing_guard_initializer_passive"]) is bool
      assert cached["typing_guard_initializer_passive"] is expected_passive
      assert cached["typing_guard_marker_mutation"] is cold[
-@@ -2030,7 +2270,7 @@ def test_d2b2_r2_forged_stale_parent_cache_rejected(
+@@ -2270,7 +2390,7 @@ def test_d2b2_r2_forged_stale_parent_cache_rejected(
      parent = root / "pkg" / "__init__.py"
      original_fingerprint = original.source_fingerprints_by_module["pkg.__init__"]
      cached = _cache_data(root, parent)
--    assert cached["import_classification_semantics_version"] == 7
-+    assert cached["import_classification_semantics_version"] == 8
+-    assert cached["import_classification_semantics_version"] == 8
++    assert cached["import_classification_semantics_version"] == 9
      assert cached["typing_guard_initializer_passive"] is False
      cached["typing_guard_initializer_passive"] = True
      cached["import_classification_semantics_version"] = 2
-@@ -2048,7 +2288,7 @@ def test_d2b2_r2_forged_stale_parent_cache_rejected(
+@@ -2288,7 +2408,7 @@ def test_d2b2_r2_forged_stale_parent_cache_rejected(
      assert graph.hard_edges["pkg.a"] == {"pkg.b"}
      assert graph.hard_edges["pkg.b"] == {"pkg.a"}
      rewritten = _cache_data(root, parent)
--    assert rewritten["import_classification_semantics_version"] == 7
-+    assert rewritten["import_classification_semantics_version"] == 8
+-    assert rewritten["import_classification_semantics_version"] == 8
++    assert rewritten["import_classification_semantics_version"] == 9
      assert type(rewritten["typing_guard_initializer_passive"]) is bool
      assert rewritten["typing_guard_initializer_passive"] is False
  
-@@ -2066,7 +2306,7 @@ def test_d2b2_r2_malformed_current_parent_cache_rejected(
+@@ -2306,7 +2426,7 @@ def test_d2b2_r2_malformed_current_parent_cache_rejected(
      _index_graph(root)
      parent = root / "pkg" / "__init__.py"
      cached = _cache_data(root, parent)
--    assert cached["import_classification_semantics_version"] == 7
-+    assert cached["import_classification_semantics_version"] == 8
+-    assert cached["import_classification_semantics_version"] == 8
++    assert cached["import_classification_semantics_version"] == 9
      if case == "missing":
          cached.pop("typing_guard_initializer_passive")
      else:
-@@ -2104,7 +2344,7 @@ def test_d2b2_r2_malformed_current_parent_cache_rejected(
+@@ -2344,7 +2464,7 @@ def test_d2b2_r2_malformed_current_parent_cache_rejected(
          for members in _scc_signature(replayed, graph)
      )
      rewritten = _cache_data(root, parent)
--    assert rewritten["import_classification_semantics_version"] == 7
-+    assert rewritten["import_classification_semantics_version"] == 8
+-    assert rewritten["import_classification_semantics_version"] == 8
++    assert rewritten["import_classification_semantics_version"] == 9
      assert type(rewritten["typing_guard_initializer_passive"]) is bool
      assert rewritten["typing_guard_initializer_passive"] is False
  
 diff --git a/tests/test_p1d3_package_cycle_integration.py b/tests/test_p1d3_package_cycle_integration.py
-index 42ba920..f7b1f3d 100644
+index f7b1f3d..8f21a76 100644
 --- a/tests/test_p1d3_package_cycle_integration.py
 +++ b/tests/test_p1d3_package_cycle_integration.py
-@@ -4,6 +4,7 @@ from __future__ import annotations
- 
- import ast
- import copy
-+import importlib.util
+@@ -7,6 +7,7 @@ import copy
+ import importlib.util
  import py_compile
  from dataclasses import replace
++from importlib.machinery import SOURCE_SUFFIXES
  from pathlib import Path
-@@ -296,6 +297,31 @@ D2B6_SOURCE_SHADOW = {
-     "pkg/launcher.py": "pass\n",
- }
  
-+D2B6_R1_PYCACHE_PACKAGE = {
-+    "__pycache__.py": "pass\n",
-+    "pkg/__init__.py": "pass\n",
-+    "pkg/a.py": (
-+        "from typing import TYPE_CHECKING\n"
-+        "if TYPE_CHECKING:\n"
-+        "    import pkg.c\n"
-+        "value = 1\n"
-+    ),
-+    "pkg/c.py": "from pkg.a import value\n",
-+    "pkg/launcher.py": "import __pycache__\nimport pkg.a\n",
-+}
-+
-+D2B6_R1_FORGED_TAGGED_CACHE = {
-+    "pkg/__init__.py": "pass\n",
-+    "pkg/a.py": (
-+        "from typing import TYPE_CHECKING\n"
-+        "if TYPE_CHECKING:\n"
-+        "    import pkg.c\n"
-+        "value = 1\n"
-+    ),
-+    "pkg/c.py": "from pkg.a import value\n",
-+    "pkg/launcher.py": "import pkg.a\n",
-+}
-+
- D2B3_SOURCE_BOUND_NEGATIVES = [
-     (
-         "N01-no-marker",
-@@ -1355,6 +1381,95 @@ def test_p1d3_d2b6_sourceless_shadow_original_worker_fails_closed(
+ import pytest
+@@ -1381,6 +1382,79 @@ def test_p1d3_d2b6_sourceless_shadow_original_worker_fails_closed(
      assert prepared.manifest is None
  
  
-+@pytest.mark.parametrize(
-+    "case,fixture",
-+    [
-+        ("K01", D2B6_R1_PYCACHE_PACKAGE),
-+        ("K02", D2B6_R1_FORGED_TAGGED_CACHE),
-+    ],
-+)
-+def test_p1d3_d2b6_r1_pycache_original_worker_fails_closed(
-+    tmp_path, isolated_dirs, case, fixture,
++def test_p1d3_d2b7_alternative_source_original_worker_fails_closed(
++    tmp_path, isolated_dirs, monkeypatch,
 +):
-+    root = write_synthetic_repository(tmp_path / "repo", fixture)
-+    temporary_source = tmp_path / "dangerous_source.py"
-+    temporary_source.write_text(
++    if ".pyw" not in SOURCE_SUFFIXES:
++        monkeypatch.setattr(indexer, "_ALTERNATIVE_SOURCE_SUFFIXES", (".pyw",))
++    root = write_synthetic_repository(tmp_path / "repo", D2B6_SOURCE_SHADOW)
++    package_directory = root / "pkg" / "launcher"
++    package_directory.mkdir()
++    alternative_source = package_directory / "__init__.pyw"
++    alternative_source.write_text(
 +        "import typing\ntyping.TYPE_CHECKING = True\nimport pkg.a\n",
 +        encoding="utf-8",
 +    )
-+    if case == "K01":
-+        package_directory = root / "__pycache__"
-+        package_directory.mkdir()
-+        target = package_directory / "__init__.pyc"
-+        py_compile.compile(str(temporary_source), cfile=str(target), doraise=True)
-+    else:
-+        target = Path(importlib.util.cache_from_source(
-+            str(root / "pkg" / "launcher.py")
-+        ))
-+        target.parent.mkdir()
-+        py_compile.compile(
-+            str(temporary_source), cfile=str(target), doraise=True,
-+            invalidation_mode=py_compile.PycInvalidationMode.UNCHECKED_HASH,
-+        )
-+    temporary_source.unlink()
-+
 +    index, graph = _d2a_canonical_index_graph(root)
++    assert alternative_source.is_file()
 +    assert graph.hard_edges["pkg.a"] == {"pkg.c"}
 +    assert graph.hard_edges["pkg.c"] == {"pkg.a"}
 +    plan = plan_original_worker_reindex(index, graph.hard_edges)
@@ -720,6 +612,7 @@ index 42ba920..f7b1f3d 100644
 +    captured, captured_graph = _d2a_canonical_index_graph(
 +        root, source_capture_module_ids=plan.selected_module_ids,
 +    )
++    assert alternative_source.is_file()
 +    assert captured.original_worker_capture_status == (
 +        "ALL_SELECTED_CAPTURED_NON_ATOMIC"
 +    )
@@ -728,6 +621,7 @@ index 42ba920..f7b1f3d 100644
 +    assert captured.source_fingerprints_by_module == (
 +        index.source_fingerprints_by_module
 +    )
++    assert all(Path(module.absolute_path).suffix == ".py" for module in captured.modules.values())
 +    for module_id in plan.selected_module_ids:
 +        assert captured.original_worker_source_snapshots[
 +            module_id
@@ -768,19 +662,24 @@ index 42ba920..f7b1f3d 100644
 +    assert prepared.manifest is None
 +
 +
- def test_p1d3_d2b4_r1_opaque_source_checker_fails_closed(
-     tmp_path, isolated_dirs,
- ):
+ @pytest.mark.parametrize(
+     "case,fixture",
+     [
 ```
 
-## 38. CONTRACT_CONFLICTS
-DIRECT_EVIDENCE: None encountered; exact production anchor matched. C02-C04 expectation revision was explicitly authorized by the architect.
+## 33. CONTRACT_CONFLICTS
 
-## 39. DESIGN_GAPS
-DIRECT_EVIDENCE: None encountered for the literal R1 implementation.
+**DIRECT_EVIDENCE:** None encountered.
 
-## 40. UNKNOWN / UNSUPPORTED
-UNKNOWN: Directory symlink behavior remains unverified on this Windows host. The symlink test skips on `[WinError 1314] A required privilege is not held by the client`. Active LIVE adoption, arbitrary import-hook safety, pre-entry mutation and global-suite status were not established.
+## 34. DESIGN_GAPS
 
-## 41. FINAL IMPLEMENTER OBSERVATION
-DIRECT_EVIDENCE: Literal D2B-6-R1 repair and focused validation complete with one platform skip; architectural acceptance remains with ChatGPT. STOP after D2B-6-R1.
+**DIRECT_EVIDENCE:** None encountered.
+
+## 35. UNKNOWN / UNSUPPORTED
+
+**UNKNOWN:** Active LIVE adoption, global pytest, and non-Windows `.pyw` loader behavior. Isolated FULL regression is not active LIVE proof.
+
+## 36. FINAL IMPLEMENTER OBSERVATION
+
+**DIRECT_EVIDENCE:** Bounded change and focused checks completed; stop after D2B-7. No architectural GO.
+

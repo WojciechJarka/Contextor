@@ -7,6 +7,7 @@ import copy
 import importlib.util
 import py_compile
 from dataclasses import replace
+from importlib.machinery import SOURCE_SUFFIXES
 from pathlib import Path
 
 import pytest
@@ -1377,6 +1378,79 @@ def test_p1d3_d2b6_sourceless_shadow_original_worker_fails_closed(
     assert consistency.reason == "GRAPH_SOURCE_IMPORT_MISMATCH"
     prepared = prepare_original_worker_cycle_manifest(
         captured, graph.hard_edges, _snapshot(root, index, graph),
+    )
+    assert prepared.manifest is None
+
+
+def test_p1d3_d2b7_alternative_source_original_worker_fails_closed(
+    tmp_path, isolated_dirs, monkeypatch,
+):
+    if ".pyw" not in SOURCE_SUFFIXES:
+        monkeypatch.setattr(indexer, "_ALTERNATIVE_SOURCE_SUFFIXES", (".pyw",))
+    root = write_synthetic_repository(tmp_path / "repo", D2B6_SOURCE_SHADOW)
+    package_directory = root / "pkg" / "launcher"
+    package_directory.mkdir()
+    alternative_source = package_directory / "__init__.pyw"
+    alternative_source.write_text(
+        "import typing\ntyping.TYPE_CHECKING = True\nimport pkg.a\n",
+        encoding="utf-8",
+    )
+    index, graph = _d2a_canonical_index_graph(root)
+    assert alternative_source.is_file()
+    assert graph.hard_edges["pkg.a"] == {"pkg.c"}
+    assert graph.hard_edges["pkg.c"] == {"pkg.a"}
+    plan = plan_original_worker_reindex(index, graph.hard_edges)
+    assert plan.status == "READY_FOR_REINDEX_NON_ATOMIC"
+    assert plan.selected_module_ids
+    captured, captured_graph = _d2a_canonical_index_graph(
+        root, source_capture_module_ids=plan.selected_module_ids,
+    )
+    assert alternative_source.is_file()
+    assert captured.original_worker_capture_status == (
+        "ALL_SELECTED_CAPTURED_NON_ATOMIC"
+    )
+    assert captured_graph.hard_edges == graph.hard_edges
+    assert captured_graph.soft_edges == graph.soft_edges
+    assert captured.source_fingerprints_by_module == (
+        index.source_fingerprints_by_module
+    )
+    assert all(Path(module.absolute_path).suffix == ".py" for module in captured.modules.values())
+    for module_id in plan.selected_module_ids:
+        assert captured.original_worker_source_snapshots[
+            module_id
+        ].source_fingerprint == index.source_fingerprints_by_module[module_id]
+    parsed = {
+        module: parse_source_snapshot(snapshot, module)
+        for module, snapshot in captured.original_worker_source_snapshots.items()
+    }
+    closure = compute_cycle_model_source_closures(graph.hard_edges)
+    assert len(closure) == 1
+    consistency = assess_package_graph_consistency(
+        graph.hard_edges,
+        {module_id: source.tree for module_id, source in parsed.items()},
+        closure[0].evidence_source_modules,
+    )
+    assert consistency.status == "INDETERMINATE"
+    assert consistency.reason == "GRAPH_SOURCE_IMPORT_MISMATCH"
+    snapshot = _snapshot(root, index, graph)
+    evidence = build_source_bound_cycle_evidence(graph.hard_edges, parsed)
+    p0 = assess_index_bound_scc_models(
+        graph.hard_edges,
+        captured.source_fingerprints_by_module,
+        snapshot,
+        evidence,
+    )
+    p1b = assess_scc_source_bytes(
+        graph.hard_edges,
+        captured.source_fingerprints_by_module,
+        snapshot,
+        evidence,
+        captured.original_worker_source_snapshots,
+    )
+    assert all(item.evidence_state != "DECLARED_INPUTS_CONSISTENT" for item in p0)
+    assert all(item.bytes_state != "BYTE_AST_CONSISTENT_NON_ATOMIC" for item in p1b)
+    prepared = prepare_original_worker_cycle_manifest(
+        captured, graph.hard_edges, snapshot,
     )
     assert prepared.manifest is None
 
