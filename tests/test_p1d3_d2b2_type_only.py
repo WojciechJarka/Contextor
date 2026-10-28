@@ -10,12 +10,13 @@ from pathlib import Path
 import pytest
 
 from contextor.core.analysis.cache_manager import CacheManager
+from contextor.core.cycle_semantics.package_model import evaluate_package_import_order
 from contextor.core.cycle_semantics.scenarios import analyze_cycle_scenarios
 from contextor.core.graph.graph import build_graph
 from contextor.core.graph.resolver import build_trie, detect_package_root
 from contextor.core.reference.shared import materialize_reexport_facts_by_module
 from contextor.core.symbol_engine import indexer
-from tests.cycle_semantics_lab import write_synthetic_repository
+from tests.cycle_semantics_lab import run_synthetic_import, write_synthetic_repository
 
 
 D2B_NAME_SAFE = {
@@ -28,6 +29,99 @@ D2B_NAME_SAFE = {
     ),
     "pkg/b.py": "from pkg.a import value\n",
 }
+
+D2B2_R1_GLOBALS_MUTATION = {
+    "pkg/__init__.py": "pass\n",
+    "pkg/a.py": (
+        "from typing import TYPE_CHECKING\n"
+        'globals()["TYPE_CHECKING"] = True\n'
+        "if TYPE_CHECKING:\n"
+        "    import pkg.b\n"
+        "value = 1\n"
+    ),
+    "pkg/b.py": "from pkg.a import value\n",
+}
+
+D2B2_R1_SETATTR_MUTATION = {
+    "pkg/__init__.py": "pass\n",
+    "pkg/a.py": (
+        "import typing\n"
+        'setattr(typing, "TYPE_CHECKING", True)\n'
+        "if typing.TYPE_CHECKING:\n"
+        "    import pkg.b\n"
+        "value = 1\n"
+    ),
+    "pkg/b.py": "from pkg.a import value\n",
+}
+
+D2B2_R1_PREFIX_NEGATIVES = [
+    (
+        "globals-update",
+        "from typing import TYPE_CHECKING\n"
+        'globals().update({"TYPE_CHECKING": True})\n'
+        "if TYPE_CHECKING:\n    import pkg.b\n",
+    ),
+    (
+        "exec-rebinding",
+        "from typing import TYPE_CHECKING\n"
+        'exec("TYPE_CHECKING = True")\n'
+        "if TYPE_CHECKING:\n    import pkg.b\n",
+    ),
+    (
+        "typing-dict-rebinding",
+        "import typing\n"
+        'typing.__dict__["TYPE_CHECKING"] = True\n'
+        "if typing.TYPE_CHECKING:\n    import pkg.b\n",
+    ),
+    (
+        "vars-rebinding",
+        "from typing import TYPE_CHECKING\n"
+        'vars()["TYPE_CHECKING"] = True\n'
+        "if TYPE_CHECKING:\n    import pkg.b\n",
+    ),
+    (
+        "active-import-before-guard",
+        "from typing import TYPE_CHECKING\n"
+        "import pkg.b\n"
+        "if TYPE_CHECKING:\n    import pkg.b\n",
+    ),
+    (
+        "conditional-before-guard",
+        "from typing import TYPE_CHECKING\n"
+        "if True:\n    pass\n"
+        "if TYPE_CHECKING:\n    import pkg.b\n",
+    ),
+    (
+        "call-assignment-before-guard",
+        "from typing import TYPE_CHECKING\n"
+        "value = unknown()\n"
+        "if TYPE_CHECKING:\n    import pkg.b\n",
+    ),
+    (
+        "function-before-guard",
+        "from typing import TYPE_CHECKING\n"
+        "def mutate():\n    pass\n"
+        "if TYPE_CHECKING:\n    import pkg.b\n",
+    ),
+    (
+        "class-before-guard",
+        "from typing import TYPE_CHECKING\n"
+        "class Mutator:\n    pass\n"
+        "if TYPE_CHECKING:\n    import pkg.b\n",
+    ),
+    (
+        "with-before-guard",
+        "from typing import TYPE_CHECKING\n"
+        "with context:\n    pass\n"
+        "if TYPE_CHECKING:\n    import pkg.b\n",
+    ),
+    (
+        "multiple-matching-guards",
+        "from typing import TYPE_CHECKING\n"
+        "if TYPE_CHECKING:\n    pass\n"
+        "if TYPE_CHECKING:\n    import pkg.b\n",
+    ),
+]
 
 D2B2_NEGATIVE_CASES = [
     ("N01-no-marker", "if TYPE_CHECKING:\n    import pkg.b\n", {}, {"pkg.b"}),
@@ -254,7 +348,7 @@ def test_cold_and_warm_worker_cache_match_type_only_graph(
     cold_graph_signature = _graph_signature(cold_index, cold_graph)
     source = root / "pkg" / "a.py"
     cached = _cache_data(root, source)
-    assert cached["import_classification_semantics_version"] == 1
+    assert cached["import_classification_semantics_version"] == 2
     assert next(
         item for item in cached["imports"] if item["module"] == "pkg.b"
     )["type_only"] is True
@@ -271,7 +365,9 @@ def test_cold_and_warm_worker_cache_match_type_only_graph(
     assert _graph_signature(warm_index, warm_graph) == cold_graph_signature
 
 
-@pytest.mark.parametrize("stored_version", [None, 0], ids=["absent", "old"])
+@pytest.mark.parametrize(
+    "stored_version", [None, 0, 1], ids=["absent", "version-0", "version-1"],
+)
 def test_stale_import_classification_cache_reparses_same_snapshot(
     tmp_path, isolated_dirs, stored_version, monkeypatch,
 ):
@@ -314,7 +410,7 @@ def test_stale_import_classification_cache_reparses_same_snapshot(
         for item in result.modules["pkg.a"].imports
     )
     rewritten = _cache_data(root, source)
-    assert rewritten["import_classification_semantics_version"] == 1
+    assert rewritten["import_classification_semantics_version"] == 2
     assert next(
         item for item in rewritten["imports"] if item["module"] == "pkg.b"
     )["type_only"] is True
@@ -428,12 +524,16 @@ def test_inline_and_process_pool_classification_parity(
     assert pool_index.original_worker_capture_status == "NOT_REQUESTED"
 
 
+@pytest.mark.parametrize(
+    "shadow_path", ["typing.py", "typing/__init__.py"],
+    ids=["module", "package"],
+)
 def test_inline_and_process_pool_typing_shadow_veto_parity(
-    tmp_path, isolated_dirs, monkeypatch,
+    tmp_path, isolated_dirs, monkeypatch, shadow_path,
 ):
     fixture = {
         **D2B_NAME_SAFE,
-        "typing.py": "pass\n",
+        shadow_path: "pass\n",
     }
     inline_root = write_synthetic_repository(
         tmp_path / "inline", fixture,
@@ -486,4 +586,175 @@ def test_unsupported_imports_remain_non_type_only_and_hard(
         assert [item.module for item in imports if item.module in {"pkg.b", "pkg.c"}] == [
             "pkg.b", "pkg.c",
         ]
+
+
+def _assert_dynamic_mutation_retains_hard_scc(root):
+    indexed, graph = _index_graph(root)
+    guarded_imports = [
+        item for item in indexed.modules["pkg.a"].imports
+        if item.module == "pkg.b" and not item.is_from_import
+    ]
+    assert len(guarded_imports) == 1
+    assert guarded_imports[0].type_only is False
+    assert graph.hard_edges["pkg.a"] == {"pkg.b"}
+    assert graph.hard_edges["pkg.b"] == {"pkg.a"}
+    assert "pkg.b" not in graph.soft_edges["pkg.a"]
+    assert any(
+        set(members) == {"pkg.a", "pkg.b"}
+        for members in _scc_signature(indexed, graph)
+    )
+
+    trees = {
+        module_id: ast.parse(Path(module.absolute_path).read_text(encoding="utf-8"))
+        for module_id, module in indexed.modules.items()
+    }
+    modeled = evaluate_package_import_order(trees, "pkg.a")
+    assert modeled.outcome != "MODEL_PASS"
+    scenarios = analyze_cycle_scenarios(graph.hard_edges, trees)
+    assert all(
+        component.classification != "MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS"
+        for component in scenarios.components
+        if {"pkg.a", "pkg.b"}.issubset(set(component.members))
+    )
+
+    actual = run_synthetic_import(root, "pkg.a")
+    assert actual.returncode != 0
+    assert "partially initialized module" in actual.stderr
+    return indexed, graph
+
+
+def test_d2b2_r1_globals_rebinding_keeps_hard_scc(tmp_path, isolated_dirs):
+    root = write_synthetic_repository(
+        tmp_path / "repo", D2B2_R1_GLOBALS_MUTATION,
+    )
+    _assert_dynamic_mutation_retains_hard_scc(root)
+
+
+def test_d2b2_r1_setattr_mutation_keeps_hard_scc(tmp_path, isolated_dirs):
+    root = write_synthetic_repository(
+        tmp_path / "repo", D2B2_R1_SETATTR_MUTATION,
+    )
+    _assert_dynamic_mutation_retains_hard_scc(root)
+
+
+@pytest.mark.parametrize(
+    "case,source", D2B2_R1_PREFIX_NEGATIVES,
+    ids=[item[0] for item in D2B2_R1_PREFIX_NEGATIVES],
+)
+def test_d2b2_r1_effectful_prefixes_keep_hard_edge(
+    tmp_path, isolated_dirs, case, source,
+):
+    fixture = {
+        "pkg/__init__.py": "pass\n",
+        "pkg/a.py": source,
+        "pkg/b.py": "from pkg.a import value\n",
+    }
+    root = write_synthetic_repository(tmp_path / case, fixture)
+    indexed, graph = _index_graph(root)
+    guarded_imports = [
+        item for item in indexed.modules["pkg.a"].imports
+        if item.module == "pkg.b" and not item.is_from_import
+    ]
+    assert guarded_imports
+    assert all(item.type_only is False for item in guarded_imports)
+    assert "pkg.b" in graph.hard_edges["pkg.a"]
+    assert "pkg.b" not in graph.soft_edges["pkg.a"]
+
+
+def test_d2b2_r1_safe_prefix_remains_type_only(tmp_path, isolated_dirs):
+    fixture = {
+        "pkg/__init__.py": "pass\n",
+        "pkg/a.py": (
+            "from typing import TYPE_CHECKING\n"
+            "constant = 1\n"
+            "pass\n"
+            "if TYPE_CHECKING:\n"
+            "    import pkg.b\n"
+            "value = 1\n"
+        ),
+        "pkg/b.py": "from pkg.a import value\n",
+    }
+    root = write_synthetic_repository(tmp_path / "repo", fixture)
+    indexed, graph = _index_graph(root)
+    guarded_imports = [
+        item for item in indexed.modules["pkg.a"].imports
+        if item.module == "pkg.b" and not item.is_from_import
+    ]
+    assert len(guarded_imports) == 1
+    assert guarded_imports[0].type_only is True
+    assert graph.soft_edges["pkg.a"] == {"pkg.b"}
+    assert "pkg.b" not in graph.hard_edges["pkg.a"]
+    assert graph.hard_edges["pkg.b"] == {"pkg.a"}
+    assert not any(
+        {"pkg.a", "pkg.b"}.issubset(set(members))
+        for members in _scc_signature(indexed, graph)
+    )
+    assert run_synthetic_import(root, "pkg.a").returncode == 0
+
+
+def test_d2b2_r1_forged_version_one_cache_is_reparsed(
+    tmp_path, isolated_dirs,
+):
+    root = write_synthetic_repository(
+        tmp_path / "repo", D2B2_R1_GLOBALS_MUTATION,
+    )
+    first, first_graph = _index_graph(root)
+    assert "pkg.b" in first_graph.hard_edges["pkg.a"]
+    assert any(
+        item.module == "pkg.b" and not item.type_only
+        for item in first.modules["pkg.a"].imports
+    )
+
+    source = root / "pkg" / "a.py"
+    cached = _cache_data(root, source)
+    assert cached["import_classification_semantics_version"] == 2
+    forged_imports = [
+        item for item in cached["imports"] if item["module"] == "pkg.b"
+    ]
+    assert len(forged_imports) == 1
+    forged_imports[0]["type_only"] = True
+    cached["import_classification_semantics_version"] = 1
+    CacheManager(str(root)).set(source, cached)
+    indexer._CACHE_MANAGERS.pop(str(root.resolve()), None)
+
+    replayed, graph = _index_graph(root)
+    assert any(
+        item.module == "pkg.b" and not item.type_only
+        for item in replayed.modules["pkg.a"].imports
+    )
+    assert graph.hard_edges["pkg.a"] == {"pkg.b"}
+    assert graph.hard_edges["pkg.b"] == {"pkg.a"}
+    assert any(
+        set(members) == {"pkg.a", "pkg.b"}
+        for members in _scc_signature(replayed, graph)
+    )
+    rewritten = _cache_data(root, source)
+    assert rewritten["import_classification_semantics_version"] == 2
+    assert next(
+        item for item in rewritten["imports"] if item["module"] == "pkg.b"
+    )["type_only"] is False
+
+
+@pytest.mark.parametrize(
+    "fixture", [D2B2_R1_GLOBALS_MUTATION, D2B2_R1_SETATTR_MUTATION],
+    ids=["globals", "setattr"],
+)
+def test_d2b2_r1_dynamic_mutation_inline_process_pool_parity(
+    tmp_path, isolated_dirs, monkeypatch, fixture,
+):
+    inline_root = write_synthetic_repository(tmp_path / "inline", fixture)
+    monkeypatch.setenv("CONTEXTOR_DISABLE_PROCESS_POOL", "1")
+    inline_index, inline_graph = _index_graph(inline_root)
+
+    pool_root = write_synthetic_repository(tmp_path / "pool", fixture)
+    monkeypatch.delenv("CONTEXTOR_DISABLE_PROCESS_POOL", raising=False)
+    pool_index, pool_graph = _index_graph(pool_root)
+
+    assert _import_signature(pool_index) == _import_signature(inline_index)
+    assert _graph_signature(pool_index, pool_graph) == (
+        _graph_signature(inline_index, inline_graph)
+    )
+    assert pool_graph.hard_edges["pkg.a"] == {"pkg.b"}
+    assert pool_graph.hard_edges["pkg.b"] == {"pkg.a"}
+    assert "pkg.b" not in pool_graph.soft_edges["pkg.a"]
 

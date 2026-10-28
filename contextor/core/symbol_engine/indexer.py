@@ -69,7 +69,7 @@ SYMBOL_FACTS_SCHEMA_VERSION = 2
 REFERENCE_FACTS_SCHEMA_VERSION = 1
 COLLISION_FACTS_SCHEMA_VERSION = 1
 TEST_FACTS_SCHEMA_VERSION = 1
-IMPORT_CLASSIFICATION_SEMANTICS_VERSION = 1
+IMPORT_CLASSIFICATION_SEMANTICS_VERSION = 2
 _SYMBOL_FACTS_AVAILABLE = "available"
 _SYMBOL_FACTS_FAILURE = "failure"
 _SYMBOL_FACTS_NOT_COMPUTED = "not_computed"
@@ -282,6 +282,61 @@ class AdvancedImportVisitor(ast.NodeVisitor):
         )
 
 
+def _safe_typing_guard_prefix_statement(
+    statement: ast.stmt,
+) -> bool:
+    if isinstance(statement, ast.Pass):
+        return True
+
+    if (
+        isinstance(statement, ast.Expr)
+        and isinstance(
+            statement.value,
+            ast.Constant,
+        )
+        and type(statement.value.value) is str
+    ):
+        return True
+
+    if isinstance(statement, ast.Assign):
+        if (
+            len(statement.targets) != 1
+            or not isinstance(
+                statement.targets[0],
+                ast.Name,
+            )
+            or not isinstance(
+                statement.value,
+                ast.Constant,
+            )
+        ):
+            return False
+
+        binding = statement.targets[0].id
+
+        return (
+            binding.isidentifier()
+            and not binding.startswith("__")
+            and binding not in {
+                "TYPE_CHECKING",
+                "typing",
+            }
+            and type(
+                statement.value.value
+            ) in {
+                type(None),
+                bool,
+                int,
+                float,
+                complex,
+                str,
+                bytes,
+            }
+        )
+
+    return False
+
+
 def read_imports(
     file_path: Path,
     *,
@@ -317,30 +372,42 @@ def read_imports(
             None,
         )
         if marker_position is not None:
-            for statement in tree.body[marker_position + 1:]:
+            matching_guards = [
+                (position, statement)
+                for position, statement in enumerate(tree.body)
                 if (
-                    not isinstance(statement, ast.If)
-                    or not matches_typing_guard(
+                    isinstance(statement, ast.If)
+                    and matches_typing_guard(
                         statement.test,
                         guard.form,
                     )
+                )
+            ]
+            if len(matching_guards) == 1:
+                guard_position, guard_statement = matching_guards[0]
+                if (
+                    guard_position > marker_position
+                    and all(
+                        _safe_typing_guard_prefix_statement(statement)
+                        for statement in tree.body[
+                            marker_position + 1:guard_position
+                        ]
+                    )
                 ):
-                    continue
-
-                for body_statement in statement.body:
-                    if (
-                        not isinstance(body_statement, ast.Import)
-                        or len(body_statement.names) != 1
-                    ):
-                        continue
-                    alias = body_statement.names[0]
-                    parts = alias.name.split(".")
-                    if (
-                        alias.asname is None
-                        and len(parts) > 1
-                        and all(part.isidentifier() for part in parts)
-                    ):
-                        type_only_statement_ids.add(id(body_statement))
+                    for body_statement in guard_statement.body:
+                        if (
+                            not isinstance(body_statement, ast.Import)
+                            or len(body_statement.names) != 1
+                        ):
+                            continue
+                        alias = body_statement.names[0]
+                        parts = alias.name.split(".")
+                        if (
+                            alias.asname is None
+                            and len(parts) > 1
+                            and all(part.isidentifier() for part in parts)
+                        ):
+                            type_only_statement_ids.add(id(body_statement))
 
     visitor = AdvancedImportVisitor(
         frozenset(type_only_statement_ids)
