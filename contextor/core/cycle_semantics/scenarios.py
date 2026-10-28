@@ -158,7 +158,10 @@ def analyze_cycle_scenarios(
 
         # The graph and AST must describe the exact same import targets.
         # No name-based exceptions and no guessed package resolution.
-        flat_applicable = not any(
+        flat_applicable = all(
+            name.isidentifier() and not name.startswith("__")
+            for name in reachable
+        ) and not any(
             _declared_import_targets(modules[name]) != set(adjacency[name])
             for name in reachable
         )

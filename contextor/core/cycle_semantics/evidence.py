@@ -17,8 +17,8 @@ from contextor.core.source import ParsedSourceInput
 
 from .contracts import CycleSemanticsSnapshot, fingerprint_hard_edges
 from .scc import analyze_import_cycle_topology
-from .initialization_model import ImportOrderAssessment
-from .package_model import PackageImportAssessment
+from .initialization_model import ImportOrderAssessment, ModelEvent
+from .package_model import PackageImportAssessment, PackageModelEvent
 from .model_source_closure import compute_cycle_model_source_closures
 from .model_identity import indexed_to_logical_module, logical_to_indexed_module
 from .scenarios import (
@@ -292,6 +292,17 @@ def assess_index_bound_scc_models(
             or len(set(contract[3])) != len(contract[3])
             or any(a.evidence_scope != contract[1]
                    for a in scenario.entry_assessments)
+            or any(
+                type(a.events) is not tuple
+                or any(
+                    type(event) is not (
+                        ModelEvent if scenario.model_kind == "FLAT_MODULE"
+                        else PackageModelEvent
+                    )
+                    for event in a.events
+                )
+                for a in scenario.entry_assessments
+            )
             or any(a.outcome == "UNKNOWN" for a in scenario.entry_assessments)
         ):
             outputs.append(result(

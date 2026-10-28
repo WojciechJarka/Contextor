@@ -69,6 +69,9 @@ def compute_cycle_model_source_closures(
             members=component.members,
             hard_reachable_modules=tuple(sorted(hard)),
             evidence_source_modules=tuple(sorted(evidence)),
-            implicit_initializer_modules=tuple(sorted(evidence - hard)),
+            implicit_initializer_modules=tuple(sorted(
+                module_id for module_id in evidence - hard
+                if module_id.endswith(".__init__")
+            )),
         ))
     return tuple(rows)

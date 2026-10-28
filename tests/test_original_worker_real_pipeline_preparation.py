@@ -250,7 +250,7 @@ def test_p1d2d_t07_real_process_pool_component_chain(
         terminate_active_process_pools(timeout=1.0)
 
 
-def test_p1d2d_t08_dotted_imports_remain_fail_closed(
+def test_p1d2d_t08_unsupported_dotted_package_remains_fail_closed(
     tmp_path, isolated_dirs,
 ):
     root = tmp_path / "package_repo"
@@ -260,6 +260,9 @@ def test_p1d2d_t08_dotted_imports_remain_fail_closed(
     (package / "__init__.py").write_bytes(b"")
     (package / "a.py").write_bytes(
         b"import pkg.b\n"
+        b"@unknown_decorator\n"
+        b"def f():\n"
+        b"    pass\n"
     )
     (package / "b.py").write_bytes(
         b"import pkg.a\n"

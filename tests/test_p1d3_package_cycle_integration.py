@@ -15,6 +15,7 @@ from contextor.core.cycle_semantics.evidence import (
     build_source_bound_cycle_evidence,
 )
 from contextor.core.cycle_semantics.generation_manifest import MANIFEST_VERSION
+from contextor.core.cycle_semantics.initialization_model import ImportOrderAssessment
 from contextor.core.cycle_semantics.materialization import materialize_cycle_semantics
 from contextor.core.cycle_semantics.model_identity import (
     indexed_to_logical_module,
@@ -35,6 +36,7 @@ from contextor.core.source import parse_source_snapshot
 from contextor.core.symbol_engine.indexer import index_repository
 from tests.cycle_semantics_lab import run_synthetic_import, write_synthetic_repository
 from tests.test_original_worker_full_receipt_optin import _persisted
+from tests.test_original_worker_official_full_live_publication import _official_live
 
 
 F1 = {
@@ -122,6 +124,24 @@ def test_identity_mapping_and_ambiguous_layout():
     assert logical_to_indexed_module("external", frozenset({"pkg.a"})) is None
 
 
+def test_initializer_hard_edges_reach_fixed_point():
+    edges = {
+        "pkg.a": {"pkg.b"},
+        "pkg.b": {"pkg.a"},
+        "pkg.__init__": {"pkg.sub.child"},
+        "pkg.sub.__init__": set(),
+        "pkg.sub.child": set(),
+    }
+    closure = compute_cycle_model_source_closures(edges)[0]
+    assert closure.hard_reachable_modules == ("pkg.a", "pkg.b")
+    assert closure.evidence_source_modules == (
+        "pkg.__init__", "pkg.a", "pkg.b", "pkg.sub.__init__", "pkg.sub.child",
+    )
+    assert closure.implicit_initializer_modules == (
+        "pkg.__init__", "pkg.sub.__init__",
+    )
+
+
 def test_early_hazard_and_safe_reordering(tmp_path, isolated_dirs):
     outcomes = []
     for name, fixture in (("hazard", F3), ("safe", F4)):
@@ -170,20 +190,23 @@ def test_unsupported_namespace_and_contradictory_graph(tmp_path, isolated_dirs):
     root = write_synthetic_repository(tmp_path / "contradictory", F1)
     index, graph = _indexed(root)
     broken = {name: set(targets) for name, targets in graph.hard_edges.items()}
-    broken["pkg.a"].remove("pkg.b")
+    broken["pkg.a"].add("pkg.__init__")
+    captured = index_repository(
+        str(root), source_capture_module_ids=frozenset(index.modules),
+    )
     trees = {
-        name: parse_source_snapshot(
-            index_repository(str(root), source_capture_module_ids=frozenset(index.modules))
-            .original_worker_source_snapshots[name], name,
-        ).tree
-        for name in index.modules
+        name: parse_source_snapshot(snapshot, name).tree
+        for name, snapshot in captured.original_worker_source_snapshots.items()
     }
     report = analyze_cycle_scenarios(broken, trees)
-    assert all(c.classification == "INDETERMINATE" for c in report.components)
+    assert len(report.components) == 1
+    assert report.components[0].classification == "INDETERMINATE"
+    assert report.components[0].reason == "GRAPH_SOURCE_IMPORT_MISMATCH"
 
 
-def test_p1b_replay_rejects_forged_event(tmp_path, isolated_dirs):
-    root = write_synthetic_repository(tmp_path / "repo", F3)
+@pytest.mark.parametrize("fixture", [F1, F3])
+def test_p1b_replay_rejects_forged_event(tmp_path, isolated_dirs, fixture):
+    root = write_synthetic_repository(tmp_path / "repo", fixture)
     index, graph = _indexed(root)
     _, captured = _captured(root, index, graph)
     sources = captured.original_worker_source_snapshots
@@ -191,7 +214,7 @@ def test_p1b_replay_rejects_forged_event(tmp_path, isolated_dirs):
     evidence = build_source_bound_cycle_evidence(graph.hard_edges, parsed)
     scenario = evidence.scenarios.components[0]
     assessment = scenario.entry_assessments[0]
-    assert assessment.outcome == "EARLY_BINDING_HAZARD"
+    assert assessment.outcome in {"MODEL_PASS", "EARLY_BINDING_HAZARD"}
     forged_events = (replace(assessment.events[0], operation="FORGED"), *assessment.events[1:])
     forged_scenario = replace(scenario, entry_assessments=(
         replace(assessment, events=forged_events), *scenario.entry_assessments[1:],
@@ -224,6 +247,38 @@ def test_p1b_replay_rejects_forged_event(tmp_path, isolated_dirs):
     assert p1b[0].reason == "MODEL_REPLAY_MISMATCH"
 
 
+def test_p0_rejects_package_assessment_disguised_as_flat(tmp_path, isolated_dirs):
+    root = write_synthetic_repository(tmp_path / "repo", F1)
+    index, graph = _indexed(root)
+    _, captured = _captured(root, index, graph)
+    parsed = {
+        name: parse_source_snapshot(snapshot, name)
+        for name, snapshot in captured.original_worker_source_snapshots.items()
+    }
+    evidence = build_source_bound_cycle_evidence(graph.hard_edges, parsed)
+    scenario = evidence.scenarios.components[0]
+    fake = ImportOrderAssessment("pkg.a", "MODEL_PASS", None, None, ())
+    changed = replace(scenario, entry_assessments=(fake, scenario.entry_assessments[1]))
+    component = evidence.components[0]
+    subgraph = tuple(
+        (name, tuple(sorted(graph.hard_edges[name])))
+        for name in component.reachable_modules
+    )
+    altered = replace(
+        evidence,
+        scenarios=replace(evidence.scenarios, components=(changed,)),
+        components=(replace(component, evidence_token=_component_token(
+            component.members, subgraph, component.source_signatures, changed,
+        )),),
+    )
+    result = assess_index_bound_scc_models(
+        graph.hard_edges, captured.source_fingerprints_by_module,
+        _snapshot(root, index, graph), altered,
+    )
+    assert result[0].evidence_state == "INCOMPLETE_EVIDENCE"
+    assert result[0].reason == "INCOMPLETE_MEMBER_ENTRY_ASSESSMENTS"
+
+
 def test_seventeen_selected_modules_fail_before_capture(tmp_path, isolated_dirs):
     sources = {"a.py": "import b\n" + "".join(
         f"import m{i:02d}\n" for i in range(15)
@@ -235,6 +290,38 @@ def test_seventeen_selected_modules_fail_before_capture(tmp_path, isolated_dirs)
     assert plan.status == "UNAVAILABLE"
     assert plan.reason == "CLOSURE_MODULE_LIMIT"
     assert not plan.selected_module_ids
+
+
+def test_flat_and_package_components_remain_independent(tmp_path, isolated_dirs):
+    root = write_synthetic_repository(tmp_path / "repo", {
+        **F1,
+        "flat_a.py": "import flat_b\nvalue=1\n",
+        "flat_b.py": "import flat_a\nvalue=2\n",
+    })
+    index, graph = _indexed(root)
+    plan, captured = _captured(root, index, graph)
+    assert plan.selected_module_ids == frozenset({
+        "flat_a", "flat_b", "pkg.__init__", "pkg.a", "pkg.b",
+    })
+    parsed = {
+        name: parse_source_snapshot(snapshot, name)
+        for name, snapshot in captured.original_worker_source_snapshots.items()
+    }
+    evidence = build_source_bound_cycle_evidence(graph.hard_edges, parsed)
+    assert tuple(c.model_kind for c in evidence.scenarios.components) == (
+        "FLAT_MODULE", "REGULAR_PACKAGE",
+    )
+    assert all(
+        c.classification == "MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS"
+        for c in evidence.scenarios.components
+    )
+    prepared = prepare_original_worker_cycle_manifest(
+        captured, graph.hard_edges, _snapshot(root, index, graph),
+    )
+    assert prepared.status == "PREPARED_UNPUBLISHED_NON_ATOMIC"
+    assert tuple(c.model_kind for c in prepared.manifest.components) == (
+        "FLAT_MODULE", "REGULAR_PACKAGE",
+    )
 
 
 def test_legacy_v1_receipt_read_only(tmp_path, isolated_dirs):
@@ -291,3 +378,55 @@ def test_fixture_writer_rejects_escaping_paths(tmp_path):
     for name in ("../out.py", "/absolute.py", "a.txt", "a//b.py", "a/./b.py"):
         with pytest.raises(ValueError):
             write_synthetic_repository(root, {name: "pass\n"})
+
+
+@pytest.mark.live
+def test_official_isolated_package_publication(tmp_path, isolated_dirs, monkeypatch):
+    root = write_synthetic_repository(tmp_path / "repo", F1)
+    with _official_live(root, monkeypatch) as (client, server, identity, calls):
+        _, result = ContextorFacade.analyze_project(
+            str(root), cycle_source_preparation_preview=True,
+            cycle_source_publication_opt_in=True,
+        )
+        assert result is not None
+        assert result.cycle_source_preparation_preview.status == (
+            "PREPARED_UNPUBLISHED_NON_ATOMIC"
+        )
+        state, metadata = _persisted(root)
+        receipt = state.cycle_source_publication
+        assert receipt is not None
+        assert receipt.version == PUBLICATION_BINDING_VERSION
+        assert receipt.prepared_manifest.version == MANIFEST_VERSION
+        assert receipt.prepared_manifest.components[0].model_kind == "REGULAR_PACKAGE"
+        assert metadata.repo_id == identity.repo_id
+        assert calls == [root.resolve()]
+        assert result.live_publish_status == "success"
+        assert result.live_publish_revision == metadata.revision
+        verified = client.verify_installed_cycle_generation(
+            expected_revision=metadata.revision,
+            expected_state_id=metadata.state_id,
+            expected_repo_id=metadata.repo_id,
+            expected_root_path=metadata.root_path,
+            expected_graph_sha256=state.cycle_semantics.graph_sha256,
+        )
+        assert verified["status"] == "ok"
+        assert verified["service_instance_id"] == server.endpoint.service_instance_id
+        assert verified["source_manifest_sha256"] == (
+            receipt.prepared_manifest.source_manifest_sha256
+        )
+        altered = copy.copy(state)
+        altered_manifest = replace(
+            receipt.prepared_manifest,
+            components=(replace(
+                receipt.prepared_manifest.components[0],
+                model_evidence_sha256="f" * 64,
+            ),),
+        )
+        altered.cycle_source_publication = replace(
+            receipt, prepared_manifest=altered_manifest,
+        )
+        assert not verify_co_published_cycle_manifest(
+            altered, revision=metadata.revision,
+            state_id=metadata.state_id, repo_id=metadata.repo_id,
+            root_path=metadata.root_path,
+        )
