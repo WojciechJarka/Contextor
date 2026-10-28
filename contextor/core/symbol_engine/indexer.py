@@ -77,7 +77,7 @@ SYMBOL_FACTS_SCHEMA_VERSION = 2
 REFERENCE_FACTS_SCHEMA_VERSION = 1
 COLLISION_FACTS_SCHEMA_VERSION = 1
 TEST_FACTS_SCHEMA_VERSION = 1
-IMPORT_CLASSIFICATION_SEMANTICS_VERSION = 7
+IMPORT_CLASSIFICATION_SEMANTICS_VERSION = 8
 _IMPORTABLE_BINARY_SUFFIXES = tuple(
     sorted(
         frozenset(BYTECODE_SUFFIXES)
@@ -2513,22 +2513,7 @@ def index_repository(
             )
 
             if importable_artifact and path.is_file():
-                rel = path.relative_to(root_path)
-
-                is_bytecode = (
-                    binary_name.endswith(".pyc")
-                )
-
-                in_pycache = any(
-                    part.casefold() == "__pycache__"
-                    for part in rel.parts[:-1]
-                )
-
-                if not (
-                    is_bytecode
-                    and in_pycache
-                ):
-                    unindexed_import_artifacts_present = True
+                unindexed_import_artifacts_present = True
 
             continue
 
