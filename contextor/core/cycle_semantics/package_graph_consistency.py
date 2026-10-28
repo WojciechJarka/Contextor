@@ -52,6 +52,174 @@ def assess_package_graph_consistency(
         prefix = ".".join(parts[:len(parts) - level + 1])
         return prefix + ("." + named if named else "")
 
+    def restricted_relative_initializer(
+        initializer_id: str,
+    ) -> bool:
+        tree = sources.get(initializer_id)
+
+        if (
+            not initializer_id.endswith(".__init__")
+            or not isinstance(tree, ast.Module)
+        ):
+            return False
+
+        package_name = initializer_id.removesuffix(
+            ".__init__"
+        )
+
+        child_names: set[str] = set()
+
+        for indexed_id in indexed:
+            prefix = package_name + "."
+
+            if not indexed_id.startswith(prefix):
+                continue
+
+            remainder = indexed_id[len(prefix):]
+
+            if remainder and remainder != "__init__":
+                child_names.add(
+                    remainder.split(".", 1)[0]
+                )
+
+        def valid_body(
+            statements: list[ast.stmt],
+            depth: int,
+        ) -> bool:
+            if depth >= 32:
+                return False
+
+            for statement in statements:
+                if isinstance(statement, ast.Pass):
+                    continue
+
+                if (
+                    isinstance(statement, ast.Expr)
+                    and isinstance(
+                        statement.value,
+                        ast.Constant,
+                    )
+                    and type(
+                        statement.value.value
+                    ) is str
+                ):
+                    continue
+
+                if isinstance(
+                    statement,
+                    ast.Assign,
+                ):
+                    if (
+                        len(statement.targets) != 1
+                        or not isinstance(
+                            statement.targets[0],
+                            ast.Name,
+                        )
+                        or not isinstance(
+                            statement.value,
+                            ast.Constant,
+                        )
+                        or type(
+                            statement.value.value
+                        ) not in {
+                            type(None),
+                            bool,
+                            int,
+                            float,
+                            complex,
+                            str,
+                            bytes,
+                        }
+                    ):
+                        return False
+
+                    binding = statement.targets[0].id
+
+                    if (
+                        not binding.isidentifier()
+                        or binding.startswith("__")
+                        or binding in child_names
+                    ):
+                        return False
+
+                    continue
+
+                if isinstance(
+                    statement,
+                    ast.ImportFrom,
+                ):
+                    if (
+                        statement.level != 1
+                        or statement.module is not None
+                        or len(statement.names) != 1
+                    ):
+                        return False
+
+                    alias = statement.names[0]
+
+                    if (
+                        not alias.name.isidentifier()
+                        or alias.name.startswith("__")
+                        or alias.asname is not None
+                    ):
+                        return False
+
+                    child_logical = (
+                        package_name
+                        + "."
+                        + alias.name
+                    )
+
+                    child_indexed = target(
+                        child_logical
+                    )
+
+                    if (
+                        child_indexed is None
+                        or child_indexed == initializer_id
+                        or child_indexed not in sources
+                        or not regular_parents(
+                            child_logical
+                        )
+                    ):
+                        return False
+
+                    continue
+
+                if isinstance(statement, ast.If):
+                    condition = statement.test
+
+                    if not (
+                        isinstance(
+                            condition,
+                            ast.Constant,
+                        )
+                        and type(
+                            condition.value
+                        ) is bool
+                    ):
+                        return False
+
+                    if not valid_body(
+                        statement.body,
+                        depth + 1,
+                    ):
+                        return False
+
+                    if not valid_body(
+                        statement.orelse,
+                        depth + 1,
+                    ):
+                        return False
+
+                    continue
+
+                return False
+
+            return True
+
+        return valid_body(tree.body, 0)
+
     for module_id in evidence_source_modules:
         expected: set[str] = set()
         for node in ast.walk(sources[module_id]):
@@ -95,16 +263,8 @@ def assess_package_graph_consistency(
                     initializer = sources.get(resolved)
                     if initializer is None:
                         return unknown("MISSING_REQUIRED_INITIALIZER")
-                    # Only an inert initializer proves that the imported
-                    # name cannot be a pre-existing package attribute.
-                    if any(
-                        not isinstance(statement, ast.Pass)
-                        and not (
-                            isinstance(statement, ast.Expr)
-                            and isinstance(statement.value, ast.Constant)
-                            and isinstance(statement.value.value, str)
-                        )
-                        for statement in initializer.body
+                    if not restricted_relative_initializer(
+                        resolved
                     ):
                         return unknown("AMBIGUOUS_PACKAGE_TARGET")
                     for alias in node.names:

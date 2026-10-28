@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import copy
 from dataclasses import replace
 
@@ -22,6 +23,9 @@ from contextor.core.cycle_semantics.model_identity import (
     logical_to_indexed_module,
 )
 from contextor.core.cycle_semantics.model_source_closure import compute_cycle_model_source_closures
+from contextor.core.cycle_semantics.package_graph_consistency import (
+    assess_package_graph_consistency,
+)
 from contextor.core.cycle_semantics.original_worker_preparation import prepare_original_worker_cycle_manifest
 from contextor.core.cycle_semantics.original_worker_reindex_planning import plan_original_worker_reindex
 from contextor.core.cycle_semantics.publication_binding import (
@@ -93,6 +97,37 @@ D1_INITIALIZER_HAZARD = {
 D1_INITIALIZER_SAFE = {
     **D1_INITIALIZER_HAZARD,
     "pkg/__init__.py": "value = 1\nif True:\n    import pkg.a\n",
+}
+
+D2A_ACTIVE_CHAIN = {
+    "pkg/__init__.py": (
+        "from . import a\n"
+    ),
+    "pkg/a.py": (
+        "from . import b\n"
+    ),
+    "pkg/b.py": (
+        "from . import a\n"
+    ),
+}
+
+D2A_INITIALIZER_HAZARD = {
+    "pkg/__init__.py": (
+        "from . import a\n"
+        "value = 1\n"
+    ),
+    "pkg/a.py": (
+        "import pkg\n"
+        "x = pkg.value\n"
+    ),
+}
+
+D2A_INITIALIZER_SAFE = {
+    **D2A_INITIALIZER_HAZARD,
+    "pkg/__init__.py": (
+        "value = 1\n"
+        "from . import a\n"
+    ),
 }
 
 
@@ -767,6 +802,290 @@ def test_p1d3_d1_official_isolated_full_receipt(
         assert receipt.prepared_manifest.components[0].model_classification == (
             "MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS"
         )
+        assert verify_co_published_cycle_manifest(
+            state, revision=metadata.revision,
+            state_id=metadata.state_id, repo_id=metadata.repo_id,
+            root_path=metadata.root_path,
+        )
+        assert result.live_publish_status == "success"
+        assert calls == [root.resolve()]
+
+
+def _d2a_source_evidence(root):
+    index, graph = _indexed(root)
+    _, captured = _captured(root, index, graph)
+    parsed = {
+        module: parse_source_snapshot(snapshot, module)
+        for module, snapshot in captured.original_worker_source_snapshots.items()
+    }
+    evidence = build_source_bound_cycle_evidence(graph.hard_edges, parsed)
+    snapshot = _snapshot(root, index, graph)
+    return index, graph, captured, parsed, evidence, snapshot
+
+
+def test_p1d3_d2a_active_initializer_chain_verified(tmp_path, isolated_dirs):
+    root = write_synthetic_repository(tmp_path / "repo", D2A_ACTIVE_CHAIN)
+    index, graph, captured, parsed, evidence, snapshot = _d2a_source_evidence(root)
+    assert {name: set(targets) for name, targets in graph.hard_edges.items()} == {
+        "pkg.__init__": {"pkg.a"},
+        "pkg.a": {"pkg.__init__", "pkg.b"},
+        "pkg.b": {"pkg.__init__", "pkg.a"},
+    }
+    closure = compute_cycle_model_source_closures(graph.hard_edges)
+    assert len(closure) == 1
+    assert closure[0].members == ("pkg.__init__", "pkg.a", "pkg.b")
+    assert closure[0].evidence_source_modules == closure[0].members
+    assert assess_package_graph_consistency(
+        graph.hard_edges,
+        {name: source.tree for name, source in parsed.items()},
+        closure[0].evidence_source_modules,
+    ).status == "CONSISTENT"
+    scenario = evidence.scenarios.components[0]
+    assert scenario.model_kind == "REGULAR_PACKAGE"
+    assert scenario.classification == "MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS"
+    assert scenario.coverage == "COMPLETE_FRESH_MEMBER_ENTRIES"
+    assert len(scenario.entry_assessments) == 3
+    assert all(item.outcome == "MODEL_PASS" for item in scenario.entry_assessments)
+    p0 = assess_index_bound_scc_models(
+        graph.hard_edges, captured.source_fingerprints_by_module,
+        snapshot, evidence,
+    )
+    assert p0[0].evidence_state == "DECLARED_INPUTS_CONSISTENT"
+    p1b = assess_scc_source_bytes(
+        graph.hard_edges, captured.source_fingerprints_by_module,
+        snapshot, evidence, captured.original_worker_source_snapshots,
+    )
+    assert p1b[0].bytes_state == "BYTE_AST_CONSISTENT_NON_ATOMIC"
+    for entry in ("pkg", "pkg.a", "pkg.b"):
+        assert run_synthetic_import(root, entry).returncode == 0
+
+
+def test_p1d3_d2a_initializer_reordering(tmp_path, isolated_dirs):
+    records = []
+    for name, fixture in (("hazard", D2A_INITIALIZER_HAZARD),
+                          ("safe", D2A_INITIALIZER_SAFE)):
+        root = write_synthetic_repository(tmp_path / name, fixture)
+        _, graph, captured, parsed, evidence, snapshot = _d2a_source_evidence(root)
+        closure = compute_cycle_model_source_closures(graph.hard_edges)
+        assert closure[0].members == ("pkg.__init__", "pkg.a")
+        assert assess_package_graph_consistency(
+            graph.hard_edges,
+            {module: source.tree for module, source in parsed.items()},
+            closure[0].evidence_source_modules,
+        ).status == "CONSISTENT"
+        scenario = evidence.scenarios.components[0]
+        assert scenario.classification == (
+            "MODEL_INTERNAL_EARLY_BINDING_HAZARD"
+            if name == "hazard"
+            else "MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS"
+        )
+        p0 = assess_index_bound_scc_models(
+            graph.hard_edges, captured.source_fingerprints_by_module,
+            snapshot, evidence,
+        )
+        assert p0[0].evidence_state == "DECLARED_INPUTS_CONSISTENT"
+        p1b = assess_scc_source_bytes(
+            graph.hard_edges, captured.source_fingerprints_by_module,
+            snapshot, evidence, captured.original_worker_source_snapshots,
+        )
+        assert p1b[0].bytes_state == "BYTE_AST_CONSISTENT_NON_ATOMIC"
+        for entry in ("pkg", "pkg.a"):
+            actual = run_synthetic_import(root, entry)
+            assert (actual.returncode == 0) is (name == "safe")
+            if name == "hazard":
+                assert "AttributeError" in actual.stderr
+        if name == "hazard":
+            assert any(
+                event.operation == "EARLY_BINDING_HAZARD"
+                and event.target == "pkg"
+                and event.symbol == "value"
+                for assessment in scenario.entry_assessments
+                for event in assessment.events
+            )
+        records.append((graph.hard_edges, evidence.components[0].evidence_token))
+    assert records[0][0] == records[1][0]
+    assert records[0][1] != records[1][1]
+
+
+@pytest.mark.parametrize("initializer", [
+    "from . import a as alias\n",
+    "from . import a, a\n",
+    "from . import missing\n",
+    "import os\nfrom . import a\n",
+    "from . import a\na = 1\n",
+    "if unknown:\n    from . import a\n",
+    "try:\n    from . import a\nexcept ImportError:\n    pass\n",
+    "from . import a\nexec('unexpected')\n",
+    "def __getattr__(name):\n    return None\nfrom . import a\n",
+    "from . import a\nclass C:\n    pass\n",
+])
+def test_p1d3_d2a_initializer_restrictions(tmp_path, isolated_dirs, initializer):
+    root = write_synthetic_repository(tmp_path / "repo", {
+        "pkg/__init__.py": initializer,
+        "pkg/a.py": "import pkg\nvalue = 1\n",
+    })
+    index, graph = _indexed(root)
+    trees = {
+        name: ast.parse((root / module.path).read_text(encoding="utf-8"))
+        for name, module in index.modules.items()
+    }
+    scenario = analyze_cycle_scenarios(graph.hard_edges, trees)
+    assert all(
+        item.classification != "MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS"
+        for item in scenario.components
+    )
+    closure = compute_cycle_model_source_closures(graph.hard_edges)
+    if closure:
+        consistency = assess_package_graph_consistency(
+            graph.hard_edges, trees, closure[0].evidence_source_modules,
+        )
+        assert consistency.status == "INDETERMINATE"
+    plan = plan_original_worker_reindex(index, graph.hard_edges)
+    if plan.status == "READY_FOR_REINDEX_NON_ATOMIC":
+        captured = index_repository(str(root), source_capture_module_ids=plan.selected_module_ids)
+        prepared = prepare_original_worker_cycle_manifest(
+            captured, graph.hard_edges, _snapshot(root, index, graph),
+        )
+        assert prepared.manifest is None
+
+
+def test_p1d3_d2a_literal_initializer_branches(tmp_path, isolated_dirs):
+    records = []
+    for name, literal in (("active", "True"), ("inactive", "False")):
+        root = write_synthetic_repository(tmp_path / name, {
+            "pkg/__init__.py": f"if {literal}:\n    from . import a\n",
+            "pkg/a.py": "import pkg\n",
+        })
+        index, graph = _indexed(root)
+        trees = {
+            module: ast.parse((root / item.path).read_text(encoding="utf-8"))
+            for module, item in index.modules.items()
+        }
+        assert graph.hard_edges["pkg.__init__"] == {"pkg.a"}
+        closure = compute_cycle_model_source_closures(graph.hard_edges)
+        assert assess_package_graph_consistency(
+            graph.hard_edges, trees, closure[0].evidence_source_modules,
+        ).status == "CONSISTENT"
+        scenario = analyze_cycle_scenarios(graph.hard_edges, trees).components[0]
+        assert scenario.model_kind == "REGULAR_PACKAGE"
+        assert scenario.classification == "MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS"
+        entry = next(item for item in scenario.entry_assessments if item.entry_module == "pkg")
+        starts_child = any(
+            event.operation == "START_IMPORT" and event.target == "pkg.a"
+            for event in entry.events
+        )
+        assert starts_child is (literal == "True")
+        assert run_synthetic_import(root, "pkg").returncode == 0
+        records.append(graph.hard_edges)
+    assert records[0] == records[1]
+
+
+def test_p1d3_d2a_rejects_forged_graph(tmp_path, isolated_dirs):
+    root = write_synthetic_repository(tmp_path / "repo", D2A_ACTIVE_CHAIN)
+    index, graph = _indexed(root)
+    altered = {name: set(targets) for name, targets in graph.hard_edges.items()}
+    altered["pkg.a"].remove("pkg.b")
+    trees = {
+        module: ast.parse((root / item.path).read_text(encoding="utf-8"))
+        for module, item in index.modules.items()
+    }
+    result = analyze_cycle_scenarios(altered, trees)
+    assert all(
+        component.classification != "MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS"
+        for component in result.components
+    )
+    assert all(
+        component.reason in {
+            "GRAPH_SOURCE_IMPORT_MISMATCH", "AMBIGUOUS_PACKAGE_TARGET",
+            "MISSING_INDEXED_TARGET", "MISSING_OR_INVALID_SOURCE",
+        }
+        for component in result.components
+    )
+    assert graph.hard_edges["pkg.a"] == {"pkg.__init__", "pkg.b"}
+
+
+def test_p1d3_d2a_original_worker_prepares_v2(tmp_path, isolated_dirs):
+    root = write_synthetic_repository(tmp_path / "repo", D2A_ACTIVE_CHAIN)
+    _, graph, captured, _, _, snapshot = _d2a_source_evidence(root)
+    prepared = prepare_original_worker_cycle_manifest(
+        captured, graph.hard_edges, snapshot,
+    )
+    assert prepared.status == "PREPARED_UNPUBLISHED_NON_ATOMIC"
+    assert prepared.manifest.version == "cycle-source-manifest/2"
+    component = prepared.manifest.components[0]
+    assert component.model_kind == "REGULAR_PACKAGE"
+    assert component.model_classification == "MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS"
+    assert tuple(row[0] for row in component.source_signatures) == (
+        "pkg.__init__", "pkg.a", "pkg.b",
+    )
+    assert component.model_evidence_sha256
+
+
+def test_p1d3_d2a_forged_event_rejected_by_p1b(tmp_path, isolated_dirs):
+    root = write_synthetic_repository(tmp_path / "repo", D2A_ACTIVE_CHAIN)
+    _, graph, captured, _, evidence, snapshot = _d2a_source_evidence(root)
+    scenario = evidence.scenarios.components[0]
+    assessment = scenario.entry_assessments[0]
+    event = next(item for item in assessment.events if item.operation in {"FROM", "FROM_REENTRANT_CHILD"})
+    forged_assessment = replace(
+        assessment,
+        events=tuple(
+            replace(item, operation="FORGED_D2A_IMPORT") if item is event else item
+            for item in assessment.events
+        ),
+    )
+    forged_scenario = replace(
+        scenario,
+        entry_assessments=(forged_assessment, *scenario.entry_assessments[1:]),
+    )
+    component = evidence.components[0]
+    subgraph = tuple(
+        (name, tuple(sorted(graph.hard_edges[name])))
+        for name in component.reachable_modules
+    )
+    forged_component = replace(
+        component,
+        evidence_token=_component_token(
+            component.members, subgraph, component.source_signatures, forged_scenario,
+        ),
+    )
+    forged = replace(
+        evidence,
+        components=(forged_component,),
+        scenarios=replace(evidence.scenarios, components=(forged_scenario,)),
+    )
+    p0 = assess_index_bound_scc_models(
+        graph.hard_edges, captured.source_fingerprints_by_module,
+        snapshot, forged,
+    )
+    assert p0[0].evidence_state == "DECLARED_INPUTS_CONSISTENT"
+    p1b = assess_scc_source_bytes(
+        graph.hard_edges, captured.source_fingerprints_by_module,
+        snapshot, forged, captured.original_worker_source_snapshots,
+    )
+    assert p1b[0].reason == "MODEL_REPLAY_MISMATCH"
+
+
+@pytest.mark.live
+def test_p1d3_d2a_official_isolated_full_receipt(
+    tmp_path, isolated_dirs, monkeypatch,
+):
+    root = write_synthetic_repository(tmp_path / "repo", D2A_ACTIVE_CHAIN)
+    with _official_live(root, monkeypatch) as (client, server, identity, calls):
+        _, result = ContextorFacade.analyze_project(
+            str(root), cycle_source_preparation_preview=True,
+            cycle_source_publication_opt_in=True,
+        )
+        assert result.cycle_source_preparation_preview.status == (
+            "PREPARED_UNPUBLISHED_NON_ATOMIC"
+        ), result.cycle_source_preparation_preview.reason
+        state, metadata = _persisted(root)
+        receipt = state.cycle_source_publication
+        assert receipt.version == PUBLICATION_BINDING_VERSION
+        assert receipt.prepared_manifest.version == MANIFEST_VERSION
+        component = receipt.prepared_manifest.components[0]
+        assert component.model_kind == "REGULAR_PACKAGE"
+        assert component.model_classification == "MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS"
         assert verify_co_published_cycle_manifest(
             state, revision=metadata.revision,
             state_id=metadata.state_id, repo_id=metadata.repo_id,
