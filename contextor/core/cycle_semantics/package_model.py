@@ -40,6 +40,7 @@ class _Step:
     explicit_alias: bool = False
     function_body: tuple[_Step, ...] = ()
     function_local: bool = False
+    class_local: bool = False
 
 
 def _safe_passive_function_definition(
@@ -124,11 +125,11 @@ def _safe_passive_class_definition(
     """Validate a class whose body has no unknown effects.
 
     Class body evaluation is not generally passive.
-    Only a literal docstring, Pass and safe method
-    definitions are modeled here.
+    Only a literal docstring, Pass, safe method
+    definitions and restricted imports are modeled.
 
-    The model records class-name binding only.
-    It does not execute class or method code.
+    Direct class-body imports execute before class-name
+    binding. Method bodies remain deferred.
     """
     if (
         not statement.name.isidentifier()
@@ -144,6 +145,9 @@ def _safe_passive_class_definition(
         statement.body
     ):
         if isinstance(body_statement, ast.Pass):
+            continue
+
+        if isinstance(body_statement, (ast.Import, ast.ImportFrom)):
             continue
 
         if (
@@ -293,32 +297,42 @@ def _compile(
             condition = stmt.test
 
             if (
-                not isinstance(condition, ast.Compare)
-                or not isinstance(condition.left, ast.Name)
-                or condition.left.id != "__name__"
-                or len(condition.ops) != 1
-                or not isinstance(
-                    condition.ops[0],
-                    (ast.Eq, ast.NotEq),
-                )
-                or len(condition.comparators) != 1
-                or not isinstance(
-                    condition.comparators[0],
-                    ast.Constant,
-                )
-                or type(
-                    condition.comparators[0].value
-                ) is not str
-                or condition.comparators[0].value
-                != "__main__"
+                isinstance(condition, ast.Constant)
+                and type(condition.value) is bool
             ):
-                return None
+                selected = (
+                    stmt.body
+                    if condition.value
+                    else stmt.orelse
+                )
+            else:
+                if (
+                    not isinstance(condition, ast.Compare)
+                    or not isinstance(condition.left, ast.Name)
+                    or condition.left.id != "__name__"
+                    or len(condition.ops) != 1
+                    or not isinstance(
+                        condition.ops[0],
+                        (ast.Eq, ast.NotEq),
+                    )
+                    or len(condition.comparators) != 1
+                    or not isinstance(
+                        condition.comparators[0],
+                        ast.Constant,
+                    )
+                    or type(
+                        condition.comparators[0].value
+                    ) is not str
+                    or condition.comparators[0].value
+                    != "__main__"
+                ):
+                    return None
 
-            selected = (
-                stmt.orelse
-                if isinstance(condition.ops[0], ast.Eq)
-                else stmt.body
-            )
+                selected = (
+                    stmt.orelse
+                    if isinstance(condition.ops[0], ast.Eq)
+                    else stmt.body
+                )
 
             selected_steps = _compile(
                 ast.Module(
@@ -381,6 +395,41 @@ def _compile(
         elif isinstance(stmt, ast.ClassDef):
             if not _safe_passive_class_definition(stmt):
                 return None
+
+            for body_statement in stmt.body:
+                if not isinstance(
+                    body_statement,
+                    (ast.Import, ast.ImportFrom),
+                ):
+                    continue
+
+                fragment = ast.Module(
+                    body=[body_statement],
+                    type_ignores=[],
+                )
+                compiled = _compile(
+                    fragment,
+                    logical,
+                    package,
+                    _depth=_depth + 1,
+                )
+                if (
+                    compiled is None
+                    or any(
+                        item.op not in {
+                            "IMPORT",
+                            "FROM",
+                            "PREPARE_FROM_MEMBER",
+                        }
+                        for item in compiled
+                    )
+                ):
+                    return None
+
+                steps.extend(
+                    replace(item, class_local=True)
+                    for item in compiled
+                )
 
             steps.append(
                 _Step(
@@ -820,7 +869,7 @@ def evaluate_package_import_order(
                         else target.split(".")[0]
                     )
 
-                    if not step.function_local:
+                    if not step.function_local and not step.class_local:
                         namespaces[module][step.binding] = binding_target
 
                     events.append(
@@ -829,6 +878,8 @@ def evaluate_package_import_order(
                             (
                                 "FUNCTION_LOCAL_IMPORT"
                                 if step.function_local
+                                else "CLASS_LOCAL_IMPORT"
+                                if step.class_local
                                 else "IMPORT"
                             ),
                             target,
@@ -856,7 +907,7 @@ def evaluate_package_import_order(
                             ):
                                 return result("UNKNOWN", child, member)
 
-                            if not step.function_local:
+                            if not step.function_local and not step.class_local:
                                 namespaces[module][step.binding] = child
 
                             events.append(
@@ -865,6 +916,8 @@ def evaluate_package_import_order(
                                     (
                                         "FUNCTION_LOCAL_FROM_REENTRANT_CHILD"
                                         if step.function_local
+                                        else "CLASS_LOCAL_FROM_REENTRANT_CHILD"
+                                        if step.class_local
                                         else "FROM_REENTRANT_CHILD"
                                     ),
                                     child,
@@ -914,7 +967,7 @@ def evaluate_package_import_order(
 
                     return result(outcome, target, member)
 
-                if not step.function_local:
+                if not step.function_local and not step.class_local:
                     namespaces[module][step.binding] = namespaces[target][member]
 
                 events.append(
@@ -923,6 +976,8 @@ def evaluate_package_import_order(
                         (
                             "FUNCTION_LOCAL_FROM"
                             if step.function_local
+                            else "CLASS_LOCAL_FROM"
+                            if step.class_local
                             else "FROM"
                         ),
                         target,

@@ -59,6 +59,42 @@ F4 = {
     "pkg/a.py": "value = 1\nimport pkg.b\n",
 }
 
+D1_FALSE = {
+    "pkg/__init__.py": "pass\n",
+    "pkg/a.py": "if False:\n    import pkg.b\nvalue = 1\n",
+    "pkg/b.py": "import pkg.a\n",
+}
+D1_TRUE_HAZARD = {
+    "pkg/__init__.py": "pass\n",
+    "pkg/a.py": "if True:\n    import pkg.b\nvalue = 1\n",
+    "pkg/b.py": "from pkg.a import value\n",
+}
+D1_FALSE_SAFE = {**D1_TRUE_HAZARD, "pkg/a.py": "if False:\n    import pkg.b\nvalue = 1\n"}
+D1_CLASS_HAZARD = {
+    "pkg/__init__.py": "pass\n",
+    "pkg/a.py": "class Loader:\n    import pkg.b\nvalue = 1\n",
+    "pkg/b.py": "from pkg.a import value\n",
+}
+D1_CLASS_SAFE = {**D1_CLASS_HAZARD, "pkg/a.py": "value = 1\nclass Loader:\n    import pkg.b\n"}
+D1_CLASS_LOCAL = {
+    "pkg/__init__.py": "pass\n",
+    "pkg/a.py": "class Loader:\n    import pkg.b as local_child\n",
+    "pkg/b.py": "from pkg.a import local_child\n",
+}
+D1_METHOD = {
+    "pkg/__init__.py": "pass\n",
+    "pkg/a.py": "class Loader:\n    def load(self):\n        import pkg.b\nvalue = 1\n",
+    "pkg/b.py": "from pkg.a import value\n",
+}
+D1_INITIALIZER_HAZARD = {
+    "pkg/__init__.py": "if True:\n    import pkg.a\nvalue = 1\n",
+    "pkg/a.py": "import pkg\nx = pkg.value\n",
+}
+D1_INITIALIZER_SAFE = {
+    **D1_INITIALIZER_HAZARD,
+    "pkg/__init__.py": "value = 1\nif True:\n    import pkg.a\n",
+}
+
 
 @pytest.fixture(autouse=True)
 def _inline(monkeypatch):
@@ -518,3 +554,223 @@ def test_official_isolated_package_publication(tmp_path, isolated_dirs, monkeypa
             state_id=metadata.state_id, repo_id=metadata.repo_id,
             root_path=metadata.root_path,
         )
+
+
+@pytest.mark.parametrize("fixture,classification,entry,success", [
+    (D1_FALSE, "MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS", "pkg.a", True),
+    (D1_TRUE_HAZARD, "MODEL_INTERNAL_EARLY_BINDING_HAZARD", "pkg.a", False),
+    (D1_FALSE_SAFE, "MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS", "pkg.a", True),
+    (D1_CLASS_HAZARD, "MODEL_INTERNAL_EARLY_BINDING_HAZARD", "pkg.a", False),
+    (D1_CLASS_SAFE, "MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS", "pkg.a", True),
+    (D1_CLASS_LOCAL, "MODEL_INTERNAL_EARLY_BINDING_HAZARD", "pkg.a", False),
+    (D1_METHOD, "MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS", "pkg.a", True),
+    (D1_INITIALIZER_HAZARD, "MODEL_INTERNAL_EARLY_BINDING_HAZARD", "pkg", False),
+    (D1_INITIALIZER_SAFE, "MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS", "pkg", True),
+])
+def test_p1d3_d1_integrated_model_and_cpython(
+    tmp_path, isolated_dirs, fixture, classification, entry, success,
+):
+    root = write_synthetic_repository(tmp_path / "repo", fixture)
+    index, graph = _indexed(root)
+    _, captured = _captured(root, index, graph)
+    parsed = {
+        name: parse_source_snapshot(snapshot, name)
+        for name, snapshot in captured.original_worker_source_snapshots.items()
+    }
+    evidence = build_source_bound_cycle_evidence(graph.hard_edges, parsed)
+    scenario = evidence.scenarios.components[0]
+    assert scenario.model_kind == "REGULAR_PACKAGE"
+    assert scenario.classification == classification
+    assert scenario.evidence_scope == "CLOSED_REGULAR_PACKAGE_FRESH_ENTRY_MODEL"
+    assert all(
+        item.evidence_scope == "RESTRICTED_REGULAR_PACKAGE_MODEL"
+        for item in scenario.entry_assessments
+    )
+    p0 = assess_index_bound_scc_models(
+        graph.hard_edges, captured.source_fingerprints_by_module,
+        _snapshot(root, index, graph), evidence,
+    )
+    if fixture is D1_CLASS_LOCAL:
+        assert p0[0].evidence_state == "INCOMPLETE_EVIDENCE"
+    else:
+        assert p0[0].evidence_state == "DECLARED_INPUTS_CONSISTENT"
+    p1b = assess_scc_source_bytes(
+        graph.hard_edges, captured.source_fingerprints_by_module,
+        _snapshot(root, index, graph), evidence,
+        captured.original_worker_source_snapshots,
+    )
+    if fixture is D1_CLASS_LOCAL:
+        assert p1b[0].bytes_state == "UNAVAILABLE"
+    else:
+        assert p1b[0].bytes_state == "BYTE_AST_CONSISTENT_NON_ATOMIC"
+    assert (run_synthetic_import(root, entry).returncode == 0) is success
+    if fixture is D1_FALSE:
+        assert "pkg.b" in graph.hard_edges["pkg.a"]
+        assert not any(
+            event.operation == "START_IMPORT" and event.target == "pkg.b"
+            for assessment in scenario.entry_assessments
+            if assessment.entry_module == "pkg.a"
+            for event in assessment.events
+        )
+    if fixture is D1_METHOD:
+        assert "pkg.b" in graph.hard_edges["pkg.a"]
+        assert not any(
+            event.operation == "START_IMPORT" and event.target == "pkg.b"
+            for assessment in scenario.entry_assessments
+            if assessment.entry_module == "pkg.a"
+            for event in assessment.events
+        )
+    if fixture is D1_CLASS_LOCAL:
+        assert any(
+            event.operation == "EARLY_BINDING_HAZARD"
+            and event.target == "pkg.a"
+            and event.symbol == "local_child"
+            for assessment in scenario.entry_assessments
+            for event in assessment.events
+        )
+    if fixture is D1_INITIALIZER_HAZARD:
+        assert set(scenario.members) == {"pkg.__init__", "pkg.a"}
+        assert any(
+            event.operation == "EARLY_BINDING_HAZARD"
+            and event.target == "pkg"
+            and event.symbol == "value"
+            for assessment in scenario.entry_assessments
+            for event in assessment.events
+        )
+
+
+def test_p1d3_d1_same_graph_changes_model_evidence(tmp_path, isolated_dirs):
+    values = []
+    for name, fixture in (("active", D1_TRUE_HAZARD), ("inactive", D1_FALSE_SAFE),
+                          ("class_early", D1_CLASS_HAZARD), ("class_late", D1_CLASS_SAFE)):
+        root = write_synthetic_repository(tmp_path / name, fixture)
+        index, graph = _indexed(root)
+        _, captured = _captured(root, index, graph)
+        parsed = {
+            module: parse_source_snapshot(snapshot, module)
+            for module, snapshot in captured.original_worker_source_snapshots.items()
+        }
+        evidence = build_source_bound_cycle_evidence(graph.hard_edges, parsed)
+        values.append((graph.hard_edges, evidence.components[0].evidence_token))
+    assert values[0][0] == values[1][0]
+    assert values[2][0] == values[3][0]
+    assert values[0][1] != values[1][1]
+    assert values[2][1] != values[3][1]
+
+
+def test_p1d3_d1_original_worker_prepares_v2(tmp_path, isolated_dirs):
+    root = write_synthetic_repository(tmp_path / "repo", D1_CLASS_SAFE)
+    index, graph = _indexed(root)
+    _, captured = _captured(root, index, graph)
+    prepared = prepare_original_worker_cycle_manifest(
+        captured, graph.hard_edges, _snapshot(root, index, graph),
+    )
+    assert prepared.status == "PREPARED_UNPUBLISHED_NON_ATOMIC"
+    assert prepared.source_modules == ("pkg.__init__", "pkg.a", "pkg.b")
+    assert prepared.manifest.version == MANIFEST_VERSION
+    assert prepared.manifest.components[0].model_kind == "REGULAR_PACKAGE"
+    assert prepared.manifest.components[0].model_classification == (
+        "MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS"
+    )
+
+
+@pytest.mark.parametrize("condition", ["unknown_condition", "1"])
+def test_p1d3_d1_unsupported_condition_no_manifest(
+    tmp_path, isolated_dirs, condition,
+):
+    fixture = {**D1_TRUE_HAZARD,
+               "pkg/a.py": f"if {condition}:\n    import pkg.b\nvalue = 1\n"}
+    root = write_synthetic_repository(tmp_path / "repo", fixture)
+    index, graph = _indexed(root)
+    _, captured = _captured(root, index, graph)
+    prepared = prepare_original_worker_cycle_manifest(
+        captured, graph.hard_edges, _snapshot(root, index, graph),
+    )
+    assert prepared.status == "UNAVAILABLE"
+    assert prepared.manifest is None
+
+
+def test_p1d3_d1_forged_class_event_fails_replay(tmp_path, isolated_dirs):
+    root = write_synthetic_repository(tmp_path / "repo", D1_CLASS_SAFE)
+    index, graph = _indexed(root)
+    _, captured = _captured(root, index, graph)
+    sources = captured.original_worker_source_snapshots
+    parsed = {name: parse_source_snapshot(snapshot, name) for name, snapshot in sources.items()}
+    evidence = build_source_bound_cycle_evidence(graph.hard_edges, parsed)
+    scenario = evidence.scenarios.components[0]
+    assessment = next(
+        item for item in scenario.entry_assessments
+        if any(event.operation == "CLASS_LOCAL_IMPORT" for event in item.events)
+    )
+    event = next(event for event in assessment.events if event.operation == "CLASS_LOCAL_IMPORT")
+    forged_assessment = replace(
+        assessment,
+        events=tuple(
+            replace(item, operation="FORGED_CLASS_IMPORT") if item is event else item
+            for item in assessment.events
+        ),
+    )
+    forged_scenario = replace(
+        scenario,
+        entry_assessments=tuple(
+            forged_assessment if item is assessment else item
+            for item in scenario.entry_assessments
+        ),
+    )
+    component = evidence.components[0]
+    subgraph = tuple(
+        (name, tuple(sorted(graph.hard_edges[name])))
+        for name in component.reachable_modules
+    )
+    forged_component = replace(
+        component,
+        evidence_token=_component_token(
+            component.members, subgraph,
+            component.source_signatures, forged_scenario,
+        ),
+    )
+    forged = replace(
+        evidence,
+        components=(forged_component,),
+        scenarios=replace(evidence.scenarios, components=(forged_scenario,)),
+    )
+    snapshot = _snapshot(root, index, graph)
+    p0 = assess_index_bound_scc_models(
+        graph.hard_edges, captured.source_fingerprints_by_module,
+        snapshot, forged,
+    )
+    assert p0[0].evidence_state == "DECLARED_INPUTS_CONSISTENT"
+    p1b = assess_scc_source_bytes(
+        graph.hard_edges, captured.source_fingerprints_by_module,
+        snapshot, forged, sources,
+    )
+    assert p1b[0].reason == "MODEL_REPLAY_MISMATCH"
+
+
+@pytest.mark.live
+def test_p1d3_d1_official_isolated_full_receipt(
+    tmp_path, isolated_dirs, monkeypatch,
+):
+    root = write_synthetic_repository(tmp_path / "repo", D1_CLASS_SAFE)
+    with _official_live(root, monkeypatch) as (client, server, identity, calls):
+        _, result = ContextorFacade.analyze_project(
+            str(root), cycle_source_preparation_preview=True,
+            cycle_source_publication_opt_in=True,
+        )
+        assert result.cycle_source_preparation_preview.status == (
+            "PREPARED_UNPUBLISHED_NON_ATOMIC"
+        )
+        state, metadata = _persisted(root)
+        receipt = state.cycle_source_publication
+        assert receipt.version == PUBLICATION_BINDING_VERSION
+        assert receipt.prepared_manifest.version == MANIFEST_VERSION
+        assert receipt.prepared_manifest.components[0].model_classification == (
+            "MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS"
+        )
+        assert verify_co_published_cycle_manifest(
+            state, revision=metadata.revision,
+            state_id=metadata.state_id, repo_id=metadata.repo_id,
+            root_path=metadata.root_path,
+        )
+        assert result.live_publish_status == "success"
+        assert calls == [root.resolve()]

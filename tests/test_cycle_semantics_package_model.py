@@ -4,6 +4,8 @@ import subprocess
 import sys
 from dataclasses import asdict
 
+import pytest
+
 from contextor.core.cycle_semantics.package_model import (
     evaluate_package_import_order,
 )
@@ -1004,3 +1006,154 @@ def test_b0g4c5_deterministic_ast_unchanged():
     } == before
 
     json.dumps(asdict(first))
+
+
+@pytest.mark.parametrize(
+    "condition,expected,active",
+    [
+        ("False", "MODEL_PASS", False),
+        ("True", "EARLY_BINDING_HAZARD", True),
+    ],
+)
+def test_p1d3_d1_literal_branch_activation(tmp_path, condition, expected, active):
+    source = {
+        "pkg.__init__": "pass",
+        "pkg.a": f"if {condition}:\n    import pkg.b\nvalue = 1",
+        "pkg.b": "from pkg.a import value",
+    }
+    result = _model(source, "pkg.a")
+    assert result.outcome == expected
+    assert any(
+        event.operation == "START_IMPORT" and event.target == "pkg.b"
+        for event in result.events
+    ) is active
+    assert _actual(tmp_path, source, "pkg.a") is (not active)
+
+
+def test_p1d3_d1_false_else_and_name_guard(tmp_path):
+    source = {
+        "pkg.__init__": "pass",
+        "pkg.a": (
+            "if False:\n    pass\nelse:\n    import pkg.b\n"
+            "if __name__ == '__main__':\n    import pkg.missing\n"
+            "value = 1"
+        ),
+        "pkg.b": "pass",
+    }
+    result = _model(source, "pkg.a")
+    assert result.outcome == "MODEL_PASS"
+    assert any(e.operation == "START_IMPORT" and e.target == "pkg.b" for e in result.events)
+    assert _actual(tmp_path, source, "pkg.a")
+
+
+@pytest.mark.parametrize(
+    "body,expected,operation",
+    [
+        ("class Loader:\n    import pkg.b\nvalue = 1", "EARLY_BINDING_HAZARD", "CLASS_LOCAL_IMPORT"),
+        ("value = 1\nclass Loader:\n    import pkg.b", "MODEL_PASS", "CLASS_LOCAL_IMPORT"),
+        ("class Loader:\n    from pkg.b import value", "MODEL_PASS", "CLASS_LOCAL_FROM"),
+        ("class Loader:\n    import pkg.b as local_child", "MODEL_PASS", "CLASS_LOCAL_IMPORT"),
+    ],
+)
+def test_p1d3_d1_class_import_timing(tmp_path, body, expected, operation):
+    source = {
+        "pkg.__init__": "pass",
+        "pkg.a": body,
+        "pkg.b": "from pkg.a import value" if "value = 1" in body else "value = 2",
+    }
+    result = _model(source, "pkg.a")
+    assert result.outcome == expected
+    if expected == "MODEL_PASS":
+        assert any(e.operation == operation for e in result.events)
+    else:
+        assert any(e.operation == "START_IMPORT" and e.target == "pkg.b" for e in result.events)
+    assert _actual(tmp_path, source, "pkg.a") is (expected == "MODEL_PASS")
+
+
+def test_p1d3_d1_class_local_binding_does_not_escape(tmp_path):
+    source = {
+        "pkg.__init__": "pass",
+        "pkg.a": "class Loader:\n    import pkg.b as local_child",
+        "pkg.b": "from pkg.a import local_child",
+    }
+    result = _model(source, "pkg.a")
+    assert result.outcome == "EARLY_BINDING_HAZARD"
+    assert result.target_module == "pkg.a"
+    assert result.symbol == "local_child"
+    assert not any(e.operation == "DEFINE_PASSIVE_CLASS" for e in result.events)
+    assert not _actual(tmp_path, source, "pkg.a")
+
+
+def test_p1d3_d1_class_local_reentrant_child_from(tmp_path):
+    source = {
+        "pkg.__init__": "from . import child",
+        "pkg.child": "class Loader:\n    from pkg import child",
+    }
+    result = _model(source, "pkg")
+    assert result.outcome == "MODEL_PASS"
+    assert any(
+        event.operation == "CLASS_LOCAL_FROM_REENTRANT_CHILD"
+        and event.target == "pkg.child"
+        for event in result.events
+    )
+    assert _actual(tmp_path, source, "pkg")
+
+
+def test_p1d3_d1_uncalled_method_import_is_deferred(tmp_path):
+    source = {
+        "pkg.__init__": "pass",
+        "pkg.a": "class Loader:\n    def load(self):\n        import pkg.b\nvalue = 1",
+        "pkg.b": "from pkg.a import value",
+    }
+    result = _model(source, "pkg.a")
+    assert result.outcome == "MODEL_PASS"
+    assert not any(e.operation == "START_IMPORT" and e.target == "pkg.b" for e in result.events)
+    assert _actual(tmp_path, source, "pkg.a")
+
+
+@pytest.mark.parametrize("condition", ["unknown_condition", "1"])
+def test_p1d3_d1_unsupported_condition(condition):
+    source = {
+        "pkg.__init__": "pass",
+        "pkg.a": f"if {condition}:\n    import pkg.b",
+        "pkg.b": "pass",
+    }
+    assert _model(source, "pkg.a").outcome == "UNKNOWN"
+
+
+@pytest.mark.parametrize("body", [
+    "class Loader(Base):\n    import pkg.b",
+    "class Loader(metaclass=Meta):\n    import pkg.b",
+    "@decorator\nclass Loader:\n    import pkg.b",
+    "class Loader:\n    helper()",
+    "class Loader:\n    x = helper()",
+    "class Loader:\n    class Nested:\n        pass",
+    "class Loader:\n    if True:\n        import pkg.b",
+    "class Loader:\n    from pkg.b import *",
+])
+def test_p1d3_d1_unsupported_class_effects(body):
+    source = {"pkg.__init__": "pass", "pkg.a": body, "pkg.b": "pass"}
+    assert _model(source, "pkg.a").outcome == "UNKNOWN"
+
+
+def test_p1d3_d1_invalid_unselected_branch_fails_compile():
+    source = {
+        "pkg.__init__": "pass",
+        "pkg.a": "if False:\n    return 1\nelse:\n    pass",
+    }
+    assert _model(source, "pkg.a").outcome == "UNKNOWN"
+
+
+def test_p1d3_d1_deterministic_events_and_ast_unchanged():
+    sources = {
+        "pkg.__init__": ast.parse("pass"),
+        "pkg.a": ast.parse("if True:\n    class Loader:\n        import pkg.b"),
+        "pkg.b": ast.parse("from pkg.a import Loader"),
+    }
+    before = {key: ast.dump(tree, include_attributes=True) for key, tree in sources.items()}
+    first = evaluate_package_import_order(sources, "pkg.a")
+    second = evaluate_package_import_order(sources, "pkg.a")
+    assert first == second
+    assert first.events == second.events
+    assert first.outcome == "EARLY_BINDING_HAZARD"
+    assert {key: ast.dump(tree, include_attributes=True) for key, tree in sources.items()} == before
