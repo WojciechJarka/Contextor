@@ -52,6 +52,7 @@ from contextor.core.reference.shared import (
 )
 from contextor.core.source import parse_source_snapshot, read_source_snapshot
 from contextor.core.symbol_engine.indexer import index_repository
+from contextor.core.symbol_engine import indexer
 from tests.cycle_semantics_lab import run_synthetic_import, write_synthetic_repository
 from tests.test_original_worker_full_receipt_optin import _persisted
 from tests.test_original_worker_official_full_live_publication import _official_live
@@ -239,6 +240,32 @@ D2B4_INDEXED_LAUNCHER = {
     "pkg/launcher.py": (
         "import typing\n"
         "typing.TYPE_CHECKING = True\n"
+        "import pkg.a\n"
+    ),
+}
+
+D2B4_R1_IOR_LAUNCHER = {
+    "pkg/__init__.py": "pass\n",
+    "pkg/a.py": (
+        "from typing import TYPE_CHECKING\n"
+        "if TYPE_CHECKING:\n"
+        "    import pkg.c\n"
+        "value = 1\n"
+    ),
+    "pkg/c.py": "from pkg.a import value\n",
+    "pkg/launcher.py": (
+        "import typing\n"
+        'typing.__dict__.__ior__({"TYPE_CHECKING": True})\n'
+        "import pkg.a\n"
+    ),
+}
+
+D2B4_R1_ALIAS_LAUNCHER = {
+    **D2B4_R1_IOR_LAUNCHER,
+    "pkg/launcher.py": (
+        "import typing\n"
+        "mutation = typing.__dict__.update\n"
+        'mutation({"TYPE_CHECKING": True})\n'
         "import pkg.a\n"
     ),
 }
@@ -1199,6 +1226,162 @@ def test_p1d3_d2b4_launcher_source_checker_fails_closed(
         captured, graph.hard_edges, snapshot,
     )
     assert prepared.manifest is None
+
+
+def test_p1d3_d2b4_r1_opaque_source_checker_fails_closed(
+    tmp_path, isolated_dirs,
+):
+    root = write_synthetic_repository(tmp_path / "repo", D2B4_R1_IOR_LAUNCHER)
+    index, graph, captured, parsed, evidence, snapshot = _d2a_source_evidence(root)
+    assert graph.hard_edges["pkg.a"] == {"pkg.c"}
+    assert graph.hard_edges["pkg.c"] == {"pkg.a"}
+    closure = compute_cycle_model_source_closures(graph.hard_edges)
+    assert len(closure) == 1
+    assert "pkg.launcher" not in closure[0].evidence_source_modules
+    consistency = assess_package_graph_consistency(
+        graph.hard_edges,
+        {module_id: source.tree for module_id, source in parsed.items()},
+        closure[0].evidence_source_modules,
+    )
+    assert consistency.status == "INDETERMINATE"
+    assert consistency.reason == "GRAPH_SOURCE_IMPORT_MISMATCH"
+    assert evidence.scenarios.components[0].classification != (
+        "MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS"
+    )
+    prepared = prepare_original_worker_cycle_manifest(
+        captured, graph.hard_edges, snapshot,
+    )
+    assert prepared.manifest is None
+
+
+@pytest.mark.parametrize(
+    "fixture,guarded_target,expected_type_only",
+    [
+        (D2B_NAME_SAFE, "pkg.b", True),
+        (D2B_ATTR_SAFE, "pkg.b", True),
+        (D2B3_TYPED_SIDE_NAME, "pkg.c", True),
+        (D2B3_TYPED_SIDE_ATTRIBUTE, "pkg.c", True),
+        (D2B2_MIXED_ACTIVE, "pkg.b", True),
+        (D2B_ELSE_SAFE, None, None),
+    ],
+    ids=["name", "attribute", "typed-side-name", "typed-side-attribute", "mixed", "else"],
+)
+def test_p1d3_d2b4_r1_safe_language_existing_fixtures(
+    tmp_path, isolated_dirs, fixture, guarded_target, expected_type_only,
+):
+    root = write_synthetic_repository(tmp_path / "repo", fixture)
+    index, graph = _d2a_canonical_index_graph(root)
+    assert indexer._project_typing_imports_closed(index.modules) is True
+    assert not index.skipped
+    for module in index.modules.values():
+        worker = indexer._process_single_file(str(module.absolute_path), str(root))
+        assert worker["typing_guard_opaque_effects"] is False
+        assert worker["typing_guard_marker_mutation"] is False
+    if guarded_target is not None:
+        guarded = [
+            item for item in index.modules["pkg.a"].imports
+            if item.module == guarded_target and not item.is_from_import
+        ]
+        assert guarded[0].type_only is expected_type_only
+        assert guarded_target in graph.soft_edges["pkg.a"]
+    else:
+        assert graph.hard_edges["pkg.a"] == {"pkg.b"}
+
+
+@pytest.mark.parametrize(
+    "fixture",
+    [
+        D2B_NAME_SAFE,
+        D2B_ATTR_SAFE,
+        D2B3_TYPED_SIDE_NAME,
+        D2B4_R1_IOR_LAUNCHER,
+        D2B4_R1_ALIAS_LAUNCHER,
+        {
+            "pkg/__init__.py": "pass\n",
+            "pkg/sub/__init__.py": "pass\n",
+            "pkg/sub/a.py": (
+                "from typing import TYPE_CHECKING\n"
+                "if TYPE_CHECKING:\n"
+                "    import pkg.sub.b\n"
+                "value = 1\n"
+            ),
+            "pkg/sub/b.py": "from pkg.sub.a import value\n",
+        },
+    ],
+    ids=["name", "attribute", "typed-side", "ior", "alias-update", "multilevel"],
+)
+def test_p1d3_d2b4_r1_real_inline_pool_parity(
+    tmp_path, isolated_dirs, monkeypatch, fixture,
+):
+    def signature(root, index, graph):
+        imports = tuple(
+            (
+                module_id,
+                tuple(
+                    (item.module, item.level, tuple(item.names),
+                     item.is_from_import, item.is_local, item.type_only)
+                    for item in module.imports
+                ),
+            )
+            for module_id, module in sorted(index.modules.items())
+        )
+        facts = tuple(
+            (
+                module_id,
+                worker["typing_guard_marker_mutation"],
+                worker["typing_guard_opaque_effects"],
+            )
+            for module_id, module in sorted(index.modules.items())
+            for worker in [indexer._process_single_file(
+                str(module.absolute_path), str(root),
+            )]
+        )
+        topology = tuple(
+            component.members for component in analyze_cycle_scenarios(
+                graph.hard_edges,
+                {
+                    module_id: ast.parse(Path(module.absolute_path).read_text())
+                    for module_id, module in index.modules.items()
+                },
+            ).components
+        )
+        return imports, facts, graph.hard_edges, graph.soft_edges, topology
+
+    inline_root = write_synthetic_repository(tmp_path / "inline", fixture)
+    monkeypatch.setenv("CONTEXTOR_DISABLE_PROCESS_POOL", "1")
+    inline_index, inline_graph = _d2a_canonical_index_graph(inline_root)
+    inline_signature = signature(inline_root, inline_index, inline_graph)
+
+    pool_root = write_synthetic_repository(tmp_path / "pool", fixture)
+    monkeypatch.delenv("CONTEXTOR_DISABLE_PROCESS_POOL", raising=False)
+    pool_index, pool_graph = _d2a_canonical_index_graph(pool_root)
+    assert signature(pool_root, pool_index, pool_graph) == inline_signature
+
+
+def test_p1d3_d2b4_r1_typed_side_cold_warm_parity(
+    tmp_path, isolated_dirs, monkeypatch,
+):
+    root = write_synthetic_repository(tmp_path / "repo", D2B3_TYPED_SIDE_NAME)
+    cold_index, cold_graph = _d2a_canonical_index_graph(root)
+    cold_imports = tuple(
+        (module_id, tuple((item.module, item.type_only) for item in module.imports))
+        for module_id, module in sorted(cold_index.modules.items())
+    )
+    cold_hard = cold_graph.hard_edges
+    cold_soft = cold_graph.soft_edges
+    indexer._CACHE_MANAGERS.pop(str(root.resolve()), None)
+
+    def unexpected_parse(*args, **kwargs):
+        raise AssertionError("complete warm cache must not reparse")
+
+    monkeypatch.setattr(indexer, "parse_source_snapshot", unexpected_parse)
+    warm_index, warm_graph = _d2a_canonical_index_graph(root)
+    assert tuple(
+        (module_id, tuple((item.module, item.type_only) for item in module.imports))
+        for module_id, module in sorted(warm_index.modules.items())
+    ) == cold_imports
+    assert warm_graph.hard_edges == cold_hard
+    assert warm_graph.soft_edges == cold_soft
 
 
 def test_p1d3_d2b3_attribute_typed_side_import(tmp_path, isolated_dirs):

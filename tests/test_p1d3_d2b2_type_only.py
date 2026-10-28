@@ -47,6 +47,33 @@ D2B4_INDEXED_LAUNCHER = {
     ),
 }
 
+D2B4_R1_BASE = {
+    "pkg/__init__.py": "pass\n",
+    "pkg/a.py": (
+        "from typing import TYPE_CHECKING\n"
+        "if TYPE_CHECKING:\n"
+        "    import pkg.c\n"
+        "value = 1\n"
+    ),
+    "pkg/c.py": "from pkg.a import value\n",
+}
+
+D2B4_R1_LAUNCHERS = [
+    (
+        "ior",
+        "import typing\n"
+        'typing.__dict__.__ior__({"TYPE_CHECKING": True})\n'
+        "import pkg.a\n",
+    ),
+    (
+        "alias-update",
+        "import typing\n"
+        "mutation = typing.__dict__.update\n"
+        'mutation({"TYPE_CHECKING": True})\n'
+        "import pkg.a\n",
+    ),
+]
+
 D2B2_R1_GLOBALS_MUTATION = {
     "pkg/__init__.py": "pass\n",
     "pkg/a.py": (
@@ -546,7 +573,7 @@ def test_p1d3_d2b4_forged_stale_launcher_cache(
     _index_graph(root)
     source = root / "pkg" / "launcher.py"
     cached = _cache_data(root, source)
-    assert cached["import_classification_semantics_version"] == 4
+    assert cached["import_classification_semantics_version"] == 5
     assert cached["typing_guard_marker_mutation"] is True
     cached["import_classification_semantics_version"] = 3
     cached["typing_guard_marker_mutation"] = False
@@ -555,7 +582,7 @@ def test_p1d3_d2b4_forged_stale_launcher_cache(
     index, graph = _index_graph(root)
     _assert_d2b4_launcher_graph(index, graph)
     rewritten = _cache_data(root, source)
-    assert rewritten["import_classification_semantics_version"] == 4
+    assert rewritten["import_classification_semantics_version"] == 5
     assert rewritten["typing_guard_marker_mutation"] is True
 
 
@@ -653,6 +680,180 @@ def test_p1d3_d2b4_inline_process_pool_parity(
     )
 
 
+@pytest.mark.parametrize("case,launcher", D2B4_R1_LAUNCHERS)
+def test_p1d3_d2b4_r1_opaque_launcher_counterexamples(
+    tmp_path, isolated_dirs, case, launcher,
+):
+    fixture = {**D2B4_R1_BASE, "pkg/launcher.py": launcher}
+    root = write_synthetic_repository(tmp_path / case, fixture)
+    tree = ast.parse(launcher)
+    assert indexer._possible_project_typing_marker_mutation(tree) is False
+    assert indexer._project_typing_opaque_effects(tree) is True
+    worker = indexer._process_single_file(str(root / "pkg" / "launcher.py"), str(root))
+    assert worker["typing_guard_marker_mutation"] is False
+    assert worker["typing_guard_opaque_effects"] is True
+    index, graph = _index_graph(root)
+    _assert_d2b4_launcher_graph(index, graph)
+    for module in ("pkg.a", "pkg.c"):
+        assert run_synthetic_import(root, module).returncode == 0
+    failed = run_synthetic_import(root, "pkg.launcher")
+    assert failed.returncode != 0
+    assert "partially initialized module 'pkg.a'" in failed.stderr
+
+
+D2B4_R1_UNKNOWN_EFFECTS = [
+    ("E01", "arbitrary()\n", True),
+    ("E02", "callback = arbitrary.callback\n", True),
+    ("E03", "def f(): pass\n", True),
+    ("E04", "class C: pass\n", True),
+    ("E05", 'import typing\ntarget = typing.__dict__\ntarget["TYPE_CHECKING"] = True\n', True),
+    ("E06", 'import typing\ngetattr(typing, "__dict__").update({"TYPE_CHECKING": True})\n', True),
+    ("E07", "if condition:\n    pass\n", True),
+    ("E08", "try:\n    pass\nexcept Exception:\n    pass\n", True),
+    ("E09", "x: int = 1\n", True),
+    ("E10", "x = 1\nx += 1\n", True),
+    ("E11", "with manager:\n    pass\n", True),
+    ("E12", 'import importlib\nimportlib.import_module("typing")\n', True),
+]
+
+
+@pytest.mark.parametrize("case,source,opaque", D2B4_R1_UNKNOWN_EFFECTS)
+def test_p1d3_d2b4_r1_unknown_effects_veto(
+    tmp_path, isolated_dirs, case, source, opaque,
+):
+    fixture = {**D2B_NAME_SAFE, "unrelated.py": source}
+    root = write_synthetic_repository(tmp_path / case, fixture)
+    worker = indexer._process_single_file(str(root / "unrelated.py"), str(root))
+    assert worker["typing_guard_opaque_effects"] is opaque
+    index, graph = _index_graph(root)
+    if case == "E12":
+        assert indexer._project_typing_imports_closed(index.modules) is False
+    assert next(
+        item for item in index.modules["pkg.a"].imports
+        if item.module == "pkg.b"
+    ).type_only is False
+    assert "pkg.b" in graph.hard_edges["pkg.a"]
+    assert "pkg.a" in graph.hard_edges["pkg.b"]
+    assert "pkg.b" not in graph.soft_edges["pkg.a"]
+
+
+D2B4_R1_EXTERNAL_IMPORTS = [
+    ("I01", "import sys\n"),
+    ("I02", "import os\n"),
+    ("I03", "import unknown_external\n"),
+    ("I04", "from typing import Any\n"),
+    ("I05", "from external_module import value\n"),
+    ("I06", "from . import sibling\n"),
+]
+
+
+@pytest.mark.parametrize("case,source", D2B4_R1_EXTERNAL_IMPORTS)
+def test_p1d3_d2b4_r1_external_import_veto(
+    tmp_path, isolated_dirs, case, source,
+):
+    fixture = {**D2B_NAME_SAFE, "pkg/unrelated.py": source}
+    root = write_synthetic_repository(tmp_path / case, fixture)
+    index, graph = _index_graph(root)
+    assert indexer._project_typing_imports_closed(index.modules) is False
+    assert next(
+        item for item in index.modules["pkg.a"].imports
+        if item.module == "pkg.b"
+    ).type_only is False
+    assert "pkg.b" in graph.hard_edges["pkg.a"]
+
+
+def test_p1d3_d2b4_r1_forged_stale_opaque_cache(
+    tmp_path, isolated_dirs,
+):
+    fixture = {**D2B4_R1_BASE, "pkg/launcher.py": D2B4_R1_LAUNCHERS[0][1]}
+    root = write_synthetic_repository(tmp_path / "repo", fixture)
+    _index_graph(root)
+    source = root / "pkg" / "launcher.py"
+    cached = _cache_data(root, source)
+    assert cached["import_classification_semantics_version"] == 5
+    assert cached["typing_guard_marker_mutation"] is False
+    assert cached["typing_guard_opaque_effects"] is True
+    cached["import_classification_semantics_version"] = 4
+    cached["typing_guard_opaque_effects"] = False
+    CacheManager(str(root)).set(source, cached)
+    indexer._CACHE_MANAGERS.pop(str(root.resolve()), None)
+    index, graph = _index_graph(root)
+    _assert_d2b4_launcher_graph(index, graph)
+    rewritten = _cache_data(root, source)
+    assert rewritten["import_classification_semantics_version"] == 5
+    assert rewritten["typing_guard_opaque_effects"] is True
+
+
+@pytest.mark.parametrize(
+    "case,value",
+    [("missing", None), ("none", None), ("string", "false"), ("integer", 0)],
+)
+def test_p1d3_d2b4_r1_malformed_current_opaque_cache(
+    tmp_path, isolated_dirs, monkeypatch, case, value,
+):
+    fixture = {**D2B4_R1_BASE, "pkg/launcher.py": D2B4_R1_LAUNCHERS[0][1]}
+    root = write_synthetic_repository(tmp_path / "repo", fixture)
+    original, _ = _index_graph(root)
+    source = root / "pkg" / "launcher.py"
+    cached = _cache_data(root, source)
+    if case == "missing":
+        cached.pop("typing_guard_opaque_effects")
+    else:
+        cached["typing_guard_opaque_effects"] = value
+    CacheManager(str(root)).set(source, cached)
+    indexer._CACHE_MANAGERS.pop(str(root.resolve()), None)
+    real_read = indexer.read_source_snapshot
+    reads = []
+
+    def tracked_read(path):
+        reads.append(Path(path).resolve())
+        return real_read(path)
+
+    monkeypatch.setattr(indexer, "read_source_snapshot", tracked_read)
+    replayed, graph = _index_graph(root)
+    _assert_d2b4_launcher_graph(replayed, graph)
+    assert replayed.source_fingerprints_by_module["pkg.launcher"] == (
+        original.source_fingerprints_by_module["pkg.launcher"]
+    )
+    assert reads.count(source.resolve()) == 1
+    assert _cache_data(root, source)["typing_guard_opaque_effects"] is True
+
+
+@pytest.mark.parametrize(
+    "fixture",
+    [
+        D2B_NAME_SAFE,
+        {**D2B4_R1_BASE, "pkg/launcher.py": D2B4_R1_LAUNCHERS[0][1]},
+        {**D2B4_R1_BASE, "pkg/launcher.py": D2B4_R1_LAUNCHERS[1][1]},
+    ],
+    ids=["safe-name", "ior", "alias-update"],
+)
+def test_p1d3_d2b4_r1_cold_warm_parity(
+    tmp_path, isolated_dirs, monkeypatch, fixture,
+):
+    root = write_synthetic_repository(tmp_path / "repo", fixture)
+    cold_index, cold_graph = _index_graph(root)
+    cold_imports = _import_signature(cold_index)
+    cold_graph_signature = _graph_signature(cold_index, cold_graph)
+    cold_flags = {
+        relative: _cache_data(root, root / relative)["typing_guard_opaque_effects"]
+        for relative in fixture
+    }
+    indexer._CACHE_MANAGERS.pop(str(root.resolve()), None)
+
+    def unexpected_parse(*args, **kwargs):
+        raise AssertionError("valid warm cache must not parse")
+
+    monkeypatch.setattr(indexer, "parse_source_snapshot", unexpected_parse)
+    warm_index, warm_graph = _index_graph(root)
+    assert _import_signature(warm_index) == cold_imports
+    assert _graph_signature(warm_index, warm_graph) == cold_graph_signature
+    assert {
+        relative: _cache_data(root, root / relative)["typing_guard_opaque_effects"]
+        for relative in fixture
+    } == cold_flags
+
+
 def test_cold_and_warm_worker_cache_match_type_only_graph(
     tmp_path, isolated_dirs, monkeypatch,
 ):
@@ -662,7 +863,7 @@ def test_cold_and_warm_worker_cache_match_type_only_graph(
     cold_graph_signature = _graph_signature(cold_index, cold_graph)
     source = root / "pkg" / "a.py"
     cached = _cache_data(root, source)
-    assert cached["import_classification_semantics_version"] == 4
+    assert cached["import_classification_semantics_version"] == 5
     assert next(
         item for item in cached["imports"] if item["module"] == "pkg.b"
     )["type_only"] is True
@@ -680,8 +881,8 @@ def test_cold_and_warm_worker_cache_match_type_only_graph(
 
 
 @pytest.mark.parametrize(
-    "stored_version", [None, 0, 1, 2, 3],
-    ids=["absent", "version-0", "version-1", "version-2", "version-3"],
+    "stored_version", [None, 0, 1, 2, 3, 4],
+    ids=["absent", "version-0", "version-1", "version-2", "version-3", "version-4"],
 )
 def test_stale_import_classification_cache_reparses_same_snapshot(
     tmp_path, isolated_dirs, stored_version, monkeypatch,
@@ -725,7 +926,7 @@ def test_stale_import_classification_cache_reparses_same_snapshot(
         for item in result.modules["pkg.a"].imports
     )
     rewritten = _cache_data(root, source)
-    assert rewritten["import_classification_semantics_version"] == 4
+    assert rewritten["import_classification_semantics_version"] == 5
     assert next(
         item for item in rewritten["imports"] if item["module"] == "pkg.b"
     )["type_only"] is True
@@ -991,6 +1192,13 @@ def test_d2b2_r1_safe_prefix_remains_type_only(tmp_path, isolated_dirs):
     }
     root = write_synthetic_repository(tmp_path / "repo", fixture)
     indexed, graph = _index_graph(root)
+    assert indexer._project_typing_imports_closed(indexed.modules) is True
+    assert all(
+        indexer._process_single_file(
+            str(module.absolute_path), str(root),
+        )["typing_guard_opaque_effects"] is False
+        for module in indexed.modules.values()
+    )
     guarded_imports = [
         item for item in indexed.modules["pkg.a"].imports
         if item.module == "pkg.b" and not item.is_from_import
@@ -1022,7 +1230,7 @@ def test_d2b2_r1_forged_version_one_cache_is_reparsed(
 
     source = root / "pkg" / "a.py"
     cached = _cache_data(root, source)
-    assert cached["import_classification_semantics_version"] == 4
+    assert cached["import_classification_semantics_version"] == 5
     forged_imports = [
         item for item in cached["imports"] if item["module"] == "pkg.b"
     ]
@@ -1044,7 +1252,7 @@ def test_d2b2_r1_forged_version_one_cache_is_reparsed(
         for members in _scc_signature(replayed, graph)
     )
     rewritten = _cache_data(root, source)
-    assert rewritten["import_classification_semantics_version"] == 4
+    assert rewritten["import_classification_semantics_version"] == 5
     assert next(
         item for item in rewritten["imports"] if item["module"] == "pkg.b"
     )["type_only"] is False
@@ -1210,6 +1418,13 @@ def test_d2b2_r2_positive_parent_initializer_matrix(
     fixture = {**D2B_NAME_SAFE, "pkg/__init__.py": source}
     root = write_synthetic_repository(tmp_path / case, fixture)
     indexed, graph = _index_graph(root)
+    assert indexer._project_typing_imports_closed(indexed.modules) is True
+    assert all(
+        indexer._process_single_file(
+            str(module.absolute_path), str(root),
+        )["typing_guard_opaque_effects"] is False
+        for module in indexed.modules.values()
+    )
     guarded = [
         item for item in indexed.modules["pkg.a"].imports
         if item.module == "pkg.b" and not item.is_from_import
@@ -1249,7 +1464,7 @@ def test_d2b2_r2_worker_success_returns_and_warm_cache(
     ]
     assert warm["source_fingerprint"] == cold["source_fingerprint"]
     cached = _cache_data(root, parent)
-    assert cached["import_classification_semantics_version"] == 4
+    assert cached["import_classification_semantics_version"] == 5
     assert type(cached["typing_guard_initializer_passive"]) is bool
     assert cached["typing_guard_initializer_passive"] is expected_passive
     assert cached["typing_guard_marker_mutation"] is cold[
@@ -1268,7 +1483,7 @@ def test_d2b2_r2_forged_stale_parent_cache_rejected(
     parent = root / "pkg" / "__init__.py"
     original_fingerprint = original.source_fingerprints_by_module["pkg.__init__"]
     cached = _cache_data(root, parent)
-    assert cached["import_classification_semantics_version"] == 4
+    assert cached["import_classification_semantics_version"] == 5
     assert cached["typing_guard_initializer_passive"] is False
     cached["typing_guard_initializer_passive"] = True
     cached["import_classification_semantics_version"] = 2
@@ -1286,7 +1501,7 @@ def test_d2b2_r2_forged_stale_parent_cache_rejected(
     assert graph.hard_edges["pkg.a"] == {"pkg.b"}
     assert graph.hard_edges["pkg.b"] == {"pkg.a"}
     rewritten = _cache_data(root, parent)
-    assert rewritten["import_classification_semantics_version"] == 4
+    assert rewritten["import_classification_semantics_version"] == 5
     assert type(rewritten["typing_guard_initializer_passive"]) is bool
     assert rewritten["typing_guard_initializer_passive"] is False
 
@@ -1304,7 +1519,7 @@ def test_d2b2_r2_malformed_current_parent_cache_rejected(
     _index_graph(root)
     parent = root / "pkg" / "__init__.py"
     cached = _cache_data(root, parent)
-    assert cached["import_classification_semantics_version"] == 4
+    assert cached["import_classification_semantics_version"] == 5
     if case == "missing":
         cached.pop("typing_guard_initializer_passive")
     else:
@@ -1342,7 +1557,7 @@ def test_d2b2_r2_malformed_current_parent_cache_rejected(
         for members in _scc_signature(replayed, graph)
     )
     rewritten = _cache_data(root, parent)
-    assert rewritten["import_classification_semantics_version"] == 4
+    assert rewritten["import_classification_semantics_version"] == 5
     assert type(rewritten["typing_guard_initializer_passive"]) is bool
     assert rewritten["typing_guard_initializer_passive"] is False
 

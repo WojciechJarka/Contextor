@@ -73,7 +73,7 @@ SYMBOL_FACTS_SCHEMA_VERSION = 2
 REFERENCE_FACTS_SCHEMA_VERSION = 1
 COLLISION_FACTS_SCHEMA_VERSION = 1
 TEST_FACTS_SCHEMA_VERSION = 1
-IMPORT_CLASSIFICATION_SEMANTICS_VERSION = 4
+IMPORT_CLASSIFICATION_SEMANTICS_VERSION = 5
 _SYMBOL_FACTS_AVAILABLE = "available"
 _SYMBOL_FACTS_FAILURE = "failure"
 _SYMBOL_FACTS_NOT_COMPUTED = "not_computed"
@@ -375,6 +375,215 @@ def _possible_project_typing_marker_mutation(
     return False
 
 
+def _project_typing_opaque_effects(
+    tree: ast.AST,
+) -> bool:
+    if not isinstance(tree, ast.Module):
+        return True
+
+    guard = recognize_typing_guard(
+        tree,
+        frozenset(),
+    )
+
+    def safe_statements(
+        statements: list[ast.stmt],
+        *,
+        top_level: bool,
+        depth: int,
+    ) -> bool:
+        if depth > 32:
+            return False
+
+        for position, statement in enumerate(
+            statements
+        ):
+            if isinstance(statement, ast.Pass):
+                continue
+
+            if (
+                top_level
+                and position == 0
+                and isinstance(
+                    statement,
+                    ast.Expr,
+                )
+                and isinstance(
+                    statement.value,
+                    ast.Constant,
+                )
+                and type(
+                    statement.value.value
+                ) is str
+            ):
+                continue
+
+            if isinstance(statement, ast.Assign):
+                if (
+                    _safe_typing_guard_prefix_statement(
+                        statement
+                    )
+                ):
+                    continue
+
+                return False
+
+            if isinstance(statement, ast.Import):
+                if (
+                    statement.names
+                    and all(
+                        alias.name
+                        and all(
+                            part.isidentifier()
+                            for part
+                            in alias.name.split(".")
+                        )
+                        for alias
+                        in statement.names
+                    )
+                ):
+                    continue
+
+                return False
+
+            if isinstance(statement, ast.ImportFrom):
+                if (
+                    statement.names
+                    and type(statement.level) is int
+                    and statement.level >= 0
+                    and (
+                        statement.module is None
+                        or (
+                            statement.module
+                            and all(
+                                part.isidentifier()
+                                for part
+                                in statement.module.split(".")
+                            )
+                        )
+                    )
+                    and all(
+                        alias.name != "*"
+                        and alias.name.isidentifier()
+                        for alias in statement.names
+                    )
+                ):
+                    continue
+
+                return False
+
+            if isinstance(statement, ast.If):
+                literal_condition = (
+                    isinstance(
+                        statement.test,
+                        ast.Constant,
+                    )
+                    and type(
+                        statement.test.value
+                    ) is bool
+                )
+
+                typing_condition = (
+                    top_level
+                    and guard is not None
+                    and matches_typing_guard(
+                        statement.test,
+                        guard.form,
+                    )
+                )
+
+                if not (
+                    literal_condition
+                    or typing_condition
+                ):
+                    return False
+
+                if not safe_statements(
+                    statement.body,
+                    top_level=False,
+                    depth=depth + 1,
+                ):
+                    return False
+
+                if not safe_statements(
+                    statement.orelse,
+                    top_level=False,
+                    depth=depth + 1,
+                ):
+                    return False
+
+                continue
+
+            return False
+
+        return True
+
+    return not safe_statements(
+        tree.body,
+        top_level=True,
+        depth=0,
+    )
+
+
+def _project_typing_imports_closed(
+    modules: dict[str, Module],
+) -> bool:
+    indexed = frozenset(modules)
+
+    for module in modules.values():
+        for import_ref in module.imports:
+            if (
+                import_ref.is_local
+                or import_ref.level != 0
+            ):
+                return False
+
+            if import_ref.is_from_import:
+                if import_ref.module == "typing":
+                    if (
+                        import_ref.names
+                        != ["TYPE_CHECKING"]
+                    ):
+                        return False
+
+                    continue
+
+                if (
+                    not import_ref.names
+                    or "*" in import_ref.names
+                ):
+                    return False
+
+                target_name = import_ref.module
+
+            else:
+                target_name = import_ref.module
+
+                if target_name == "typing":
+                    continue
+
+            if (
+                type(target_name) is not str
+                or not target_name
+                or not all(
+                    part.isidentifier()
+                    for part
+                    in target_name.split(".")
+                )
+            ):
+                return False
+
+            if (
+                target_name not in indexed
+                and (
+                    target_name + ".__init__"
+                ) not in indexed
+            ):
+                return False
+
+    return True
+
+
 def read_imports(
     file_path: Path,
     *,
@@ -630,6 +839,7 @@ def _process_single_file(
             "error": str(exc),
             "typing_guard_initializer_passive": False,
             "typing_guard_marker_mutation": True,
+            "typing_guard_opaque_effects": True,
             "filename": path.name,
             "symbol_facts": None,
             "reference_facts": None,
@@ -696,6 +906,11 @@ def _process_single_file(
                     "typing_guard_marker_mutation"
                 )
             ) is not bool
+            or type(
+                cached_data.get(
+                    "typing_guard_opaque_effects"
+                )
+            ) is not bool
         )
     ):
         cached_data = None
@@ -707,6 +922,13 @@ def _process_single_file(
     )
     typing_guard_marker_mutation = (
         cached_data["typing_guard_marker_mutation"]
+        if cached_data is not None
+        else True
+    )
+    typing_guard_opaque_effects = (
+        cached_data[
+            "typing_guard_opaque_effects"
+        ]
         if cached_data is not None
         else True
     )
@@ -771,6 +993,9 @@ def _process_single_file(
                 "typing_guard_marker_mutation": (
                     typing_guard_marker_mutation
                 ),
+                "typing_guard_opaque_effects": (
+                    typing_guard_opaque_effects
+                ),
                 "filename": path.name,
                 "symbol_facts": symbol_facts,
                 "reference_facts": reference_facts,
@@ -813,6 +1038,7 @@ def _process_single_file(
             "error": str(exc), "filename": path.name,
             "typing_guard_initializer_passive": False,
             "typing_guard_marker_mutation": True,
+            "typing_guard_opaque_effects": True,
             "symbol_facts": None, "reference_facts": None,
             "collision_facts": None, "collision_facts_status": None,
             "test_facts": None, "test_facts_status": None,
@@ -847,6 +1073,12 @@ def _process_single_file(
     if cached_data is None:
         typing_guard_marker_mutation = (
             _possible_project_typing_marker_mutation(
+                tree
+            )
+        )
+    if cached_data is None:
+        typing_guard_opaque_effects = (
+            _project_typing_opaque_effects(
                 tree
             )
         )
@@ -976,6 +1208,9 @@ def _process_single_file(
                 rewritten[
                     "typing_guard_marker_mutation"
                 ] = typing_guard_marker_mutation
+                rewritten[
+                    "typing_guard_opaque_effects"
+                ] = typing_guard_opaque_effects
                 rewritten["lineage_facts"] = serialize_extracted_lineage_source_facts(
                     lineage_facts
                 )
@@ -1115,6 +1350,9 @@ def _process_single_file(
             "typing_guard_marker_mutation": (
                 typing_guard_marker_mutation
             ),
+            "typing_guard_opaque_effects": (
+                typing_guard_opaque_effects
+            ),
         }
         if symbol_facts and symbol_facts.get("status") == _SYMBOL_FACTS_AVAILABLE:
             cache_data["symbol_facts"] = symbol_facts
@@ -1152,6 +1390,9 @@ def _process_single_file(
         ),
         "typing_guard_marker_mutation": (
             typing_guard_marker_mutation
+        ),
+        "typing_guard_opaque_effects": (
+            typing_guard_opaque_effects
         ),
         "filename": path.name,
         "symbol_facts": symbol_facts,
@@ -1381,6 +1622,10 @@ def index_repository(
         str,
         tuple[bool, str],
     ] = {}
+    opaque_effects_by_module: dict[
+        str,
+        tuple[bool, str],
+    ] = {}
     file_tasks = 0
     source_parse_calls = 0
     source_parse_failures = 0
@@ -1560,6 +1805,37 @@ def index_repository(
                 module_id
             ] = (
                 mutation,
+                fingerprint,
+            )
+
+    def record_opaque_effects(
+        result: dict,
+    ) -> None:
+        module_id = result.get("module_id")
+
+        if (
+            type(module_id) is not str
+            or not module_id
+            or result.get("error") is not None
+        ):
+            return
+
+        opaque = result.get(
+            "typing_guard_opaque_effects"
+        )
+
+        fingerprint = result.get(
+            "source_fingerprint"
+        )
+
+        if (
+            type(opaque) is bool
+            and type(fingerprint) is str
+        ):
+            opaque_effects_by_module[
+                module_id
+            ] = (
+                opaque,
                 fingerprint,
             )
 
@@ -2225,6 +2501,36 @@ def index_repository(
                 for module_id in modules
             )
         )
+        project_effects_closed = (
+            not skipped
+            and len(opaque_effects_by_module)
+            == len(modules)
+            and all(
+                (
+                    module_id
+                    in opaque_effects_by_module
+                    and type(
+                        opaque_effects_by_module[
+                            module_id
+                        ][0]
+                    ) is bool
+                    and opaque_effects_by_module[
+                        module_id
+                    ][0] is False
+                    and opaque_effects_by_module[
+                        module_id
+                    ][1] == (
+                        source_fingerprints_by_module.get(
+                            module_id
+                        )
+                    )
+                )
+                for module_id in modules
+            )
+            and _project_typing_imports_closed(
+                modules
+            )
+        )
 
         for module_id, module in modules.items():
             if not any(
@@ -2265,6 +2571,7 @@ def index_repository(
                 not typing_shadowed
                 and parents_proved
                 and project_marker_safe
+                and project_effects_closed
             ):
                 continue
 
@@ -2313,6 +2620,7 @@ def index_repository(
                 record_indexed_source_fingerprint(res)
                 record_initializer_passivity(res)
                 record_marker_mutation(res)
+                record_opaque_effects(res)
                 if res.get("symbol_facts") is not None:
                     symbol_facts_by_module[res["module_id"]] = res["symbol_facts"]
                 if res.get("reference_facts") is not None:
@@ -2471,6 +2779,7 @@ def index_repository(
                 record_indexed_source_fingerprint(res)
                 record_initializer_passivity(res)
                 record_marker_mutation(res)
+                record_opaque_effects(res)
 
                 if res.get("symbol_facts") is not None:
                     symbol_facts_by_module[
