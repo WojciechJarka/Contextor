@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import copy
+import py_compile
 from dataclasses import replace
 from pathlib import Path
 
@@ -281,6 +282,18 @@ D2B5_EXCLUDED_CHILD = {
     "pkg/c.py": "from pkg.a import value\n",
     "pkg/hidden.py": "import typing\ntyping.TYPE_CHECKING = True\n",
     "pkg/launcher.py": "from pkg import hidden\nimport pkg.a\n",
+}
+
+D2B6_SOURCE_SHADOW = {
+    "pkg/__init__.py": "pass\n",
+    "pkg/a.py": (
+        "from typing import TYPE_CHECKING\n"
+        "if TYPE_CHECKING:\n"
+        "    import pkg.c\n"
+        "value = 1\n"
+    ),
+    "pkg/c.py": "from pkg.a import value\n",
+    "pkg/launcher.py": "pass\n",
 }
 
 D2B3_SOURCE_BOUND_NEGATIVES = [
@@ -1278,6 +1291,64 @@ def test_p1d3_d2b5_excluded_child_source_checker_fails_closed(
     assert evidence.scenarios.components[0].classification != (
         "MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS"
     )
+    prepared = prepare_original_worker_cycle_manifest(
+        captured, graph.hard_edges, _snapshot(root, index, graph),
+    )
+    assert prepared.manifest is None
+
+
+def test_p1d3_d2b6_sourceless_shadow_original_worker_fails_closed(
+    tmp_path, isolated_dirs,
+):
+    root = write_synthetic_repository(tmp_path / "repo", D2B6_SOURCE_SHADOW)
+    compiled_source = tmp_path / "launcher_init_source.py"
+    compiled_source.write_text(
+        "import typing\ntyping.TYPE_CHECKING = True\nimport pkg.a\n",
+        encoding="utf-8",
+    )
+    package_directory = root / "pkg" / "launcher"
+    package_directory.mkdir()
+    py_compile.compile(
+        str(compiled_source),
+        cfile=str(package_directory / "__init__.pyc"),
+        doraise=True,
+    )
+    compiled_source.unlink()
+
+    index, graph = _d2a_canonical_index_graph(root)
+    assert graph.hard_edges["pkg.a"] == {"pkg.c"}
+    assert graph.hard_edges["pkg.c"] == {"pkg.a"}
+    plan = plan_original_worker_reindex(index, graph.hard_edges)
+    assert plan.status == "READY_FOR_REINDEX_NON_ATOMIC"
+    assert plan.selected_module_ids
+    captured, captured_graph = _d2a_canonical_index_graph(
+        root, source_capture_module_ids=plan.selected_module_ids,
+    )
+    assert captured.original_worker_capture_status == (
+        "ALL_SELECTED_CAPTURED_NON_ATOMIC"
+    )
+    assert captured_graph.hard_edges == graph.hard_edges
+    assert captured_graph.soft_edges == graph.soft_edges
+    assert captured.source_fingerprints_by_module == (
+        index.source_fingerprints_by_module
+    )
+    for module_id in plan.selected_module_ids:
+        assert captured.original_worker_source_snapshots[
+            module_id
+        ].source_fingerprint == index.source_fingerprints_by_module[module_id]
+    parsed = {
+        module: parse_source_snapshot(snapshot, module)
+        for module, snapshot in captured.original_worker_source_snapshots.items()
+    }
+    closure = compute_cycle_model_source_closures(graph.hard_edges)
+    assert len(closure) == 1
+    consistency = assess_package_graph_consistency(
+        graph.hard_edges,
+        {module_id: source.tree for module_id, source in parsed.items()},
+        closure[0].evidence_source_modules,
+    )
+    assert consistency.status == "INDETERMINATE"
+    assert consistency.reason == "GRAPH_SOURCE_IMPORT_MISMATCH"
     prepared = prepare_original_worker_cycle_manifest(
         captured, graph.hard_edges, _snapshot(root, index, graph),
     )

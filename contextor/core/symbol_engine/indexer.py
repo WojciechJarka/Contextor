@@ -17,6 +17,10 @@ import os
 import re
 import time
 from concurrent.futures import as_completed
+from importlib.machinery import (
+    BYTECODE_SUFFIXES,
+    EXTENSION_SUFFIXES,
+)
 from pathlib import Path
 
 from contextor.core.analysis.cache_manager import CacheManager
@@ -73,7 +77,13 @@ SYMBOL_FACTS_SCHEMA_VERSION = 2
 REFERENCE_FACTS_SCHEMA_VERSION = 1
 COLLISION_FACTS_SCHEMA_VERSION = 1
 TEST_FACTS_SCHEMA_VERSION = 1
-IMPORT_CLASSIFICATION_SEMANTICS_VERSION = 6
+IMPORT_CLASSIFICATION_SEMANTICS_VERSION = 7
+_IMPORTABLE_BINARY_SUFFIXES = tuple(
+    sorted(
+        frozenset(BYTECODE_SUFFIXES)
+        | frozenset(EXTENSION_SUFFIXES)
+    )
+)
 _SYMBOL_FACTS_AVAILABLE = "available"
 _SYMBOL_FACTS_FAILURE = "failure"
 _SYMBOL_FACTS_NOT_COMPUTED = "not_computed"
@@ -2465,15 +2475,68 @@ def index_repository(
         ignored_dirs.update(extra_ignored_dirs)
 
     unindexed_python_sources_present = False
+    unindexed_import_artifacts_present = False
     file_discovery_started = time.monotonic()
 
     files_to_process = []
-    for path in root_path.rglob("*.py"):
-        # rglob matches directories too, and a directory named 'foo.py'
-        # was becoming a module in its own right.
+    for path in root_path.rglob("*"):
+        if (
+            path.is_symlink()
+            and path.is_dir()
+        ):
+            unindexed_import_artifacts_present = True
+            continue
+
+        name = path.name
+
+        is_python_source = (
+            name.casefold().endswith(".py")
+            if os.name == "nt"
+            else name.endswith(".py")
+        )
+
+        if not is_python_source:
+            binary_name = (
+                name.casefold()
+                if os.name == "nt"
+                else name
+            )
+
+            importable_artifact = any(
+                binary_name.endswith(
+                    suffix.casefold()
+                    if os.name == "nt"
+                    else suffix
+                )
+                for suffix
+                in _IMPORTABLE_BINARY_SUFFIXES
+            )
+
+            if importable_artifact and path.is_file():
+                rel = path.relative_to(root_path)
+
+                is_bytecode = (
+                    binary_name.endswith(".pyc")
+                )
+
+                in_pycache = any(
+                    part.casefold() == "__pycache__"
+                    for part in rel.parts[:-1]
+                )
+
+                if not (
+                    is_bytecode
+                    and in_pycache
+                ):
+                    unindexed_import_artifacts_present = True
+
+            continue
+
         if not path.is_file():
             continue
+
         rel = path.relative_to(root_path)
+
         if any(
             part in ignored_dirs
             for part in rel.parts
@@ -2483,14 +2546,23 @@ def index_repository(
         if excludes:
             rel_str = rel.as_posix()
             is_excluded = False
+
             for ex in excludes:
                 ex_norm = ex.replace("\\", "/")
-                if rel_str == ex_norm or rel_str.startswith(ex_norm + "/"):
+
+                if (
+                    rel_str == ex_norm
+                    or rel_str.startswith(
+                        ex_norm + "/"
+                    )
+                ):
                     is_excluded = True
                     break
+
             if is_excluded:
                 unindexed_python_sources_present = True
                 continue
+
         files_to_process.append(path)
 
     file_discovery_ms = (
@@ -2539,6 +2611,7 @@ def index_repository(
         project_effects_closed = (
             not skipped
             and not unindexed_python_sources_present
+            and not unindexed_import_artifacts_present
             and len(opaque_effects_by_module)
             == len(modules)
             and all(
