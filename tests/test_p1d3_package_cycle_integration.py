@@ -247,6 +247,94 @@ def test_p1b_replay_rejects_forged_event(tmp_path, isolated_dirs, fixture):
     assert p1b[0].reason == "MODEL_REPLAY_MISMATCH"
 
 
+def test_p0_rehashed_invalid_package_scope_is_rejected(
+    tmp_path,
+    isolated_dirs,
+):
+    root = write_synthetic_repository(
+        tmp_path / "repo",
+        F1,
+    )
+
+    index, graph = _indexed(root)
+    _, captured = _captured(root, index, graph)
+
+    parsed = {
+        module: parse_source_snapshot(snapshot, module)
+        for module, snapshot
+        in captured.original_worker_source_snapshots.items()
+    }
+
+    evidence = build_source_bound_cycle_evidence(
+        graph.hard_edges,
+        parsed,
+    )
+
+    scenario = evidence.scenarios.components[0]
+
+    assert scenario.model_kind == "REGULAR_PACKAGE"
+    assert scenario.classification == (
+        "MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS"
+    )
+
+    assessment = scenario.entry_assessments[0]
+
+    changed_assessment = replace(
+        assessment,
+        evidence_scope="RESTRICTED_FLAT_MODULE_MODEL",
+    )
+
+    changed_scenario = replace(
+        scenario,
+        entry_assessments=(
+            changed_assessment,
+            *scenario.entry_assessments[1:],
+        ),
+    )
+
+    component = evidence.components[0]
+
+    subgraph = tuple(
+        (
+            module,
+            tuple(sorted(graph.hard_edges[module])),
+        )
+        for module in component.reachable_modules
+    )
+
+    changed_component = replace(
+        component,
+        evidence_token=_component_token(
+            component.members,
+            subgraph,
+            component.source_signatures,
+            changed_scenario,
+        ),
+    )
+
+    changed_evidence = replace(
+        evidence,
+        scenarios=replace(
+            evidence.scenarios,
+            components=(changed_scenario,),
+        ),
+        components=(changed_component,),
+    )
+
+    result = assess_index_bound_scc_models(
+        graph.hard_edges,
+        captured.source_fingerprints_by_module,
+        _snapshot(root, index, graph),
+        changed_evidence,
+    )
+
+    assert result[0].model_classification == "INDETERMINATE"
+    assert result[0].evidence_state == "INCOMPLETE_EVIDENCE"
+    assert result[0].reason == (
+        "INCOMPLETE_MEMBER_ENTRY_ASSESSMENTS"
+    )
+
+
 def test_p0_rejects_package_assessment_disguised_as_flat(tmp_path, isolated_dirs):
     root = write_synthetic_repository(tmp_path / "repo", F1)
     index, graph = _indexed(root)

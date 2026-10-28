@@ -326,6 +326,28 @@ def test_p0_t11_unknown_entry_in_scc():
     assert result[0].evidence_state == "EVIDENCE_MISMATCH"
 
 
+def test_p0_genuine_unknown_entry_remains_incomplete():
+    sources = {
+        "a": "import b\nx = object()\n",
+        "b": "import a\ny = 2\n",
+    }
+
+    result, index, snapshot, evidence = _one(
+        sources=sources,
+    )
+
+    scenario = evidence.scenarios.components[0]
+
+    assert scenario.classification == "INDETERMINATE"
+    assert scenario.coverage == "PARTIAL_FRESH_MEMBER_ENTRIES"
+
+    assert result[0].model_classification == "INDETERMINATE"
+    assert result[0].evidence_state == "INCOMPLETE_EVIDENCE"
+    assert result[0].reason == (
+        "INCOMPLETE_MEMBER_ENTRY_ASSESSMENTS"
+    )
+
+
 def test_p0_t12_independent_sccs_do_not_share_pass():
     edges = {"a": {"b"}, "b": {"a"}, "x": {"y"}, "y": {"x"}}
     sources = dict(PASS, x="import y\nvalue=1", y="from x import value")
@@ -449,6 +471,70 @@ def test_p0_t18_entry_model_scope_must_match(sources):
     assert result[0].model_classification == "INDETERMINATE"
     assert result[0].evidence_state == "EVIDENCE_MISMATCH"
     assert result[0].reason == "COMPONENT_EVIDENCE_TOKEN_MISMATCH"
+
+
+def test_p0_rehashed_invalid_flat_scope_is_rejected():
+    _, index, snapshot, evidence = _one()
+
+    scenario = evidence.scenarios.components[0]
+    assessment = scenario.entry_assessments[0]
+
+    changed_assessment = replace(
+        assessment,
+        evidence_scope="UNVERIFIED_EXECUTION_MODEL",
+    )
+
+    changed_scenario = replace(
+        scenario,
+        entry_assessments=(
+            changed_assessment,
+            *scenario.entry_assessments[1:],
+        ),
+    )
+
+    component = evidence.components[0]
+
+    subgraph = tuple(
+        (
+            module,
+            tuple(sorted(PAIR[module])),
+        )
+        for module in component.reachable_modules
+    )
+
+    changed_token = _component_token(
+        component.members,
+        subgraph,
+        component.source_signatures,
+        changed_scenario,
+    )
+
+    changed_component = replace(
+        component,
+        evidence_token=changed_token,
+    )
+
+    changed_evidence = replace(
+        evidence,
+        scenarios=replace(
+            evidence.scenarios,
+            components=(changed_scenario,),
+        ),
+        components=(changed_component,),
+    )
+
+    result = assess(
+        PAIR,
+        index,
+        snapshot,
+        changed_evidence,
+    )
+
+    assert result[0].model_classification == "INDETERMINATE"
+    assert result[0].evidence_state == "INCOMPLETE_EVIDENCE"
+    assert result[0].reason == (
+        "INCOMPLETE_MEMBER_ENTRY_ASSESSMENTS"
+    )
 
 
 def _p1_case(sources=PASS):
