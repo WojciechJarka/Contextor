@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from contextor.core.analysis.cache_manager import CacheManager
+from contextor.core.cycle_semantics.original_worker_reindex_planning import plan_original_worker_reindex
 from contextor.core.cycle_semantics.package_model import evaluate_package_import_order
 from contextor.core.cycle_semantics.scenarios import analyze_cycle_scenarios
 from contextor.core.graph.graph import build_graph
@@ -53,6 +54,78 @@ D2B2_R1_SETATTR_MUTATION = {
     ),
     "pkg/b.py": "from pkg.a import value\n",
 }
+
+D2B2_R2_PARENT_MUTATION = {
+    "pkg/__init__.py": (
+        "import typing\n"
+        "typing.TYPE_CHECKING = True\n"
+    ),
+    "pkg/a.py": D2B_NAME_SAFE["pkg/a.py"],
+    "pkg/b.py": D2B_NAME_SAFE["pkg/b.py"],
+}
+
+D2B2_R2_PARENT_SETATTR = {
+    **D2B2_R2_PARENT_MUTATION,
+    "pkg/__init__.py": (
+        "import typing\n"
+        'setattr(typing, "TYPE_CHECKING", True)\n'
+    ),
+}
+
+D2B2_R2_MULTILEVEL_COMMON = {
+    "pkg/sub/a.py": (
+        "from typing import TYPE_CHECKING\n"
+        "if TYPE_CHECKING:\n"
+        "    import pkg.sub.b\n"
+        "value = 1\n"
+    ),
+    "pkg/sub/b.py": "from pkg.sub.a import value\n",
+}
+
+D2B2_R2_UNSAFE_INITIALIZER = (
+    "import typing\n"
+    "typing.TYPE_CHECKING = True\n"
+)
+
+D2B2_R2_MULTILEVEL_CASES = [
+    ("M01-both-pass", "pass\n", "pass\n", True, True),
+    ("M02-unsafe-outer", D2B2_R2_UNSAFE_INITIALIZER, "pass\n", False, True),
+    ("M03-unsafe-inner", "pass\n", D2B2_R2_UNSAFE_INITIALIZER, False, True),
+    ("M04-passive-literals", "constant = 1\n", '"docstring"\npass\n', True, True),
+    ("M05-missing-inner", "pass\n", None, False, False),
+    ("M06-missing-outer", None, "pass\n", False, False),
+]
+
+D2B2_R2_NEGATIVE_INITIALIZERS = [
+    ("N01-import-typing", "import typing\n"),
+    ("N02-from-typing", "from typing import TYPE_CHECKING\n"),
+    ("N03-attribute-assignment", "typing.TYPE_CHECKING = True\n"),
+    ("N04-setattr", 'setattr(typing, "TYPE_CHECKING", True)\n'),
+    ("N05-globals", 'globals()["TYPE_CHECKING"] = True\n'),
+    ("N06-exec", 'exec("x = 1")\n'),
+    ("N07-function", "def f(): pass\n"),
+    ("N08-class", "class C: pass\n"),
+    ("N09-if", "if True: pass\n"),
+    ("N10-try", "try:\n    pass\nexcept Exception:\n    pass\n"),
+    ("N11-with", "with context:\n    pass\n"),
+    ("N12-import-child", "import pkg.other\n"),
+    ("N13-call", "arbitrary()\n"),
+    ("N14-subscript-assignment", 'obj["x"] = 1\n'),
+    ("N15-augmented-assignment", "x = 1\nx += 1\n"),
+    ("N16-annotated-assignment", "x: int = 1\n"),
+    ("N17-raise", "raise RuntimeError()\n"),
+]
+
+D2B2_R2_POSITIVE_INITIALIZERS = [
+    ("P01-empty", ""),
+    ("P02-pass", "pass\n"),
+    ("P03-docstring", '"docstring"\n'),
+    ("P04-literal", "constant = 1\n"),
+    (
+        "P05-mixed-passive",
+        '"docstring"\nconstant = 1\nother = False\npass\n',
+    ),
+]
 
 D2B2_R1_PREFIX_NEGATIVES = [
     (
@@ -348,7 +421,7 @@ def test_cold_and_warm_worker_cache_match_type_only_graph(
     cold_graph_signature = _graph_signature(cold_index, cold_graph)
     source = root / "pkg" / "a.py"
     cached = _cache_data(root, source)
-    assert cached["import_classification_semantics_version"] == 2
+    assert cached["import_classification_semantics_version"] == 3
     assert next(
         item for item in cached["imports"] if item["module"] == "pkg.b"
     )["type_only"] is True
@@ -366,7 +439,8 @@ def test_cold_and_warm_worker_cache_match_type_only_graph(
 
 
 @pytest.mark.parametrize(
-    "stored_version", [None, 0, 1], ids=["absent", "version-0", "version-1"],
+    "stored_version", [None, 0, 1, 2],
+    ids=["absent", "version-0", "version-1", "version-2"],
 )
 def test_stale_import_classification_cache_reparses_same_snapshot(
     tmp_path, isolated_dirs, stored_version, monkeypatch,
@@ -410,7 +484,7 @@ def test_stale_import_classification_cache_reparses_same_snapshot(
         for item in result.modules["pkg.a"].imports
     )
     rewritten = _cache_data(root, source)
-    assert rewritten["import_classification_semantics_version"] == 2
+    assert rewritten["import_classification_semantics_version"] == 3
     assert next(
         item for item in rewritten["imports"] if item["module"] == "pkg.b"
     )["type_only"] is True
@@ -707,7 +781,7 @@ def test_d2b2_r1_forged_version_one_cache_is_reparsed(
 
     source = root / "pkg" / "a.py"
     cached = _cache_data(root, source)
-    assert cached["import_classification_semantics_version"] == 2
+    assert cached["import_classification_semantics_version"] == 3
     forged_imports = [
         item for item in cached["imports"] if item["module"] == "pkg.b"
     ]
@@ -729,7 +803,7 @@ def test_d2b2_r1_forged_version_one_cache_is_reparsed(
         for members in _scc_signature(replayed, graph)
     )
     rewritten = _cache_data(root, source)
-    assert rewritten["import_classification_semantics_version"] == 2
+    assert rewritten["import_classification_semantics_version"] == 3
     assert next(
         item for item in rewritten["imports"] if item["module"] == "pkg.b"
     )["type_only"] is False
@@ -757,4 +831,414 @@ def test_d2b2_r1_dynamic_mutation_inline_process_pool_parity(
     assert pool_graph.hard_edges["pkg.a"] == {"pkg.b"}
     assert pool_graph.hard_edges["pkg.b"] == {"pkg.a"}
     assert "pkg.b" not in pool_graph.soft_edges["pkg.a"]
+
+
+def _assert_r2_unsafe_parent(root):
+    indexed, graph = _index_graph(root)
+    guarded = [
+        item for item in indexed.modules["pkg.a"].imports
+        if item.module == "pkg.b" and not item.is_from_import
+    ]
+    assert len(guarded) == 1
+    assert guarded[0].type_only is False
+    assert graph.hard_edges["pkg.a"] == {"pkg.b"}
+    assert graph.hard_edges["pkg.b"] == {"pkg.a"}
+    assert "pkg.b" not in graph.soft_edges["pkg.a"]
+    assert any(
+        set(members) == {"pkg.a", "pkg.b"}
+        for members in _scc_signature(indexed, graph)
+    )
+
+    trees = {
+        module_id: ast.parse(Path(module.absolute_path).read_text(encoding="utf-8"))
+        for module_id, module in indexed.modules.items()
+    }
+    scenarios = analyze_cycle_scenarios(graph.hard_edges, trees)
+    assert all(
+        component.classification != "MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS"
+        for component in scenarios.components
+        if {"pkg.a", "pkg.b"}.issubset(set(component.members))
+    )
+
+    actual = run_synthetic_import(root, "pkg.a")
+    assert actual.returncode != 0
+    assert "partially initialized module" in actual.stderr
+    return indexed, graph
+
+
+def test_d2b2_r2_parent_initializer_mutation_retains_hard_scc(
+    tmp_path, isolated_dirs,
+):
+    root = write_synthetic_repository(
+        tmp_path / "repo", D2B2_R2_PARENT_MUTATION,
+    )
+    _assert_r2_unsafe_parent(root)
+
+
+def test_d2b2_r2_parent_setattr_retains_hard_scc(
+    tmp_path, isolated_dirs,
+):
+    root = write_synthetic_repository(
+        tmp_path / "repo", D2B2_R2_PARENT_SETATTR,
+    )
+    _assert_r2_unsafe_parent(root)
+
+
+@pytest.mark.parametrize(
+    "case,outer,inner,expected_type_only,run_cpython",
+    D2B2_R2_MULTILEVEL_CASES,
+    ids=[item[0] for item in D2B2_R2_MULTILEVEL_CASES],
+)
+def test_d2b2_r2_multilevel_parent_chain(
+    tmp_path, isolated_dirs, case, outer, inner,
+    expected_type_only, run_cpython,
+):
+    fixture = dict(D2B2_R2_MULTILEVEL_COMMON)
+    if outer is not None:
+        fixture["pkg/__init__.py"] = outer
+    if inner is not None:
+        fixture["pkg/sub/__init__.py"] = inner
+    root = write_synthetic_repository(tmp_path / case, fixture)
+    indexed, graph = _index_graph(root)
+    expected_ids = {"pkg.sub.a", "pkg.sub.b"}
+    if outer is not None:
+        expected_ids.add("pkg.__init__")
+    if inner is not None:
+        expected_ids.add("pkg.sub.__init__")
+    assert set(indexed.modules) == expected_ids
+    assert indexer._typing_guard_parent_initializers("pkg.sub.a") == (
+        "pkg.__init__", "pkg.sub.__init__",
+    )
+    guarded = [
+        item for item in indexed.modules["pkg.sub.a"].imports
+        if item.module == "pkg.sub.b" and not item.is_from_import
+    ]
+    assert len(guarded) == 1
+    assert guarded[0].type_only is expected_type_only
+    assert graph.hard_edges["pkg.sub.b"] == {"pkg.sub.a"}
+    if expected_type_only:
+        assert graph.soft_edges["pkg.sub.a"] == {"pkg.sub.b"}
+        assert "pkg.sub.b" not in graph.hard_edges["pkg.sub.a"]
+        assert not any(
+            {"pkg.sub.a", "pkg.sub.b"}.issubset(set(members))
+            for members in _scc_signature(indexed, graph)
+        )
+    else:
+        assert "pkg.sub.b" in graph.hard_edges["pkg.sub.a"]
+        assert "pkg.sub.b" not in graph.soft_edges["pkg.sub.a"]
+        assert any(
+            set(members) == {"pkg.sub.a", "pkg.sub.b"}
+            for members in _scc_signature(indexed, graph)
+        )
+    if run_cpython:
+        actual = run_synthetic_import(root, "pkg.sub.a")
+        assert (actual.returncode == 0) is expected_type_only
+        if not expected_type_only:
+            assert "partially initialized module" in actual.stderr
+
+
+@pytest.mark.parametrize(
+    "case,source", D2B2_R2_NEGATIVE_INITIALIZERS,
+    ids=[item[0] for item in D2B2_R2_NEGATIVE_INITIALIZERS],
+)
+def test_d2b2_r2_negative_parent_initializer_matrix(
+    tmp_path, isolated_dirs, case, source,
+):
+    assert indexer._typing_guard_passive_initializer(ast.parse(source)) is False
+    fixture = {**D2B_NAME_SAFE, "pkg/__init__.py": source}
+    root = write_synthetic_repository(tmp_path / case, fixture)
+    indexed, graph = _index_graph(root)
+    guarded = [
+        item for item in indexed.modules["pkg.a"].imports
+        if item.module == "pkg.b" and not item.is_from_import
+    ]
+    assert len(guarded) == 1
+    assert guarded[0].type_only is False
+    assert "pkg.b" in graph.hard_edges["pkg.a"]
+    assert "pkg.b" not in graph.soft_edges["pkg.a"]
+
+
+@pytest.mark.parametrize(
+    "case,source", D2B2_R2_POSITIVE_INITIALIZERS,
+    ids=[item[0] for item in D2B2_R2_POSITIVE_INITIALIZERS],
+)
+def test_d2b2_r2_positive_parent_initializer_matrix(
+    tmp_path, isolated_dirs, case, source,
+):
+    assert indexer._typing_guard_passive_initializer(ast.parse(source)) is True
+    fixture = {**D2B_NAME_SAFE, "pkg/__init__.py": source}
+    root = write_synthetic_repository(tmp_path / case, fixture)
+    indexed, graph = _index_graph(root)
+    guarded = [
+        item for item in indexed.modules["pkg.a"].imports
+        if item.module == "pkg.b" and not item.is_from_import
+    ]
+    assert len(guarded) == 1
+    assert guarded[0].type_only is True
+    assert graph.soft_edges["pkg.a"] == {"pkg.b"}
+    assert "pkg.b" not in graph.hard_edges["pkg.a"]
+    assert _scc_signature(indexed, graph) == ()
+
+
+@pytest.mark.parametrize(
+    "fixture,expected_passive",
+    [(D2B_NAME_SAFE, True), (D2B2_R2_PARENT_MUTATION, False)],
+    ids=["safe-parent", "unsafe-parent"],
+)
+def test_d2b2_r2_worker_success_returns_and_warm_cache(
+    tmp_path, isolated_dirs, fixture, expected_passive,
+):
+    root = write_synthetic_repository(tmp_path / "repo", fixture)
+    parent = root / "pkg" / "__init__.py"
+    cold = indexer._process_single_file(str(parent), str(root))
+    assert cold["error"] is None
+    assert cold["source_parse_called"] is True
+    assert type(cold["typing_guard_initializer_passive"]) is bool
+    assert cold["typing_guard_initializer_passive"] is expected_passive
+    assert cold["source_fingerprint"]
+    warm = indexer._process_single_file(str(parent), str(root))
+    assert warm["error"] is None
+    assert warm["source_parse_called"] is False
+    assert warm["cache_hit"] is True
+    assert type(warm["typing_guard_initializer_passive"]) is bool
+    assert warm["typing_guard_initializer_passive"] is expected_passive
+    assert warm["source_fingerprint"] == cold["source_fingerprint"]
+    cached = _cache_data(root, parent)
+    assert cached["import_classification_semantics_version"] == 3
+    assert type(cached["typing_guard_initializer_passive"]) is bool
+    assert cached["typing_guard_initializer_passive"] is expected_passive
+
+
+def test_d2b2_r2_forged_stale_parent_cache_rejected(
+    tmp_path, isolated_dirs,
+):
+    root = write_synthetic_repository(
+        tmp_path / "repo", D2B2_R2_PARENT_MUTATION,
+    )
+    original, original_graph = _index_graph(root)
+    assert "pkg.b" in original_graph.hard_edges["pkg.a"]
+    parent = root / "pkg" / "__init__.py"
+    original_fingerprint = original.source_fingerprints_by_module["pkg.__init__"]
+    cached = _cache_data(root, parent)
+    assert cached["import_classification_semantics_version"] == 3
+    assert cached["typing_guard_initializer_passive"] is False
+    cached["typing_guard_initializer_passive"] = True
+    cached["import_classification_semantics_version"] = 2
+    CacheManager(str(root)).set(parent, cached)
+    indexer._CACHE_MANAGERS.pop(str(root.resolve()), None)
+
+    replayed, graph = _index_graph(root)
+    assert replayed.source_fingerprints_by_module["pkg.__init__"] == (
+        original_fingerprint
+    )
+    assert next(
+        item for item in replayed.modules["pkg.a"].imports
+        if item.module == "pkg.b"
+    ).type_only is False
+    assert graph.hard_edges["pkg.a"] == {"pkg.b"}
+    assert graph.hard_edges["pkg.b"] == {"pkg.a"}
+    rewritten = _cache_data(root, parent)
+    assert rewritten["import_classification_semantics_version"] == 3
+    assert type(rewritten["typing_guard_initializer_passive"]) is bool
+    assert rewritten["typing_guard_initializer_passive"] is False
+
+
+@pytest.mark.parametrize(
+    "case,malformed",
+    [("missing", None), ("none", None), ("string", "true"), ("integer", 1)],
+)
+def test_d2b2_r2_malformed_current_parent_cache_rejected(
+    tmp_path, isolated_dirs, monkeypatch, case, malformed,
+):
+    root = write_synthetic_repository(
+        tmp_path / "repo", D2B2_R2_PARENT_MUTATION,
+    )
+    _index_graph(root)
+    parent = root / "pkg" / "__init__.py"
+    cached = _cache_data(root, parent)
+    assert cached["import_classification_semantics_version"] == 3
+    if case == "missing":
+        cached.pop("typing_guard_initializer_passive")
+    else:
+        cached["typing_guard_initializer_passive"] = malformed
+    CacheManager(str(root)).set(parent, cached)
+    indexer._CACHE_MANAGERS.pop(str(root.resolve()), None)
+
+    real_read = indexer.read_source_snapshot
+    real_parse = indexer.parse_source_snapshot
+    read_calls = []
+    parse_calls = []
+
+    def tracked_read(path):
+        read_calls.append(Path(path).resolve())
+        return real_read(path)
+
+    def tracked_parse(snapshot, path):
+        parse_calls.append(Path(path).resolve())
+        return real_parse(snapshot, path)
+
+    monkeypatch.setattr(indexer, "read_source_snapshot", tracked_read)
+    monkeypatch.setattr(indexer, "parse_source_snapshot", tracked_parse)
+    replayed, graph = _index_graph(root)
+    assert len(read_calls) == 3
+    assert len(set(read_calls)) == 3
+    assert parse_calls == [parent.resolve()]
+    assert next(
+        item for item in replayed.modules["pkg.a"].imports
+        if item.module == "pkg.b"
+    ).type_only is False
+    assert graph.hard_edges["pkg.a"] == {"pkg.b"}
+    assert graph.hard_edges["pkg.b"] == {"pkg.a"}
+    assert any(
+        set(members) == {"pkg.a", "pkg.b"}
+        for members in _scc_signature(replayed, graph)
+    )
+    rewritten = _cache_data(root, parent)
+    assert rewritten["import_classification_semantics_version"] == 3
+    assert type(rewritten["typing_guard_initializer_passive"]) is bool
+    assert rewritten["typing_guard_initializer_passive"] is False
+
+
+@pytest.mark.parametrize(
+    "fixture",
+    [D2B_NAME_SAFE, D2B2_R2_PARENT_MUTATION],
+    ids=["passive-parent", "unsafe-parent"],
+)
+def test_d2b2_r2_cold_warm_graph_parity(
+    tmp_path, isolated_dirs, monkeypatch, fixture,
+):
+    root = write_synthetic_repository(tmp_path / "repo", fixture)
+    cold_index, cold_graph = _index_graph(root)
+    cold_imports = _import_signature(cold_index)
+    cold_graph_signature = _graph_signature(cold_index, cold_graph)
+    indexer._CACHE_MANAGERS.pop(str(root.resolve()), None)
+
+    def unexpected_parse(*args, **kwargs):
+        raise AssertionError("complete current warm cache must not parse source")
+
+    monkeypatch.setattr(indexer, "parse_source_snapshot", unexpected_parse)
+    warm_index, warm_graph = _index_graph(root)
+    assert _import_signature(warm_index) == cold_imports
+    assert _graph_signature(warm_index, warm_graph) == cold_graph_signature
+
+
+def test_d2b2_r2_parent_source_fingerprint_change_reclassifies_child(
+    tmp_path, isolated_dirs,
+):
+    root = write_synthetic_repository(tmp_path / "repo", D2B_NAME_SAFE)
+    safe_index, safe_graph = _index_graph(root)
+    assert "pkg.b" in safe_graph.soft_edges["pkg.a"]
+    parent_fingerprint = safe_index.source_fingerprints_by_module["pkg.__init__"]
+    child_fingerprint = safe_index.source_fingerprints_by_module["pkg.a"]
+
+    (root / "pkg" / "__init__.py").write_text(
+        D2B2_R2_UNSAFE_INITIALIZER, encoding="utf-8",
+    )
+    unsafe_index, unsafe_graph = _index_graph(root)
+    assert unsafe_index.source_fingerprints_by_module["pkg.__init__"] != (
+        parent_fingerprint
+    )
+    assert unsafe_index.source_fingerprints_by_module["pkg.a"] == (
+        child_fingerprint
+    )
+    assert next(
+        item for item in unsafe_index.modules["pkg.a"].imports
+        if item.module == "pkg.b"
+    ).type_only is False
+    assert unsafe_graph.hard_edges["pkg.a"] == {"pkg.b"}
+    assert unsafe_graph.hard_edges["pkg.b"] == {"pkg.a"}
+
+
+@pytest.mark.parametrize(
+    "case,fixture",
+    [
+        ("safe-single", D2B_NAME_SAFE),
+        ("unsafe-single", D2B2_R2_PARENT_MUTATION),
+        (
+            "safe-multilevel",
+            {
+                **D2B2_R2_MULTILEVEL_COMMON,
+                "pkg/__init__.py": "pass\n",
+                "pkg/sub/__init__.py": "pass\n",
+            },
+        ),
+        (
+            "unsafe-outer",
+            {
+                **D2B2_R2_MULTILEVEL_COMMON,
+                "pkg/__init__.py": D2B2_R2_UNSAFE_INITIALIZER,
+                "pkg/sub/__init__.py": "pass\n",
+            },
+        ),
+        (
+            "unsafe-inner",
+            {
+                **D2B2_R2_MULTILEVEL_COMMON,
+                "pkg/__init__.py": "pass\n",
+                "pkg/sub/__init__.py": D2B2_R2_UNSAFE_INITIALIZER,
+            },
+        ),
+    ],
+)
+def test_d2b2_r2_inline_process_pool_parent_parity(
+    tmp_path, isolated_dirs, monkeypatch, case, fixture,
+):
+    inline_root = write_synthetic_repository(tmp_path / "inline", fixture)
+    monkeypatch.setenv("CONTEXTOR_DISABLE_PROCESS_POOL", "1")
+    inline_index, inline_graph = _index_graph(inline_root)
+
+    pool_root = write_synthetic_repository(tmp_path / "pool", fixture)
+    monkeypatch.delenv("CONTEXTOR_DISABLE_PROCESS_POOL", raising=False)
+    pool_index, pool_graph = _index_graph(pool_root)
+
+    assert _import_signature(pool_index) == _import_signature(inline_index)
+    assert _graph_signature(pool_index, pool_graph) == (
+        _graph_signature(inline_index, inline_graph)
+    )
+
+
+def test_d2b2_r2_original_worker_reindex_retains_hard_graph(
+    tmp_path, isolated_dirs,
+):
+    root = write_synthetic_repository(
+        tmp_path / "repo", D2B2_R2_PARENT_MUTATION,
+    )
+    original, graph = _index_graph(root)
+    plan = plan_original_worker_reindex(original, graph.hard_edges)
+    assert plan.status == "READY_FOR_REINDEX_NON_ATOMIC"
+    assert plan.selected_module_ids
+
+    captured = indexer.index_repository(
+        str(root), source_capture_module_ids=plan.selected_module_ids,
+    )
+    assert captured.original_worker_capture_status == (
+        "ALL_SELECTED_CAPTURED_NON_ATOMIC"
+    )
+    assert plan.selected_module_ids.issubset(
+        captured.original_worker_source_snapshots
+    )
+    for module_id in plan.selected_module_ids:
+        assert captured.original_worker_source_snapshots[
+            module_id
+        ].source_fingerprint == captured.source_fingerprints_by_module[module_id]
+    assert captured.source_fingerprints_by_module == (
+        original.source_fingerprints_by_module
+    )
+
+    reexport_facts = materialize_reexport_facts_by_module(
+        captured.modules,
+        captured.reference_facts_by_module,
+    )
+    trie = build_trie(captured.modules.keys())
+    package_root = detect_package_root(captured.modules, trie)
+    captured_graph = build_graph(
+        captured.modules,
+        trie=trie,
+        package_root=package_root,
+        reexport_facts_by_module=reexport_facts,
+    )
+    assert captured_graph.hard_edges == graph.hard_edges
+    assert captured_graph.soft_edges == graph.soft_edges
+    assert captured_graph.hard_edges["pkg.a"] == {"pkg.b"}
+    assert captured_graph.hard_edges["pkg.b"] == {"pkg.a"}
 

@@ -1,534 +1,546 @@
-# CONTEXTOR — P1D3-D2B-2-R1 TYPE_ONLY UNSOUND PROMOTION HARDENING
+# CONTEXTOR — P1D3-D2B-2-R2 PARENT INITIALIZER SOURCE-BOUND TYPE_ONLY VETO
 
 ## 1. EXECUTIVE VERDICT
 
-**GO for the scoped D2B-2-R1 repair.** The specified execution-prefix gate prevents both demonstrated dynamic mutations from promoting an executed import to `type_only=True`. The focused eight-module suite completed with `323 passed in 59.53s`. This verdict covers the edited repository source and isolated synthetic tests; it is not active LIVE adoption or general Python runtime certification.
+**IMPLEMENTER OBSERVATION:** the specified code changes were applied to the single authorized production file. The eight requested focused test modules completed with `370 passed in 67.11s`. This is an observed implementation and test result. Architectural acceptance and any GO/PARTIAL/NO_GO decision belong exclusively to ChatGPT.
 
-Evidence labels in this report: **DIRECT_EVIDENCE** (observed source, command, test or Git result); **CODE_PATH_PROVED** (current code path and its exact condition); **CONTRACT_PROVED** (an executed contract assertion); **INFERENCE** (bounded conclusion from stated evidence); **UNKNOWN** (not established here).
+Evidence labels: **DIRECT_EVIDENCE** = observed repository/tool/test output; **CODE_PATH_PROVED** = exact current code condition; **CONTRACT_PROVED** = executed assertion of the specified contract; **INFERENCE** = bounded conclusion; **UNKNOWN** = not established.
 
 ## 2. INITIAL / FINAL HEAD
 
-- **DIRECT_EVIDENCE** Initial HEAD: `c6965dd02943c72994e6a2c189169f9d0e357623`.
-- **DIRECT_EVIDENCE** Final HEAD: `c6965dd02943c72994e6a2c189169f9d0e357623`.
-- No commit, push, checkout, reset or clean was run.
+- **DIRECT_EVIDENCE** Initial HEAD: `cdb6e13f0bef36d5c4a8953891945c7132b093b5`.
+- **DIRECT_EVIDENCE** Final HEAD: `cdb6e13f0bef36d5c4a8953891945c7132b093b5`.
+- No commit, push, reset, checkout or clean command was run.
 
 ## 3. INITIAL / FINAL WORKTREE
 
 - **DIRECT_EVIDENCE** Initial `git status --short` was empty.
-- **DIRECT_EVIDENCE** Final changed paths: `contextor/core/symbol_engine/indexer.py`, `tests/test_p1d3_d2b2_type_only.py`, and this overwritten `walkthrough.md` report. The authorized integration test was inspected and executed but not changed.
-- No other production, test or documentation file was modified.
+- **DIRECT_EVIDENCE** Final changed files: `contextor/core/symbol_engine/indexer.py`, `tests/test_p1d3_d2b2_type_only.py`, and this overwritten `walkthrough.md` report.
+- `tests/test_p1d3_package_cycle_integration.py` was read and executed, but did not require modification.
 
-## 4. ROOT CAUSE
+## 4. EXACT PRODUCTION CHANGES
 
-- **CODE_PATH_PROVED** Before R1, `read_imports` found the D2B-1 marker and iterated matching top-level `ast.If` statements after it. It authorized direct guarded imports without checking statements executed between marker and guard. Thus an effectful expression such as `globals()["TYPE_CHECKING"] = True` or `setattr(typing, "TYPE_CHECKING", True)` could cause ordinary CPython to execute the import while the indexer labeled it type-only.
-- **CODE_PATH_PROVED** Worker-cache version 1 stored pre-R1 classifications, so version 1 must be invalidated for this repair to take effect on warm caches.
-- **DIRECT_EVIDENCE** Both counterexamples now retain hard `pkg.a -> pkg.b` and `pkg.b -> pkg.a` edges, a real hard SCC, and a failing fresh CPython `pkg.a` import with partially initialized module text.
+- **CODE_PATH_PROVED** `IMPORT_CLASSIFICATION_SEMANTICS_VERSION` changed only from 2 to 3. The cache key remained `import_classification_semantics_version`.
+- **CODE_PATH_PROVED** Added the two exact top-level private functions specified in §§06–07 of the instruction, immediately before `read_imports`.
+- **CODE_PATH_PROVED** Worker cache eligibility now also requires `type(cached_data.get("typing_guard_initializer_passive")) is bool`. Cache miss/staleness derives the fact from the worker's already parsed original source snapshot.
+- **CODE_PATH_PROVED** The exact private bool is written to cold and partial cache records and all four worker return dictionaries. The index parent records `(passive, source_fingerprint)` only for successful initializer modules.
+- **CODE_PATH_PROVED** Both inline and process-pool branches call `record_initializer_passivity` immediately after the existing fingerprint recorder. The finalizer uses the prescribed parent enumeration, worker fact, matching fingerprint and typing-shadow veto before each existing `RepositoryIndex` return.
+- The complete production diff is in §33. No other production file was edited.
 
-## 5. EXACT PRODUCTION DIFF
+## 5. PASSIVITY FUNCTION
 
-The following is the complete current Git diff for the sole authorized production file. It changes only the cache semantic marker and `read_imports` prefix eligibility, adding the exact private helper from the supplied patch specification.
+- **CODE_PATH_PROVED** `_typing_guard_passive_initializer(tree)` returns False for non-`ast.Module`; accepts an empty module, `Pass`, only a position-zero constant string expression, and the exact single-name literal assignment form from the instruction. Any other statement returns False.
+- **DIRECT_EVIDENCE** The 17 negative and 5 positive initializer source variants passed direct function and final child-classification assertions.
+- The function does not execute analyzed source or recurse into control flow.
 
-````diff
-diff --git a/contextor/core/symbol_engine/indexer.py b/contextor/core/symbol_engine/indexer.py
-index 73fd28d..5fe3205 100644
---- a/contextor/core/symbol_engine/indexer.py
-+++ b/contextor/core/symbol_engine/indexer.py
-@@ -72 +72 @@ TEST_FACTS_SCHEMA_VERSION = 1
--IMPORT_CLASSIFICATION_SEMANTICS_VERSION = 1
-+IMPORT_CLASSIFICATION_SEMANTICS_VERSION = 2
-@@ -284,0 +285,55 @@ class AdvancedImportVisitor(ast.NodeVisitor):
-+def _safe_typing_guard_prefix_statement(
-+    statement: ast.stmt,
-+) -> bool:
-+    if isinstance(statement, ast.Pass):
-+        return True
-+
-+    if (
-+        isinstance(statement, ast.Expr)
-+        and isinstance(
-+            statement.value,
-+            ast.Constant,
-+        )
-+        and type(statement.value.value) is str
-+    ):
-+        return True
-+
-+    if isinstance(statement, ast.Assign):
-+        if (
-+            len(statement.targets) != 1
-+            or not isinstance(
-+                statement.targets[0],
-+                ast.Name,
-+            )
-+            or not isinstance(
-+                statement.value,
-+                ast.Constant,
-+            )
-+        ):
-+            return False
-+
-+        binding = statement.targets[0].id
-+
-+        return (
-+            binding.isidentifier()
-+            and not binding.startswith("__")
-+            and binding not in {
-+                "TYPE_CHECKING",
-+                "typing",
-+            }
-+            and type(
-+                statement.value.value
-+            ) in {
-+                type(None),
-+                bool,
-+                int,
-+                float,
-+                complex,
-+                str,
-+                bytes,
-+            }
-+        )
-+
-+    return False
-+
-+
-@@ -320 +375,3 @@ def read_imports(
--            for statement in tree.body[marker_position + 1:]:
-+            matching_guards = [
-+                (position, statement)
-+                for position, statement in enumerate(tree.body)
-@@ -322,2 +379,2 @@ def read_imports(
--                    not isinstance(statement, ast.If)
--                    or not matches_typing_guard(
-+                    isinstance(statement, ast.If)
-+                    and matches_typing_guard(
-@@ -326,0 +384,12 @@ def read_imports(
-+                )
-+            ]
-+            if len(matching_guards) == 1:
-+                guard_position, guard_statement = matching_guards[0]
-+                if (
-+                    guard_position > marker_position
-+                    and all(
-+                        _safe_typing_guard_prefix_statement(statement)
-+                        for statement in tree.body[
-+                            marker_position + 1:guard_position
-+                        ]
-+                    )
-@@ -328,16 +397,14 @@ def read_imports(
--                    continue
--
--                for body_statement in statement.body:
--                    if (
--                        not isinstance(body_statement, ast.Import)
--                        or len(body_statement.names) != 1
--                    ):
--                        continue
--                    alias = body_statement.names[0]
--                    parts = alias.name.split(".")
--                    if (
--                        alias.asname is None
--                        and len(parts) > 1
--                        and all(part.isidentifier() for part in parts)
--                    ):
--                        type_only_statement_ids.add(id(body_statement))
-+                    for body_statement in guard_statement.body:
-+                        if (
-+                            not isinstance(body_statement, ast.Import)
-+                            or len(body_statement.names) != 1
-+                        ):
-+                            continue
-+                        alias = body_statement.names[0]
-+                        parts = alias.name.split(".")
-+                        if (
-+                            alias.asname is None
-+                            and len(parts) > 1
-+                            and all(part.isidentifier() for part in parts)
-+                        ):
-+                            type_only_statement_ids.add(id(body_statement))
-````
+## 6. PARENT ENUMERATOR
 
-## 6. STRICT PREFIX ALGORITHM
+- **CODE_PATH_PROVED** `_typing_guard_parent_initializers(module_id)` strips the module's own `.__init__` suffix for logical identity, then returns ancestor initializer IDs from outermost to innermost, excluding self.
+- **DIRECT_EVIDENCE** The multilevel test asserts `pkg.sub.a -> (pkg.__init__, pkg.sub.__init__)`. The six multilevel fixtures independently exercised this chain and missing-parent vetoes.
 
-- **CODE_PATH_PROVED** The existing `recognize_typing_guard(tree, frozenset())` source-local recognizer remains the candidate authority. The AST module requirement and marker lookup by object identity remain.
-- **CODE_PATH_PROVED** `matching_guards` enumerates direct top-level `ast.If` nodes whose test matches the recognized guard form. Exactly one is required, and it must follow the marker.
-- **CODE_PATH_PROVED** Every statement strictly between marker and guard must pass `_safe_typing_guard_prefix_statement`. Its only accepted shapes are `Pass`, a constant-string expression, or a single plain-name assignment of one permitted literal value to a non-dunder name other than `TYPE_CHECKING` or `typing`.
-- **CODE_PATH_PROVED** If any condition fails, no AST import node identity is authorized. If all pass, only direct imports in the guard body with the existing exact dotted single-alias syntax are authorized. The ELSE body, nested constructs, visitor, source occurrence order, `ImportFrom`, `is_local`, resolver and public schemas are unchanged.
-- **CONTRACT_PROVED** The 11 added negative prefix variants, original positive NAME/ATTRIBUTE fixtures, and safe-prefix fixture passed.
+## 7. WORKER CACHE BINDING
 
-## 7. GLOBALS COUNTEREXAMPLE
+- **CODE_PATH_PROVED** The worker retains `cache.get(path, source_bytes=source_snapshot.raw)`. Cache data is reusable only with an exact integer semantic version equal to 3 and an exact bool `typing_guard_initializer_passive` value.
+- **CODE_PATH_PROVED** On a validated cache, the worker takes the bool directly from that entry. On missing/stale cache, after `tree = parsed_input.tree`, it computes `module_id.endswith(".__init__") and _typing_guard_passive_initializer(tree)`.
+- **CODE_PATH_PROVED** Cold cache construction and partial validated-cache rewrite preserve the exact bool with the same existing `source_bytes` cache-set binding. No independent hash, second source read, post-index parse or cache-manager change was added.
 
-- **DIRECT_EVIDENCE** The isolated fixture uses `globals()["TYPE_CHECKING"] = True` between marker and guard. Its `pkg.b` import occurrence remains present with `type_only=False`; `pkg.a -> pkg.b` is hard, not soft; `pkg.b -> pkg.a` is hard; both modules belong to the hard SCC.
-- **DIRECT_EVIDENCE** A fresh isolated CPython subprocess importing `pkg.a` exited nonzero and its stderr contained `partially initialized module`.
-- **DIRECT_EVIDENCE** The direct restricted model did not return `MODEL_PASS`, and the SCC scenario did not claim `MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS`. The test does not demand unsupported dynamic effects to become a proved hazard classification.
+## 8. ALL WORKER RETURN PATHS
 
-## 8. SETATTR COUNTEREXAMPLE
+- **CODE_PATH_PROVED** The complete current-cache fast return and parsed-source final return both include `typing_guard_initializer_passive`. The source-read and parse-failure returns include exact False.
+- **DIRECT_EVIDENCE** Dedicated safe/unsafe parent tests invoked the real worker cold and warm paths. Both successful results had exact bool type; cold had `source_parse_called=True`, warm complete-cache fast return had `source_parse_called=False`, `cache_hit=True`, and equal source fingerprints. Their cached flags were exact bool values.
+- Failure-return field placement was inspected in the production diff; those two paths were not separately executed by new tests.
 
-- **DIRECT_EVIDENCE** The isolated fixture uses `setattr(typing, "TYPE_CHECKING", True)` between marker and guard. Its `pkg.b` occurrence remains `type_only=False` and the graph retains the same two hard edges, no `pkg.a -> pkg.b` soft edge, and the real hard SCC.
-- **DIRECT_EVIDENCE** Fresh isolated CPython `pkg.a` import exited nonzero with `partially initialized module` in stderr. The direct model and SCC report did not produce a false positive PASS.
+## 9. INLINE COLLECTION
 
-## 9. ADDITIONAL NEGATIVE MATRIX
+- **CODE_PATH_PROVED** The inline success branch records its existing source fingerprint and then calls `record_initializer_passivity(res)`. No record is produced for an errored worker result.
+- **DIRECT_EVIDENCE** The focused synthetic inline fixtures passed across safe, unsafe, multilevel and cache cases.
 
-- **DIRECT_EVIDENCE** The new parameterized test passed all 11 supplied variants: `globals().update`, `exec`, `typing.__dict__` mutation, `vars()` mutation, active import before guard, a preceding conditional, call assignment, preceding function, preceding class, preceding `with`, and two direct matching guards.
-- **CONTRACT_PROVED** Every indexed `pkg.b` occurrence in those variants remains `type_only=False`, `pkg.a -> pkg.b` remains hard, and no soft edge is attributed to it.
-- No CPython execution outcome is claimed for variants with undefined synthetic names or context managers.
+## 10. PROCESS-POOL COLLECTION
 
-## 10. SAFE PREFIX REGRESSION
+- **CODE_PATH_PROVED** The process-pool success branch makes the same call immediately after its existing fingerprint recorder. No second collection algorithm or IPC schema was added.
+- **DIRECT_EVIDENCE** Five specified fixture classes were indexed through real process-pool execution with `CONTEXTOR_DISABLE_PROCESS_POOL` removed; ordered imports and graph/SCC signatures matched inline results.
 
-- **DIRECT_EVIDENCE** `constant = 1` followed by `pass` between marker and the single positive guard keeps the guarded `pkg.b` occurrence `type_only=True`. The graph has soft `pkg.a -> pkg.b`, no hard edge in that direction, hard `pkg.b -> pkg.a`, and no `pkg.a/pkg.b` hard SCC. Fresh isolated CPython `pkg.a` import succeeds.
-- **DIRECT_EVIDENCE** The original simple NAME and ATTRIBUTE positive fixtures remain in the focused integration suite and pass.
+## 11. SOURCE-FINGERPRINT ASSOCIATION
 
-## 11. MULTIPLE GUARD REJECTION
+- **CODE_PATH_PROVED** `initializer_passivity_by_module` is a private `dict[str, tuple[bool, str]]`. A record is created only when worker `module_id` is an initializer string, `error is None`, the passive value is exact bool and the worker fingerprint is string. The existing fingerprint recorder validates and stores the indexed source fingerprint.
+- **CODE_PATH_PROVED** Finalization requires parent membership, positive exact bool and equality between the worker-derived tuple fingerprint and `source_fingerprints_by_module[parent_id]`.
+- **DIRECT_EVIDENCE** In an isolated source-change test, editing only a safe parent to the unsafe initializer changed the parent's fingerprint, preserved the child's fingerprint and changed the child's final import from soft to hard.
 
-- **CODE_PATH_PROVED** `len(matching_guards) == 1` is required before collecting any import node identity.
-- **DIRECT_EVIDENCE** The two-direct-guard variant in the negative matrix retains its guarded import as hard and produces no `pkg.a -> pkg.b` soft edge.
+## 12. FINALIZER EXACT RULE
 
-## 12. SAME-TARGET HARD DOMINANCE
+- **CODE_PATH_PROVED** For each module containing a candidate `type_only` import, the finalizer computes the existing repository-wide typing shadow and requires every enumerated parent initializer to have a matching positive source-bound worker fact. If typing is shadowed or any parent proof is absent/false/mismatched, only candidate `ImportRef` objects are replaced with `type_only=False` using `dataclasses.replace`.
+- **CODE_PATH_PROVED** Both existing finalizer call sites remain immediately before the inline and process-pool `RepositoryIndex` returns. No third call site, graph mutation or public field was added.
 
-- **DIRECT_EVIDENCE** The existing mixed fixture passed without changes: it checks two ordered occurrences with `[True, False]`, a soft edge from the guarded occurrence, and a hard edge from the normal import to the same target. The real hard SCC survives. Original-worker P0/P1B assertions were not weakened.
+## 13. PRIMARY MUTATION DIFFERENTIAL
 
-## 13. ELSE BEHAVIOR
+- **DIRECT_EVIDENCE** The exact parent source `import typing; typing.TYPE_CHECKING = True` caused the guarded child `pkg.b` occurrence to remain `type_only=False`. Hard `pkg.a -> pkg.b` and `pkg.b -> pkg.a` edges and the real `{pkg.a, pkg.b}` SCC survived; `pkg.a -> pkg.b` was absent from soft edges.
+- **DIRECT_EVIDENCE** Fresh isolated CPython `pkg.a` import failed with `partially initialized module` in stderr. The restricted SCC report did not claim `MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS`.
 
-- **DIRECT_EVIDENCE** Existing `D2B_ELSE_HAZARD` and `D2B_ELSE_SAFE` integration tests passed. ELSE imports remain hard, and the hazard/safe source-order differential, surviving SCC evidence, manifest and receipt tests continue to run on genuine components.
-- **CODE_PATH_PROVED** The R1 selection inspects only `guard_statement.body`; it never authorizes the ELSE body.
+## 14. SETATTR DIFFERENTIAL
 
-## 14. CACHE VERSION MIGRATION 1 -> 2
+- **DIRECT_EVIDENCE** A separate isolated fixture with parent `import typing; setattr(typing, "TYPE_CHECKING", True)` produced the same hard graph and SCC. A separate fresh CPython subprocess failed importing `pkg.a` with partially initialized module text.
+- No unsupported parent execution effect was promoted to a proved model hazard or positive source proof.
 
-- **CODE_PATH_PROVED** Only `IMPORT_CLASSIFICATION_SEMANTICS_VERSION` changed from integer 1 to integer 2. The worker-cache key stays `import_classification_semantics_version`.
-- **CODE_PATH_PROVED** Existing validation rejects missing, non-exact-int or unequal values before using cached imports. Source SHA validation and the already acquired source snapshot path remain intact; no source reread or public schema change was added.
-- **DIRECT_EVIDENCE** Stale-marker tests for absent, 0 and 1 pass, including a version-1 cache rewrite to version 2. A warm version-2 cache still matches the cold classification and graph.
+## 15. MULTILEVEL MATRIX
 
-## 15. STALE FORGED CACHE REPLAY
+- **DIRECT_EVIDENCE** All six independent fixtures passed with exact indexed module IDs checked per case: M01 both passive => soft; M02 unsafe outer => hard SCC; M03 unsafe inner => hard SCC; M04 literal outer plus docstring/pass inner => soft; M05 missing inner => hard SCC; M06 missing outer => hard SCC.
+- **DIRECT_EVIDENCE** Fresh CPython differentials were run only for executable M01–M04. M01/M04 succeeded; M02/M03 failed with partially initialized module text. No namespace-package runtime equivalence is claimed for M05/M06.
 
-- **DIRECT_EVIDENCE** The isolated test first indexes the globals-mutation fixture under version 2, edits only its synthetic `pkg/a.py` worker-cache data to forge `type_only=True` with semantic version 1, then reindexes unchanged source.
-- **DIRECT_EVIDENCE** The replayed occurrence is `type_only=False`, both hard SCC edges survive, and the cache entry is rewritten as version 2 with `type_only=False`. No active/user cache directory was changed.
+## 16. NEGATIVE INITIALIZER MATRIX
 
-## 16. COLD / WARM PARITY
+- **DIRECT_EVIDENCE** N01–N17 each returned False from the pure passivity function. In a separate synthetic repository per case, the guarded child occurrence remained `type_only=False`, `pkg.a -> pkg.b` remained hard and no corresponding soft edge appeared.
+- The variants include imports, attribute/subscript mutation, calls, function/class/control-flow definitions, augmented/annotated assignment and raise. Intentionally incomplete runtime variants were not executed in CPython.
 
-- **DIRECT_EVIDENCE** The existing cold/warm worker-cache regression passed with the version assertion updated to 2. It compares the ordered import signature, `type_only` values, hard and soft graph signatures and SCC members for identical synthetic bytes.
+## 17. POSITIVE INITIALIZER MATRIX
 
-## 17. INLINE / PROCESS-POOL PARITY
+- **DIRECT_EVIDENCE** P01–P05 each returned True from the pure function and preserved the guarded child `type_only=True` classification, soft `pkg.a -> pkg.b`, no hard edge in that direction and no hard SCC. The cases are empty, pass, first-position docstring, one literal assignment and the specified mixed passive sequence.
+- No SCC evidence was fabricated for these dissolved components.
 
-- **DIRECT_EVIDENCE** Both primary dynamic-mutation fixtures were indexed in isolated inline and process-pool modes. Their ordered `ImportRef` signatures, `type_only`, hard/soft edges and SCC topology match. The test explicitly clears `CONTEXTOR_DISABLE_PROCESS_POOL` for the pool path; the current indexer selects the inline path only when that variable equals `1`.
-- **DIRECT_EVIDENCE** The existing positive parity test passed. Repository-wide shadow-veto parity now covers both `typing.py` and `typing/__init__.py`; both passed in the pool path.
+## 18. CACHE VERSION 2 -> 3
 
-## 18. SCC TOPOLOGY
+- **DIRECT_EVIDENCE** Existing tests now expect worker-cache semantic version 3. Stale-marker parameterization covers absent, 0, 1 and 2; each reparses from the existing original worker source snapshot and rewrites version 3.
+- **CODE_PATH_PROVED** Source SHA checking remains through the original `cache.get(..., source_bytes=source_snapshot.raw)` call; other schema versions were not changed.
 
-- **DIRECT_EVIDENCE** Globals and setattr dynamic-mutation fixtures each have the hard SCC `{pkg.a, pkg.b}`. The safe-prefix fixture and original inactive NAME/ATTRIBUTE fixtures have no such hard SCC. The mixed active/type-only fixture retains it; ELSE fixtures retain it.
-- **INFERENCE** This is a topology result for the constructed source fixtures and current indexer/graph code, not a general runtime-safety conclusion.
+## 19. MALFORMED CACHE
 
-## 19. CPYTHON DIFFERENTIAL
+- **DIRECT_EVIDENCE** Four current-version-3 forged parent cache records were tested with missing passivity key, None, string `"true"` and integer `1`. Each was rejected, reparsed only the parent from its original worker snapshot and rewrote exact bool False. The child hard SCC remained.
+- **DIRECT_EVIDENCE** Instrumented reads observed three distinct source reads for the three source files, one per file, and only the malformed parent was reparsed. No `bool(1)` coercion was accepted.
 
-- **DIRECT_EVIDENCE** The two primary counterexamples were imported in fresh CPython subprocesses through the existing isolated synthetic harness. Each `pkg.a` import failed and exposed partially initialized module text. The safe-prefix `pkg.a` import succeeded.
-- **CONTRACT_PROVED** Unsupported dynamic calls were not modeled as proven safe; the test requires only the absence of false `MODEL_PASS` and false all-fresh-member PASS.
+## 20. STALE FORGED CACHE
 
-## 20. NO-SCC HANDLING
+- **DIRECT_EVIDENCE** The isolated unsafe parent cache initially held version 3 and passive False. The test forged only that parent cache entry to version 2/passive True while retaining original source bytes. Reindexing restored version 3/passive False, retained unchanged parent source fingerprint and the child's hard SCC.
+- Active cache directories were not modified.
 
-- **DIRECT_EVIDENCE** Existing D2B-2 NAME/ATTRIBUTE tests in the focused suite continue to require `analyze_cycle_scenarios(...).components == ()`, empty P0/source-bound evidence, `NO_CYCLIC_COMPONENTS` from the original-worker planner, no prepared manifest and no persisted receipt for the dissolved hard SCC.
-- **DIRECT_EVIDENCE** The dynamic counterexamples do not enter that no-SCC path because their hard SCC remains. No planner or evidence production code was changed.
+## 21. COLD / WARM PARITY
 
-## 21. P0/P1B REGRESSIONS
+- **DIRECT_EVIDENCE** Separate passive and unsafe parent fixtures matched exact ordered imports, type-only flags, hard edges, soft edges and SCC members between cold and warm indexing. The warm test made parsing an assertion failure, so a complete valid cache hit could not silently reparse.
+- The existing D2B-2 warm-cache regression also passed under version 3.
 
-- **DIRECT_EVIDENCE** Existing focused tests for the mixed and ELSE surviving SCCs still exercise genuine original-worker capture, P0 `DECLARED_INPUTS_CONSISTENT`, P1B `BYTE_AST_CONSISTENT_NON_ATOMIC`, and forged-event P1B `MODEL_REPLAY_MISMATCH`.
-- **CODE_PATH_PROVED** R1 changes neither the P0/P1B implementation nor their schema/event contracts. The dynamic counterexamples are not given fabricated positive P0/P1B assessments.
+## 22. INLINE / PROCESS-POOL PARITY
 
-## 22. ORIGINAL-WORKER MANIFEST V2
+- **DIRECT_EVIDENCE** Safe single-level, unsafe single-level, safe multilevel, unsafe outer and unsafe inner fixtures each passed inline versus real process-pool comparisons for ordered `ImportRef` records, final flags, hard graph, soft graph and SCC signature.
+- Existing local `typing.py` and `typing/__init__.py` shadow-veto parity regressions also passed.
 
-- **DIRECT_EVIDENCE** The existing original-worker preparation tests ran in the focused suite for surviving SCCs and passed. The safe-only former SCC still has no synthetic manifest. No manifest schema or original-worker capture path was edited.
+## 23. HARD / SOFT GRAPH
 
-## 23. OFFICIAL ISOLATED FULL / RECEIPT V2
+- **DIRECT_EVIDENCE** Unsafe and missing-parent cases keep guarded imports hard. Proven passive parents keep them soft. The existing mixed same-target fixture still retains a hard edge from its normal import beside the soft guarded occurrence; ELSE imports remain hard. No graph/resolver file was edited.
 
-- **DIRECT_EVIDENCE** The focused suite executed the existing synthetic official facade FULL/publication/receipt tests. `D2B_ELSE_SAFE` still verifies prepared manifest v2, isolated publication and receipt v2 for a surviving SCC; the dissolved NAME-safe fixture still checks no persisted receipt.
-- **UNKNOWN** These isolated tests do not establish active Contextor LIVE adoption or active service receipt behavior. No FULL was run on the active repository.
+## 24. SCC TOPOLOGY
 
-## 24. FOCUSED PYTEST RESULTS
+- **DIRECT_EVIDENCE** Primary and setattr unsafe parents, unsafe outer/inner multilevel parents, and missing-parent cases retain a hard SCC over the two child modules. Proven passive parent cases dissolve that hard SCC. The tests assert actual canonical graph and scenario component signatures.
+- **INFERENCE** These results are limited to the constructed fixtures and current indexed graph, not general runtime certainty.
 
-- **DIRECT_EVIDENCE** Exact final result: `323 passed in 59.53s`, exit code 0, for the eight named focused modules in §25.
-- No test was deleted or skipped for this repair. No global pytest was run.
+## 25. ORIGINAL-WORKER REINDEX
 
-## 25. EXACT COMMANDS / EXIT CODES
+- **DIRECT_EVIDENCE** For the primary unsafe fixture, the existing planner returned `READY_FOR_REINDEX_NON_ATOMIC` with a nonempty selected module set. A real second index captured the selected original worker source snapshots with `ALL_SELECTED_CAPTURED_NON_ATOMIC`; each selected snapshot fingerprint equaled the captured index fingerprint.
+- **DIRECT_EVIDENCE** An independently rebuilt canonical graph from the captured modules and canonical reexport facts exactly matched original hard/soft edges. `pkg.a -> pkg.b` and `pkg.b -> pkg.a` remained hard. No positive P0/P1B assessment was asserted for unsupported parent semantics.
 
-Working directory: `C:\Temp\Contextor_Repo`. Commands were executed using the repository virtual environment.
+## 26. P0/P1B
+
+- **DIRECT_EVIDENCE** Existing focused tests for supported surviving SCCs, including mixed and ELSE fixtures, passed their P0 genuine evidence, P1B original-source replay and forged-event rejection assertions.
+- **CODE_PATH_PROVED** R2 did not edit P0/P1B implementation or event/schema contracts.
+
+## 27. MANIFEST V2
+
+- **DIRECT_EVIDENCE** Focused original-worker preparation tests ran and passed for supported SCCs. The existing dissolved NAME-safe hard SCC still yields no invented manifest. R2 did not edit manifest or publication-binding code.
+
+## 28. OFFICIAL ISOLATED FULL
+
+- **DIRECT_EVIDENCE** The existing isolated `D2B_ELSE_SAFE` facade analysis and publication tests were included in the passing focused suite. Their assertions cover `PREPARED_UNPUBLISHED_NON_ATOMIC`, manifest v2, prepared co-publication v2 and `MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS` for the genuine supported SCC.
+- No FULL was run on the active Contextor repository or active service.
+
+## 29. RECEIPT V2
+
+- **DIRECT_EVIDENCE** The same isolated positive test checks successful live publication and verified co-publication receipt; the dissolved `D2B_NAME_SAFE` test checks no invented persisted receipt. Both ran in the focused suite.
+- **UNKNOWN** These isolated results do not establish active LIVE code adoption or active process receipt behavior.
+
+## 30. FOCUSED PYTEST RESULTS
+
+- **DIRECT_EVIDENCE** The requested eight-module focused command exited 0: `370 passed in 67.11s (0:01:07)`; failed=0, skipped=0 as reported by pytest. No global pytest was run.
+- Existing B/C, D1, D2A, D2B-1, D2B-2, D2B-2-R1 and original-worker/manifest/receipt regressions within those eight modules remained in the run; no test was deleted or skipped for R2.
+
+## 31. EXACT COMMANDS / EXIT CODES
+
+Working directory: `C:\Temp\Contextor_Repo`.
 
 ```text
+git rev-parse HEAD
+exit_code=0
+output=cdb6e13f0bef36d5c4a8953891945c7132b093b5
+
+git status --short
+exit_code=0
+initial_output=(empty)
+
 & .\.venv\Scripts\python.exe -m py_compile contextor/core/symbol_engine/indexer.py
 exit_code=0
 
 & .\.venv\Scripts\python.exe -m pytest -q tests/test_p1d3_d2b2_type_only.py tests/test_p1d3_package_cycle_integration.py tests/test_cycle_semantics_package_model.py tests/test_cycle_semantics_scenarios.py tests/test_cycle_semantics_evidence.py tests/test_original_worker_full_preparation_optin.py tests/test_original_worker_full_receipt_optin.py tests/test_original_worker_official_full_live_publication.py
 exit_code=0
-result=323 passed in 59.53s
+result=370 passed in 67.11s (0:01:07)
 
 git diff --check
 exit_code=0
+
+git rev-parse HEAD
+exit_code=0
+output=cdb6e13f0bef36d5c4a8953891945c7132b093b5
+
+git status --short
+exit_code=0
+final_output=modified indexer.py, modified test_p1d3_d2b2_type_only.py, modified walkthrough.md
 ```
 
-The final `git diff --check` was run after report generation; Git emitted line-ending notices but reported no whitespace errors.
+The final `git diff --check`, HEAD and status reads were performed after writing this report. Git may print line-ending notices; it reported no whitespace error.
 
-## 26. FILES_CHANGED
+## 32. FILES_CHANGED
 
-1. `contextor/core/symbol_engine/indexer.py` — authorized production change.
-2. `tests/test_p1d3_d2b2_type_only.py` — authorized test change.
-3. `walkthrough.md` — required report overwritten. Its self-diff is excluded to avoid recursive report content.
+1. `contextor/core/symbol_engine/indexer.py` — authorized production source.
+2. `tests/test_p1d3_d2b2_type_only.py` — authorized test file.
+3. `walkthrough.md` — required report, overwritten. Its self-diff is omitted to avoid recursion.
 
-`tests/test_p1d3_package_cycle_integration.py` was read and tested, not changed. No other source, test or docs file changed.
+No other production, test or docs file changed. Full actual source/test diffs follow.
 
-## 27. FULL ACTUAL_DIFF
+## 33. FULL ACTUAL_DIFF
 
-The following complete zero-context Git diff contains every added and removed line for both changed source/test files. Section 5 also includes the full production diff. The report's self-diff is excluded.
+Complete zero-context Git diff for every changed source/test file; every added and removed line is included. The report file's own diff is excluded.
 
 ````diff
 diff --git a/contextor/core/symbol_engine/indexer.py b/contextor/core/symbol_engine/indexer.py
-index 73fd28d..5fe3205 100644
+index 5fe3205..1448334 100644
 --- a/contextor/core/symbol_engine/indexer.py
 +++ b/contextor/core/symbol_engine/indexer.py
 @@ -72 +72 @@ TEST_FACTS_SCHEMA_VERSION = 1
--IMPORT_CLASSIFICATION_SEMANTICS_VERSION = 1
-+IMPORT_CLASSIFICATION_SEMANTICS_VERSION = 2
-@@ -284,0 +285,55 @@ class AdvancedImportVisitor(ast.NodeVisitor):
-+def _safe_typing_guard_prefix_statement(
-+    statement: ast.stmt,
+-IMPORT_CLASSIFICATION_SEMANTICS_VERSION = 2
++IMPORT_CLASSIFICATION_SEMANTICS_VERSION = 3
+@@ -339,0 +340,88 @@ def _safe_typing_guard_prefix_statement(
++def _typing_guard_passive_initializer(
++    tree: ast.AST,
 +) -> bool:
-+    if isinstance(statement, ast.Pass):
-+        return True
++    if not isinstance(tree, ast.Module):
++        return False
 +
-+    if (
-+        isinstance(statement, ast.Expr)
-+        and isinstance(
-+            statement.value,
-+            ast.Constant,
-+        )
-+        and type(statement.value.value) is str
++    allowed_types = {
++        type(None),
++        bool,
++        int,
++        float,
++        complex,
++        str,
++        bytes,
++    }
++
++    for position, statement in enumerate(
++        tree.body
 +    ):
-+        return True
++        if isinstance(statement, ast.Pass):
++            continue
 +
-+    if isinstance(statement, ast.Assign):
 +        if (
-+            len(statement.targets) != 1
-+            or not isinstance(
-+                statement.targets[0],
-+                ast.Name,
-+            )
-+            or not isinstance(
++            position == 0
++            and isinstance(statement, ast.Expr)
++            and isinstance(
 +                statement.value,
 +                ast.Constant,
 +            )
-+        ):
-+            return False
-+
-+        binding = statement.targets[0].id
-+
-+        return (
-+            binding.isidentifier()
-+            and not binding.startswith("__")
-+            and binding not in {
-+                "TYPE_CHECKING",
-+                "typing",
-+            }
 +            and type(
 +                statement.value.value
-+            ) in {
-+                type(None),
-+                bool,
-+                int,
-+                float,
-+                complex,
-+                str,
-+                bytes,
-+            }
++            ) is str
++        ):
++            continue
++
++        if isinstance(statement, ast.Assign):
++            if (
++                len(statement.targets) != 1
++                or not isinstance(
++                    statement.targets[0],
++                    ast.Name,
++                )
++                or not isinstance(
++                    statement.value,
++                    ast.Constant,
++                )
++            ):
++                return False
++
++            binding = statement.targets[0].id
++
++            if (
++                not binding.isidentifier()
++                or binding.startswith("__")
++                or binding in {
++                    "typing",
++                    "TYPE_CHECKING",
++                }
++                or type(
++                    statement.value.value
++                ) not in allowed_types
++            ):
++                return False
++
++            continue
++
++        return False
++
++    return True
++
++
++def _typing_guard_parent_initializers(
++    module_id: str,
++) -> tuple[str, ...]:
++    logical = (
++        module_id.removesuffix(".__init__")
++        if module_id.endswith(".__init__")
++        else module_id
++    )
++
++    parts = logical.split(".")
++
++    return tuple(
++        ".".join(parts[:length]) + ".__init__"
++        for length in range(1, len(parts))
++    )
++
++
+@@ -634,0 +723 @@ def _process_single_file(
++            "typing_guard_initializer_passive": False,
+@@ -690,0 +780,5 @@ def _process_single_file(
++            or type(
++                cached_data.get(
++                    "typing_guard_initializer_passive"
++                )
++            ) is not bool
+@@ -694,0 +789,6 @@ def _process_single_file(
++    typing_guard_initializer_passive = (
++        cached_data["typing_guard_initializer_passive"]
++        if cached_data is not None
++        else False
++    )
++
+@@ -748,0 +849,3 @@ def _process_single_file(
++                "typing_guard_initializer_passive": (
++                    typing_guard_initializer_passive
++                ),
+@@ -788,0 +892 @@ def _process_single_file(
++            "typing_guard_initializer_passive": False,
+@@ -814,0 +919,5 @@ def _process_single_file(
++    if cached_data is None:
++        typing_guard_initializer_passive = (
++            module_id.endswith(".__init__")
++            and _typing_guard_passive_initializer(tree)
++        )
+@@ -934,0 +1044,3 @@ def _process_single_file(
++                rewritten[
++                    "typing_guard_initializer_passive"
++                ] = typing_guard_initializer_passive
+@@ -1067,0 +1180,3 @@ def _process_single_file(
++            "typing_guard_initializer_passive": (
++                typing_guard_initializer_passive
++            ),
+@@ -1099,0 +1215,3 @@ def _process_single_file(
++        "typing_guard_initializer_passive": (
++            typing_guard_initializer_passive
++        ),
+@@ -1319,0 +1438,4 @@ def index_repository(
++    initializer_passivity_by_module: dict[
++        str,
++        tuple[bool, str],
++    ] = {}
+@@ -1441,0 +1564,30 @@ def index_repository(
++    def record_initializer_passivity(
++        result: dict,
++    ) -> None:
++        module_id = result.get("module_id")
++
++        if (
++            type(module_id) is not str
++            or not module_id.endswith(".__init__")
++            or result.get("error") is not None
++        ):
++            return
++
++        passive = result.get(
++            "typing_guard_initializer_passive"
++        )
++        fingerprint = result.get(
++            "source_fingerprint"
 +        )
 +
-+    return False
++        if (
++            type(passive) is bool
++            and type(fingerprint) is str
++        ):
++            initializer_passivity_by_module[
++                module_id
++            ] = (
++                passive,
++                fingerprint,
++            )
 +
+@@ -2073,2 +2225,4 @@ def index_repository(
+-        if "typing" not in modules and "typing.__init__" not in modules:
+-            return
++        typing_shadowed = (
++            "typing" in modules
++            or "typing.__init__" in modules
++        )
+@@ -2077 +2231,38 @@ def index_repository(
+-            if not any(import_ref.type_only for import_ref in module.imports):
++            if not any(
++                import_ref.type_only
++                for import_ref in module.imports
++            ):
++                continue
 +
-@@ -320 +375,3 @@ def read_imports(
--            for statement in tree.body[marker_position + 1:]:
-+            matching_guards = [
-+                (position, statement)
-+                for position, statement in enumerate(tree.body)
-@@ -322,2 +379,2 @@ def read_imports(
--                    not isinstance(statement, ast.If)
--                    or not matches_typing_guard(
-+                    isinstance(statement, ast.If)
-+                    and matches_typing_guard(
-@@ -326,0 +384,12 @@ def read_imports(
-+                )
-+            ]
-+            if len(matching_guards) == 1:
-+                guard_position, guard_statement = matching_guards[0]
-+                if (
-+                    guard_position > marker_position
-+                    and all(
-+                        _safe_typing_guard_prefix_statement(statement)
-+                        for statement in tree.body[
-+                            marker_position + 1:guard_position
-+                        ]
++            parents_proved = all(
++                (
++                    parent_id in modules
++                    and parent_id
++                    in initializer_passivity_by_module
++                    and type(
++                        initializer_passivity_by_module[
++                            parent_id
++                        ][0]
++                    ) is bool
++                    and initializer_passivity_by_module[
++                        parent_id
++                    ][0] is True
++                    and initializer_passivity_by_module[
++                        parent_id
++                    ][1] == (
++                        source_fingerprints_by_module.get(
++                            parent_id
++                        )
 +                    )
-@@ -328,16 +397,14 @@ def read_imports(
--                    continue
--
--                for body_statement in statement.body:
--                    if (
--                        not isinstance(body_statement, ast.Import)
--                        or len(body_statement.names) != 1
--                    ):
--                        continue
--                    alias = body_statement.names[0]
--                    parts = alias.name.split(".")
--                    if (
--                        alias.asname is None
--                        and len(parts) > 1
--                        and all(part.isidentifier() for part in parts)
--                    ):
--                        type_only_statement_ids.add(id(body_statement))
-+                    for body_statement in guard_statement.body:
-+                        if (
-+                            not isinstance(body_statement, ast.Import)
-+                            or len(body_statement.names) != 1
-+                        ):
-+                            continue
-+                        alias = body_statement.names[0]
-+                        parts = alias.name.split(".")
-+                        if (
-+                            alias.asname is None
-+                            and len(parts) > 1
-+                            and all(part.isidentifier() for part in parts)
-+                        ):
-+                            type_only_statement_ids.add(id(body_statement))
++                )
++                for parent_id in (
++                    _typing_guard_parent_initializers(
++                        module_id
++                    )
++                )
++            )
++
++            if (
++                not typing_shadowed
++                and parents_proved
++            ):
+@@ -2078,0 +2270 @@ def index_repository(
++
+@@ -2082 +2274,4 @@ def index_repository(
+-                    dataclasses.replace(import_ref, type_only=False)
++                    dataclasses.replace(
++                        import_ref,
++                        type_only=False,
++                    )
+@@ -2118,0 +2314 @@ def index_repository(
++                record_initializer_passivity(res)
+@@ -2274,0 +2471 @@ def index_repository(
++                record_initializer_passivity(res)
 diff --git a/tests/test_p1d3_d2b2_type_only.py b/tests/test_p1d3_d2b2_type_only.py
-index 00baa48..0a4811a 100644
+index 0a4811a..9e00afe 100644
 --- a/tests/test_p1d3_d2b2_type_only.py
 +++ b/tests/test_p1d3_d2b2_type_only.py
 @@ -12,0 +13 @@ from contextor.core.analysis.cache_manager import CacheManager
-+from contextor.core.cycle_semantics.package_model import evaluate_package_import_order
-@@ -18 +19 @@ from contextor.core.symbol_engine import indexer
--from tests.cycle_semantics_lab import write_synthetic_repository
-+from tests.cycle_semantics_lab import run_synthetic_import, write_synthetic_repository
-@@ -31,0 +33,93 @@ D2B_NAME_SAFE = {
-+D2B2_R1_GLOBALS_MUTATION = {
-+    "pkg/__init__.py": "pass\n",
-+    "pkg/a.py": (
-+        "from typing import TYPE_CHECKING\n"
-+        'globals()["TYPE_CHECKING"] = True\n'
-+        "if TYPE_CHECKING:\n"
-+        "    import pkg.b\n"
-+        "value = 1\n"
++from contextor.core.cycle_semantics.original_worker_reindex_planning import plan_original_worker_reindex
+@@ -56,0 +58,72 @@ D2B2_R1_SETATTR_MUTATION = {
++D2B2_R2_PARENT_MUTATION = {
++    "pkg/__init__.py": (
++        "import typing\n"
++        "typing.TYPE_CHECKING = True\n"
 +    ),
-+    "pkg/b.py": "from pkg.a import value\n",
++    "pkg/a.py": D2B_NAME_SAFE["pkg/a.py"],
++    "pkg/b.py": D2B_NAME_SAFE["pkg/b.py"],
 +}
 +
-+D2B2_R1_SETATTR_MUTATION = {
-+    "pkg/__init__.py": "pass\n",
-+    "pkg/a.py": (
++D2B2_R2_PARENT_SETATTR = {
++    **D2B2_R2_PARENT_MUTATION,
++    "pkg/__init__.py": (
 +        "import typing\n"
 +        'setattr(typing, "TYPE_CHECKING", True)\n'
-+        "if typing.TYPE_CHECKING:\n"
-+        "    import pkg.b\n"
-+        "value = 1\n"
 +    ),
-+    "pkg/b.py": "from pkg.a import value\n",
 +}
 +
-+D2B2_R1_PREFIX_NEGATIVES = [
-+    (
-+        "globals-update",
++D2B2_R2_MULTILEVEL_COMMON = {
++    "pkg/sub/a.py": (
 +        "from typing import TYPE_CHECKING\n"
-+        'globals().update({"TYPE_CHECKING": True})\n'
-+        "if TYPE_CHECKING:\n    import pkg.b\n",
++        "if TYPE_CHECKING:\n"
++        "    import pkg.sub.b\n"
++        "value = 1\n"
 +    ),
++    "pkg/sub/b.py": "from pkg.sub.a import value\n",
++}
++
++D2B2_R2_UNSAFE_INITIALIZER = (
++    "import typing\n"
++    "typing.TYPE_CHECKING = True\n"
++)
++
++D2B2_R2_MULTILEVEL_CASES = [
++    ("M01-both-pass", "pass\n", "pass\n", True, True),
++    ("M02-unsafe-outer", D2B2_R2_UNSAFE_INITIALIZER, "pass\n", False, True),
++    ("M03-unsafe-inner", "pass\n", D2B2_R2_UNSAFE_INITIALIZER, False, True),
++    ("M04-passive-literals", "constant = 1\n", '"docstring"\npass\n', True, True),
++    ("M05-missing-inner", "pass\n", None, False, False),
++    ("M06-missing-outer", None, "pass\n", False, False),
++]
++
++D2B2_R2_NEGATIVE_INITIALIZERS = [
++    ("N01-import-typing", "import typing\n"),
++    ("N02-from-typing", "from typing import TYPE_CHECKING\n"),
++    ("N03-attribute-assignment", "typing.TYPE_CHECKING = True\n"),
++    ("N04-setattr", 'setattr(typing, "TYPE_CHECKING", True)\n'),
++    ("N05-globals", 'globals()["TYPE_CHECKING"] = True\n'),
++    ("N06-exec", 'exec("x = 1")\n'),
++    ("N07-function", "def f(): pass\n"),
++    ("N08-class", "class C: pass\n"),
++    ("N09-if", "if True: pass\n"),
++    ("N10-try", "try:\n    pass\nexcept Exception:\n    pass\n"),
++    ("N11-with", "with context:\n    pass\n"),
++    ("N12-import-child", "import pkg.other\n"),
++    ("N13-call", "arbitrary()\n"),
++    ("N14-subscript-assignment", 'obj["x"] = 1\n'),
++    ("N15-augmented-assignment", "x = 1\nx += 1\n"),
++    ("N16-annotated-assignment", "x: int = 1\n"),
++    ("N17-raise", "raise RuntimeError()\n"),
++]
++
++D2B2_R2_POSITIVE_INITIALIZERS = [
++    ("P01-empty", ""),
++    ("P02-pass", "pass\n"),
++    ("P03-docstring", '"docstring"\n'),
++    ("P04-literal", "constant = 1\n"),
 +    (
-+        "exec-rebinding",
-+        "from typing import TYPE_CHECKING\n"
-+        'exec("TYPE_CHECKING = True")\n'
-+        "if TYPE_CHECKING:\n    import pkg.b\n",
-+    ),
-+    (
-+        "typing-dict-rebinding",
-+        "import typing\n"
-+        'typing.__dict__["TYPE_CHECKING"] = True\n'
-+        "if typing.TYPE_CHECKING:\n    import pkg.b\n",
-+    ),
-+    (
-+        "vars-rebinding",
-+        "from typing import TYPE_CHECKING\n"
-+        'vars()["TYPE_CHECKING"] = True\n'
-+        "if TYPE_CHECKING:\n    import pkg.b\n",
-+    ),
-+    (
-+        "active-import-before-guard",
-+        "from typing import TYPE_CHECKING\n"
-+        "import pkg.b\n"
-+        "if TYPE_CHECKING:\n    import pkg.b\n",
-+    ),
-+    (
-+        "conditional-before-guard",
-+        "from typing import TYPE_CHECKING\n"
-+        "if True:\n    pass\n"
-+        "if TYPE_CHECKING:\n    import pkg.b\n",
-+    ),
-+    (
-+        "call-assignment-before-guard",
-+        "from typing import TYPE_CHECKING\n"
-+        "value = unknown()\n"
-+        "if TYPE_CHECKING:\n    import pkg.b\n",
-+    ),
-+    (
-+        "function-before-guard",
-+        "from typing import TYPE_CHECKING\n"
-+        "def mutate():\n    pass\n"
-+        "if TYPE_CHECKING:\n    import pkg.b\n",
-+    ),
-+    (
-+        "class-before-guard",
-+        "from typing import TYPE_CHECKING\n"
-+        "class Mutator:\n    pass\n"
-+        "if TYPE_CHECKING:\n    import pkg.b\n",
-+    ),
-+    (
-+        "with-before-guard",
-+        "from typing import TYPE_CHECKING\n"
-+        "with context:\n    pass\n"
-+        "if TYPE_CHECKING:\n    import pkg.b\n",
-+    ),
-+    (
-+        "multiple-matching-guards",
-+        "from typing import TYPE_CHECKING\n"
-+        "if TYPE_CHECKING:\n    pass\n"
-+        "if TYPE_CHECKING:\n    import pkg.b\n",
++        "P05-mixed-passive",
++        '"docstring"\nconstant = 1\nother = False\npass\n',
 +    ),
 +]
 +
-@@ -257 +351 @@ def test_cold_and_warm_worker_cache_match_type_only_graph(
--    assert cached["import_classification_semantics_version"] == 1
-+    assert cached["import_classification_semantics_version"] == 2
-@@ -274 +368,3 @@ def test_cold_and_warm_worker_cache_match_type_only_graph(
--@pytest.mark.parametrize("stored_version", [None, 0], ids=["absent", "old"])
-+@pytest.mark.parametrize(
-+    "stored_version", [None, 0, 1], ids=["absent", "version-0", "version-1"],
-+)
-@@ -317 +413 @@ def test_stale_import_classification_cache_reparses_same_snapshot(
--    assert rewritten["import_classification_semantics_version"] == 1
-+    assert rewritten["import_classification_semantics_version"] == 2
-@@ -430,0 +527,4 @@ def test_inline_and_process_pool_classification_parity(
-+@pytest.mark.parametrize(
-+    "shadow_path", ["typing.py", "typing/__init__.py"],
-+    ids=["module", "package"],
-+)
-@@ -432 +532 @@ def test_inline_and_process_pool_typing_shadow_veto_parity(
--    tmp_path, isolated_dirs, monkeypatch,
-+    tmp_path, isolated_dirs, monkeypatch, shadow_path,
-@@ -436 +536 @@ def test_inline_and_process_pool_typing_shadow_veto_parity(
--        "typing.py": "pass\n",
-+        shadow_path: "pass\n",
-@@ -489,0 +590,171 @@ def test_unsupported_imports_remain_non_type_only_and_hard(
+@@ -351 +424 @@ def test_cold_and_warm_worker_cache_match_type_only_graph(
+-    assert cached["import_classification_semantics_version"] == 2
++    assert cached["import_classification_semantics_version"] == 3
+@@ -369 +442,2 @@ def test_cold_and_warm_worker_cache_match_type_only_graph(
+-    "stored_version", [None, 0, 1], ids=["absent", "version-0", "version-1"],
++    "stored_version", [None, 0, 1, 2],
++    ids=["absent", "version-0", "version-1", "version-2"],
+@@ -413 +487 @@ def test_stale_import_classification_cache_reparses_same_snapshot(
+-    assert rewritten["import_classification_semantics_version"] == 2
++    assert rewritten["import_classification_semantics_version"] == 3
+@@ -710 +784 @@ def test_d2b2_r1_forged_version_one_cache_is_reparsed(
+-    assert cached["import_classification_semantics_version"] == 2
++    assert cached["import_classification_semantics_version"] == 3
+@@ -732 +806 @@ def test_d2b2_r1_forged_version_one_cache_is_reparsed(
+-    assert rewritten["import_classification_semantics_version"] == 2
++    assert rewritten["import_classification_semantics_version"] == 3
+@@ -760,0 +835,410 @@ def test_d2b2_r1_dynamic_mutation_inline_process_pool_parity(
 +
-+def _assert_dynamic_mutation_retains_hard_scc(root):
++def _assert_r2_unsafe_parent(root):
 +    indexed, graph = _index_graph(root)
-+    guarded_imports = [
++    guarded = [
 +        item for item in indexed.modules["pkg.a"].imports
 +        if item.module == "pkg.b" and not item.is_from_import
 +    ]
-+    assert len(guarded_imports) == 1
-+    assert guarded_imports[0].type_only is False
++    assert len(guarded) == 1
++    assert guarded[0].type_only is False
 +    assert graph.hard_edges["pkg.a"] == {"pkg.b"}
 +    assert graph.hard_edges["pkg.b"] == {"pkg.a"}
 +    assert "pkg.b" not in graph.soft_edges["pkg.a"]
@@ -541,8 +553,6 @@ index 00baa48..0a4811a 100644
 +        module_id: ast.parse(Path(module.absolute_path).read_text(encoding="utf-8"))
 +        for module_id, module in indexed.modules.items()
 +    }
-+    modeled = evaluate_package_import_order(trees, "pkg.a")
-+    assert modeled.outcome != "MODEL_PASS"
 +    scenarios = analyze_cycle_scenarios(graph.hard_edges, trees)
 +    assert all(
 +        component.classification != "MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS"
@@ -556,124 +566,322 @@ index 00baa48..0a4811a 100644
 +    return indexed, graph
 +
 +
-+def test_d2b2_r1_globals_rebinding_keeps_hard_scc(tmp_path, isolated_dirs):
++def test_d2b2_r2_parent_initializer_mutation_retains_hard_scc(
++    tmp_path, isolated_dirs,
++):
 +    root = write_synthetic_repository(
-+        tmp_path / "repo", D2B2_R1_GLOBALS_MUTATION,
++        tmp_path / "repo", D2B2_R2_PARENT_MUTATION,
 +    )
-+    _assert_dynamic_mutation_retains_hard_scc(root)
++    _assert_r2_unsafe_parent(root)
 +
 +
-+def test_d2b2_r1_setattr_mutation_keeps_hard_scc(tmp_path, isolated_dirs):
++def test_d2b2_r2_parent_setattr_retains_hard_scc(
++    tmp_path, isolated_dirs,
++):
 +    root = write_synthetic_repository(
-+        tmp_path / "repo", D2B2_R1_SETATTR_MUTATION,
++        tmp_path / "repo", D2B2_R2_PARENT_SETATTR,
 +    )
-+    _assert_dynamic_mutation_retains_hard_scc(root)
++    _assert_r2_unsafe_parent(root)
 +
 +
 +@pytest.mark.parametrize(
-+    "case,source", D2B2_R1_PREFIX_NEGATIVES,
-+    ids=[item[0] for item in D2B2_R1_PREFIX_NEGATIVES],
++    "case,outer,inner,expected_type_only,run_cpython",
++    D2B2_R2_MULTILEVEL_CASES,
++    ids=[item[0] for item in D2B2_R2_MULTILEVEL_CASES],
 +)
-+def test_d2b2_r1_effectful_prefixes_keep_hard_edge(
-+    tmp_path, isolated_dirs, case, source,
++def test_d2b2_r2_multilevel_parent_chain(
++    tmp_path, isolated_dirs, case, outer, inner,
++    expected_type_only, run_cpython,
 +):
-+    fixture = {
-+        "pkg/__init__.py": "pass\n",
-+        "pkg/a.py": source,
-+        "pkg/b.py": "from pkg.a import value\n",
-+    }
++    fixture = dict(D2B2_R2_MULTILEVEL_COMMON)
++    if outer is not None:
++        fixture["pkg/__init__.py"] = outer
++    if inner is not None:
++        fixture["pkg/sub/__init__.py"] = inner
 +    root = write_synthetic_repository(tmp_path / case, fixture)
 +    indexed, graph = _index_graph(root)
-+    guarded_imports = [
++    expected_ids = {"pkg.sub.a", "pkg.sub.b"}
++    if outer is not None:
++        expected_ids.add("pkg.__init__")
++    if inner is not None:
++        expected_ids.add("pkg.sub.__init__")
++    assert set(indexed.modules) == expected_ids
++    assert indexer._typing_guard_parent_initializers("pkg.sub.a") == (
++        "pkg.__init__", "pkg.sub.__init__",
++    )
++    guarded = [
++        item for item in indexed.modules["pkg.sub.a"].imports
++        if item.module == "pkg.sub.b" and not item.is_from_import
++    ]
++    assert len(guarded) == 1
++    assert guarded[0].type_only is expected_type_only
++    assert graph.hard_edges["pkg.sub.b"] == {"pkg.sub.a"}
++    if expected_type_only:
++        assert graph.soft_edges["pkg.sub.a"] == {"pkg.sub.b"}
++        assert "pkg.sub.b" not in graph.hard_edges["pkg.sub.a"]
++        assert not any(
++            {"pkg.sub.a", "pkg.sub.b"}.issubset(set(members))
++            for members in _scc_signature(indexed, graph)
++        )
++    else:
++        assert "pkg.sub.b" in graph.hard_edges["pkg.sub.a"]
++        assert "pkg.sub.b" not in graph.soft_edges["pkg.sub.a"]
++        assert any(
++            set(members) == {"pkg.sub.a", "pkg.sub.b"}
++            for members in _scc_signature(indexed, graph)
++        )
++    if run_cpython:
++        actual = run_synthetic_import(root, "pkg.sub.a")
++        assert (actual.returncode == 0) is expected_type_only
++        if not expected_type_only:
++            assert "partially initialized module" in actual.stderr
++
++
++@pytest.mark.parametrize(
++    "case,source", D2B2_R2_NEGATIVE_INITIALIZERS,
++    ids=[item[0] for item in D2B2_R2_NEGATIVE_INITIALIZERS],
++)
++def test_d2b2_r2_negative_parent_initializer_matrix(
++    tmp_path, isolated_dirs, case, source,
++):
++    assert indexer._typing_guard_passive_initializer(ast.parse(source)) is False
++    fixture = {**D2B_NAME_SAFE, "pkg/__init__.py": source}
++    root = write_synthetic_repository(tmp_path / case, fixture)
++    indexed, graph = _index_graph(root)
++    guarded = [
 +        item for item in indexed.modules["pkg.a"].imports
 +        if item.module == "pkg.b" and not item.is_from_import
 +    ]
-+    assert guarded_imports
-+    assert all(item.type_only is False for item in guarded_imports)
++    assert len(guarded) == 1
++    assert guarded[0].type_only is False
 +    assert "pkg.b" in graph.hard_edges["pkg.a"]
 +    assert "pkg.b" not in graph.soft_edges["pkg.a"]
 +
 +
-+def test_d2b2_r1_safe_prefix_remains_type_only(tmp_path, isolated_dirs):
-+    fixture = {
-+        "pkg/__init__.py": "pass\n",
-+        "pkg/a.py": (
-+            "from typing import TYPE_CHECKING\n"
-+            "constant = 1\n"
-+            "pass\n"
-+            "if TYPE_CHECKING:\n"
-+            "    import pkg.b\n"
-+            "value = 1\n"
-+        ),
-+        "pkg/b.py": "from pkg.a import value\n",
-+    }
-+    root = write_synthetic_repository(tmp_path / "repo", fixture)
++@pytest.mark.parametrize(
++    "case,source", D2B2_R2_POSITIVE_INITIALIZERS,
++    ids=[item[0] for item in D2B2_R2_POSITIVE_INITIALIZERS],
++)
++def test_d2b2_r2_positive_parent_initializer_matrix(
++    tmp_path, isolated_dirs, case, source,
++):
++    assert indexer._typing_guard_passive_initializer(ast.parse(source)) is True
++    fixture = {**D2B_NAME_SAFE, "pkg/__init__.py": source}
++    root = write_synthetic_repository(tmp_path / case, fixture)
 +    indexed, graph = _index_graph(root)
-+    guarded_imports = [
++    guarded = [
 +        item for item in indexed.modules["pkg.a"].imports
 +        if item.module == "pkg.b" and not item.is_from_import
 +    ]
-+    assert len(guarded_imports) == 1
-+    assert guarded_imports[0].type_only is True
++    assert len(guarded) == 1
++    assert guarded[0].type_only is True
 +    assert graph.soft_edges["pkg.a"] == {"pkg.b"}
 +    assert "pkg.b" not in graph.hard_edges["pkg.a"]
-+    assert graph.hard_edges["pkg.b"] == {"pkg.a"}
-+    assert not any(
-+        {"pkg.a", "pkg.b"}.issubset(set(members))
-+        for members in _scc_signature(indexed, graph)
-+    )
-+    assert run_synthetic_import(root, "pkg.a").returncode == 0
++    assert _scc_signature(indexed, graph) == ()
 +
 +
-+def test_d2b2_r1_forged_version_one_cache_is_reparsed(
++@pytest.mark.parametrize(
++    "fixture,expected_passive",
++    [(D2B_NAME_SAFE, True), (D2B2_R2_PARENT_MUTATION, False)],
++    ids=["safe-parent", "unsafe-parent"],
++)
++def test_d2b2_r2_worker_success_returns_and_warm_cache(
++    tmp_path, isolated_dirs, fixture, expected_passive,
++):
++    root = write_synthetic_repository(tmp_path / "repo", fixture)
++    parent = root / "pkg" / "__init__.py"
++    cold = indexer._process_single_file(str(parent), str(root))
++    assert cold["error"] is None
++    assert cold["source_parse_called"] is True
++    assert type(cold["typing_guard_initializer_passive"]) is bool
++    assert cold["typing_guard_initializer_passive"] is expected_passive
++    assert cold["source_fingerprint"]
++    warm = indexer._process_single_file(str(parent), str(root))
++    assert warm["error"] is None
++    assert warm["source_parse_called"] is False
++    assert warm["cache_hit"] is True
++    assert type(warm["typing_guard_initializer_passive"]) is bool
++    assert warm["typing_guard_initializer_passive"] is expected_passive
++    assert warm["source_fingerprint"] == cold["source_fingerprint"]
++    cached = _cache_data(root, parent)
++    assert cached["import_classification_semantics_version"] == 3
++    assert type(cached["typing_guard_initializer_passive"]) is bool
++    assert cached["typing_guard_initializer_passive"] is expected_passive
++
++
++def test_d2b2_r2_forged_stale_parent_cache_rejected(
 +    tmp_path, isolated_dirs,
 +):
 +    root = write_synthetic_repository(
-+        tmp_path / "repo", D2B2_R1_GLOBALS_MUTATION,
++        tmp_path / "repo", D2B2_R2_PARENT_MUTATION,
 +    )
-+    first, first_graph = _index_graph(root)
-+    assert "pkg.b" in first_graph.hard_edges["pkg.a"]
-+    assert any(
-+        item.module == "pkg.b" and not item.type_only
-+        for item in first.modules["pkg.a"].imports
-+    )
-+
-+    source = root / "pkg" / "a.py"
-+    cached = _cache_data(root, source)
-+    assert cached["import_classification_semantics_version"] == 2
-+    forged_imports = [
-+        item for item in cached["imports"] if item["module"] == "pkg.b"
-+    ]
-+    assert len(forged_imports) == 1
-+    forged_imports[0]["type_only"] = True
-+    cached["import_classification_semantics_version"] = 1
-+    CacheManager(str(root)).set(source, cached)
++    original, original_graph = _index_graph(root)
++    assert "pkg.b" in original_graph.hard_edges["pkg.a"]
++    parent = root / "pkg" / "__init__.py"
++    original_fingerprint = original.source_fingerprints_by_module["pkg.__init__"]
++    cached = _cache_data(root, parent)
++    assert cached["import_classification_semantics_version"] == 3
++    assert cached["typing_guard_initializer_passive"] is False
++    cached["typing_guard_initializer_passive"] = True
++    cached["import_classification_semantics_version"] = 2
++    CacheManager(str(root)).set(parent, cached)
 +    indexer._CACHE_MANAGERS.pop(str(root.resolve()), None)
 +
 +    replayed, graph = _index_graph(root)
-+    assert any(
-+        item.module == "pkg.b" and not item.type_only
-+        for item in replayed.modules["pkg.a"].imports
++    assert replayed.source_fingerprints_by_module["pkg.__init__"] == (
++        original_fingerprint
 +    )
++    assert next(
++        item for item in replayed.modules["pkg.a"].imports
++        if item.module == "pkg.b"
++    ).type_only is False
++    assert graph.hard_edges["pkg.a"] == {"pkg.b"}
++    assert graph.hard_edges["pkg.b"] == {"pkg.a"}
++    rewritten = _cache_data(root, parent)
++    assert rewritten["import_classification_semantics_version"] == 3
++    assert type(rewritten["typing_guard_initializer_passive"]) is bool
++    assert rewritten["typing_guard_initializer_passive"] is False
++
++
++@pytest.mark.parametrize(
++    "case,malformed",
++    [("missing", None), ("none", None), ("string", "true"), ("integer", 1)],
++)
++def test_d2b2_r2_malformed_current_parent_cache_rejected(
++    tmp_path, isolated_dirs, monkeypatch, case, malformed,
++):
++    root = write_synthetic_repository(
++        tmp_path / "repo", D2B2_R2_PARENT_MUTATION,
++    )
++    _index_graph(root)
++    parent = root / "pkg" / "__init__.py"
++    cached = _cache_data(root, parent)
++    assert cached["import_classification_semantics_version"] == 3
++    if case == "missing":
++        cached.pop("typing_guard_initializer_passive")
++    else:
++        cached["typing_guard_initializer_passive"] = malformed
++    CacheManager(str(root)).set(parent, cached)
++    indexer._CACHE_MANAGERS.pop(str(root.resolve()), None)
++
++    real_read = indexer.read_source_snapshot
++    real_parse = indexer.parse_source_snapshot
++    read_calls = []
++    parse_calls = []
++
++    def tracked_read(path):
++        read_calls.append(Path(path).resolve())
++        return real_read(path)
++
++    def tracked_parse(snapshot, path):
++        parse_calls.append(Path(path).resolve())
++        return real_parse(snapshot, path)
++
++    monkeypatch.setattr(indexer, "read_source_snapshot", tracked_read)
++    monkeypatch.setattr(indexer, "parse_source_snapshot", tracked_parse)
++    replayed, graph = _index_graph(root)
++    assert len(read_calls) == 3
++    assert len(set(read_calls)) == 3
++    assert parse_calls == [parent.resolve()]
++    assert next(
++        item for item in replayed.modules["pkg.a"].imports
++        if item.module == "pkg.b"
++    ).type_only is False
 +    assert graph.hard_edges["pkg.a"] == {"pkg.b"}
 +    assert graph.hard_edges["pkg.b"] == {"pkg.a"}
 +    assert any(
 +        set(members) == {"pkg.a", "pkg.b"}
 +        for members in _scc_signature(replayed, graph)
 +    )
-+    rewritten = _cache_data(root, source)
-+    assert rewritten["import_classification_semantics_version"] == 2
-+    assert next(
-+        item for item in rewritten["imports"] if item["module"] == "pkg.b"
-+    )["type_only"] is False
++    rewritten = _cache_data(root, parent)
++    assert rewritten["import_classification_semantics_version"] == 3
++    assert type(rewritten["typing_guard_initializer_passive"]) is bool
++    assert rewritten["typing_guard_initializer_passive"] is False
 +
 +
 +@pytest.mark.parametrize(
-+    "fixture", [D2B2_R1_GLOBALS_MUTATION, D2B2_R1_SETATTR_MUTATION],
-+    ids=["globals", "setattr"],
++    "fixture",
++    [D2B_NAME_SAFE, D2B2_R2_PARENT_MUTATION],
++    ids=["passive-parent", "unsafe-parent"],
 +)
-+def test_d2b2_r1_dynamic_mutation_inline_process_pool_parity(
++def test_d2b2_r2_cold_warm_graph_parity(
 +    tmp_path, isolated_dirs, monkeypatch, fixture,
++):
++    root = write_synthetic_repository(tmp_path / "repo", fixture)
++    cold_index, cold_graph = _index_graph(root)
++    cold_imports = _import_signature(cold_index)
++    cold_graph_signature = _graph_signature(cold_index, cold_graph)
++    indexer._CACHE_MANAGERS.pop(str(root.resolve()), None)
++
++    def unexpected_parse(*args, **kwargs):
++        raise AssertionError("complete current warm cache must not parse source")
++
++    monkeypatch.setattr(indexer, "parse_source_snapshot", unexpected_parse)
++    warm_index, warm_graph = _index_graph(root)
++    assert _import_signature(warm_index) == cold_imports
++    assert _graph_signature(warm_index, warm_graph) == cold_graph_signature
++
++
++def test_d2b2_r2_parent_source_fingerprint_change_reclassifies_child(
++    tmp_path, isolated_dirs,
++):
++    root = write_synthetic_repository(tmp_path / "repo", D2B_NAME_SAFE)
++    safe_index, safe_graph = _index_graph(root)
++    assert "pkg.b" in safe_graph.soft_edges["pkg.a"]
++    parent_fingerprint = safe_index.source_fingerprints_by_module["pkg.__init__"]
++    child_fingerprint = safe_index.source_fingerprints_by_module["pkg.a"]
++
++    (root / "pkg" / "__init__.py").write_text(
++        D2B2_R2_UNSAFE_INITIALIZER, encoding="utf-8",
++    )
++    unsafe_index, unsafe_graph = _index_graph(root)
++    assert unsafe_index.source_fingerprints_by_module["pkg.__init__"] != (
++        parent_fingerprint
++    )
++    assert unsafe_index.source_fingerprints_by_module["pkg.a"] == (
++        child_fingerprint
++    )
++    assert next(
++        item for item in unsafe_index.modules["pkg.a"].imports
++        if item.module == "pkg.b"
++    ).type_only is False
++    assert unsafe_graph.hard_edges["pkg.a"] == {"pkg.b"}
++    assert unsafe_graph.hard_edges["pkg.b"] == {"pkg.a"}
++
++
++@pytest.mark.parametrize(
++    "case,fixture",
++    [
++        ("safe-single", D2B_NAME_SAFE),
++        ("unsafe-single", D2B2_R2_PARENT_MUTATION),
++        (
++            "safe-multilevel",
++            {
++                **D2B2_R2_MULTILEVEL_COMMON,
++                "pkg/__init__.py": "pass\n",
++                "pkg/sub/__init__.py": "pass\n",
++            },
++        ),
++        (
++            "unsafe-outer",
++            {
++                **D2B2_R2_MULTILEVEL_COMMON,
++                "pkg/__init__.py": D2B2_R2_UNSAFE_INITIALIZER,
++                "pkg/sub/__init__.py": "pass\n",
++            },
++        ),
++        (
++            "unsafe-inner",
++            {
++                **D2B2_R2_MULTILEVEL_COMMON,
++                "pkg/__init__.py": "pass\n",
++                "pkg/sub/__init__.py": D2B2_R2_UNSAFE_INITIALIZER,
++            },
++        ),
++    ],
++)
++def test_d2b2_r2_inline_process_pool_parent_parity(
++    tmp_path, isolated_dirs, monkeypatch, case, fixture,
 +):
 +    inline_root = write_synthetic_repository(tmp_path / "inline", fixture)
 +    monkeypatch.setenv("CONTEXTOR_DISABLE_PROCESS_POOL", "1")
@@ -687,51 +895,70 @@ index 00baa48..0a4811a 100644
 +    assert _graph_signature(pool_index, pool_graph) == (
 +        _graph_signature(inline_index, inline_graph)
 +    )
-+    assert pool_graph.hard_edges["pkg.a"] == {"pkg.b"}
-+    assert pool_graph.hard_edges["pkg.b"] == {"pkg.a"}
-+    assert "pkg.b" not in pool_graph.soft_edges["pkg.a"]
++
++
++def test_d2b2_r2_original_worker_reindex_retains_hard_graph(
++    tmp_path, isolated_dirs,
++):
++    root = write_synthetic_repository(
++        tmp_path / "repo", D2B2_R2_PARENT_MUTATION,
++    )
++    original, graph = _index_graph(root)
++    plan = plan_original_worker_reindex(original, graph.hard_edges)
++    assert plan.status == "READY_FOR_REINDEX_NON_ATOMIC"
++    assert plan.selected_module_ids
++
++    captured = indexer.index_repository(
++        str(root), source_capture_module_ids=plan.selected_module_ids,
++    )
++    assert captured.original_worker_capture_status == (
++        "ALL_SELECTED_CAPTURED_NON_ATOMIC"
++    )
++    assert plan.selected_module_ids.issubset(
++        captured.original_worker_source_snapshots
++    )
++    for module_id in plan.selected_module_ids:
++        assert captured.original_worker_source_snapshots[
++            module_id
++        ].source_fingerprint == captured.source_fingerprints_by_module[module_id]
++    assert captured.source_fingerprints_by_module == (
++        original.source_fingerprints_by_module
++    )
++
++    reexport_facts = materialize_reexport_facts_by_module(
++        captured.modules,
++        captured.reference_facts_by_module,
++    )
++    trie = build_trie(captured.modules.keys())
++    package_root = detect_package_root(captured.modules, trie)
++    captured_graph = build_graph(
++        captured.modules,
++        trie=trie,
++        package_root=package_root,
++        reexport_facts_by_module=reexport_facts,
++    )
++    assert captured_graph.hard_edges == graph.hard_edges
++    assert captured_graph.soft_edges == graph.soft_edges
++    assert captured_graph.hard_edges["pkg.a"] == {"pkg.b"}
++    assert captured_graph.hard_edges["pkg.b"] == {"pkg.a"}
 +
 ````
 
-## 28. CONTRACT CONFLICTS
+## 34. CONTRACT_CONFLICTS
 
-- **DIRECT_EVIDENCE** No supplied literal patch requirement conflicted with the current `read_imports` anchor or cache marker. The code still uses the D2B-1 recognizer and existing visitor/finalizer/resolver contracts.
-- **DIRECT_EVIDENCE** No acceptance gate failed in the focused validation. No out-of-scope production edit was made.
+- **DIRECT_EVIDENCE** None observed. All specified production anchors were present in the current local source and the focused command completed without a contract failure.
 
-## 29. UNSUPPORTED / UNKNOWN
+## 35. DESIGN_GAPS
 
-- **UNKNOWN** Active MCP/LIVE process code adoption: not inspected or claimed. Contextor MCP reads were used before editing for architecture/source discovery; no active mutation tool was invoked.
-- **UNKNOWN** Global-suite result; the user prohibited global pytest.
-- **UNKNOWN** General Python runtime behavior beyond the explicit synthetic fixtures and restricted package model.
-- Dynamic rebinding calls remain unsupported by the restricted execution model; their hard graph edges are retained without inventing a hazard-proof P0/P1B result.
+- **DIRECT_EVIDENCE** None encountered for the literal production instructions or specified test cases. No alternative implementation was selected.
 
-## 30. FINAL GO / PARTIAL / NO_GO
+## 36. UNKNOWN / UNSUPPORTED
 
-**GO — D2B-2-R1 scoped repair.** All 22 supplied acceptance gates are met by the implemented conditions, executed focused assertions and final file scope:
+- **UNKNOWN** Active MCP/LIVE loaded-code adoption; no restart, reload, active FULL or active service mutation was used for this task. The pre-edit Contextor read reported canonical revision 750 and verified source sync, which was used for discovery only.
+- **UNKNOWN** Global pytest status and behavior beyond the eight focused modules; global pytest was prohibited.
+- **UNKNOWN** General Python runtime behavior outside the explicit synthetic CPython differentials.
+- Unsupported dynamic parent initializer behavior was not converted into positive P0/P1B or manifest evidence.
 
-| Gate | Result | Evidence |
-| --- | --- | --- |
-| G01 globals mutation cannot promote | PASS | Direct dynamic fixture, hard SCC and CPython failure |
-| G02 setattr mutation cannot promote | PASS | Direct dynamic fixture, hard SCC and CPython failure |
-| G03 other effectful prefixes fail closed | PASS | 11-case negative matrix |
-| G04 multiple guards rejected | PASS | Two-guard negative case |
-| G05 passive prefix remains eligible | PASS | Constant-assignment/pass positive fixture |
-| G06 NAME/ATTRIBUTE positives remain | PASS | Existing integration tests |
-| G07 normal import remains hard | PASS | Existing mixed/negative tests |
-| G08 mixed classifications retained | PASS | Existing mixed test `[True, False]` |
-| G09 ELSE remains hard | PASS | Existing ELSE tests |
-| G10 dynamic hard SCCs retained | PASS | Primary fixtures and parity tests |
-| G11 CPython hazard detected | PASS | Fresh subprocess failures with required stderr |
-| G12 no false model PASS | PASS | Direct model/scenario assertions |
-| G13 version-1 cache stale | PASS | Parameterized stale-marker test |
-| G14 cold/warm version-2 parity | PASS | Existing warm-cache test updated |
-| G15 forged version-1 cache rejected | PASS | Forged cache replay regression |
-| G16 inline/process-pool parity | PASS | Both primary fixture parity tests |
-| G17 typing shadow veto retained | PASS | Module/package shadow tests and parity |
-| G18 soft-only dissolution remains bounded | PASS | Existing no-SCC planner/manifest/receipt tests |
-| G19 surviving SCC P0/P1B/receipt v2 | PASS | Existing genuine SCC regressions |
-| G20 D1/D2A/D2B-1/D2B-2 focused regressions | PASS | Eight-module focused run, 323 passed |
-| G21 authorized production scope | PASS | Final Git status/diff paths |
-| G22 no active FULL/LIVE mutation | PASS | Only read-only MCP discovery and isolated synthetic tests; no active mutation command |
+## 37. IMPLEMENTER OBSERVATION ONLY
 
-The GO classification is limited to this stage. Stop after D2B-2-R1 and await a separate explicit `proceduj` for any later stage.
+The implementer observed: exact authorized file scope; compilation exit 0; focused pytest exit 0 with 370 passes; full source/test diffs included; final `git diff --check` exit 0. The specified negative, positive, multilevel, cache, process-pool, original-worker and isolated publication regressions were exercised. The architectural decision on acceptance remains with ChatGPT. Stop after D2B-2-R2.

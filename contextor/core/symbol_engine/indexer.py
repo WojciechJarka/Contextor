@@ -69,7 +69,7 @@ SYMBOL_FACTS_SCHEMA_VERSION = 2
 REFERENCE_FACTS_SCHEMA_VERSION = 1
 COLLISION_FACTS_SCHEMA_VERSION = 1
 TEST_FACTS_SCHEMA_VERSION = 1
-IMPORT_CLASSIFICATION_SEMANTICS_VERSION = 2
+IMPORT_CLASSIFICATION_SEMANTICS_VERSION = 3
 _SYMBOL_FACTS_AVAILABLE = "available"
 _SYMBOL_FACTS_FAILURE = "failure"
 _SYMBOL_FACTS_NOT_COMPUTED = "not_computed"
@@ -335,6 +335,94 @@ def _safe_typing_guard_prefix_statement(
         )
 
     return False
+
+
+def _typing_guard_passive_initializer(
+    tree: ast.AST,
+) -> bool:
+    if not isinstance(tree, ast.Module):
+        return False
+
+    allowed_types = {
+        type(None),
+        bool,
+        int,
+        float,
+        complex,
+        str,
+        bytes,
+    }
+
+    for position, statement in enumerate(
+        tree.body
+    ):
+        if isinstance(statement, ast.Pass):
+            continue
+
+        if (
+            position == 0
+            and isinstance(statement, ast.Expr)
+            and isinstance(
+                statement.value,
+                ast.Constant,
+            )
+            and type(
+                statement.value.value
+            ) is str
+        ):
+            continue
+
+        if isinstance(statement, ast.Assign):
+            if (
+                len(statement.targets) != 1
+                or not isinstance(
+                    statement.targets[0],
+                    ast.Name,
+                )
+                or not isinstance(
+                    statement.value,
+                    ast.Constant,
+                )
+            ):
+                return False
+
+            binding = statement.targets[0].id
+
+            if (
+                not binding.isidentifier()
+                or binding.startswith("__")
+                or binding in {
+                    "typing",
+                    "TYPE_CHECKING",
+                }
+                or type(
+                    statement.value.value
+                ) not in allowed_types
+            ):
+                return False
+
+            continue
+
+        return False
+
+    return True
+
+
+def _typing_guard_parent_initializers(
+    module_id: str,
+) -> tuple[str, ...]:
+    logical = (
+        module_id.removesuffix(".__init__")
+        if module_id.endswith(".__init__")
+        else module_id
+    )
+
+    parts = logical.split(".")
+
+    return tuple(
+        ".".join(parts[:length]) + ".__init__"
+        for length in range(1, len(parts))
+    )
 
 
 def read_imports(
@@ -632,6 +720,7 @@ def _process_single_file(
             "absolute_path": str(path.resolve()),
             "imports": None,
             "error": str(exc),
+            "typing_guard_initializer_passive": False,
             "filename": path.name,
             "symbol_facts": None,
             "reference_facts": None,
@@ -688,9 +777,20 @@ def _process_single_file(
             is not int
             or cached_data.get("import_classification_semantics_version")
             != IMPORT_CLASSIFICATION_SEMANTICS_VERSION
+            or type(
+                cached_data.get(
+                    "typing_guard_initializer_passive"
+                )
+            ) is not bool
         )
     ):
         cached_data = None
+
+    typing_guard_initializer_passive = (
+        cached_data["typing_guard_initializer_passive"]
+        if cached_data is not None
+        else False
+    )
 
     lineage_facts = None
     lineage_cache_hit = False
@@ -746,6 +846,9 @@ def _process_single_file(
                 "absolute_path": str(path.resolve()),
                 "imports": imports,
                 "error": error,
+                "typing_guard_initializer_passive": (
+                    typing_guard_initializer_passive
+                ),
                 "filename": path.name,
                 "symbol_facts": symbol_facts,
                 "reference_facts": reference_facts,
@@ -786,6 +889,7 @@ def _process_single_file(
             "module_id": module_id, "path": str(rel),
             "absolute_path": str(path.resolve()), "imports": None,
             "error": str(exc), "filename": path.name,
+            "typing_guard_initializer_passive": False,
             "symbol_facts": None, "reference_facts": None,
             "collision_facts": None, "collision_facts_status": None,
             "test_facts": None, "test_facts_status": None,
@@ -812,6 +916,11 @@ def _process_single_file(
     source_parse_ms = (time.monotonic() - source_parse_started) * 1000.0
     assert parsed_input.source_fingerprint == source_snapshot.source_fingerprint
     tree = parsed_input.tree
+    if cached_data is None:
+        typing_guard_initializer_passive = (
+            module_id.endswith(".__init__")
+            and _typing_guard_passive_initializer(tree)
+        )
     lineage_extract_ms = 0.0
     lineage_extract_called = False
     if lineage_facts is None:
@@ -932,6 +1041,9 @@ def _process_single_file(
                             - test_extract_started
                         ) * 1000.0
                 rewritten = dict(cached_data)
+                rewritten[
+                    "typing_guard_initializer_passive"
+                ] = typing_guard_initializer_passive
                 rewritten["lineage_facts"] = serialize_extracted_lineage_source_facts(
                     lineage_facts
                 )
@@ -1065,6 +1177,9 @@ def _process_single_file(
             "import_classification_semantics_version": (
                 IMPORT_CLASSIFICATION_SEMANTICS_VERSION
             ),
+            "typing_guard_initializer_passive": (
+                typing_guard_initializer_passive
+            ),
         }
         if symbol_facts and symbol_facts.get("status") == _SYMBOL_FACTS_AVAILABLE:
             cache_data["symbol_facts"] = symbol_facts
@@ -1097,6 +1212,9 @@ def _process_single_file(
         "absolute_path": str(path.resolve()),
         "imports": imports,
         "error": error,
+        "typing_guard_initializer_passive": (
+            typing_guard_initializer_passive
+        ),
         "filename": path.name,
         "symbol_facts": symbol_facts,
         "reference_facts": reference_facts,
@@ -1317,6 +1435,10 @@ def index_repository(
     reference_facts_by_module: dict[str, dict] = {}
     lineage_facts_by_source: dict[str, ExtractedLineageSourceFacts] = {}
     source_fingerprints_by_module: dict[str, str] = {}
+    initializer_passivity_by_module: dict[
+        str,
+        tuple[bool, str],
+    ] = {}
     file_tasks = 0
     source_parse_calls = 0
     source_parse_failures = 0
@@ -1438,6 +1560,36 @@ def index_repository(
         source_fingerprints_by_module[
             module_id
         ] = fingerprint
+
+    def record_initializer_passivity(
+        result: dict,
+    ) -> None:
+        module_id = result.get("module_id")
+
+        if (
+            type(module_id) is not str
+            or not module_id.endswith(".__init__")
+            or result.get("error") is not None
+        ):
+            return
+
+        passive = result.get(
+            "typing_guard_initializer_passive"
+        )
+        fingerprint = result.get(
+            "source_fingerprint"
+        )
+
+        if (
+            type(passive) is bool
+            and type(fingerprint) is str
+        ):
+            initializer_passivity_by_module[
+                module_id
+            ] = (
+                passive,
+                fingerprint,
+            )
 
     def record_file_task_evidence(
         result: dict,
@@ -2070,16 +2222,59 @@ def index_repository(
     completed = 0
 
     def _finalize_type_only_imports() -> None:
-        if "typing" not in modules and "typing.__init__" not in modules:
-            return
+        typing_shadowed = (
+            "typing" in modules
+            or "typing.__init__" in modules
+        )
 
         for module_id, module in modules.items():
-            if not any(import_ref.type_only for import_ref in module.imports):
+            if not any(
+                import_ref.type_only
+                for import_ref in module.imports
+            ):
                 continue
+
+            parents_proved = all(
+                (
+                    parent_id in modules
+                    and parent_id
+                    in initializer_passivity_by_module
+                    and type(
+                        initializer_passivity_by_module[
+                            parent_id
+                        ][0]
+                    ) is bool
+                    and initializer_passivity_by_module[
+                        parent_id
+                    ][0] is True
+                    and initializer_passivity_by_module[
+                        parent_id
+                    ][1] == (
+                        source_fingerprints_by_module.get(
+                            parent_id
+                        )
+                    )
+                )
+                for parent_id in (
+                    _typing_guard_parent_initializers(
+                        module_id
+                    )
+                )
+            )
+
+            if (
+                not typing_shadowed
+                and parents_proved
+            ):
+                continue
+
             modules[module_id] = dataclasses.replace(
                 module,
                 imports=[
-                    dataclasses.replace(import_ref, type_only=False)
+                    dataclasses.replace(
+                        import_ref,
+                        type_only=False,
+                    )
                     if import_ref.type_only
                     else import_ref
                     for import_ref in module.imports
@@ -2116,6 +2311,7 @@ def index_repository(
                     imports=res["imports"],
                 )
                 record_indexed_source_fingerprint(res)
+                record_initializer_passivity(res)
                 if res.get("symbol_facts") is not None:
                     symbol_facts_by_module[res["module_id"]] = res["symbol_facts"]
                 if res.get("reference_facts") is not None:
@@ -2272,6 +2468,7 @@ def index_repository(
                     imports=res["imports"],
                 )
                 record_indexed_source_fingerprint(res)
+                record_initializer_passivity(res)
 
                 if res.get("symbol_facts") is not None:
                     symbol_facts_by_module[
