@@ -2336,6 +2336,34 @@ class CanonicalLiveServer:
             return self._execute_publish(request)
 
         with self._lock:
+            if operation == "get_installed_cycle_warning_projection":
+                if set(request) != {"operation"}:
+                    return {
+                        "status": "unavailable",
+                        "reason": "INVALID_CYCLE_WARNING_PROJECTION_PAYLOAD",
+                        "revision": self._revision,
+                    }
+                if (
+                    self._stop.is_set()
+                    or self._pending_recovery_certificate is not None
+                    or self._recovery_release_degraded
+                ):
+                    return {
+                        "status": "unavailable",
+                        "reason": "LIVE_OWNER_NOT_READY",
+                        "revision": self._revision,
+                    }
+                from contextor.core.cycle_semantics.live_cycle_warning_query import (
+                    read_locked_installed_cycle_warnings,
+                )
+
+                return read_locked_installed_cycle_warnings(
+                    self._state,
+                    canonical_revision=self._revision,
+                    authority_identity=self._authority_identity,
+                    activity_epoch=self._activity_epoch,
+                )
+
             if operation == "verify_installed_partial_scc_generation":
                 required_fields = {
                     "operation",
@@ -2803,6 +2831,10 @@ class LiveStateClient:
                 self.endpoint.service_instance_id
             ),
         )
+
+    def get_installed_cycle_warning_projection(self) -> dict[str, Any]:
+        """Read the current canonical LIVE warning partition under its lock."""
+        return self.request("get_installed_cycle_warning_projection")
 
     def verify_installed_partial_scc_generation(
         self,
