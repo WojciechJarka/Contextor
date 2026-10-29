@@ -1312,6 +1312,8 @@ class ContextorGUI:
                 log=log,
                 progress_callback=progress_callback,
                 is_cancelled=lambda: getattr(self.progress_bar, "is_cancelled", False),
+                cycle_source_preparation_preview=True,
+                cycle_partial_source_publication_opt_in=True,
             )
             from contextor.ui.cycle_warning_presentation import (
                 filter_installed_desktop_cycle_errors,
