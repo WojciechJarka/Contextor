@@ -1519,6 +1519,7 @@ def save_snapshot(
     migration_file_state_source: str | Path | None = None,
     migration_only_if_absent: bool = False,
     prepared_cycle_manifest: Any = None,
+    prepared_partial_scc_preparation: Any = None,
 ) -> LiveStateMetadata:
     """Atomically publish a complete snapshot and monotonically increasing revision."""
 
@@ -1736,47 +1737,62 @@ def save_snapshot(
             except AttributeError:
                 pass
 
-        state_to_persist = state
+        if prepared_cycle_manifest is not None and not isinstance(
+            state, RepositoryAnalysisState
+        ):
+            raise TypeError("prepared cycle manifest requires canonical state")
+        if prepared_partial_scc_preparation is not None and type(state) is not (
+            RepositoryAnalysisState
+        ):
+            raise TypeError("partial SCC preparation requires canonical state")
 
-        # A prepared manifest is sealed by the canonical STORE OWNER
-        # under the existing store lock, as part of the SAME state
-        # generation. Never write it as a separate metadata file.
-        #
-        # The original caller state is not given a receipt before
-        # the durable metadata commit can succeed.
+        # Both receipts belong to one copy and one locked store generation.
+        # Neither is installed on the caller's original state.
+        receipt_input = (
+            prepared_cycle_manifest is not None
+            or prepared_partial_scc_preparation is not None
+            or getattr(state, "cycle_source_publication", None) is not None
+            or getattr(state, "cycle_partial_source_publication", None) is not None
+        )
+        state_to_persist = (
+            copy.copy(state)
+            if isinstance(state, RepositoryAnalysisState) and receipt_input
+            else state
+        )
+
         if prepared_cycle_manifest is not None:
-            if not isinstance(state, RepositoryAnalysisState):
-                raise TypeError(
-                    "prepared cycle manifest requires canonical state"
-                )
-
             from contextor.core.cycle_semantics.publication_binding import (
                 seal_prepared_cycle_manifest,
             )
 
-            state_to_persist = copy.copy(state)
-            state_to_persist.cycle_source_publication = (
-                seal_prepared_cycle_manifest(
+            state_to_persist.cycle_source_publication = seal_prepared_cycle_manifest(
+                state_to_persist,
+                prepared_cycle_manifest,
+                revision=metadata.revision,
+                state_id=metadata.state_id,
+                repo_id=metadata.repo_id,
+                root_path=metadata.root_path,
+            )
+        elif state_to_persist is not state:
+            state_to_persist.cycle_source_publication = None
+
+        if prepared_partial_scc_preparation is not None:
+            from contextor.core.cycle_semantics.partial_scc_publication import (
+                seal_partial_scc_preparation,
+            )
+
+            state_to_persist.cycle_partial_source_publication = (
+                seal_partial_scc_preparation(
                     state_to_persist,
-                    prepared_cycle_manifest,
+                    prepared_partial_scc_preparation,
                     revision=metadata.revision,
                     state_id=metadata.state_id,
                     repo_id=metadata.repo_id,
                     root_path=metadata.root_path,
                 )
             )
-
-        elif (
-            isinstance(state, RepositoryAnalysisState)
-            and getattr(
-                state,
-                "cycle_source_publication",
-                None,
-            ) is not None
-        ):
-            # Old receipt must never be republished implicitly.
-            state_to_persist = copy.copy(state)
-            state_to_persist.cycle_source_publication = None
+        elif state_to_persist is not state:
+            state_to_persist.cycle_partial_source_publication = None
 
         if (
             generation_lineage_manifest
@@ -2369,6 +2385,20 @@ def load_snapshot(
                 ):
                     state_obj.cycle_source_publication = None
 
+            if getattr(state_obj, "cycle_partial_source_publication", None) is not None:
+                from contextor.core.cycle_semantics.partial_scc_publication import (
+                    verify_co_published_partial_scc_preparation,
+                )
+
+                if not verify_co_published_partial_scc_preparation(
+                    state_obj,
+                    revision=metadata.revision,
+                    state_id=metadata.state_id,
+                    repo_id=metadata.repo_id,
+                    root_path=metadata.root_path,
+                ):
+                    state_obj.cycle_partial_source_publication = None
+
             return state_obj, metadata
         if metadata.lineage_manifest_file:
             return None
@@ -2487,6 +2517,20 @@ def load_snapshot(
                 root_path=metadata.root_path,
             ):
                 payload.cycle_source_publication = None
+
+        if getattr(payload, "cycle_partial_source_publication", None) is not None:
+            from contextor.core.cycle_semantics.partial_scc_publication import (
+                verify_co_published_partial_scc_preparation,
+            )
+
+            if not verify_co_published_partial_scc_preparation(
+                payload,
+                revision=metadata.revision,
+                state_id=metadata.state_id,
+                repo_id=metadata.repo_id,
+                root_path=metadata.root_path,
+            ):
+                payload.cycle_partial_source_publication = None
 
         return payload, metadata
 

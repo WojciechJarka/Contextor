@@ -138,11 +138,13 @@ class RepositoryAnalysisState:
     # ClassVar also supplies None for old unpickled states in
     # which the instance attribute is absent.
     cycle_source_publication: ClassVar[Any] = None
+    cycle_partial_source_publication: ClassVar[Any] = None
 
     def __post_init__(self) -> None:
         # Persisted as an ordinary instance __dict__ attribute,
         # not as a dataclass field.
         self.cycle_source_publication = None
+        self.cycle_partial_source_publication = None
 
     def clone_for_update(self) -> "RepositoryAnalysisState":
         """
@@ -163,6 +165,7 @@ class RepositoryAnalysisState:
         # An incremental candidate is a new generation.
         # It cannot inherit a receipt from the old generation.
         candidate.cycle_source_publication = None
+        candidate.cycle_partial_source_publication = None
 
         for state_field in fields(self):
             value = getattr(
