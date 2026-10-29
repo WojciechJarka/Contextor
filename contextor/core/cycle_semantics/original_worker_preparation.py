@@ -19,6 +19,7 @@ from .contracts import CycleSemanticsSnapshot
 from .evidence import build_source_bound_cycle_evidence
 from .generation_manifest import (
     PreparedCycleSourceManifest,
+    PreparedSCCSourceBinding,
     prepare_cycle_source_manifest,
 )
 from .original_worker_binding import (
@@ -32,6 +33,7 @@ class OriginalWorkerManifestPreparation:
     reason: str | None
     manifest: PreparedCycleSourceManifest | None
     source_modules: tuple[str, ...]
+    component_preparations: tuple[PreparedSCCSourceBinding, ...] = ()
 
 
 def prepare_original_worker_cycle_manifest(
@@ -56,12 +58,15 @@ def prepare_original_worker_cycle_manifest(
 
     def unavailable(
         reason: str,
+        *,
+        component_preparations: tuple[PreparedSCCSourceBinding, ...] = (),
     ) -> OriginalWorkerManifestPreparation:
         return OriginalWorkerManifestPreparation(
             status="UNAVAILABLE",
             reason=reason,
             manifest=None,
             source_modules=(),
+            component_preparations=component_preparations,
         )
 
     binding = assess_original_worker_cycle_closure(
@@ -135,7 +140,8 @@ def prepare_original_worker_cycle_manifest(
         )
     ):
         return unavailable(
-            "P1C0_SOURCE_EVIDENCE_UNAVAILABLE"
+            "P1C0_SOURCE_EVIDENCE_UNAVAILABLE",
+            component_preparations=manifest.components,
         )
 
     if manifest.authority != (
@@ -158,4 +164,5 @@ def prepare_original_worker_cycle_manifest(
         reason=None,
         manifest=manifest,
         source_modules=binding.reachable_modules,
+        component_preparations=manifest.components,
     )
