@@ -1,127 +1,291 @@
-# CONTEXTOR P1D3-WARN-4H — implementer report
+# CONTEXTOR P1D3-WARN-4I — implementer report
 
 ## PREFLIGHT
 
-- DIRECT_EVIDENCE: Initial/final HEAD `18f5628ef73693dc9e325c8665fd188899c1daee`; initial worktree clean.
-- DIRECT_EVIDENCE: Contextor MCP pre-edit resolved `contextor.ui.gui` at revision 875 and reported 16 fresh structural DFS cycles.
-- DIRECT_EVIDENCE: The supplied SEARCH block in `gui.py` occurred once. The new test file was absent.
+- DIRECT_EVIDENCE: Initial/final HEAD `cdd67d308570848d1684f737d90ba1dcab067ebe`; initial worktree clean.
+- DIRECT_EVIDENCE: Contextor MCP pre-edit resolved `contextor.mcp.tools.get_live_events` at revision 877 and reported 16 fresh structural DFS cycles.
+- DIRECT_EVIDENCE: The new test was absent. SEARCH 1, SEARCH 2 and the documentation SEARCH each occurred exactly once. MCP `get_file_edit_context` does not resolve JSON docs as a Python module; the docs file was inspected literally.
 
-## EXACT SEARCH / REPLACE
+## SEARCH / REPLACE RESULT
 
-- DIRECT_EVIDENCE: Applied only the architect-authored replacement in `contextor/ui/gui.py`; added the supplied test file with exact content.
-- DIRECT_EVIDENCE: Literal new-file comparison passed. No facade default, validator, or graph files changed.
+- DIRECT_EVIDENCE: Applied the two exact architect-authored replacements in `get_live_events.py` and the exact replacement in `get_live_events.json`. Added the supplied test file with exact content.
+- CODE_PATH_PROVED: The successful MCP response now adds `cycle_warning_transitions` after the existing `cycle_warning_view`, leaving the event journal response intact.
 
-## GUI FLAG FORWARDING
+## REAL INSTALLED TRANSITION CHECKPOINT
 
-- CODE_PATH_PROVED: Desktop `ContextorGUI.analyze` now forwards `cycle_source_preparation_preview=True` and `cycle_partial_source_publication_opt_in=True` to `run_full_analysis_exclusive`.
-- CONTRACT_PROVED: T01 executes the GUI task closure and checks those exact kwargs, while excluding `cycle_source_publication_opt_in`.
+- CONTRACT_PROVED: T01 exercises real owner-installed latest-commit reactivation transitions. T02 distinguishes `MODEL_ACCEPTED` from structural removal.
+- CODE_PATH_PROVED: The projection queries `get_installed_cycle_warning_transitions` only for a fresh current warning view and validates checkpoint shape, authority, generation, identity, path shape, uniqueness, action, and current partition before returning `fresh`.
 
-## REAL FULL / DURABLE RECEIPT / LIVE INSTALLATION
+## CURRENT WARNING GENERATION GATE
 
-- CONTRACT_PROVED: T02–T04 use isolated synthetic repositories and the existing official LIVE fixture. They check successful FULL publication, matching revision and state ID, durable `CanonicalPartialSCCReceipt`, receipt verification, installed warning projection, and unchanged structural cycles and hard edges.
-- DIRECT_EVIDENCE: This was test fixture execution only; no active user's FULL/LIVE operation was invoked.
+- CONTRACT_PROVED: T03–T06 cover identity/generation mismatch, invalid transition content, absent checkpoint, and unavailable current view. These paths produce `unavailable` rather than fabricated zero transitions.
+- CODE_PATH_PROVED: A transition checkpoint must match both events and current warning view revision/activity epoch.
 
-## MIXED UNKNOWN AND HAZARD CASES
+## HISTORICAL EVENT PRESERVATION
 
-- CONTRACT_PROVED: TWO_PASS yields 2 model PASS and 0 active warning paths; PASS_AND_UNKNOWN and PASS_AND_HAZARD each yield 1 model PASS and 1 active warning path. The Desktop presentation retains the nonaccepted warning.
+- CONTRACT_PROVED: T07 checks transport failure does not remove retained history.
+- CODE_PATH_PROVED: The new projection reads the checkpoint and adds a separate response field; it does not rewrite `diagnostic_changes` or the event journal.
 
-## FAILED PREPARATION
+## DOC CONTRACT
 
-- CONTRACT_PROVED: T05 injects a second capture failure through the test's monkeypatch; no partial receipt is published, and both warnings remain active.
+- DIRECT_EVIDENCE: Updated `contextor/mcp/docs/get_live_events.json` with current warning view, latest installed transition, historical structural event, and unavailable semantics. `get_mcp_documentation({tool:"get_live_events"})` returned the new transition wording.
+- CONTRACT_PROVED: T08 validates the documentation terms.
 
-## ACYCLIC FAST PATH
+## NEW TEST RESULTS
 
-- CONTRACT_PROVED: T06 checks an acyclic isolated repository: one index call, no second source capture, no partial receipt, and zero structural or active cycle warnings.
-
-## NEW TESTS
-
-- `& .\.venv\Scripts\python.exe -m py_compile contextor/ui/gui.py tests/test_cycle_semantics_desktop_full_partial_activation.py` — PASS.
-- `& .\.venv\Scripts\python.exe -m pytest -q -rs tests/test_cycle_semantics_desktop_full_partial_activation.py` — 6 passed; one third-party Authlib deprecation warning.
+- `& .\.venv\Scripts\python.exe -m py_compile contextor/mcp/tools/get_live_events.py tests/test_cycle_semantics_mcp_warning_transitions.py` — PASS.
+- `& .\.venv\Scripts\python.exe -m pytest -q -rs tests/test_cycle_semantics_mcp_warning_transitions.py` — 17 passed.
 
 ## FOCUSED REGRESSIONS
 
-- `& .\.venv\Scripts\python.exe -m pytest -q -rs tests/test_cycle_semantics_desktop_warning_presentation.py tests/test_original_worker_full_partial_receipt_optin.py tests/test_original_worker_full_preparation_optin.py tests/test_cycle_semantics_live_cycle_warning_query.py` — 61 passed; one third-party Authlib deprecation warning.
+- `& .\.venv\Scripts\python.exe -m pytest -q -rs tests/test_cycle_semantics_mcp_live_warning_view.py tests/test_cycle_semantics_live_warning_transition_checkpoint.py tests/test_cycle_semantics_cycle_warning_transitions.py tests/test_mcp_documentation.py` — 69 passed; one third-party Authlib deprecation warning.
 - `git diff --check` and new-file `git diff --no-index --check` — no whitespace errors.
 
 ## POST-CHANGE MCP AUDIT
 
-- DIRECT_EVIDENCE: Contextor MCP `get_module_context` at revision 877 reported `canonical_state=fresh`, `workspace_sync=verified` for both changed files. Graph/cycle families fresh, structural DFS cycle count 16 (unchanged). `cycle_semantics=stale`.
-- UNKNOWN: MCP workspace synchronization does not establish active Desktop/backend loaded-code adoption.
+- DIRECT_EVIDENCE: Contextor MCP `get_module_context` at revision 879 reported `canonical_state=fresh`, `workspace_sync=verified` for source and test. Graph and cycles were fresh; structural DFS cycle count remained 16.
+- DIRECT_EVIDENCE: `cycle_semantics=stale`. Workspace synchronization does not prove active backend loaded-code adoption.
 
 ## FILES_CHANGED
 
-- `contextor/ui/gui.py`
-- `tests/test_cycle_semantics_desktop_full_partial_activation.py`
+- `contextor/mcp/tools/get_live_events.py`
+- `contextor/mcp/docs/get_live_events.json`
+- `tests/test_cycle_semantics_mcp_warning_transitions.py`
 
 `walkthrough.md` overwritten as report only.
 
 ## FULL_DIFFS
 
-### contextor/ui/gui.py
+### contextor/mcp/tools/get_live_events.py
 
 ```diff
-diff --git a/contextor/ui/gui.py b/contextor/ui/gui.py
-index a90eb6c..f855fad 100644
---- a/contextor/ui/gui.py
-+++ b/contextor/ui/gui.py
-@@ -1312,6 +1312,8 @@ class ContextorGUI:
-                 log=log,
-                 progress_callback=progress_callback,
-                 is_cancelled=lambda: getattr(self.progress_bar, "is_cancelled", False),
-+                cycle_source_preparation_preview=True,
-+                cycle_partial_source_publication_opt_in=True,
-             )
-             from contextor.ui.cycle_warning_presentation import (
-                 filter_installed_desktop_cycle_errors,
+diff --git a/contextor/mcp/tools/get_live_events.py b/contextor/mcp/tools/get_live_events.py
+index b30170a..9906480 100644
+--- a/contextor/mcp/tools/get_live_events.py
++++ b/contextor/mcp/tools/get_live_events.py
+@@ -79,6 +79,159 @@ def _current_cycle_warning_view(client, events):
+     }
+ 
+ 
++def _current_cycle_warning_transitions(client, events, view):
++    """Expose only the latest owner-verified warning transition checkpoint."""
++
++    def unavailable(reason):
++        return {"status": "unavailable", "reason": reason}
++
++    if type(view) is not dict or view.get("status") != "fresh":
++        return unavailable("CURRENT_WARNING_VIEW_UNAVAILABLE")
++
++    try:
++        checkpoint = client.request(
++            "get_installed_cycle_warning_transitions",
++            timeout=2.0,
++        )
++    except (
++        OSError, EOFError, ConnectionError, TimeoutError,
++        RuntimeError, AttributeError, TypeError, ValueError,
++    ):
++        return unavailable("WARNING_TRANSITION_QUERY_FAILED")
++
++    if type(checkpoint) is not dict or checkpoint.get("status") != "ok":
++        return unavailable("WARNING_TRANSITION_CHECKPOINT_UNAVAILABLE")
++
++    required = {
++        "status",
++        "binding_state",
++        "from_revision",
++        "to_revision",
++        "activity_epoch",
++        "repo_id",
++        "root_path",
++        "service_instance_id",
++        "process_start_identity",
++        "transitions",
++        "authority",
++    }
++
++    if set(checkpoint) != required:
++        return unavailable("WARNING_TRANSITION_CHECKPOINT_INVALID")
++
++    if (
++        checkpoint["binding_state"]
++        != "INSTALLED_WARNING_TRANSITION_CHECKPOINT"
++        or checkpoint["authority"] != (
++            "LIVE_OWNER_COMMIT_SCOPED_WARNING_TRANSITIONS"
++            "_NOT_STRUCTURAL_REMOVAL_FOR_MODEL_ACCEPTANCE"
++            "_NOT_RUNTIME_SAFETY"
++        )
++        or type(checkpoint["from_revision"]) is not int
++        or type(checkpoint["to_revision"]) is not int
++        or checkpoint["from_revision"] < 1
++        or checkpoint["to_revision"] <= checkpoint["from_revision"]
++        or checkpoint["to_revision"] != events.get("revision")
++        or checkpoint["to_revision"] != view.get("revision")
++        or checkpoint["activity_epoch"] != events.get("activity_epoch")
++        or checkpoint["activity_epoch"] != view.get("activity_epoch")
++        or type(checkpoint["activity_epoch"]) is not str
++        or not checkpoint["activity_epoch"]
++    ):
++        return unavailable("WARNING_TRANSITION_GENERATION_MISMATCH")
++
++    for key in (
++        "repo_id",
++        "root_path",
++        "service_instance_id",
++        "process_start_identity",
++    ):
++        if type(checkpoint[key]) is not str or not checkpoint[key]:
++            return unavailable("WARNING_TRANSITION_IDENTITY_INVALID")
++
++    transitions = checkpoint["transitions"]
++
++    if type(transitions) is not tuple:
++        return unavailable("WARNING_TRANSITION_CONTENT_INVALID")
++
++    accepted = set(view["model_pass_paths"])
++    active = set(view["active_warning_paths"])
++    structural = set(view["structural_paths"])
++    seen = set()
++
++    for transition in transitions:
++        if (
++            type(transition) is not dict
++            or set(transition) != {
++                "path", "action", "previous_state", "current_state",
++            }
++        ):
++            return unavailable("WARNING_TRANSITION_CONTENT_INVALID")
++
++        path = transition["path"]
++        action = transition["action"]
++        before = transition["previous_state"]
++        after = transition["current_state"]
++
++        if (
++            type(path) is not tuple
++            or len(path) < 2
++            or any(type(node) is not str or not node for node in path)
++            or path[0] != path[-1]
++            or len(set(path[:-1])) != len(path) - 1
++            or path in seen
++        ):
++            return unavailable("WARNING_TRANSITION_CONTENT_INVALID")
++
++        seen.add(path)
++
++        if action == "STRUCTURAL_ADDED":
++            valid = (
++                before is None
++                and after in {"MODEL_PASS", "ACTIVE"}
++                and path in structural
++            )
++        elif action == "STRUCTURAL_REMOVED":
++            valid = (
++                before in {"MODEL_PASS", "ACTIVE"}
++                and after is None
++                and path not in structural
++            )
++        elif action == "MODEL_ACCEPTED":
++            valid = (
++                before == "ACTIVE"
++                and after == "MODEL_PASS"
++                and path in accepted
++            )
++        elif action == "WARNING_REACTIVATED":
++            valid = (
++                before == "MODEL_PASS"
++                and after == "ACTIVE"
++                and path in active
++            )
++        else:
++            valid = False
++
++        if not valid:
++            return unavailable("WARNING_TRANSITION_CONTENT_INVALID")
++
++        if after == "MODEL_PASS" and path not in accepted:
++            return unavailable("WARNING_TRANSITION_CONTENT_INVALID")
++
++        if after == "ACTIVE" and path not in active:
++            return unavailable("WARNING_TRANSITION_CONTENT_INVALID")
++
++    return {
++        "status": "fresh",
++        "scope": "LATEST_INSTALLED_COMMIT_ONLY_NOT_RETAINED_EVENT_HISTORY",
++        "from_revision": checkpoint["from_revision"],
++        "to_revision": checkpoint["to_revision"],
++        "activity_epoch": checkpoint["activity_epoch"],
++        "transition_count": len(transitions),
++        "transitions": transitions,
++    }
++
++
+ def get_live_events(
+     repo_path: str,
+     after_revision: int | None = None,
+@@ -145,6 +298,13 @@ def get_live_events(
+         response["cycle_warning_view"] = _current_cycle_warning_view(
+             client, events,
+         )
++        response["cycle_warning_transitions"] = (
++            _current_cycle_warning_transitions(
++                client,
++                events,
++                response["cycle_warning_view"],
++            )
++        )
+         return json.dumps(response, indent=2)
+ 
+     except (OSError, EOFError, RuntimeError) as exc:
 ```
 
-### tests/test_cycle_semantics_desktop_full_partial_activation.py
+### contextor/mcp/docs/get_live_events.json
 
 ```diff
-diff --git a/tests/test_cycle_semantics_desktop_full_partial_activation.py b/tests/test_cycle_semantics_desktop_full_partial_activation.py
+diff --git a/contextor/mcp/docs/get_live_events.json b/contextor/mcp/docs/get_live_events.json
+index f04cff8..c095a8b 100644
+--- a/contextor/mcp/docs/get_live_events.json
++++ b/contextor/mcp/docs/get_live_events.json
+@@ -14,6 +14,10 @@
+     "Committed incremental ``update_file`` events may include optional post-commit ``diagnostic_changes`` evidence with exact bounded shape ``{total, truncated, items}``; ``items`` contains at most three deterministic details.",
+     "Each diagnostic item exposes ``action`` (``ADDED`` or ``RESOLVED``), ``diagnostic_kind`` (``syntax``, ``collision``, or ``cycle``), and a stable JSON-safe ``diagnostic_key``. Syntax items include ``source_path`` and ``line_number``/``column_number`` when attributable; collision items expose canonical structured collision fields; cycle items expose ``cycle_nodes``.",
+     "Diagnostic changes are emitted only when both before and after canonical diagnostic-family states are fresh. Their absence is not proof of zero diagnostics when a family is stale or deferred. Canonical state remains authoritative; the runtime JSONL trace carries the full committed diagnostic delta for operational evidence.",
++    "When the LIVE owner can verify the current installed cycle warning partition, successful responses expose ``cycle_warning_view`` with structural, MODEL_PASS and active-warning counts and paths. Structural cycle count remains unchanged. This is static-model acceptance evidence, not runtime execution safety.",
++    "Successful responses also expose ``cycle_warning_transitions`` for the latest installed commit only. Valid transitions distinguish ``STRUCTURAL_ADDED``, ``STRUCTURAL_REMOVED``, ``MODEL_ACCEPTED`` and ``WARNING_REACTIVATED``. Their absence or an unavailable result is not evidence of zero transitions. The checkpoint is not a reconstruction of the retained event history.",
++    "``diagnostic_changes`` in the journal describe historical structural changes, not current active cycle warnings. The journal is preserved without deleting or rewriting its events. Current active warnings must be read from a fresh ``cycle_warning_view``.",
++    "Warning projections require matching LIVE revision and activity epoch. If the owner, projection or checkpoint is unavailable or inconsistent, the warning view or transitions are marked ``unavailable`` without fabricated active-warning counts.",
+     "Existing syntax failure fields ``error``, ``line_number``, and ``column_number`` remain unchanged."
+   ],
+   "freshness": [],
+```
+
+### tests/test_cycle_semantics_mcp_warning_transitions.py
+
+```diff
+diff --git a/tests/test_cycle_semantics_mcp_warning_transitions.py b/tests/test_cycle_semantics_mcp_warning_transitions.py
 new file mode 100644
-index 0000000..8298119
+index 0000000..e0a7dfe
 --- /dev/null
-+++ b/tests/test_cycle_semantics_desktop_full_partial_activation.py
-@@ -0,0 +1,290 @@
-+"""WARN-4H: Desktop FULL activates existing partial SCC publication.
-+
-+All real analyses use synthetic temporary repositories and isolated LIVE.
-+No production repository or existing LIVE service is contacted.
-+"""
++++ b/tests/test_cycle_semantics_mcp_warning_transitions.py
+@@ -0,0 +1,320 @@
++"""WARN-4I: MCP projects current commit warning transitions separately."""
 +
 +from __future__ import annotations
 +
 +import copy
-+from types import SimpleNamespace
++import json
 +
 +import pytest
 +
-+import contextor.core.api.facade as facade_module
-+from contextor.core.analysis.full_analysis_coordinator import (
-+    run_full_analysis_exclusive,
++from contextor.mcp.tools.get_live_events import get_live_events
++from tests.test_cycle_semantics_live_installed_partial_claims import (
++    _fixture, _owner,
 +)
-+from contextor.core.cycle_semantics.partial_scc_publication import (
-+    CanonicalPartialSCCReceipt,
-+    verify_co_published_partial_scc_preparation,
++from tests.test_cycle_semantics_live_warning_transition_checkpoint import (
++    _installed_next,
 +)
-+from contextor.ui import gui
-+from contextor.ui.gui import ContextorGUI
-+from contextor.ui.cycle_warning_presentation import (
-+    filter_installed_desktop_cycle_errors,
-+)
-+from tests.test_original_worker_official_full_live_publication import (
-+    _official_live,
-+)
-+from tests.test_original_worker_full_partial_receipt_optin import (
-+    _persisted,
-+)
-+from tests.test_original_worker_partial_scc_preparation import (
-+    PASS_AND_UNKNOWN,
-+    PASS_AND_HAZARD,
-+    TWO_PASS,
-+    _repo,
-+)
++from tests.test_original_worker_partial_scc_preparation import TWO_PASS
++from tests.test_cycle_semantics_mcp_live_warning_view import _fake_reports
 +
 +
 +@pytest.fixture(autouse=True)
@@ -129,263 +293,313 @@ index 0000000..8298119
 +    monkeypatch.setenv("CONTEXTOR_DISABLE_PROCESS_POOL", "1")
 +
 +
-+def _desktop_full(root):
-+    return run_full_analysis_exclusive(
-+        str(root),
-+        owner="desktop_analysis",
-+        cycle_source_preparation_preview=True,
-+        cycle_partial_source_publication_opt_in=True,
++def _connect(monkeypatch, client):
++    monkeypatch.setattr(
++        "contextor.core.live_state.runtime.connect_existing_with_status",
++        lambda _root: (client, "ok"),
 +    )
 +
 +
-+def _cycle_errors(errors):
-+    return [
-+        error for error in errors
-+        if error.kind == "ArchitectureCycle"
-+    ]
-+
-+
-+def test_t01_gui_passes_both_exact_optins(
-+    tmp_path, monkeypatch,
-+):
-+    """Execute the actual GUI task closure without a Tk window."""
-+    calls = []
-+    results = []
-+
-+    controller = SimpleNamespace(
-+        repo_path_var=SimpleNamespace(
-+            get=lambda: str(tmp_path),
++def _checkpoint():
++    return {
++        "status": "ok",
++        "binding_state": "INSTALLED_WARNING_TRANSITION_CHECKPOINT",
++        "from_revision": 11,
++        "to_revision": 12,
++        "activity_epoch": "epoch-1",
++        "repo_id": "synthetic-repo",
++        "root_path": "/synthetic",
++        "service_instance_id": "synthetic-service",
++        "process_start_identity": "synthetic-process",
++        "transitions": (
++            {
++                "path": ("a", "b", "a"),
++                "action": "MODEL_ACCEPTED",
++                "previous_state": "ACTIVE",
++                "current_state": "MODEL_PASS",
++            },
++            {
++                "path": ("x", "y", "x"),
++                "action": "STRUCTURAL_ADDED",
++                "previous_state": None,
++                "current_state": "ACTIVE",
++            },
 +        ),
-+        root=object(),
-+        progress_bar=SimpleNamespace(is_cancelled=False),
-+        log_box=None,
-+        cpu_indicator=None,
-+        stop_btn=None,
-+        _busy_buttons=lambda: (),
-+        _live_recovery_incident=lambda _path: None,
-+    )
-+
-+    monkeypatch.setattr(
-+        "contextor.core.live_state.connect",
-+        lambda _path: None,
-+    )
-+
-+    def fake_full(path, **kwargs):
-+        calls.append((path, kwargs))
-+        return [], SimpleNamespace(
-+            live_publish_status="not_attempted",
-+        )
-+
-+    def fake_progress(root, bar, task, **kwargs):
-+        results.append(task())
-+        return "synthetic-task-completed"
-+
-+    monkeypatch.setattr(
-+        gui, "run_full_analysis_exclusive", fake_full,
-+    )
-+    monkeypatch.setattr(
-+        gui, "run_with_progress", fake_progress,
-+    )
-+
-+    ContextorGUI.analyze(controller)
-+
-+    assert controller._full_analysis_done == (
-+        "synthetic-task-completed"
-+    )
-+    assert len(calls) == 1
-+    assert len(results) == 1
-+
-+    path, kwargs = calls[0]
-+
-+    assert path == str(tmp_path.resolve())
-+    assert kwargs["owner"] == "desktop_analysis"
-+    assert kwargs["cycle_source_preparation_preview"] is True
-+    assert kwargs["cycle_partial_source_publication_opt_in"] is True
-+    assert "cycle_source_publication_opt_in" not in kwargs
-+    assert kwargs["is_cancelled"]() is False
-+
-+    assert results[0][0] == []
++        "authority": (
++            "LIVE_OWNER_COMMIT_SCOPED_WARNING_TRANSITIONS"
++            "_NOT_STRUCTURAL_REMOVAL_FOR_MODEL_ACCEPTANCE"
++            "_NOT_RUNTIME_SAFETY"
++        ),
++    }
 +
 +
-+@pytest.mark.parametrize(
-+    "sources,model_pass,active",
-+    [
-+        (TWO_PASS, 2, 0),
-+        (PASS_AND_UNKNOWN, 1, 1),
-+        (PASS_AND_HAZARD, 1, 1),
-+    ],
-+)
-+def test_t02_t04_real_full_publishes_partial_to_live(
-+    tmp_path, isolated_dirs, monkeypatch,
-+    sources, model_pass, active,
-+):
-+    """FULL -> durable partial receipt -> LIVE -> Desktop messages."""
-+    root = _repo(tmp_path, sources)
++class _Client:
++    def __init__(self, events, projection, checkpoint):
++        self.events = events
++        self.projection = projection
++        self.checkpoint = checkpoint
++        self.checkpoint_calls = 0
 +
-+    with _official_live(
-+        root, monkeypatch,
-+    ) as (client, server, identity, calls):
++    def get_events(self, **_kwargs):
++        return self.events
 +
-+        errors, result = _desktop_full(root)
++    def get_installed_cycle_warning_projection(self):
++        return self.projection
 +
-+        state, metadata = _persisted(root)
-+
-+        assert result.live_publish_status == "success"
-+        assert result.live_publish_revision == metadata.revision
-+        assert result.live_publish_expected_state_id == (
-+            metadata.state_id
-+        )
-+        assert result.live_publish_service_instance_id == (
-+            server.endpoint.service_instance_id
-+        )
-+
-+        assert metadata.repo_id == identity.repo_id
-+        assert calls == [root.resolve()]
-+
-+        receipt = state.cycle_partial_source_publication
-+
-+        assert type(receipt) is CanonicalPartialSCCReceipt
-+        assert verify_co_published_partial_scc_preparation(
-+            state,
-+            revision=metadata.revision,
-+            state_id=metadata.state_id,
-+            repo_id=metadata.repo_id,
-+            root_path=metadata.root_path,
-+        )
-+
-+        assert state.cycle_source_publication is None
-+        assert len(state.cycles) == 2
-+        assert len(_cycle_errors(errors)) == 2
-+
-+        original_cycles = copy.deepcopy(state.cycles)
-+        original_edges = copy.deepcopy(
-+            state.dependency_graph.hard_edges
-+        )
-+
-+        view = client.get_installed_cycle_warning_projection()
-+
-+        assert view["status"] == "ok"
-+        assert view["revision"] == metadata.revision
-+        assert view["structural_count"] == 2
-+        assert view["model_pass_count"] == model_pass
-+        assert view["active_warning_count"] == active
-+
-+        displayed = filter_installed_desktop_cycle_errors(
-+            errors, result, str(root),
-+        )
-+
-+        assert len(_cycle_errors(displayed)) == active
-+        assert len(_cycle_errors(errors)) == 2
-+        assert state.cycles == original_cycles
-+        assert state.dependency_graph.hard_edges == original_edges
++    def request(self, operation, **kwargs):
++        assert operation == "get_installed_cycle_warning_transitions"
++        assert kwargs == {"timeout": 2.0}
++        self.checkpoint_calls += 1
++        if isinstance(self.checkpoint, Exception):
++            raise self.checkpoint
++        return self.checkpoint
 +
 +
-+def test_t05_failed_second_capture_preserves_all_warnings(
++def test_t01_latest_installed_commit_reports_real_reactivations(
 +    tmp_path, isolated_dirs, monkeypatch,
 +):
-+    """A failed evidence pass must not silently accept any cycle."""
-+    root = _repo(tmp_path, TWO_PASS)
++    root, state, metadata = _fixture(tmp_path, TWO_PASS)
 +
-+    original_index = facade_module.index_repository
++    with _owner(state, metadata) as (server, client):
++        _connect(monkeypatch, client)
 +
-+    def missing_capture(*args, **kwargs):
-+        if kwargs.get("source_capture_module_ids") is not None:
-+            raise RuntimeError("synthetic second-pass failure")
-+        return original_index(*args, **kwargs)
++        before = json.loads(get_live_events(str(root)))
 +
-+    monkeypatch.setattr(
-+        facade_module,
-+        "index_repository",
-+        missing_capture,
-+    )
++        assert before["status"] == "ok"
++        assert before["cycle_warning_view"]["status"] == "fresh"
++        assert before["cycle_warning_transitions"]["status"] == "unavailable"
 +
-+    with _official_live(
-+        root, monkeypatch,
-+    ) as (client, server, identity, calls):
++        _installed_next(root, server, partial=False)
 +
-+        errors, result = _desktop_full(root)
-+        state, metadata = _persisted(root)
-+
-+        assert result.live_publish_status == "success"
-+        assert result.cycle_source_preparation_preview.status == (
-+            "UNAVAILABLE"
++        journal_before = copy.deepcopy(
++            (server._events, server._activity_seq)
 +        )
-+        assert state.cycle_partial_source_publication is None
-+        assert len(state.cycles) == 2
 +
-+        view = client.get_installed_cycle_warning_projection()
++        result = json.loads(get_live_events(str(root)))
 +
-+        assert view["status"] == "ok"
++        view = result["cycle_warning_view"]
++        delta = result["cycle_warning_transitions"]
++
++        assert result["status"] == "ok"
++        assert view["status"] == "fresh"
 +        assert view["structural_count"] == 2
 +        assert view["model_pass_count"] == 0
 +        assert view["active_warning_count"] == 2
 +
-+        displayed = filter_installed_desktop_cycle_errors(
-+            errors, result, str(root),
++        assert delta["status"] == "fresh"
++        assert delta["scope"] == (
++            "LATEST_INSTALLED_COMMIT_ONLY_NOT_RETAINED_EVENT_HISTORY"
 +        )
++        assert delta["from_revision"] == metadata.revision
++        assert delta["to_revision"] == result["revision"]
++        assert delta["activity_epoch"] == result["activity_epoch"]
++        assert delta["transition_count"] == 2
++        assert [item["action"] for item in delta["transitions"]] == [
++            "WARNING_REACTIVATED", "WARNING_REACTIVATED",
++        ]
 +
-+        assert len(_cycle_errors(displayed)) == 2
-+        assert len(_cycle_errors(errors)) == 2
++        assert (
++            server._events, server._activity_seq
++        ) == journal_before
 +
 +
-+def test_t06_acyclic_full_skips_second_index(
-+    tmp_path, isolated_dirs, monkeypatch,
++def test_t02_model_acceptance_is_not_structural_removal(
++    tmp_path, monkeypatch,
 +):
-+    """Enabling the opt-in must not reindex an acyclic repository."""
-+    root = _repo(
-+        tmp_path,
-+        {"a": "value = 1\n"},
++    events, projection = _fake_reports()
++    checkpoint = _checkpoint()
++    client = _Client(events, projection, checkpoint)
++    _connect(monkeypatch, client)
++
++    result = json.loads(get_live_events(str(tmp_path)))
++
++    delta = result["cycle_warning_transitions"]
++
++    assert delta["status"] == "fresh"
++    assert delta["transition_count"] == 2
++    assert [item["action"] for item in delta["transitions"]] == [
++        "MODEL_ACCEPTED", "STRUCTURAL_ADDED",
++    ]
++    assert result["cycle_warning_view"]["structural_count"] == 2
++    assert client.checkpoint_calls == 1
++
++
++@pytest.mark.parametrize("change", [
++    {"to_revision": 13},
++    {"activity_epoch": "wrong-epoch"},
++    {"from_revision": 12},
++    {"binding_state": "FORGED"},
++    {"authority": "FORGED"},
++    {"service_instance_id": ""},
++])
++def test_t03_checkpoint_identity_and_generation_mismatch_fails_closed(
++    tmp_path, monkeypatch, change,
++):
++    events, projection = _fake_reports()
++    checkpoint = {**_checkpoint(), **change}
++    _connect(monkeypatch, _Client(events, projection, checkpoint))
++
++    response = json.loads(get_live_events(str(tmp_path)))
++    delta = response["cycle_warning_transitions"]
++
++    assert delta["status"] == "unavailable"
++    assert "transition_count" not in delta
++    assert response["cycle_warning_view"]["status"] == "fresh"
++
++
++@pytest.mark.parametrize("item", [
++    {
++        "path": ("a", "b", "a"),
++        "action": "STRUCTURAL_REMOVED",
++        "previous_state": "ACTIVE",
++        "current_state": None,
++    },
++    {
++        "path": ("a", "b", "a"),
++        "action": "WARNING_REACTIVATED",
++        "previous_state": "MODEL_PASS",
++        "current_state": "ACTIVE",
++    },
++    {
++        "path": ("a", "b", "a"),
++        "action": "MODEL_ACCEPTED",
++        "previous_state": "ACTIVE",
++        "current_state": "ACTIVE",
++    },
++    {
++        "path": ("a", "b", "a"),
++        "action": "UNKNOWN",
++        "previous_state": "ACTIVE",
++        "current_state": "MODEL_PASS",
++    },
++    {
++        "path": ("a", "b", "x"),
++        "action": "MODEL_ACCEPTED",
++        "previous_state": "ACTIVE",
++        "current_state": "MODEL_PASS",
++    },
++])
++def test_t04_invalid_transition_never_becomes_fresh(
++    tmp_path, monkeypatch, item,
++):
++    events, projection = _fake_reports()
++    checkpoint = _checkpoint()
++    checkpoint["transitions"] = (item,)
++    _connect(monkeypatch, _Client(events, projection, checkpoint))
++
++    delta = json.loads(get_live_events(str(tmp_path)))[
++        "cycle_warning_transitions"
++    ]
++
++    assert delta["status"] == "unavailable"
++    assert "transitions" not in delta
++
++
++def test_t05_missing_checkpoint_does_not_claim_zero(
++    tmp_path, monkeypatch,
++):
++    events, projection = _fake_reports()
++    client = _Client(
++        events,
++        projection,
++        {
++            "status": "unavailable",
++            "reason": "NO_COMMITTED_WARNING_TRANSITION",
++        },
++    )
++    _connect(monkeypatch, client)
++
++    result = json.loads(get_live_events(str(tmp_path)))
++
++    assert result["cycle_warning_transitions"]["status"] == "unavailable"
++    assert "transition_count" not in result["cycle_warning_transitions"]
++
++
++def test_t06_unavailable_current_view_skips_transition_query(
++    tmp_path, monkeypatch,
++):
++    events, projection = _fake_reports()
++    projection["revision"] = 13
++    client = _Client(events, projection, _checkpoint())
++    _connect(monkeypatch, client)
++
++    result = json.loads(get_live_events(str(tmp_path)))
++
++    assert result["cycle_warning_view"]["status"] == "unavailable"
++    assert result["cycle_warning_transitions"]["status"] == "unavailable"
++    assert client.checkpoint_calls == 0
++
++
++def test_t07_transport_failure_does_not_remove_history(
++    tmp_path, monkeypatch,
++):
++    events, projection = _fake_reports()
++    events["events"] = [{
++        "canonical_revision": 12,
++        "diagnostic_changes": {
++            "total": 1,
++            "truncated": False,
++            "items": [{
++                "diagnostic_kind": "cycle",
++                "action": "ADDED",
++                "cycle_nodes": ["a", "b", "a"],
++            }],
++        },
++    }]
++    original = copy.deepcopy(events)
++
++    client = _Client(
++        events, projection, TimeoutError("synthetic timeout"),
++    )
++    _connect(monkeypatch, client)
++
++    result = json.loads(get_live_events(str(tmp_path)))
++
++    assert result["status"] == "ok"
++    assert result["events"] == original["events"]
++    assert result["cycle_warning_transitions"]["status"] == "unavailable"
++    assert "transition_count" not in result["cycle_warning_transitions"]
++    assert events == original
++
++
++def test_t08_documentation_describes_current_warning_semantics():
++    from pathlib import Path
++
++    docs = (
++        Path(__file__).resolve().parents[1]
++        / "contextor" / "mcp" / "docs" / "get_live_events.json"
 +    )
 +
-+    original_index = facade_module.index_repository
-+    selections = []
++    data = json.loads(docs.read_text(encoding="utf-8"))
 +
-+    def observed_index(*args, **kwargs):
-+        selections.append(
-+            kwargs.get("source_capture_module_ids")
-+        )
-+        return original_index(*args, **kwargs)
++    assert data["version"] == "1.0.0"
++    assert data["tool"] == "get_live_events"
 +
-+    monkeypatch.setattr(
-+        facade_module,
-+        "index_repository",
-+        observed_index,
-+    )
++    behavior = " ".join(data["behavior"])
 +
-+    with _official_live(
-+        root, monkeypatch,
-+    ) as (client, server, identity, calls):
-+
-+        errors, result = _desktop_full(root)
-+        state, metadata = _persisted(root)
-+
-+        assert result.live_publish_status == "success"
-+        assert state.cycles == []
-+        assert state.cycle_partial_source_publication is None
-+        assert selections == [None]
-+
-+        view = client.get_installed_cycle_warning_projection()
-+
-+        assert view["status"] == "ok"
-+        assert view["structural_count"] == 0
-+        assert view["model_pass_count"] == 0
-+        assert view["active_warning_count"] == 0
-+
-+        assert filter_installed_desktop_cycle_errors(
-+            errors, result, str(root),
-+        ) is errors
++    for term in (
++        "cycle_warning_view",
++        "cycle_warning_transitions",
++        "MODEL_ACCEPTED",
++        "WARNING_REACTIVATED",
++        "STRUCTURAL_ADDED",
++        "STRUCTURAL_REMOVED",
++        "historical structural changes",
++        "unavailable",
++    ):
++        assert term in behavior
 ```
 
 ## CONTRACT_CONFLICTS
 
-None observed in the literal anchor, compilation, or focused tests.
+None observed in the exact anchors, compilation, or focused tests.
 
 ## REMAINING UNKNOWN
 
-- UNKNOWN: Active Desktop/backend loaded-code adoption; no restart occurred.
-- UNKNOWN: Global pytest result; prohibited in this stage.
-- UNKNOWN: Semantic cycle family is stale in MCP.
+- UNKNOWN: Active MCP backend loaded-code adoption; no restart was performed.
+- UNKNOWN: Global pytest outcome; prohibited in this stage.
+- UNKNOWN: Semantic cycle family remains stale in MCP.
 
 ## FINAL IMPLEMENTER OBSERVATION
 
-The literal WARN-4H change passed the new isolated tests and specified focused regressions. Structural DFS cycle count remained 16. Architectural acceptance remains with ChatGPT. STOP after WARN-4H.
+The literal WARN-4I change passed new and specified focused tests. Structural DFS cycle count remained 16. Architectural acceptance remains with ChatGPT. STOP after WARN-4I.

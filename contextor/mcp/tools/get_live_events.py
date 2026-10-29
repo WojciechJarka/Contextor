@@ -79,6 +79,159 @@ def _current_cycle_warning_view(client, events):
     }
 
 
+def _current_cycle_warning_transitions(client, events, view):
+    """Expose only the latest owner-verified warning transition checkpoint."""
+
+    def unavailable(reason):
+        return {"status": "unavailable", "reason": reason}
+
+    if type(view) is not dict or view.get("status") != "fresh":
+        return unavailable("CURRENT_WARNING_VIEW_UNAVAILABLE")
+
+    try:
+        checkpoint = client.request(
+            "get_installed_cycle_warning_transitions",
+            timeout=2.0,
+        )
+    except (
+        OSError, EOFError, ConnectionError, TimeoutError,
+        RuntimeError, AttributeError, TypeError, ValueError,
+    ):
+        return unavailable("WARNING_TRANSITION_QUERY_FAILED")
+
+    if type(checkpoint) is not dict or checkpoint.get("status") != "ok":
+        return unavailable("WARNING_TRANSITION_CHECKPOINT_UNAVAILABLE")
+
+    required = {
+        "status",
+        "binding_state",
+        "from_revision",
+        "to_revision",
+        "activity_epoch",
+        "repo_id",
+        "root_path",
+        "service_instance_id",
+        "process_start_identity",
+        "transitions",
+        "authority",
+    }
+
+    if set(checkpoint) != required:
+        return unavailable("WARNING_TRANSITION_CHECKPOINT_INVALID")
+
+    if (
+        checkpoint["binding_state"]
+        != "INSTALLED_WARNING_TRANSITION_CHECKPOINT"
+        or checkpoint["authority"] != (
+            "LIVE_OWNER_COMMIT_SCOPED_WARNING_TRANSITIONS"
+            "_NOT_STRUCTURAL_REMOVAL_FOR_MODEL_ACCEPTANCE"
+            "_NOT_RUNTIME_SAFETY"
+        )
+        or type(checkpoint["from_revision"]) is not int
+        or type(checkpoint["to_revision"]) is not int
+        or checkpoint["from_revision"] < 1
+        or checkpoint["to_revision"] <= checkpoint["from_revision"]
+        or checkpoint["to_revision"] != events.get("revision")
+        or checkpoint["to_revision"] != view.get("revision")
+        or checkpoint["activity_epoch"] != events.get("activity_epoch")
+        or checkpoint["activity_epoch"] != view.get("activity_epoch")
+        or type(checkpoint["activity_epoch"]) is not str
+        or not checkpoint["activity_epoch"]
+    ):
+        return unavailable("WARNING_TRANSITION_GENERATION_MISMATCH")
+
+    for key in (
+        "repo_id",
+        "root_path",
+        "service_instance_id",
+        "process_start_identity",
+    ):
+        if type(checkpoint[key]) is not str or not checkpoint[key]:
+            return unavailable("WARNING_TRANSITION_IDENTITY_INVALID")
+
+    transitions = checkpoint["transitions"]
+
+    if type(transitions) is not tuple:
+        return unavailable("WARNING_TRANSITION_CONTENT_INVALID")
+
+    accepted = set(view["model_pass_paths"])
+    active = set(view["active_warning_paths"])
+    structural = set(view["structural_paths"])
+    seen = set()
+
+    for transition in transitions:
+        if (
+            type(transition) is not dict
+            or set(transition) != {
+                "path", "action", "previous_state", "current_state",
+            }
+        ):
+            return unavailable("WARNING_TRANSITION_CONTENT_INVALID")
+
+        path = transition["path"]
+        action = transition["action"]
+        before = transition["previous_state"]
+        after = transition["current_state"]
+
+        if (
+            type(path) is not tuple
+            or len(path) < 2
+            or any(type(node) is not str or not node for node in path)
+            or path[0] != path[-1]
+            or len(set(path[:-1])) != len(path) - 1
+            or path in seen
+        ):
+            return unavailable("WARNING_TRANSITION_CONTENT_INVALID")
+
+        seen.add(path)
+
+        if action == "STRUCTURAL_ADDED":
+            valid = (
+                before is None
+                and after in {"MODEL_PASS", "ACTIVE"}
+                and path in structural
+            )
+        elif action == "STRUCTURAL_REMOVED":
+            valid = (
+                before in {"MODEL_PASS", "ACTIVE"}
+                and after is None
+                and path not in structural
+            )
+        elif action == "MODEL_ACCEPTED":
+            valid = (
+                before == "ACTIVE"
+                and after == "MODEL_PASS"
+                and path in accepted
+            )
+        elif action == "WARNING_REACTIVATED":
+            valid = (
+                before == "MODEL_PASS"
+                and after == "ACTIVE"
+                and path in active
+            )
+        else:
+            valid = False
+
+        if not valid:
+            return unavailable("WARNING_TRANSITION_CONTENT_INVALID")
+
+        if after == "MODEL_PASS" and path not in accepted:
+            return unavailable("WARNING_TRANSITION_CONTENT_INVALID")
+
+        if after == "ACTIVE" and path not in active:
+            return unavailable("WARNING_TRANSITION_CONTENT_INVALID")
+
+    return {
+        "status": "fresh",
+        "scope": "LATEST_INSTALLED_COMMIT_ONLY_NOT_RETAINED_EVENT_HISTORY",
+        "from_revision": checkpoint["from_revision"],
+        "to_revision": checkpoint["to_revision"],
+        "activity_epoch": checkpoint["activity_epoch"],
+        "transition_count": len(transitions),
+        "transitions": transitions,
+    }
+
+
 def get_live_events(
     repo_path: str,
     after_revision: int | None = None,
@@ -144,6 +297,13 @@ def get_live_events(
         )
         response["cycle_warning_view"] = _current_cycle_warning_view(
             client, events,
+        )
+        response["cycle_warning_transitions"] = (
+            _current_cycle_warning_transitions(
+                client,
+                events,
+                response["cycle_warning_view"],
+            )
         )
         return json.dumps(response, indent=2)
 
