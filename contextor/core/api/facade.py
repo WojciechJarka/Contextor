@@ -565,6 +565,7 @@ class ContextorFacade:
         *,
         cycle_source_preparation_preview: bool = False,
         cycle_source_publication_opt_in: bool = False,
+        cycle_partial_source_publication_opt_in: bool = False,
     ) -> list:
         """
         Analyzes full project hierarchy, builds dependency graph, evaluates
@@ -604,6 +605,20 @@ class ContextorFacade:
         ):
             raise ValueError(
                 "cycle_source_publication_opt_in requires "
+                "cycle_source_preparation_preview=True"
+            )
+
+        if type(cycle_partial_source_publication_opt_in) is not bool:
+            raise ValueError(
+                "cycle_partial_source_publication_opt_in must be bool"
+            )
+
+        if (
+            cycle_partial_source_publication_opt_in
+            and not cycle_source_preparation_preview
+        ):
+            raise ValueError(
+                "cycle_partial_source_publication_opt_in requires "
                 "cycle_source_preparation_preview=True"
             )
 
@@ -1417,6 +1432,33 @@ class ContextorFacade:
                     store_manifest_kwargs[
                         "prepared_cycle_manifest"
                     ] = cycle_source_preparation.manifest
+
+            if (
+                cycle_partial_source_publication_opt_in
+                and cycle_source_preparation is not None
+                and state.cycle_semantics is cycle_semantics
+                and state.cycle_semantics_state == "fresh"
+                and state.cycles_state == "fresh"
+                and state.cycle_semantics.coverage_status
+                == "FILESYSTEM_STABLE_NON_ATOMIC"
+                and not state.cycle_semantics.source_issues
+                and getattr(state, "resync_required", False) is False
+                and state.dependency_graph is graph
+                and set(state.modules) == set(index.modules)
+            ):
+                from contextor.core.cycle_semantics.partial_scc_claims import (
+                    validate_partial_scc_claims,
+                )
+
+                partial_claims = validate_partial_scc_claims(
+                    state.dependency_graph.hard_edges,
+                    state.cycle_semantics,
+                    cycle_source_preparation,
+                )
+                if partial_claims is not None:
+                    store_manifest_kwargs[
+                        "prepared_partial_scc_preparation"
+                    ] = cycle_source_preparation
 
             component_started = time.monotonic()
             meta = save_engine_state(

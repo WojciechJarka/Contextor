@@ -536,6 +536,7 @@ def save_engine_state(
     exact_revision: int | None = None,
     file_state_payload: dict[str, Any] | None = None,
     prepared_cycle_manifest: Any = None,
+    prepared_partial_scc_preparation: Any = None,
 ):
     """Persist canonical state; optionally forward prepared SCC claims.
 
@@ -560,6 +561,11 @@ def save_engine_state(
         if prepared_cycle_manifest is not None:
             save_kwargs["prepared_cycle_manifest"] = (
                 prepared_cycle_manifest
+            )
+
+        if prepared_partial_scc_preparation is not None:
+            save_kwargs["prepared_partial_scc_preparation"] = (
+                prepared_partial_scc_preparation
             )
 
         return save_snapshot(
