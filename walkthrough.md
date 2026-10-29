@@ -1,52 +1,56 @@
-# CONTEXTOR P1D3-WARN-4C — implementer report
+# CONTEXTOR P1D3-WARN-4D — implementer report
 
 ## PREFLIGHT
 
-DIRECT_EVIDENCE: Contextor MCP inspected `ipc.py` and the existing pure warning projection first. Both new paths were absent. The two exact IPC patch anchors were present. No material drift. Prechange structural DFS back-edge count was 16.
+DIRECT_EVIDENCE: Contextor MCP inspected `ipc.py` first at canonical revision 864; structural DFS back-edge count was 16. Initial HEAD `e9ae2da25facd35e2c864703afabd0b590297f82`. The pre-existing worktree changed only `walkthrough.md` from the missing-patch report. Both requested new paths were absent. All eight supplied SEARCH blocks occurred exactly once in current `ipc.py`.
 
 ## HEAD / WORKTREE
 
-DIRECT_EVIDENCE: Initial and final HEAD `659fe7c6112de9cf7b7011a95256d2cc3d949eed`; initial worktree clean. Final changes are the three authorized Python files and this report. No commit, push, restart or active user's FULL/LIVE.
+DIRECT_EVIDENCE: Final HEAD unchanged. Final worktree changes are the two new Python files, `ipc.py` and this report. No commit, push, restart or active user's FULL/LIVE operation.
 
-## EXACT PATCH RESULT
+## EXACT PATCH APPLICATION
 
-DIRECT_EVIDENCE: The two new files were created from the supplied unified diff, preserving their supplied 135 and 215 source lines. The two IPC hunks were inserted at the exact anchors without modifying other logic or test assertions.
+DIRECT_EVIDENCE: Applied all eight literal SEARCH → REPLACE blocks through `apply_patch` and created both new files from the supplied `CREATE EXACT CONTENT` blocks. No alternative implementation or assertion change was made. The earlier named `.patch` file was not used; this task supplied complete replacement text.
+
+## DIRECT PUBLISH RESULTS
+
+CONTRACT_PROVED: The isolated direct publish path captured owner-derived warning reports before and after installation. Tests observed WARNING_REACTIVATED and MODEL_ACCEPTED without removing unchanged structural cycles. A later commit replaced the checkpoint.
+
+## COMMITTED PUBLISH RESULTS
+
+CONTRACT_PROVED: The isolated committed-snapshot publish test installed the next actual stored generation and produced a two-path WARNING_REACTIVATED checkpoint.
+
+## INCREMENTAL UPDATE RESULTS
+
+CONTRACT_PROVED: The isolated update_file commit produced two WARNING_REACTIVATED transitions while retaining cycle topology and clearing the old partial receipt. The existing canonical commit path remained the owner.
+
+## INVALID / STALE GENERATION RESULTS
+
+CONTRACT_PROVED: Stale pre- or post-installation structural inventory returned unavailable without an empty transition claim. Current state drift hid a cached positive checkpoint. Missing checkpoint, extra caller payload and recovery readiness failed closed.
+
+## IPC IDENTITY AND LOCK BOUNDARY
+
+CODE_PATH_PROVED: Owner reports are captured under the existing LIVE state lock at each actual commit boundary. Checkpoint construction checks owner identity and activity epoch. The query accepts only the operation key, checks readiness, compares its stored current report with the currently installed report under the lock, and returns a defensive copy. Caller-supplied projections, receipts, state or source bytes are rejected. The query itself does not append journal events.
 
 ## NEW TEST RESULTS
 
-DIRECT_EVIDENCE: `py_compile` on all three Python files exited 0. `tests/test_cycle_semantics_live_cycle_warning_query.py`: 19 passed, 0 failed, 0 skipped, 22.04 s, exit 0.
+DIRECT_EVIDENCE: `py_compile` on all three changed Python files exited 0. `tests/test_cycle_semantics_live_warning_transition_checkpoint.py`: 13 passed, 0 failed, 0 skipped, 27.22 s, exit 0.
 
 ## FOCUSED REGRESSIONS
 
-DIRECT_EVIDENCE: Three requested modules passed: 82 passed, 0 failed, 0 skipped, 67.69 s, exit 0. Tracked and new-file `git diff --check` whitespace checks exited 0. No global suite ran.
-
-## IPC LOCK BOUNDARY
-
-CODE_PATH_PROVED: New `get_installed_cycle_warning_projection` dispatch is inside the existing `with self._lock` region. It accepts exactly the operation key, checks stop/pending/degraded readiness and calls the new pure query before releasing the lock. The client method sends no caller-provided state or receipt object.
-
-## INSTALLED GENERATION IDENTITY
-
-CODE_PATH_PROVED: The new query derives canonical revision, state ID, repository/root, service instance, process start and activity epoch from the installed owner. Exact registered state class is resolved through `sys.modules`; a durable receipt without installed state cannot qualify. No protocol version changed.
-
-## STRUCTURAL / MODEL_PASS / ACTIVE COUNTS
-
-CONTRACT_PROVED: Genuine isolated FULL/store/LIVE PASS/INDETERMINATE and PASS/HAZARD had two structural paths, one accepted and one active. TWO_PASS had two accepted and zero active. Default/v2-only generations retained all structural paths as active. Fresh acyclic generation returned empty path tuples and zero counts.
-
-## FAIL-CLOSED NEGATIVE CASES
-
-CONTRACT_PROVED: Tests covered missing or forged partial receipt, stale/resync/duplicate structural inventory, absent installed state, wrong installed revision, incomplete authority, extra request keys and recovery readiness. Invalid structural inventory returned unavailable without an active warning count. The read-only query left the server event journal and state cycles unchanged.
+DIRECT_EVIDENCE: Four requested regression modules: 101 passed, 0 failed, 0 skipped, 88.29 s, exit 0. `git diff --check` and both new-file `git diff --no-index --check` calls exited 0. No global suite.
 
 ## POST-CHANGE MCP AUDIT
 
-DIRECT_EVIDENCE: Contextor `get_module_context` inspected all three files at canonical revision 864, with `workspace_sync=verified`, live provenance, fresh module/graph/topology/structural cycles and stale cycle_semantics. Structural DFS back-edge count remained 16. New query imports `contracts`, `cycle_warning_projection` and `partial_scc_publication`; IPC gained the specified hard dependency on the query. No newly counted structural cycle. This is source/workspace synchronization, not active loaded-code adoption.
+DIRECT_EVIDENCE: Contextor `get_module_context` inspected all three changed files at canonical revision 867; all had `workspace_sync=verified`, live provenance, fresh module/graph/topology/structural cycles and stale cycle_semantics. Structural DFS back-edge count remained 16. IPC gained the intended hard dependency on `live_warning_transition_checkpoint`; the new module imports only existing projection, transition and query modules. No newly counted structural cycle. This is source/workspace evidence, not the user's active process loaded-code adoption.
 
 ## FILES_CHANGED
 
-- `contextor/core/cycle_semantics/live_cycle_warning_query.py` (new)
-- `tests/test_cycle_semantics_live_cycle_warning_query.py` (new)
 - `contextor/core/live_state/ipc.py`
+- `contextor/core/cycle_semantics/live_warning_transition_checkpoint.py` (new)
+- `tests/test_cycle_semantics_live_warning_transition_checkpoint.py` (new)
 
-`walkthrough.md` is this report. Complete actual diffs of all three Python files follow.
+`walkthrough.md` is this report. Complete actual diffs follow.
 
 ## FULL_DIFFS
 
@@ -55,227 +59,307 @@ DIRECT_EVIDENCE: Contextor `get_module_context` inspected all three files at can
 
 ```diff
 diff --git a/contextor/core/live_state/ipc.py b/contextor/core/live_state/ipc.py
-index 7032732..596c80d 100644
+index 596c80d..277ff93 100644
 --- a/contextor/core/live_state/ipc.py
 +++ b/contextor/core/live_state/ipc.py
-@@ -2336,6 +2336,34 @@ class CanonicalLiveServer:
+@@ -860,6 +860,8 @@ class CanonicalLiveServer:
+         self._events: list[dict[str, Any]] = []
+         self._authority_event_fingerprints: OrderedDict[tuple[str, int, str], str] = OrderedDict()
+         self._lock = threading.RLock()
++        self._cycle_warning_transition_checkpoint = None
++        self._cycle_warning_transition_current_report = None
+         self._mutation_execution_lock = threading.Lock()
+         self._mutation_guard = mutation_guard
+         self._recovery_verification_guard = recovery_verification_guard
+@@ -905,6 +907,39 @@ class CanonicalLiveServer:
+             desktop_instance_id=self._authority_identity.get("desktop_instance_id"),
+         )
+ 
++    def _owner_cycle_warning_report_locked(self) -> dict[str, Any]:
++        """Capture this installed generation under self._lock, not from a caller."""
++        try:
++            from contextor.core.cycle_semantics.live_cycle_warning_query import (
++                read_locked_installed_cycle_warnings,
++            )
++            return read_locked_installed_cycle_warnings(
++                self._state,
++                canonical_revision=self._revision,
++                authority_identity=self._authority_identity,
++                activity_epoch=self._activity_epoch,
++            )
++        except Exception:
++            return {"status": "unavailable", "reason": "WARNING_PROJECTION_FAILURE"}
++
++    def _refresh_cycle_warning_transition_locked(self, before: dict[str, Any]) -> None:
++        """Commit-scoped derived checkpoint; never affect canonical commit success."""
++        after = self._owner_cycle_warning_report_locked()
++        try:
++            from contextor.core.cycle_semantics.live_warning_transition_checkpoint import (
++                build_locked_warning_transition_checkpoint,
++            )
++            result = build_locked_warning_transition_checkpoint(
++                before,
++                after,
++                authority_identity=self._authority_identity,
++                activity_epoch=self._activity_epoch,
++            )
++        except Exception:
++            result = {"status": "unavailable", "reason": "WARNING_TRANSITION_FAILURE"}
++        self._cycle_warning_transition_current_report = after
++        self._cycle_warning_transition_checkpoint = result
++
+     def _read_revision(self) -> int:
+         with self._lock:
+             return self._revision
+@@ -1514,6 +1549,7 @@ class CanonicalLiveServer:
+                         self._events + [event]
+                     )[-self._retention:]
+ 
++                    before_warning_report = self._owner_cycle_warning_report_locked()
+                     _mark_live_state_provenance(committed_state)
+ 
+                     # COMMIT BOUNDARY
+@@ -1528,6 +1564,7 @@ class CanonicalLiveServer:
+                     self._revision = committed_revision
+                     self._events = next_events
+                     self._activity_seq = next_seq
++                    self._refresh_cycle_warning_transition_locked(before_warning_report)
+ 
+                     committed_seq = next_seq
+                     committed = True
+@@ -1646,9 +1683,11 @@ class CanonicalLiveServer:
+                         }
+                     state_rev = expected_revision
+ 
++                before_warning_report = self._owner_cycle_warning_report_locked()
+                 _mark_live_state_provenance(state)
+                 self._state = state
+                 self._revision = state_rev
++                self._refresh_cycle_warning_transition_locked(before_warning_report)
+                 evt = self._record_event("publish", request, category="LIVE_STATE")
+                 _safe_trace_event("LIVE", "CANONICAL_PUBLISH", op=trace_op, rev_before=previous_revision, rev_after=self._revision, seq=evt["seq"], origin=request.get("origin"))
+                 return {"status": "ok", "revision": self._revision, "seq": evt["seq"]}
+@@ -2213,8 +2252,10 @@ class CanonicalLiveServer:
+ 
+                 # ATOMIC COMMIT BOUNDARY.
+                 # Nothing above this line may replace/mutate active canonical ownership.
++                before_warning_report = self._owner_cycle_warning_report_locked()
+                 self._state = candidate_state
+                 self._revision = expected_revision
++                self._refresh_cycle_warning_transition_locked(before_warning_report)
+                 _safe_trace_event("LIVE", "CANONICAL_COMMIT", op=trace_op, path=file_path, rev_before=previous_revision, rev_after=expected_revision)
+ 
+                 try:
+@@ -2336,6 +2377,42 @@ class CanonicalLiveServer:
              return self._execute_publish(request)
  
          with self._lock:
-+            if operation == "get_installed_cycle_warning_projection":
++            if operation == "get_installed_cycle_warning_transitions":
 +                if set(request) != {"operation"}:
 +                    return {
 +                        "status": "unavailable",
-+                        "reason": "INVALID_CYCLE_WARNING_PROJECTION_PAYLOAD",
-+                        "revision": self._revision,
++                        "reason": "INVALID_WARNING_TRANSITION_PAYLOAD",
 +                    }
 +                if (
 +                    self._stop.is_set()
 +                    or self._pending_recovery_certificate is not None
 +                    or self._recovery_release_degraded
 +                ):
-+                    return {
-+                        "status": "unavailable",
-+                        "reason": "LIVE_OWNER_NOT_READY",
-+                        "revision": self._revision,
-+                    }
-+                from contextor.core.cycle_semantics.live_cycle_warning_query import (
-+                    read_locked_installed_cycle_warnings,
-+                )
++                    return {"status": "unavailable", "reason": "LIVE_OWNER_NOT_READY"}
++                checkpoint = self._cycle_warning_transition_checkpoint
++                if checkpoint is None:
++                    return {"status": "unavailable", "reason": "NO_COMMITTED_WARNING_TRANSITION"}
++                if (
++                    self._cycle_warning_transition_current_report
++                    != self._owner_cycle_warning_report_locked()
++                ):
++                    return {"status": "unavailable", "reason": "WARNING_TRANSITION_STATE_DRIFT"}
++                if checkpoint.get("status") != "ok":
++                    return copy.deepcopy(checkpoint)
++                if (
++                    checkpoint.get("to_revision") != self._revision
++                    or checkpoint.get("activity_epoch") != self._activity_epoch
++                    or any(
++                        checkpoint.get(key) != self._authority_identity.get(key)
++                        for key in (
++                            "repo_id", "root_path", "service_instance_id",
++                            "process_start_identity",
++                        )
++                    )
++                ):
++                    return {"status": "unavailable", "reason": "WARNING_TRANSITION_IDENTITY_DRIFT"}
++                return copy.deepcopy(checkpoint)
 +
-+                return read_locked_installed_cycle_warnings(
-+                    self._state,
-+                    canonical_revision=self._revision,
-+                    authority_identity=self._authority_identity,
-+                    activity_epoch=self._activity_epoch,
-+                )
-+
-             if operation == "verify_installed_partial_scc_generation":
-                 required_fields = {
-                     "operation",
-@@ -2804,6 +2832,10 @@ class LiveStateClient:
+             if operation == "get_installed_cycle_warning_projection":
+                 if set(request) != {"operation"}:
+                     return {
+@@ -2832,6 +2909,10 @@ class LiveStateClient:
              ),
          )
  
-+    def get_installed_cycle_warning_projection(self) -> dict[str, Any]:
-+        """Read the current canonical LIVE warning partition under its lock."""
-+        return self.request("get_installed_cycle_warning_projection")
++    def get_installed_cycle_warning_transitions(self) -> dict[str, Any]:
++        """Read the latest owner-derived LIVE commit warning transition."""
++        return self.request("get_installed_cycle_warning_transitions")
 +
-     def verify_installed_partial_scc_generation(
-         self,
-         *,
+     def get_installed_cycle_warning_projection(self) -> dict[str, Any]:
+         """Read the current canonical LIVE warning partition under its lock."""
+         return self.request("get_installed_cycle_warning_projection")
 ```
 
-### New LIVE query
+### New checkpoint module
 
 ```diff
-diff --git a/contextor/core/cycle_semantics/live_cycle_warning_query.py b/contextor/core/cycle_semantics/live_cycle_warning_query.py
+diff --git a/contextor/core/cycle_semantics/live_warning_transition_checkpoint.py b/contextor/core/cycle_semantics/live_warning_transition_checkpoint.py
 new file mode 100644
-index 0000000..c951e0b
+index 0000000..c372ca2
 --- /dev/null
-+++ b/contextor/core/cycle_semantics/live_cycle_warning_query.py
-@@ -0,0 +1,135 @@
-+"""Lock-scoped, read-only projection of canonical LIVE cycle warnings.
++++ b/contextor/core/cycle_semantics/live_warning_transition_checkpoint.py
+@@ -0,0 +1,119 @@
++"""Pure owner-captured cycle warning transition checkpoint.
 +
-+The owner obtains and reports its own generation identity. No caller
-+supplies a state, receipt, graph, or source capture. MODEL_PASS is a
-+restricted static-model claim, not a runtime safety certificate.
++Both reports must have been obtained from the same LIVE owner, each while
++its corresponding generation was installed under the owner's lock.
++This module never authenticates caller-provided data on its own.
 +"""
 +
 +from __future__ import annotations
 +
-+import sys
 +from collections.abc import Mapping
 +from typing import Any
 +
-+from .contracts import fingerprint_hard_edges
-+from .cycle_warning_projection import project_installed_cycle_warnings
-+from .partial_scc_publication import CanonicalPartialSCCReceipt
++from .cycle_warning_projection import InstalledCycleWarningProjection
++from .cycle_warning_transitions import diff_installed_cycle_warning_projections
++from .live_cycle_warning_query import _AUTHORITY as _PROJECTION_AUTHORITY
++from .live_cycle_warning_query import _BINDING as _PROJECTION_BINDING
 +
-+
-+_AUTHORITY = (
-+    "LIVE_OWNER_LOCK_SCOPED_CYCLE_WARNING_PROJECTION"
-+    "_NOT_STABLE_AFTER_REPLY_NOT_RUNTIME_SAFETY"
++_CHECKPOINT_AUTHORITY = (
++    "LIVE_OWNER_COMMIT_SCOPED_WARNING_TRANSITIONS"
++    "_NOT_STRUCTURAL_REMOVAL_FOR_MODEL_ACCEPTANCE"
++    "_NOT_RUNTIME_SAFETY"
 +)
-+_BINDING = "INSTALLED_CYCLE_WARNING_PROJECTION"
-+_NO_RECEIPT_SHA256 = "0" * 64
 +
 +
-+def read_locked_installed_cycle_warnings(
-+    state: Any,
++def build_locked_warning_transition_checkpoint(
++    before: Any,
++    after: Any,
 +    *,
-+    canonical_revision: int,
 +    authority_identity: Mapping[str, Any],
 +    activity_epoch: str,
 +) -> dict[str, Any]:
-+    """Project installed warnings; the caller MUST hold the LIVE owner lock."""
++    """Diff two owner-captured reports; return no transitions on uncertainty."""
 +    def unavailable(reason: str) -> dict[str, Any]:
 +        return {
 +            "status": "unavailable",
 +            "reason": reason,
-+            "revision": canonical_revision,
-+            "activity_epoch": activity_epoch,
-+            "authority": _AUTHORITY,
++            "authority": _CHECKPOINT_AUTHORITY,
 +        }
 +
-+    if (
-+        type(canonical_revision) is not int
-+        or canonical_revision < 1
-+        or type(activity_epoch) is not str
-+        or not activity_epoch
-+        or not isinstance(authority_identity, Mapping)
-+    ):
-+        return unavailable("INSTALLED_GENERATION_UNAVAILABLE")
-+
-+    owner_values = tuple(
-+        authority_identity.get(name)
-+        for name in (
-+            "repo_id", "root_path", "service_instance_id",
-+            "process_start_identity",
-+        )
-+    )
-+    if any(type(value) is not str or not value for value in owner_values):
-+        return unavailable("LIVE_AUTHORITY_UNAVAILABLE")
-+    repo_id, root_path, service_instance_id, process_start_identity = owner_values
-+
-+    registered = getattr(
-+        sys.modules.get("contextor.core.analysis.state_manager"),
-+        "RepositoryAnalysisState", None,
-+    )
-+    if type(registered) is not type or type(state) is not registered:
-+        return unavailable("INSTALLED_STATE_UNAVAILABLE")
-+
-+    revision = getattr(state, "revision", None)
-+    state_id = getattr(state, "state_id", None)
-+    if (
-+        type(revision) is not int
-+        or revision != canonical_revision
-+        or type(state_id) is not str
-+        or not state_id
-+    ):
-+        return unavailable("INSTALLED_GENERATION_MISMATCH")
-+
 +    try:
-+        graph_sha256 = fingerprint_hard_edges(state.dependency_graph.hard_edges)
-+        receipt = getattr(state, "cycle_partial_source_publication", None)
-+        claims_sha256 = (
-+            receipt.claims_sha256
-+            if type(receipt) is CanonicalPartialSCCReceipt
-+            and type(receipt.claims_sha256) is str
-+            else _NO_RECEIPT_SHA256
++        if type(activity_epoch) is not str or not activity_epoch:
++            return unavailable("WARNING_TRANSITION_AUTHORITY_UNAVAILABLE")
++        if not isinstance(authority_identity, Mapping):
++            return unavailable("WARNING_TRANSITION_AUTHORITY_UNAVAILABLE")
++        names = ("repo_id", "root_path", "service_instance_id", "process_start_identity")
++        identity = {name: authority_identity.get(name) for name in names}
++        if any(type(value) is not str or not value for value in identity.values()):
++            return unavailable("WARNING_TRANSITION_AUTHORITY_UNAVAILABLE")
++        fields = {
++            "status", "binding_state", "revision", "state_id", "repo_id",
++            "root_path", "service_instance_id", "process_start_identity",
++            "activity_epoch", "graph_sha256", "structural_paths",
++            "model_pass_paths", "active_warning_paths", "structural_count",
++            "model_pass_count", "active_warning_count", "authority",
++        }
++        for report in (before, after):
++            if type(report) is not dict or set(report) != fields:
++                return unavailable("WARNING_TRANSITION_PROJECTION_UNAVAILABLE")
++            if (report["status"] != "ok"
++                    or report["binding_state"] != _PROJECTION_BINDING
++                    or report["authority"] != _PROJECTION_AUTHORITY
++                    or report["activity_epoch"] != activity_epoch):
++                return unavailable("WARNING_TRANSITION_PROJECTION_UNAVAILABLE")
++            if any(report[name] != identity[name] for name in names):
++                return unavailable("WARNING_TRANSITION_IDENTITY_MISMATCH")
++            if (type(report["revision"]) is not int or report["revision"] < 1
++                    or type(report["state_id"]) is not str or not report["state_id"]
++                    or type(report["graph_sha256"]) is not str
++                    or len(report["graph_sha256"]) != 64
++                    or any(c not in "0123456789abcdef" for c in report["graph_sha256"])):
++                return unavailable("WARNING_TRANSITION_PROJECTION_UNAVAILABLE")
++            for count, paths in (
++                ("structural_count", "structural_paths"),
++                ("model_pass_count", "model_pass_paths"),
++                ("active_warning_count", "active_warning_paths"),
++            ):
++                if (type(report[count]) is not int or report[count] < 0
++                        or type(report[paths]) is not tuple
++                        or report[count] != len(report[paths])):
++                    return unavailable("WARNING_TRANSITION_PROJECTION_UNAVAILABLE")
++
++        old_revision, new_revision = before["revision"], after["revision"]
++        if new_revision <= old_revision:
++            return unavailable("WARNING_TRANSITION_REVISION_MISMATCH")
++        before_projection = InstalledCycleWarningProjection(
++            "FRESH", None, old_revision,
++            before["structural_paths"], before["model_pass_paths"],
++            before["active_warning_paths"],
 +        )
-+        projection = project_installed_cycle_warnings(
-+            state,
-+            canonical_revision=canonical_revision,
-+            authority_identity=authority_identity,
-+            activity_epoch=activity_epoch,
-+            expected_revision=canonical_revision,
-+            expected_state_id=state_id,
-+            expected_repo_id=repo_id,
-+            expected_root_path=root_path,
-+            expected_graph_sha256=graph_sha256,
-+            expected_claims_sha256=claims_sha256,
-+            expected_service_instance_id=service_instance_id,
-+            expected_process_start_identity=process_start_identity,
++        after_projection = InstalledCycleWarningProjection(
++            "FRESH", None, new_revision,
++            after["structural_paths"], after["model_pass_paths"],
++            after["active_warning_paths"],
 +        )
++        delta = diff_installed_cycle_warning_projections(
++            before_projection, after_projection,
++        )
++        if (delta.status != "FRESH" or delta.transitions is None
++                or delta.from_revision != old_revision
++                or delta.to_revision != new_revision):
++            return unavailable("WARNING_TRANSITION_PROJECTION_UNAVAILABLE")
++        return {
++            "status": "ok",
++            "binding_state": "INSTALLED_WARNING_TRANSITION_CHECKPOINT",
++            "from_revision": old_revision,
++            "to_revision": new_revision,
++            "activity_epoch": activity_epoch,
++            **identity,
++            "transitions": tuple({
++                "path": transition.path,
++                "action": transition.action,
++                "previous_state": transition.previous_state,
++                "current_state": transition.current_state,
++            } for transition in delta.transitions),
++            "authority": _CHECKPOINT_AUTHORITY,
++        }
 +    except (AttributeError, KeyError, TypeError, ValueError, IndexError,
 +            RecursionError, OverflowError):
-+        return unavailable("CYCLE_WARNING_PROJECTION_UNAVAILABLE")
-+
-+    if projection.status != "FRESH":
-+        return unavailable(projection.reason or "CYCLE_WARNING_PROJECTION_UNAVAILABLE")
-+
-+    structural = projection.structural_paths
-+    accepted = projection.model_pass_paths
-+    active = projection.active_warning_paths
-+    if any(type(value) is not tuple for value in (structural, accepted, active)):
-+        return unavailable("CYCLE_WARNING_PROJECTION_UNAVAILABLE")
-+
-+    return {
-+        "status": "ok",
-+        "binding_state": _BINDING,
-+        "revision": canonical_revision,
-+        "state_id": state_id,
-+        "repo_id": repo_id,
-+        "root_path": root_path,
-+        "service_instance_id": service_instance_id,
-+        "process_start_identity": process_start_identity,
-+        "activity_epoch": activity_epoch,
-+        "graph_sha256": graph_sha256,
-+        "structural_paths": structural,
-+        "model_pass_paths": accepted,
-+        "active_warning_paths": active,
-+        "structural_count": len(structural),
-+        "model_pass_count": len(accepted),
-+        "active_warning_count": len(active),
-+        "authority": _AUTHORITY,
-+    }
++        return unavailable("WARNING_TRANSITION_PROJECTION_UNAVAILABLE")
 ```
 
-### New test module
+### New integration test
 
 ```diff
-diff --git a/tests/test_cycle_semantics_live_cycle_warning_query.py b/tests/test_cycle_semantics_live_cycle_warning_query.py
+diff --git a/tests/test_cycle_semantics_live_warning_transition_checkpoint.py b/tests/test_cycle_semantics_live_warning_transition_checkpoint.py
 new file mode 100644
-index 0000000..d26a174
+index 0000000..f3a9b37
 --- /dev/null
-+++ b/tests/test_cycle_semantics_live_cycle_warning_query.py
-@@ -0,0 +1,215 @@
-+"""Read-only canonical LIVE cycle-warning projection, no user service access."""
++++ b/tests/test_cycle_semantics_live_warning_transition_checkpoint.py
+@@ -0,0 +1,206 @@
++"""WARN-4D: owner-owned warning transitions survive generation installation."""
 +
 +from __future__ import annotations
 +
 +import copy
-+from dataclasses import replace
++from contextlib import contextmanager
++from types import SimpleNamespace
 +
 +import pytest
 +
-+from contextor.core.api.facade import ContextorFacade
 +from tests.test_cycle_semantics_live_installed_partial_claims import (
 +    _fixture, _full, _owner, _persisted,
 +)
 +from tests.test_original_worker_partial_scc_preparation import (
-+    PASS_AND_HAZARD, PASS_AND_UNKNOWN, TWO_PASS, _repo,
++    PASS_AND_HAZARD, PASS_AND_UNKNOWN, TWO_PASS,
 +)
 +
 +
@@ -284,198 +368,189 @@ index 0000000..d26a174
 +    monkeypatch.setenv("CONTEXTOR_DISABLE_PROCESS_POOL", "1")
 +
 +
-+@pytest.mark.parametrize("sources,expected_accepted", [
-+    (PASS_AND_UNKNOWN, 1),
-+    (PASS_AND_HAZARD, 1),
-+    (TWO_PASS, 2),
-+])
-+def test_t01_t03_real_installed_partial_projection(
-+    tmp_path, isolated_dirs, sources, expected_accepted,
-+):
-+    _, state, metadata = _fixture(tmp_path, sources)
-+    with _owner(state, metadata) as (server, client):
-+        before = copy.deepcopy((server._events, server._activity_seq, state.cycles))
-+        answer = client.get_installed_cycle_warning_projection()
-+        assert answer["status"] == "ok"
-+        assert answer["binding_state"] == "INSTALLED_CYCLE_WARNING_PROJECTION"
-+        assert answer["revision"] == metadata.revision
-+        assert answer["structural_count"] == 2
-+        assert answer["model_pass_count"] == expected_accepted
-+        assert answer["active_warning_count"] == 2 - expected_accepted
-+        assert answer["structural_paths"] == tuple(tuple(path) for path in state.cycles)
-+        assert answer["model_pass_paths"] == tuple(
-+            tuple(path) for path in state.cycles[:expected_accepted]
-+        )
-+        assert answer["active_warning_paths"] == tuple(
-+            tuple(path) for path in state.cycles[expected_accepted:]
-+        )
-+        assert answer["activity_epoch"] == server._activity_epoch
-+        assert answer["service_instance_id"] == server.endpoint.service_instance_id
-+        assert answer["process_start_identity"] == server.endpoint.process_start_identity
-+        assert (server._events, server._activity_seq, state.cycles) == before
-+        assert client.get_installed_cycle_warning_projection() == answer
-+
-+
-+def test_t04_default_full_has_all_structural_cycles_active(tmp_path, isolated_dirs):
-+    root = _repo(tmp_path, TWO_PASS)
-+    errors, result = ContextorFacade.analyze_project(str(root))
-+    assert isinstance(errors, list) and result is not None
++def _installed_next(root, server, *, partial=False):
++    _full(root, partial=partial)
 +    state, metadata = _persisted(root)
-+    assert state.cycle_partial_source_publication is None
-+    with _owner(state, metadata) as (_, client):
-+        answer = client.get_installed_cycle_warning_projection()
-+        assert answer["status"] == "ok"
-+        assert answer["structural_count"] == answer["active_warning_count"] == 2
-+        assert answer["model_pass_paths"] == ()
++    assert server._execute_publish({
++        "state": state, "origin": "isolated_test",
++    })["status"] == "ok"
++    return state, metadata
 +
 +
-+def test_t05_v2_only_receipt_does_not_accept_partial(tmp_path, isolated_dirs):
-+    _, state, metadata = _fixture(
-+        tmp_path, TWO_PASS, partial=False, complete=True,
-+    )
-+    assert state.cycle_source_publication is not None
-+    with _owner(state, metadata) as (_, client):
-+        answer = client.get_installed_cycle_warning_projection()
-+        assert answer["status"] == "ok"
-+        assert answer["structural_count"] == answer["active_warning_count"] == 2
-+        assert answer["model_pass_count"] == 0
++def _transition(client):
++    result = client.get_installed_cycle_warning_transitions()
++    assert result["status"] == "ok"
++    assert result["binding_state"] == "INSTALLED_WARNING_TRANSITION_CHECKPOINT"
++    return result
 +
 +
-+def test_t06_valid_fresh_acyclic_generation(tmp_path, isolated_dirs):
-+    _, state, metadata = _fixture(tmp_path, {"a": "value = 1\n"})
-+    with _owner(state, metadata) as (_, client):
-+        answer = client.get_installed_cycle_warning_projection()
-+        assert answer["status"] == "ok"
-+        assert answer["structural_paths"] == ()
-+        assert answer["model_pass_paths"] == ()
-+        assert answer["active_warning_paths"] == ()
-+        assert answer["structural_count"] == answer["active_warning_count"] == 0
++def test_t01_t04_two_pass_loses_proof_and_reactivates_both(tmp_path, isolated_dirs):
++    root, state, metadata = _fixture(tmp_path, TWO_PASS)
++    with _owner(state, metadata) as (server, client):
++        assert client.get_installed_cycle_warning_transitions()["status"] == "unavailable"
++        next_state, newer = _installed_next(root, server, partial=False)
++        answer = _transition(client)
++        assert answer["from_revision"] == metadata.revision
++        assert answer["to_revision"] == newer.revision
++        assert answer["activity_epoch"] == server._activity_epoch
++        assert len(answer["transitions"]) == 2
++        assert tuple(item["action"] for item in answer["transitions"]) == (
++            "WARNING_REACTIVATED", "WARNING_REACTIVATED",
++        )
++        assert all(item["previous_state"] == "MODEL_PASS" for item in answer["transitions"])
++        assert all(item["current_state"] == "ACTIVE" for item in answer["transitions"])
++        assert tuple(item["path"] for item in answer["transitions"]) == (
++            ("a", "b", "a"), ("x", "y", "x"),
++        )
++        assert next_state.cycles == state.cycles
++        assert client.get_installed_cycle_warning_transitions() == answer
 +
 +
-+def test_t07_missing_partial_receipt_reactivates_all(tmp_path, isolated_dirs):
-+    _, state, metadata = _fixture(tmp_path, TWO_PASS)
-+    state.cycle_partial_source_publication = None
-+    with _owner(state, metadata) as (_, client):
-+        answer = client.get_installed_cycle_warning_projection()
-+        assert answer["status"] == "ok"
-+        assert answer["model_pass_count"] == 0
-+        assert answer["active_warning_count"] == 2
++def test_t02_mixed_pass_unknown_only_one_reactivated(tmp_path, isolated_dirs):
++    root, state, metadata = _fixture(tmp_path, PASS_AND_UNKNOWN)
++    with _owner(state, metadata) as (server, client):
++        _installed_next(root, server, partial=False)
++        answer = _transition(client)
++        assert tuple(item["path"] for item in answer["transitions"]) == (("a", "b", "a"),)
++        assert answer["transitions"][0]["action"] == "WARNING_REACTIVATED"
 +
 +
-+def test_t08_forged_receipt_fails_closed_without_hiding_paths(tmp_path, isolated_dirs):
-+    _, state, metadata = _fixture(tmp_path, TWO_PASS)
-+    receipt = state.cycle_partial_source_publication
-+    state.cycle_partial_source_publication = replace(receipt, claims_sha256="0" * 64)
-+    with _owner(state, metadata) as (_, client):
-+        answer = client.get_installed_cycle_warning_projection()
-+        assert answer["status"] == "ok"
-+        assert answer["model_pass_count"] == 0
-+        assert answer["active_warning_count"] == 2
++def test_t03_mixed_pass_hazard_does_not_suppress_hazard(tmp_path, isolated_dirs):
++    root, state, metadata = _fixture(tmp_path, PASS_AND_HAZARD)
++    with _owner(state, metadata) as (server, client):
++        _installed_next(root, server, partial=False)
++        answer = _transition(client)
++        assert tuple(item["path"] for item in answer["transitions"]) == (("a", "b", "a"),)
++        assert answer["transitions"][0]["action"] == "WARNING_REACTIVATED"
 +
 +
-+@pytest.mark.parametrize("mutation", ["stale", "resync", "duplicate"])
-+def test_t09_unavailable_structural_inventory_is_not_zero(
-+    tmp_path, isolated_dirs, mutation,
-+):
-+    _, state, metadata = _fixture(tmp_path)
-+    if mutation == "stale":
-+        state.cycles_state = "stale"
-+    elif mutation == "resync":
-+        state.resync_required = True
-+    else:
-+        state.cycles.append(list(state.cycles[0]))
-+    with _owner(state, metadata) as (_, client):
-+        answer = client.get_installed_cycle_warning_projection()
++def test_t05_persisted_full_without_receipt_then_partial_accepts(tmp_path, isolated_dirs):
++    root, state, metadata = _fixture(tmp_path, TWO_PASS, partial=False)
++    with _owner(state, metadata) as (server, client):
++        _installed_next(root, server, partial=True)
++        answer = _transition(client)
++        assert len(answer["transitions"]) == 2
++        assert {item["action"] for item in answer["transitions"]} == {"MODEL_ACCEPTED"}
++
++
++def test_t06_stale_before_is_unavailable_without_zero_transition_claim(tmp_path, isolated_dirs):
++    root, state, metadata = _fixture(tmp_path, TWO_PASS)
++    state.cycles_state = "stale"
++    with _owner(state, metadata) as (server, client):
++        _installed_next(root, server, partial=True)
++        answer = client.get_installed_cycle_warning_transitions()
 +        assert answer["status"] == "unavailable"
-+        assert answer["reason"] == "STRUCTURAL_CYCLE_INVENTORY_UNAVAILABLE"
-+        assert "active_warning_count" not in answer
++        assert "transitions" not in answer
 +
 +
-+def test_t10_durable_receipt_without_installed_state_is_not_accepted(
-+    tmp_path, isolated_dirs,
-+):
-+    _, state, metadata = _fixture(tmp_path, TWO_PASS)
-+    with _owner(None, metadata) as (_, client):
-+        answer = client.get_installed_cycle_warning_projection()
++def test_t07_stale_after_is_unavailable(tmp_path, isolated_dirs):
++    root, state, metadata = _fixture(tmp_path, TWO_PASS)
++    with _owner(state, metadata) as (server, client):
++        _full(root, partial=False)
++        newer, _ = _persisted(root)
++        newer.cycles_state = "stale"
++        assert server._execute_publish({"state": newer, "origin": "isolated_test"})["status"] == "ok"
++        answer = client.get_installed_cycle_warning_transitions()
 +        assert answer["status"] == "unavailable"
-+        assert answer["reason"] == "INSTALLED_STATE_UNAVAILABLE"
++        assert "transitions" not in answer
 +
 +
-+def test_t11_wrong_loaded_revision_fails_closed(tmp_path, isolated_dirs):
-+    _, state, metadata = _fixture(tmp_path, TWO_PASS)
-+    with _owner(state, metadata) as (_, client):
-+        state.revision += 1
-+        answer = client.get_installed_cycle_warning_projection()
++def test_t08_query_read_only_does_not_emit_events(tmp_path, isolated_dirs):
++    root, state, metadata = _fixture(tmp_path, TWO_PASS)
++    with _owner(state, metadata) as (server, client):
++        _installed_next(root, server, partial=False)
++        before = copy.deepcopy((server._events, server._activity_seq, server._activity_epoch))
++        _transition(client)
++        _transition(client)
++        assert (server._events, server._activity_seq, server._activity_epoch) == before
++
++
++def test_t09_newer_commit_replaces_previous_checkpoint(tmp_path, isolated_dirs):
++    root, state, metadata = _fixture(tmp_path, TWO_PASS)
++    with _owner(state, metadata) as (server, client):
++        _, first = _installed_next(root, server, partial=False)
++        assert len(_transition(client)["transitions"]) == 2
++        _, second = _installed_next(root, server, partial=False)
++        answer = _transition(client)
++        assert answer["from_revision"] == first.revision
++        assert answer["to_revision"] == second.revision
++        assert answer["transitions"] == ()
++
++
++def test_t10_current_state_drift_hides_cached_positive(tmp_path, isolated_dirs):
++    root, state, metadata = _fixture(tmp_path, TWO_PASS)
++    with _owner(state, metadata) as (server, client):
++        newest, _ = _installed_next(root, server, partial=False)
++        assert _transition(client)["status"] == "ok"
++        newest.cycles_state = "stale"
++        answer = client.get_installed_cycle_warning_transitions()
 +        assert answer["status"] == "unavailable"
-+        assert answer["reason"] == "INSTALLED_GENERATION_MISMATCH"
++        assert "transitions" not in answer
 +
 +
-+def test_t12_foreign_or_incomplete_authority_fails_closed(tmp_path, isolated_dirs):
++def test_t11_no_caller_payload_allowed(tmp_path, isolated_dirs):
 +    _, state, metadata = _fixture(tmp_path, TWO_PASS)
 +    with _owner(state, metadata) as (server, client):
-+        server._authority_identity["process_start_identity"] = None
-+        answer = client.get_installed_cycle_warning_projection()
-+        assert answer["status"] == "unavailable"
-+        assert answer["reason"] == "LIVE_AUTHORITY_UNAVAILABLE"
++        for extra in ("state", "receipt", "previous_projection", "expected_revision"):
++            answer = client.request("get_installed_cycle_warning_transitions", **{extra: "bad"})
++            assert answer["reason"] == "INVALID_WARNING_TRANSITION_PAYLOAD"
 +
 +
-+def test_t13_extra_request_keys_are_rejected(tmp_path, isolated_dirs):
-+    _, state, metadata = _fixture(tmp_path)
-+    with _owner(state, metadata) as (_, client):
-+        for extra in ("state", "receipt", "source_bytes", "expected_revision"):
-+            answer = client.request("get_installed_cycle_warning_projection", **{extra: "forbidden"})
-+            assert answer["status"] == "unavailable"
-+            assert answer["reason"] == "INVALID_CYCLE_WARNING_PROJECTION_PAYLOAD"
-+
-+
-+@pytest.mark.parametrize("readiness", ["pending", "degraded"])
-+def test_t14_recovery_not_ready_returns_unavailable(tmp_path, isolated_dirs, readiness):
-+    _, state, metadata = _fixture(tmp_path)
++def test_t12_recovery_blocks_transition_query(tmp_path, isolated_dirs):
++    root, state, metadata = _fixture(tmp_path, TWO_PASS)
 +    with _owner(state, metadata) as (server, client):
++        _installed_next(root, server, partial=False)
 +        try:
-+            if readiness == "pending":
-+                server._pending_recovery_certificate = {"certificate_id": "synthetic"}
-+            else:
-+                server._recovery_release_degraded = True
-+            answer = client.get_installed_cycle_warning_projection()
-+            assert answer["status"] == "unavailable"
++            server._recovery_release_degraded = True
++            answer = client.get_installed_cycle_warning_transitions()
 +            assert answer["reason"] == "LIVE_OWNER_NOT_READY"
 +        finally:
-+            server._pending_recovery_certificate = None
 +            server._recovery_release_degraded = False
 +
 +
-+def test_t15_new_installed_generation_restores_warnings(tmp_path, isolated_dirs):
++def test_t13_committed_snapshot_publish_uses_same_checkpoint(tmp_path, isolated_dirs):
 +    root, state, metadata = _fixture(tmp_path, TWO_PASS)
 +    with _owner(state, metadata) as (server, client):
-+        first = client.get_installed_cycle_warning_projection()
-+        assert first["active_warning_count"] == 0
 +        _full(root, partial=False)
-+        newer, newer_metadata = _persisted(root)
-+        assert newer_metadata.revision == metadata.revision + 1
-+        assert server._execute_publish({
-+            "state": newer, "origin": "isolated_test",
-+        })["status"] == "ok"
-+        second = client.get_installed_cycle_warning_projection()
-+        assert second["status"] == "ok"
-+        assert second["revision"] == newer_metadata.revision
-+        assert second["structural_paths"] == first["structural_paths"]
-+        assert second["model_pass_count"] == 0
-+        assert second["active_warning_count"] == 2
-+        assert second["activity_epoch"] == first["activity_epoch"]
++        newer, new_meta = _persisted(root)
++        @contextmanager
++        def _reader():
++            yield newer, new_meta
++        server._committed_snapshot_reader = _reader
++        response = server._execute_publish({
++            "state": SimpleNamespace(revision=new_meta.revision, state_id=new_meta.state_id),
++            "origin": "isolated_test",
++        })
++        assert response["status"] == "ok"
++        answer = _transition(client)
++        assert answer["from_revision"] == metadata.revision
++        assert answer["to_revision"] == new_meta.revision
++        assert len(answer["transitions"]) == 2
++        assert all(item["action"] == "WARNING_REACTIVATED" for item in answer["transitions"])
 +
 +
-+def test_t16_valid_result_has_no_receipt_or_source_bytes(tmp_path, isolated_dirs):
-+    _, state, metadata = _fixture(tmp_path)
-+    with _owner(state, metadata) as (_, client):
-+        answer = client.get_installed_cycle_warning_projection()
-+        assert set(answer) == {
-+            "status", "binding_state", "revision", "state_id", "repo_id",
-+            "root_path", "service_instance_id", "process_start_identity",
-+            "activity_epoch", "graph_sha256", "structural_paths",
-+            "model_pass_paths", "active_warning_paths", "structural_count",
-+            "model_pass_count", "active_warning_count", "authority",
-+        }
++def test_t14_incremental_commit_reactivates_without_topology_change(
++    tmp_path, isolated_dirs,
++):
++    root, state, metadata = _fixture(tmp_path, TWO_PASS)
++    with _owner(state, metadata) as (server, client):
++        before_cycles = copy.deepcopy(state.cycles)
++        server._updater = lambda candidate, path: SimpleNamespace(
++            status="ok", file_path=path, affected_modules=(),
++        )
++        result = server._execute_update_file({
++            "operation": "update_file", "file_path": str(root / "a.py"),
++            "origin": "isolated_test",
++        })
++        assert result["status"] == "ok"
++        answer = _transition(client)
++        assert answer["from_revision"] == metadata.revision
++        assert answer["to_revision"] == metadata.revision + 1
++        assert tuple(item["action"] for item in answer["transitions"]) == (
++            "WARNING_REACTIVATED", "WARNING_REACTIVATED",
++        )
++        assert server._state.cycles == before_cycles
++        assert server._state.cycle_partial_source_publication is None
 ```
 
 ## CONTRACT_CONFLICTS
@@ -484,9 +559,9 @@ NONE observed.
 
 ## REMAINING UNKNOWN
 
-UNKNOWN: The user's active LIVE process loaded-code adoption, active service generation and downstream Desktop/MCP/get_live_events consumer behavior. This patch added no warning consumer or active FULL operation.
+UNKNOWN: The user's active LIVE process loaded-code adoption, active service generation and Desktop/MCP/get_live_events consumer behavior. No consumer schema or protocol version changed.
 
 ## FINAL IMPLEMENTER OBSERVATION
 
-CONTRACT_PROVED: Exact WARN-4C patch and focused tests pass. Architectural GO remains with ChatGPT. STOP after this stage.
+CONTRACT_PROVED: Literal WARN-4D search/replace implementation and focused regressions pass. Architectural GO remains with ChatGPT. STOP after this stage.
 

@@ -860,6 +860,8 @@ class CanonicalLiveServer:
         self._events: list[dict[str, Any]] = []
         self._authority_event_fingerprints: OrderedDict[tuple[str, int, str], str] = OrderedDict()
         self._lock = threading.RLock()
+        self._cycle_warning_transition_checkpoint = None
+        self._cycle_warning_transition_current_report = None
         self._mutation_execution_lock = threading.Lock()
         self._mutation_guard = mutation_guard
         self._recovery_verification_guard = recovery_verification_guard
@@ -904,6 +906,39 @@ class CanonicalLiveServer:
             process_start_identity=self._authority_identity.get("process_start_identity"),
             desktop_instance_id=self._authority_identity.get("desktop_instance_id"),
         )
+
+    def _owner_cycle_warning_report_locked(self) -> dict[str, Any]:
+        """Capture this installed generation under self._lock, not from a caller."""
+        try:
+            from contextor.core.cycle_semantics.live_cycle_warning_query import (
+                read_locked_installed_cycle_warnings,
+            )
+            return read_locked_installed_cycle_warnings(
+                self._state,
+                canonical_revision=self._revision,
+                authority_identity=self._authority_identity,
+                activity_epoch=self._activity_epoch,
+            )
+        except Exception:
+            return {"status": "unavailable", "reason": "WARNING_PROJECTION_FAILURE"}
+
+    def _refresh_cycle_warning_transition_locked(self, before: dict[str, Any]) -> None:
+        """Commit-scoped derived checkpoint; never affect canonical commit success."""
+        after = self._owner_cycle_warning_report_locked()
+        try:
+            from contextor.core.cycle_semantics.live_warning_transition_checkpoint import (
+                build_locked_warning_transition_checkpoint,
+            )
+            result = build_locked_warning_transition_checkpoint(
+                before,
+                after,
+                authority_identity=self._authority_identity,
+                activity_epoch=self._activity_epoch,
+            )
+        except Exception:
+            result = {"status": "unavailable", "reason": "WARNING_TRANSITION_FAILURE"}
+        self._cycle_warning_transition_current_report = after
+        self._cycle_warning_transition_checkpoint = result
 
     def _read_revision(self) -> int:
         with self._lock:
@@ -1514,6 +1549,7 @@ class CanonicalLiveServer:
                         self._events + [event]
                     )[-self._retention:]
 
+                    before_warning_report = self._owner_cycle_warning_report_locked()
                     _mark_live_state_provenance(committed_state)
 
                     # COMMIT BOUNDARY
@@ -1528,6 +1564,7 @@ class CanonicalLiveServer:
                     self._revision = committed_revision
                     self._events = next_events
                     self._activity_seq = next_seq
+                    self._refresh_cycle_warning_transition_locked(before_warning_report)
 
                     committed_seq = next_seq
                     committed = True
@@ -1646,9 +1683,11 @@ class CanonicalLiveServer:
                         }
                     state_rev = expected_revision
 
+                before_warning_report = self._owner_cycle_warning_report_locked()
                 _mark_live_state_provenance(state)
                 self._state = state
                 self._revision = state_rev
+                self._refresh_cycle_warning_transition_locked(before_warning_report)
                 evt = self._record_event("publish", request, category="LIVE_STATE")
                 _safe_trace_event("LIVE", "CANONICAL_PUBLISH", op=trace_op, rev_before=previous_revision, rev_after=self._revision, seq=evt["seq"], origin=request.get("origin"))
                 return {"status": "ok", "revision": self._revision, "seq": evt["seq"]}
@@ -2213,8 +2252,10 @@ class CanonicalLiveServer:
 
                 # ATOMIC COMMIT BOUNDARY.
                 # Nothing above this line may replace/mutate active canonical ownership.
+                before_warning_report = self._owner_cycle_warning_report_locked()
                 self._state = candidate_state
                 self._revision = expected_revision
+                self._refresh_cycle_warning_transition_locked(before_warning_report)
                 _safe_trace_event("LIVE", "CANONICAL_COMMIT", op=trace_op, path=file_path, rev_before=previous_revision, rev_after=expected_revision)
 
                 try:
@@ -2336,6 +2377,42 @@ class CanonicalLiveServer:
             return self._execute_publish(request)
 
         with self._lock:
+            if operation == "get_installed_cycle_warning_transitions":
+                if set(request) != {"operation"}:
+                    return {
+                        "status": "unavailable",
+                        "reason": "INVALID_WARNING_TRANSITION_PAYLOAD",
+                    }
+                if (
+                    self._stop.is_set()
+                    or self._pending_recovery_certificate is not None
+                    or self._recovery_release_degraded
+                ):
+                    return {"status": "unavailable", "reason": "LIVE_OWNER_NOT_READY"}
+                checkpoint = self._cycle_warning_transition_checkpoint
+                if checkpoint is None:
+                    return {"status": "unavailable", "reason": "NO_COMMITTED_WARNING_TRANSITION"}
+                if (
+                    self._cycle_warning_transition_current_report
+                    != self._owner_cycle_warning_report_locked()
+                ):
+                    return {"status": "unavailable", "reason": "WARNING_TRANSITION_STATE_DRIFT"}
+                if checkpoint.get("status") != "ok":
+                    return copy.deepcopy(checkpoint)
+                if (
+                    checkpoint.get("to_revision") != self._revision
+                    or checkpoint.get("activity_epoch") != self._activity_epoch
+                    or any(
+                        checkpoint.get(key) != self._authority_identity.get(key)
+                        for key in (
+                            "repo_id", "root_path", "service_instance_id",
+                            "process_start_identity",
+                        )
+                    )
+                ):
+                    return {"status": "unavailable", "reason": "WARNING_TRANSITION_IDENTITY_DRIFT"}
+                return copy.deepcopy(checkpoint)
+
             if operation == "get_installed_cycle_warning_projection":
                 if set(request) != {"operation"}:
                     return {
@@ -2831,6 +2908,10 @@ class LiveStateClient:
                 self.endpoint.service_instance_id
             ),
         )
+
+    def get_installed_cycle_warning_transitions(self) -> dict[str, Any]:
+        """Read the latest owner-derived LIVE commit warning transition."""
+        return self.request("get_installed_cycle_warning_transitions")
 
     def get_installed_cycle_warning_projection(self) -> dict[str, Any]:
         """Read the current canonical LIVE warning partition under its lock."""
