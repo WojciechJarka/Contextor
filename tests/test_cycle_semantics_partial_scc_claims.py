@@ -255,3 +255,33 @@ def test_t18_prepared_claims_are_not_manifest_or_receipt(tmp_path, isolated_dirs
         expected_repo_id="repo",
         expected_root_path="root",
     ) == frozenset()
+
+
+def test_r1_t01_complete_source_domain_mismatch_rejected(tmp_path, isolated_dirs):
+    edges, snapshot, preparation = _case(tmp_path, TWO_PASS)
+    assert preparation.status == "PREPARED_UNPUBLISHED_NON_ATOMIC"
+    assert _validated(edges, snapshot, preparation) is not None
+    changed = replace(preparation, source_modules=("foreign",))
+    assert _validated(edges, snapshot, changed) is None
+
+
+def test_r1_t02_recursive_complete_source_modules_rejected(tmp_path, isolated_dirs):
+    edges, snapshot, preparation = _case(tmp_path, TWO_PASS)
+    recursive = []
+    recursive.append(recursive)
+    changed = replace(preparation, source_modules=recursive)
+    assert _validated(edges, snapshot, changed) is None
+
+
+def test_r1_t03_recursive_unavailable_model_kind_rejected(tmp_path, isolated_dirs):
+    edges, snapshot, preparation = _case(tmp_path)
+    recursive = []
+    recursive.append(recursive)
+    changed = _replace_component(preparation, 1, model_kind=recursive)
+    assert _validated(edges, snapshot, changed) is None
+
+
+@pytest.mark.parametrize("sources", [PASS_AND_UNKNOWN, PASS_AND_HAZARD])
+def test_r1_t08_valid_preparations_still_validate(tmp_path, isolated_dirs, sources):
+    edges, snapshot, preparation = _case(tmp_path, sources)
+    assert _validated(edges, snapshot, preparation) is not None

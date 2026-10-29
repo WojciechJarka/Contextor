@@ -122,6 +122,7 @@ def verify_co_published_partial_scc_preparation(
             repo_id=repo_id,
             root_path=root_path,
         )
-    except (AttributeError, KeyError, TypeError, ValueError, IndexError):
+    except (AttributeError, KeyError, TypeError, ValueError, IndexError,
+            RecursionError, OverflowError):
         return False
     return receipt == expected

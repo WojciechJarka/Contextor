@@ -52,6 +52,11 @@ def validate_partial_scc_claims(
         graph_sha256 = fingerprint_hard_edges(hard_edges)
         topology = analyze_import_cycle_topology(hard_edges)
         closures = compute_cycle_model_source_closures(hard_edges)
+        expected_source_modules = tuple(sorted({
+            module_id
+            for closure in closures
+            for module_id in closure.evidence_source_modules
+        }))
         components = topology.cyclic_components
         cyclic_members = tuple(sorted(
             member for component in components for member in component.members
@@ -93,6 +98,8 @@ def validate_partial_scc_claims(
             manifest = preparation.manifest
             if (
                 preparation.reason is not None
+                or type(preparation.source_modules) is not tuple
+                or preparation.source_modules != expected_source_modules
                 or type(manifest) is not PreparedCycleSourceManifest
                 or manifest.components != declarations
                 or manifest.version != MANIFEST_VERSION
@@ -160,6 +167,8 @@ def validate_partial_scc_claims(
             elif item.preparation_state == "UNAVAILABLE":
                 if (
                     item.model_classification != "INDETERMINATE"
+                    or type(item.model_kind) is not str
+                    or item.model_kind not in {"FLAT_MODULE", "REGULAR_PACKAGE"}
                     or type(item.reason) is not str or not item.reason
                     or item.source_signatures != ()
                     or item.model_evidence_sha256 is not None
