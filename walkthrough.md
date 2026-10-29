@@ -1,134 +1,113 @@
-# CONTEXTOR P1D3-WARN-4F — implementer report
+# CONTEXTOR P1D3-WARN-4G — implementer report
 
 ## PREFLIGHT
 
-- DIRECT_EVIDENCE: HEAD `a5b8d69a07323dc486014fee2f293915d5281c3c`; initial worktree clean.
-- DIRECT_EVIDENCE: Contextor MCP pre-edit resolved `contextor.core.live_state.ipc`, revision 869, structural DFS cycle count 16, fresh.
-- DIRECT_EVIDENCE: Both new authorized files were absent. The specified `ipc.py` SEARCH block occurred exactly once.
+- DIRECT_EVIDENCE: Initial and final HEAD: `898d5eb5b8186c0e924224a043d9874137ce890a`. Initial worktree clean.
+- DIRECT_EVIDENCE: Contextor MCP `get_file_edit_context` resolved `contextor.ui.gui` at revision 872. Structural DFS cycle count: 16, fresh.
+- DIRECT_EVIDENCE: Both new files were absent; the specified SEARCH in `gui.py` occurred exactly once.
 
-## FILES_CHANGED
+## SEARCH / REPLACE RESULT
 
-- `contextor/core/live_state/ipc.py`
-- `contextor/core/cycle_semantics/live_warning_diagnostics_summary.py`
-- `tests/test_cycle_semantics_live_warning_diagnostics_summary.py`
-
-`walkthrough.md` overwritten as report only.
-
-## EXACT SEARCH / REPLACE
-
-- DIRECT_EVIDENCE: Replaced the unique specified diagnostics query block in `ipc.py` with the architect-authored block. Added the supplied source and test bodies.
-- DIRECT_EVIDENCE: An initial patch construction stripped the leading indentation from `try:`; it was restored to the specified text before compilation.
-- CODE_PATH_PROVED: The projection returns the original summary when its authority or state validation fails.
+- DIRECT_EVIDENCE: Applied the exact architect-authored `gui.py` replacement; added both new files with supplied content.
+- DIRECT_EVIDENCE: Literal content comparison for both new files passed. No other production or test files edited.
 
 ## NEW TEST RESULTS
 
-- `& .\.venv\Scripts\python.exe -m py_compile contextor/core/live_state/ipc.py contextor/core/cycle_semantics/live_warning_diagnostics_summary.py tests/test_cycle_semantics_live_warning_diagnostics_summary.py` — PASS.
-- `& .\.venv\Scripts\python.exe -m pytest -q -rs tests/test_cycle_semantics_live_warning_diagnostics_summary.py` — 15 passed.
+- `& .\.venv\Scripts\python.exe -m py_compile contextor/ui/gui.py contextor/ui/cycle_warning_presentation.py tests/test_cycle_semantics_desktop_warning_presentation.py` — PASS.
+- `& .\.venv\Scripts\python.exe -m pytest -q -rs tests/test_cycle_semantics_desktop_warning_presentation.py` — 13 passed, one third-party Authlib deprecation warning.
 
 ## FOCUSED REGRESSIONS
 
-- `& .\.venv\Scripts\python.exe -m pytest -q -rs tests/test_cycle_semantics_live_cycle_warning_query.py tests/test_cycle_semantics_live_warning_transition_checkpoint.py tests/test_cycle_semantics_mcp_live_warning_view.py tests/test_mcp_diagnostics.py` — 114 passed; one third-party Authlib deprecation warning.
+- `& .\.venv\Scripts\python.exe -m pytest -q -rs tests/test_cycle_semantics_live_cycle_warning_query.py tests/test_cycle_semantics_live_warning_diagnostics_summary.py tests/test_gui_live_startup.py` — 69 passed, one third-party Authlib deprecation warning.
 - `git diff --check` and new-file `git diff --no-index --check` — no whitespace errors.
 
-## MODEL_PASS / ACTIVE ATTENTION CHECKS
+## DESKTOP PRESENTATION CONTRACT
 
-- CONTRACT_PROVED: T01–T03 show mixed PASS/UNKNOWN and PASS/HAZARD keep one active warning; TWO_PASS has two model PASS paths and zero active warnings.
-- CONTRACT_PROVED: T04–T05 show missing or invalid partial receipts keep two active warnings.
-- CONTRACT_PROVED: T06–T07 show syntax errors and name collisions still require attention.
-- CONTRACT_PROVED: T14 checks narrow MCP transport; T15 checks repeated queries leave cycles, hard edges, events and activity sequence unchanged.
+- CODE_PATH_PROVED: Desktop `ContextorGUI.analyze` invokes `filter_installed_desktop_cycle_errors` before returning errors to its success callback.
+- CONTRACT_PROVED: T01–T03 filter only installed MODEL_PASS cycle errors, retaining UNKNOWN/HAZARD cycles and unrelated errors. Canonical `state.cycles` remains two cycles in the test fixtures.
+- CONTRACT_PROVED: T04 retains an error with a noncanonical message even when its nodes match a model PASS path.
 
-## STALE / INVALID AUTHORITY CHECKS
+## FAIL-CLOSED CASES
 
-- CONTRACT_PROVED: T08–T09 preserve stale structural availability. T10–T11 preserve raw warnings under degraded recovery or incomplete authority. T12–T13 reject revision and count mismatches.
+- CONTRACT_PROVED: T05–T07 retain all errors for unpublished, wrong revision, or wrong service identity.
+- CONTRACT_PROVED: T08–T09 reject invalid path partition or repository identity.
+- CONTRACT_PROVED: T10–T12 retain errors for unavailable owner, failed query, or no cycle error; the no-cycle path does not query LIVE.
 
-## POST-CHANGE MCP AUDIT
+## MCP POST-CHANGE AUDIT
 
-- DIRECT_EVIDENCE: `get_file_edit_context` resolved all three changed modules at revision 871 with no warnings.
-- DIRECT_EVIDENCE: `get_module_context` at revision 872 reported `workspace_sync=verified` and `canonical_state=fresh` for all three files; graph and cycles fresh; structural DFS cycle count 16.
-- DIRECT_EVIDENCE: `cycle_semantics=stale`.
+- DIRECT_EVIDENCE: Contextor MCP `get_module_context` at revision 875 reported `canonical_state=fresh`, `workspace_sync=verified` for all three changed files. Graph and cycle families were fresh. Structural DFS cycle count remained **16**; no new structural hard-edge cycle was observed in this count.
+- DIRECT_EVIDENCE: `cycle_semantics=stale`. MCP workspace sync does not prove active loaded-code adoption.
+
+## FILES_CHANGED
+
+- `contextor/ui/gui.py`
+- `contextor/ui/cycle_warning_presentation.py`
+- `tests/test_cycle_semantics_desktop_warning_presentation.py`
+
+`walkthrough.md` overwritten as report only.
 
 ## FULL_DIFFS
 
-### contextor/core/live_state/ipc.py
+### contextor/ui/gui.py
 
 ```diff
-diff --git a/contextor/core/live_state/ipc.py b/contextor/core/live_state/ipc.py
-index 277ff93..ed4976f 100644
---- a/contextor/core/live_state/ipc.py
-+++ b/contextor/core/live_state/ipc.py
-@@ -2590,6 +2590,30 @@ class CanonicalLiveServer:
-                         query_kind,
-                         dict(payload),
-                     )
-+
-+                    if (
-+                        query_kind == "diagnostics_summary"
-+                        and not self._stop.is_set()
-+                        and self._pending_recovery_certificate is None
-+                        and not self._recovery_release_degraded
-+                    ):
-+                        try:
-+                            from contextor.core.cycle_semantics.live_warning_diagnostics_summary import (
-+                                project_locked_warning_diagnostics_summary,
-+                            )
-+                            result = project_locked_warning_diagnostics_summary(
-+                                result,
-+                                self._owner_cycle_warning_report_locked(),
-+                                canonical_revision=self._revision,
-+                                activity_epoch=self._activity_epoch,
-+                                authority_identity=self._authority_identity,
-+                            )
-+                        except Exception:
-+                            # Never let an optional warning projection
-+                            # invalidate the canonical diagnostics query.
-+                            # Preserve the original structural warning count.
-+                            pass
-+
-                 except Exception as exc:
-                     return {
-                         "status": "error",
+diff --git a/contextor/ui/gui.py b/contextor/ui/gui.py
+index 16d138c..a90eb6c 100644
+--- a/contextor/ui/gui.py
++++ b/contextor/ui/gui.py
+@@ -1313,6 +1313,14 @@ class ContextorGUI:
+                 progress_callback=progress_callback,
+                 is_cancelled=lambda: getattr(self.progress_bar, "is_cancelled", False),
+             )
++            from contextor.ui.cycle_warning_presentation import (
++                filter_installed_desktop_cycle_errors,
++            )
++            errors = filter_installed_desktop_cycle_errors(
++                errors,
++                analysis_result,
++                path,
++            )
+             return errors, analysis_result
+ 
+         def on_success(outcome):
 ```
 
-### contextor/core/cycle_semantics/live_warning_diagnostics_summary.py
+### contextor/ui/cycle_warning_presentation.py
 
 ```diff
-diff --git a/contextor/core/cycle_semantics/live_warning_diagnostics_summary.py b/contextor/core/cycle_semantics/live_warning_diagnostics_summary.py
+diff --git a/contextor/ui/cycle_warning_presentation.py b/contextor/ui/cycle_warning_presentation.py
 new file mode 100644
-index 0000000..b8aa88a
+index 0000000..a1a810e
 --- /dev/null
-+++ b/contextor/core/cycle_semantics/live_warning_diagnostics_summary.py
-@@ -0,0 +1,198 @@
-+"""Warning-aware diagnostics summary for one installed LIVE generation.
++++ b/contextor/ui/cycle_warning_presentation.py
+@@ -0,0 +1,224 @@
++"""Fail-closed Desktop presentation of installed cycle warnings.
 +
-+Canonical structural cycle counts are preserved. Only a validated,
-+owner-captured static-model acceptance partition can reduce active
-+cycle warnings. This does not establish runtime execution safety.
-+
-+This pure function does not authenticate the caller or hold a lock.
-+The LIVE owner must invoke it while holding its canonical state lock.
++This module only filters presentation errors, never canonical cycles,
++validation evidence, LIVE state, receipts or structural diagnostics.
++A published generation with matching owner identity is mandatory.
 +"""
 +
 +from __future__ import annotations
 +
-+from collections.abc import Mapping
++from pathlib import Path
 +from typing import Any
 +
-+from .cycle_warning_projection import InstalledCycleWarningProjection
-+from .cycle_warning_transitions import _validated_states
-+from .live_cycle_warning_query import (
++from contextor.core.cycle_semantics.cycle_warning_projection import (
++    InstalledCycleWarningProjection,
++)
++from contextor.core.cycle_semantics.cycle_warning_transitions import (
++    _validated_states,
++)
++from contextor.core.cycle_semantics.live_cycle_warning_query import (
 +    _AUTHORITY as _PROJECTION_AUTHORITY,
 +    _BINDING as _PROJECTION_BINDING,
 +)
++from contextor.core.domain.validation import ValidationError
++from contextor.core.repository_identity import read_repository_identity
 +
 +
-+_IDENTITY_KEYS = (
-+    "repo_id",
-+    "root_path",
-+    "service_instance_id",
-+    "process_start_identity",
-+)
-+
-+_PROJECTION_FIELDS = frozenset({
++_FIELDS = frozenset({
 +    "status",
 +    "binding_state",
 +    "revision",
@@ -148,182 +127,208 @@ index 0000000..b8aa88a
 +    "authority",
 +})
 +
-+_WARNING_SEMANTICS = (
-+    "INSTALLED_STATIC_MODEL_ACCEPTANCE_NOT_RUNTIME_SAFETY"
-+)
 +
++def _accepted_paths(
++    result: Any,
++    repo_path: str,
++    report: Any,
++) -> frozenset[tuple[str, ...]] | None:
++    """Validate the published generation before accepting any cycle path."""
++    if type(report) is not dict or set(report) != _FIELDS:
++        return None
 +
-+def _nonnegative_count(value: Any) -> bool:
-+    return value is None or (
-+        type(value) is int and value >= 0
++    if getattr(result, "live_publish_status", None) != "success":
++        return None
++
++    revision = getattr(result, "live_publish_revision", None)
++    expected_revision = getattr(
++        result, "live_publish_expected_revision", None
++    )
++    expected_state_id = getattr(
++        result, "live_publish_expected_state_id", None
++    )
++    expected_service = getattr(
++        result, "live_publish_service_instance_id", None
++    )
++    expected_process = getattr(
++        result, "live_publish_process_start_identity", None
 +    )
 +
++    if (
++        type(revision) is not int
++        or revision < 1
++        or type(expected_revision) is not int
++        or revision != expected_revision
++        or type(expected_state_id) is not str
++        or not expected_state_id
++        or type(expected_service) is not str
++        or not expected_service
++        or type(expected_process) is not str
++        or not expected_process
++    ):
++        return None
 +
-+def project_locked_warning_diagnostics_summary(
-+    summary: Any,
-+    warning_report: Any,
-+    *,
-+    canonical_revision: int,
-+    activity_epoch: str,
-+    authority_identity: Mapping[str, Any],
++    if (
++        report["status"] != "ok"
++        or report["binding_state"] != _PROJECTION_BINDING
++        or report["authority"] != _PROJECTION_AUTHORITY
++        or type(report["revision"]) is not int
++        or report["revision"] != revision
++        or report["state_id"] != expected_state_id
++        or report["service_instance_id"] != expected_service
++        or report["process_start_identity"] != expected_process
++        or type(report["activity_epoch"]) is not str
++        or not report["activity_epoch"]
++    ):
++        return None
++
++    identity = read_repository_identity(repo_path)
++    if identity is None:
++        return None
++
++    if (
++        report["repo_id"] != identity.repo_id
++        or Path(report["root_path"]).resolve()
++        != Path(identity.root_path).resolve()
++        or Path(repo_path).resolve()
++        != Path(identity.root_path).resolve()
++    ):
++        return None
++
++    digest = report["graph_sha256"]
++    if (
++        type(digest) is not str
++        or len(digest) != 64
++        or any(char not in "0123456789abcdef" for char in digest)
++    ):
++        return None
++
++    for paths_field, count_field in (
++        ("structural_paths", "structural_count"),
++        ("model_pass_paths", "model_pass_count"),
++        ("active_warning_paths", "active_warning_count"),
++    ):
++        paths = report[paths_field]
++        count = report[count_field]
++        if (
++            type(paths) is not tuple
++            or type(count) is not int
++            or count != len(paths)
++        ):
++            return None
++
++    projection = InstalledCycleWarningProjection(
++        status="FRESH",
++        reason=None,
++        revision=revision,
++        structural_paths=report["structural_paths"],
++        model_pass_paths=report["model_pass_paths"],
++        active_warning_paths=report["active_warning_paths"],
++    )
++
++    if _validated_states(projection) is None:
++        return None
++
++    return frozenset(report["model_pass_paths"])
++
++
++def filter_installed_desktop_cycle_errors(
++    errors: Any,
++    analysis_result: Any,
++    repo_path: str,
 +) -> Any:
-+    """Return an additive warning-aware summary, or unchanged original.
++    """Filter only proven MODEL_PASS cycle errors from Desktop messages.
 +
-+    Invalid evidence never suppresses a structural cycle warning.
-+    Structural evidence and source summary objects are never mutated.
++    The caller runs this after full analysis, on the worker thread.
++    Any missing or mismatched evidence preserves the original errors.
 +    """
-+    if type(summary) is not dict:
-+        return summary
++    if type(errors) is not list or not errors:
++        return errors
++
++    if not any(
++        type(error) is ValidationError
++        and error.kind == "ArchitectureCycle"
++        for error in errors
++    ):
++        return errors
++
++    if getattr(analysis_result, "live_publish_status", None) != "success":
++        return errors
 +
 +    try:
-+        if (
-+            type(canonical_revision) is not int
-+            or canonical_revision < 1
-+            or type(activity_epoch) is not str
-+            or not activity_epoch
-+            or not isinstance(authority_identity, Mapping)
-+            or type(warning_report) is not dict
-+            or set(warning_report) != _PROJECTION_FIELDS
-+        ):
-+            return summary
++        from contextor.core.live_state import connect
 +
-+        if (
-+            warning_report["status"] != "ok"
-+            or warning_report["binding_state"] != _PROJECTION_BINDING
-+            or warning_report["authority"] != _PROJECTION_AUTHORITY
-+            or type(warning_report["revision"]) is not int
-+            or warning_report["revision"] != canonical_revision
-+            or warning_report["activity_epoch"] != activity_epoch
-+        ):
-+            return summary
++        client = connect(Path(repo_path))
++        if client is None:
++            return errors
 +
-+        if any(
-+            type(authority_identity.get(key)) is not str
-+            or not authority_identity[key]
-+            or warning_report[key] != authority_identity[key]
-+            for key in _IDENTITY_KEYS
-+        ):
-+            return summary
++        report = client.request(
++            "get_installed_cycle_warning_projection",
++            timeout=2.0,
++        )
 +
-+        if (
-+            type(warning_report["state_id"]) is not str
-+            or not warning_report["state_id"]
-+            or type(warning_report["graph_sha256"]) is not str
-+            or len(warning_report["graph_sha256"]) != 64
-+            or any(
-+                char not in "0123456789abcdef"
-+                for char in warning_report["graph_sha256"]
-+            )
-+        ):
-+            return summary
++        accepted = _accepted_paths(
++            analysis_result,
++            repo_path,
++            report,
++        )
 +
-+        cycles = summary.get("cycles")
-+        syntax = summary.get("syntax_errors")
-+        collisions = summary.get("name_collisions")
++        if accepted is None or not accepted:
++            return errors
 +
-+        if (
-+            type(cycles) is not dict
-+            or type(syntax) is not dict
-+            or type(collisions) is not dict
-+            or cycles.get("availability") != "fresh"
-+            or type(cycles.get("count")) is not int
-+            or cycles["count"] < 0
-+            or type(summary.get("attention_required")) is not bool
-+            or not _nonnegative_count(syntax.get("count"))
-+            or not _nonnegative_count(collisions.get("count"))
-+        ):
-+            return summary
-+
-+        structural = warning_report["structural_paths"]
-+        accepted = warning_report["model_pass_paths"]
-+        active = warning_report["active_warning_paths"]
-+
-+        for field, paths in (
-+            ("structural_count", structural),
-+            ("model_pass_count", accepted),
-+            ("active_warning_count", active),
-+        ):
++        filtered = []
++        for error in errors:
 +            if (
-+                type(paths) is not tuple
-+                or type(warning_report[field]) is not int
-+                or warning_report[field] < 0
-+                or warning_report[field] != len(paths)
++                type(error) is ValidationError
++                and error.kind == "ArchitectureCycle"
++                and type(error.nodes) in (list, tuple)
++                and all(
++                    type(node) is str and node
++                    for node in error.nodes
++                )
 +            ):
-+                return summary
++                path = tuple(error.nodes)
++                expected_message = (
++                    "Cyclic dependency detected in architecture: "
++                    + " -> ".join(path)
++                )
++                if (
++                    path in accepted
++                    and error.message == expected_message
++                ):
++                    continue
 +
-+        if warning_report["structural_count"] != cycles["count"]:
-+            return summary
++            filtered.append(error)
 +
-+        projection = InstalledCycleWarningProjection(
-+            status="FRESH",
-+            reason=None,
-+            revision=canonical_revision,
-+            structural_paths=structural,
-+            model_pass_paths=accepted,
-+            active_warning_paths=active,
-+        )
++        return filtered
 +
-+        if _validated_states(projection) is None:
-+            return summary
-+
-+        active_count = warning_report["active_warning_count"]
-+
-+        result = dict(summary)
-+        result["cycles"] = {
-+            **cycles,
-+            "active_warning_count": active_count,
-+            "model_pass_count": warning_report["model_pass_count"],
-+            "warning_availability": "fresh",
-+            "warning_semantics": _WARNING_SEMANTICS,
-+        }
-+        result["attention_required"] = any(
-+            type(value) is int and value > 0
-+            for value in (
-+                syntax["count"],
-+                collisions["count"],
-+                active_count,
-+            )
-+        )
-+        return result
-+
-+    except (
-+        AttributeError,
-+        KeyError,
-+        TypeError,
-+        ValueError,
-+        IndexError,
-+        RecursionError,
-+        OverflowError,
-+    ):
-+        return summary
++    except Exception:
++        # A presentation query must not hide diagnostics or fail analysis.
++        return errors
 ```
 
-### tests/test_cycle_semantics_live_warning_diagnostics_summary.py
+### tests/test_cycle_semantics_desktop_warning_presentation.py
 
 ```diff
-diff --git a/tests/test_cycle_semantics_live_warning_diagnostics_summary.py b/tests/test_cycle_semantics_live_warning_diagnostics_summary.py
+diff --git a/tests/test_cycle_semantics_desktop_warning_presentation.py b/tests/test_cycle_semantics_desktop_warning_presentation.py
 new file mode 100644
-index 0000000..0bab1ec
+index 0000000..976de70
 --- /dev/null
-+++ b/tests/test_cycle_semantics_live_warning_diagnostics_summary.py
-@@ -0,0 +1,319 @@
-+"""WARN-4F: installed warning eligibility controls MCP attention only."""
++++ b/tests/test_cycle_semantics_desktop_warning_presentation.py
+@@ -0,0 +1,270 @@
++"""WARN-4G: Desktop only hides exactly installed MODEL_PASS cycle errors."""
 +
 +from __future__ import annotations
 +
-+import copy
++from types import SimpleNamespace
 +from dataclasses import replace
 +
 +import pytest
 +
-+from contextor.core.diagnostics_projection import (
-+    diagnostics_summary_for_state,
-+)
-+from contextor.core.live_state.runtime import (
-+    _repository_canonical_query_handler,
-+)
-+from contextor.core.cycle_semantics.live_warning_diagnostics_summary import (
-+    project_locked_warning_diagnostics_summary,
++from contextor.core.domain.validation import ValidationError
++from contextor.ui.cycle_warning_presentation import (
++    _accepted_paths,
++    filter_installed_desktop_cycle_errors,
 +)
 +from tests.test_cycle_semantics_live_installed_partial_claims import (
 +    _fixture,
@@ -341,303 +346,254 @@ index 0000000..0bab1ec
 +    monkeypatch.setenv("CONTEXTOR_DISABLE_PROCESS_POOL", "1")
 +
 +
-+def _install_query_handler(server):
-+    server._canonical_query_handler = _repository_canonical_query_handler
-+
-+
-+def _summary(client):
-+    response = client.canonical_query(
-+        "diagnostics_summary",
-+        payload={},
++def _analysis_result(metadata, server):
++    return SimpleNamespace(
++        live_publish_status="success",
++        live_publish_revision=metadata.revision,
++        live_publish_expected_revision=metadata.revision,
++        live_publish_expected_state_id=metadata.state_id,
++        live_publish_service_instance_id=(
++            server.endpoint.service_instance_id
++        ),
++        live_publish_process_start_identity=(
++            server.endpoint.process_start_identity
++        ),
 +    )
-+    assert response["status"] == "ok"
-+    return response["result"]
 +
 +
-+@pytest.mark.parametrize("sources,accepted,active", [
-+    (PASS_AND_UNKNOWN, 1, 1),
-+    (PASS_AND_HAZARD, 1, 1),
-+    (TWO_PASS, 2, 0),
++def _cycle(path):
++    return ValidationError(
++        kind="ArchitectureCycle",
++        message=(
++            "Cyclic dependency detected in architecture: "
++            + " -> ".join(path)
++        ),
++        nodes=list(path),
++    )
++
++
++def _other():
++    return ValidationError(
++        kind="ForbiddenDependency",
++        message="Unrelated architecture error",
++        nodes=["a", "b"],
++    )
++
++
++def _connect(monkeypatch, client):
++    monkeypatch.setattr(
++        "contextor.core.live_state.connect",
++        lambda _root: client,
++    )
++
++
++@pytest.mark.parametrize("sources,expected_remaining", [
++    (TWO_PASS, 0),
++    (PASS_AND_UNKNOWN, 1),
++    (PASS_AND_HAZARD, 1),
 +])
-+def test_t01_t03_installed_partial_scc_controls_attention(
-+    tmp_path, isolated_dirs, sources, accepted, active,
++def test_t01_t03_real_owner_acceptance_filters_only_pass(
++    tmp_path, isolated_dirs, monkeypatch,
++    sources, expected_remaining,
 +):
-+    _, state, metadata = _fixture(tmp_path, sources)
++    root, state, metadata = _fixture(tmp_path, sources)
 +
 +    with _owner(state, metadata) as (server, client):
-+        _install_query_handler(server)
++        _connect(monkeypatch, client)
++        errors = [_cycle(path) for path in state.cycles]
++        other = _other()
++        errors.append(other)
 +
-+        original = diagnostics_summary_for_state(state)
-+        structural = copy.deepcopy(state.cycles)
-+        events = copy.deepcopy(server._events)
++        result = filter_installed_desktop_cycle_errors(
++            errors,
++            _analysis_result(metadata, server),
++            str(root),
++        )
 +
-+        summary = _summary(client)
++        remaining_cycles = [
++            item for item in result
++            if item.kind == "ArchitectureCycle"
++        ]
 +
-+        assert summary["cycles"]["count"] == 2
-+        assert summary["cycles"]["model_pass_count"] == accepted
-+        assert summary["cycles"]["active_warning_count"] == active
-+        assert summary["cycles"]["warning_availability"] == "fresh"
-+        assert summary["attention_required"] is (active > 0)
-+
-+        assert original["cycles"]["count"] == 2
-+        assert "active_warning_count" not in original["cycles"]
-+        assert state.cycles == structural
-+        assert server._events == events
-+
-+
-+def test_t04_no_partial_receipt_preserves_all_warnings(
-+    tmp_path, isolated_dirs,
-+):
-+    _, state, metadata = _fixture(
-+        tmp_path, TWO_PASS, partial=False,
-+    )
-+
-+    with _owner(state, metadata) as (server, client):
-+        _install_query_handler(server)
-+        summary = _summary(client)
-+
-+        assert summary["cycles"]["count"] == 2
-+        assert summary["cycles"]["model_pass_count"] == 0
-+        assert summary["cycles"]["active_warning_count"] == 2
-+        assert summary["attention_required"] is True
++        assert len(remaining_cycles) == expected_remaining
++        assert result[-1] is other
++        assert len(errors) == 3
++        assert len(state.cycles) == 2
 +
 +
-+def test_t05_invalid_partial_receipt_cannot_suppress(
-+    tmp_path, isolated_dirs,
-+):
-+    _, state, metadata = _fixture(tmp_path, TWO_PASS)
-+    receipt = state.cycle_partial_source_publication
-+    state.cycle_partial_source_publication = replace(
-+        receipt,
-+        claims_sha256="0" * 64,
-+    )
-+
-+    with _owner(state, metadata) as (server, client):
-+        _install_query_handler(server)
-+        summary = _summary(client)
-+
-+        assert summary["cycles"]["count"] == 2
-+        assert summary["cycles"]["model_pass_count"] == 0
-+        assert summary["cycles"]["active_warning_count"] == 2
-+        assert summary["attention_required"] is True
-+
-+
-+def test_t06_real_syntax_error_remains_attention(
-+    tmp_path, isolated_dirs,
-+):
-+    _, state, metadata = _fixture(tmp_path, TWO_PASS)
-+
-+    state.syntax_diagnostics_state = "fresh"
-+    state.syntax_diagnostics_by_path = {
-+        "broken.py": {
-+            "status": "checked_with_errors",
-+            "errors": [{"message": "invalid syntax"}],
-+        },
-+    }
-+
-+    with _owner(state, metadata) as (server, client):
-+        _install_query_handler(server)
-+        summary = _summary(client)
-+
-+        assert summary["cycles"]["count"] == 2
-+        assert summary["cycles"]["active_warning_count"] == 0
-+        assert summary["syntax_errors"]["count"] == 1
-+        assert summary["attention_required"] is True
-+
-+
-+def test_t07_collision_remains_attention(
-+    tmp_path, isolated_dirs,
-+):
-+    _, state, metadata = _fixture(tmp_path, TWO_PASS)
-+
-+    state.collisions_state = "fresh"
-+    state.collisions = [object()]
-+
-+    with _owner(state, metadata) as (server, client):
-+        _install_query_handler(server)
-+        summary = _summary(client)
-+
-+        assert summary["cycles"]["active_warning_count"] == 0
-+        assert summary["name_collisions"]["count"] == 1
-+        assert summary["attention_required"] is True
-+
-+
-+def test_t08_stale_structural_inventory_never_claims_zero(
-+    tmp_path, isolated_dirs,
-+):
-+    _, state, metadata = _fixture(tmp_path, TWO_PASS)
-+    state.cycles_state = "stale"
-+
-+    with _owner(state, metadata) as (server, client):
-+        _install_query_handler(server)
-+        summary = _summary(client)
-+
-+        assert summary["cycles"]["count"] is None
-+        assert "active_warning_count" not in summary["cycles"]
-+        assert summary["cycles"]["availability"] == "stale"
-+
-+
-+def test_t09_resync_never_suppresses_or_certifies(
-+    tmp_path, isolated_dirs,
-+):
-+    _, state, metadata = _fixture(tmp_path, TWO_PASS)
-+    state.resync_required = True
-+
-+    with _owner(state, metadata) as (server, client):
-+        _install_query_handler(server)
-+        summary = _summary(client)
-+
-+        assert summary["cycles"]["count"] is None
-+        assert "active_warning_count" not in summary["cycles"]
-+        assert summary["cycles"]["availability"] == "stale"
-+
-+
-+def test_t10_recovery_degraded_preserves_raw_summary(
-+    tmp_path, isolated_dirs,
-+):
-+    _, state, metadata = _fixture(tmp_path, TWO_PASS)
-+
-+    with _owner(state, metadata) as (server, client):
-+        _install_query_handler(server)
-+        try:
-+            server._recovery_release_degraded = True
-+            summary = _summary(client)
-+
-+            assert summary["cycles"]["count"] == 2
-+            assert "active_warning_count" not in summary["cycles"]
-+            assert summary["attention_required"] is True
-+        finally:
-+            server._recovery_release_degraded = False
-+
-+
-+def test_t11_incomplete_authority_preserves_raw_warnings(
-+    tmp_path, isolated_dirs,
-+):
-+    _, state, metadata = _fixture(tmp_path, TWO_PASS)
-+
-+    with _owner(state, metadata) as (server, client):
-+        _install_query_handler(server)
-+        server._authority_identity["process_start_identity"] = None
-+
-+        summary = _summary(client)
-+
-+        assert summary["cycles"]["count"] == 2
-+        assert "active_warning_count" not in summary["cycles"]
-+        assert summary["attention_required"] is True
-+
-+
-+def test_t12_pure_projection_rejects_wrong_revision(
-+    tmp_path, isolated_dirs,
-+):
-+    _, state, metadata = _fixture(tmp_path, TWO_PASS)
-+
-+    with _owner(state, metadata) as (server, client):
-+        with server._lock:
-+            raw = diagnostics_summary_for_state(state)
-+            report = server._owner_cycle_warning_report_locked()
-+            original = copy.deepcopy(raw)
-+
-+            result = project_locked_warning_diagnostics_summary(
-+                raw,
-+                report,
-+                canonical_revision=server._revision + 1,
-+                activity_epoch=server._activity_epoch,
-+                authority_identity=server._authority_identity,
-+            )
-+
-+        assert result is raw
-+        assert raw == original
-+        assert "active_warning_count" not in result["cycles"]
-+
-+
-+def test_t13_pure_projection_rejects_count_mismatch(
-+    tmp_path, isolated_dirs,
-+):
-+    _, state, metadata = _fixture(tmp_path, TWO_PASS)
-+
-+    with _owner(state, metadata) as (server, client):
-+        with server._lock:
-+            raw = diagnostics_summary_for_state(state)
-+            report = server._owner_cycle_warning_report_locked()
-+            damaged = dict(report, structural_count=99)
-+
-+            result = project_locked_warning_diagnostics_summary(
-+                raw,
-+                damaged,
-+                canonical_revision=server._revision,
-+                activity_epoch=server._activity_epoch,
-+                authority_identity=server._authority_identity,
-+            )
-+
-+        assert result is raw
-+        assert raw["cycles"]["count"] == 2
-+        assert raw["attention_required"] is True
-+
-+
-+def test_t14_narrow_mcp_transport_uses_owner_summary(
++def test_t04_noncanonical_message_is_not_removed(
 +    tmp_path, isolated_dirs, monkeypatch,
 +):
-+    from contextor.mcp.runtime import (
-+        query_live_diagnostics_summary_narrow,
-+    )
-+
 +    root, state, metadata = _fixture(tmp_path, TWO_PASS)
 +
 +    with _owner(state, metadata) as (server, client):
-+        _install_query_handler(server)
++        _connect(monkeypatch, client)
++        invalid = _cycle(state.cycles[0])
++        invalid.message = "Unrelated warning with same nodes"
 +
-+        monkeypatch.setattr(
-+            "contextor.core.live_state.connect",
-+            lambda _root: client,
++        result = filter_installed_desktop_cycle_errors(
++            [invalid],
++            _analysis_result(metadata, server),
++            str(root),
 +        )
 +
-+        result = query_live_diagnostics_summary_narrow(root)
-+
-+        assert result.status == "ok"
-+        assert result.revision == metadata.revision
-+        assert result.summary["cycles"]["count"] == 2
-+        assert result.summary["cycles"]["model_pass_count"] == 2
-+        assert result.summary["cycles"]["active_warning_count"] == 0
-+        assert result.summary["attention_required"] is False
++        assert result == [invalid]
 +
 +
-+def test_t15_repeated_query_is_read_only(
-+    tmp_path, isolated_dirs,
++def test_t05_unpublished_full_preserves_all_errors(
++    tmp_path, isolated_dirs, monkeypatch,
 +):
-+    _, state, metadata = _fixture(tmp_path, TWO_PASS)
++    root, state, metadata = _fixture(tmp_path, TWO_PASS)
 +
 +    with _owner(state, metadata) as (server, client):
-+        _install_query_handler(server)
++        _connect(monkeypatch, client)
++        errors = [_cycle(path) for path in state.cycles]
++        publication = _analysis_result(metadata, server)
++        publication.live_publish_status = "pending_verification"
 +
-+        before = copy.deepcopy((
-+            state.cycles,
-+            state.dependency_graph.hard_edges,
-+            server._events,
-+            server._activity_seq,
-+        ))
++        assert filter_installed_desktop_cycle_errors(
++            errors, publication, str(root)
++        ) is errors
 +
-+        first = _summary(client)
-+        second = _summary(client)
 +
-+        assert first == second
-+        assert (
-+            state.cycles,
-+            state.dependency_graph.hard_edges,
-+            server._events,
-+            server._activity_seq,
-+        ) == before
++def test_t06_wrong_revision_preserves_all_errors(
++    tmp_path, isolated_dirs, monkeypatch,
++):
++    root, state, metadata = _fixture(tmp_path, TWO_PASS)
++
++    with _owner(state, metadata) as (server, client):
++        _connect(monkeypatch, client)
++        errors = [_cycle(path) for path in state.cycles]
++        publication = _analysis_result(metadata, server)
++        publication.live_publish_revision += 1
++
++        assert filter_installed_desktop_cycle_errors(
++            errors, publication, str(root)
++        ) is errors
++
++
++def test_t07_wrong_service_preserves_all_errors(
++    tmp_path, isolated_dirs, monkeypatch,
++):
++    root, state, metadata = _fixture(tmp_path, TWO_PASS)
++
++    with _owner(state, metadata) as (server, client):
++        _connect(monkeypatch, client)
++        errors = [_cycle(path) for path in state.cycles]
++        publication = _analysis_result(metadata, server)
++        publication.live_publish_service_instance_id = "foreign"
++
++        assert filter_installed_desktop_cycle_errors(
++            errors, publication, str(root)
++        ) is errors
++
++
++def test_t08_invalid_partition_never_suppresses(
++    tmp_path, isolated_dirs,
++):
++    root, state, metadata = _fixture(tmp_path, TWO_PASS)
++
++    with _owner(state, metadata) as (server, client):
++        report = client.get_installed_cycle_warning_projection()
++        report["active_warning_paths"] = report["model_pass_paths"]
++
++        assert _accepted_paths(
++            _analysis_result(metadata, server),
++            str(root),
++            report,
++        ) is None
++
++
++def test_t09_wrong_repository_never_suppresses(
++    tmp_path, isolated_dirs,
++):
++    root, state, metadata = _fixture(tmp_path, TWO_PASS)
++
++    with _owner(state, metadata) as (server, client):
++        report = client.get_installed_cycle_warning_projection()
++        report["repo_id"] = "foreign-repository"
++
++        assert _accepted_paths(
++            _analysis_result(metadata, server),
++            str(root),
++            report,
++        ) is None
++
++
++def test_t10_missing_owner_preserves_all_errors(
++    tmp_path, isolated_dirs, monkeypatch,
++):
++    root, state, metadata = _fixture(tmp_path, TWO_PASS)
++    monkeypatch.setattr(
++        "contextor.core.live_state.connect",
++        lambda _root: None,
++    )
++
++    errors = [_cycle(path) for path in state.cycles]
++
++    assert filter_installed_desktop_cycle_errors(
++        errors,
++        SimpleNamespace(live_publish_status="success"),
++        str(root),
++    ) is errors
++
++
++def test_t11_query_failure_preserves_all_errors(
++    tmp_path, isolated_dirs, monkeypatch,
++):
++    root, state, metadata = _fixture(tmp_path, TWO_PASS)
++
++    class FailingClient:
++        def request(self, *_args, **_kwargs):
++            raise RuntimeError("unavailable")
++
++    _connect(monkeypatch, FailingClient())
++    errors = [_cycle(path) for path in state.cycles]
++
++    with _owner(state, metadata) as (server, client):
++        assert filter_installed_desktop_cycle_errors(
++            errors,
++            _analysis_result(metadata, server),
++            str(root),
++        ) is errors
++
++
++def test_t12_no_cycles_does_not_query_live(
++    tmp_path, monkeypatch,
++):
++    def forbidden(_root):
++        raise AssertionError("LIVE must not be queried")
++
++    monkeypatch.setattr(
++        "contextor.core.live_state.connect",
++        forbidden,
++    )
++
++    errors = [_other()]
++
++    assert filter_installed_desktop_cycle_errors(
++        errors,
++        SimpleNamespace(live_publish_status="success"),
++        str(tmp_path),
++    ) is errors
++
++
++def test_t13_presenter_is_connected_to_desktop_full_scan():
++    import inspect
++    from contextor.ui.gui import ContextorGUI
++
++    source = inspect.getsource(ContextorGUI.analyze)
++
++    assert "filter_installed_desktop_cycle_errors(" in source
++    assert "return errors, analysis_result" in source
 ```
-
-## CONTRACT_CONFLICTS
-
-None observed in the exact anchor, compilation, or focused tests.
 
 ## REMAINING UNKNOWN
 
-- UNKNOWN: Active loaded-code adoption; no service restart or active user's FULL/LIVE operation was performed.
-- UNKNOWN: Global pytest result; prohibited in this stage.
-- UNKNOWN: Semantic cycle freshness remains stale in MCP.
+- UNKNOWN: Active loaded-code adoption; no backend or Desktop restart was performed.
+- UNKNOWN: Global pytest outcome; the suite was not run.
+- UNKNOWN: Semantic cycle family remains stale in MCP.
 
 ## FINAL IMPLEMENTER OBSERVATION
 
-The exact WARN-4F change passed the new module and listed focused regressions. Structural DFS cycle count remained 16. This is local source/test evidence; architectural acceptance remains with ChatGPT. STOP after WARN-4F.
+WARN-4G's literal local implementation passed the new test and specified focused regressions. This is source and isolated test evidence; architectural acceptance remains with ChatGPT. STOP after WARN-4G.

@@ -1313,6 +1313,14 @@ class ContextorGUI:
                 progress_callback=progress_callback,
                 is_cancelled=lambda: getattr(self.progress_bar, "is_cancelled", False),
             )
+            from contextor.ui.cycle_warning_presentation import (
+                filter_installed_desktop_cycle_errors,
+            )
+            errors = filter_installed_desktop_cycle_errors(
+                errors,
+                analysis_result,
+                path,
+            )
             return errors, analysis_result
 
         def on_success(outcome):
