@@ -1,260 +1,85 @@
-# CONTEXTOR P1D3-WARN-2B-2-R1 — implementer report
+# CONTEXTOR P1D3-WARN-2C — CONTRACT_CONFLICT
 
-## PREFLIGHT
+## 1. PREFLIGHT
 
-DIRECT_EVIDENCE: Initial HEAD `d2e5a1b7db7af6af1d11855bc12a8ffbbabfa9b4`, clean worktree. Contextor MCP inspected both production modules before editing. Local WARN-2B-2 receipt, validator and test anchors matched the supplied R1 preflight. No material drift was found.
+DIRECT_EVIDENCE: Initial HEAD `72753947474f612fbe90609f6b355205802a6e47`, clean worktree. Contextor MCP inspected `facade.py` and `state_manager.py` first; structural cycle count was 16. Local source showed the official preview originates from the second original-worker index pass and `save_snapshot` already accepts `prepared_partial_scc_preparation`. Existing v2 opt-in remains separate.
 
-## HEAD / WORKTREE
+## 2. HEAD / WORKTREE
 
-DIRECT_EVIDENCE: Final HEAD remains `d2e5a1b7db7af6af1d11855bc12a8ffbbabfa9b4`. Four allowlisted Python files and `walkthrough.md` changed. No Git mutation, service restart or active FULL/LIVE occurred.
+DIRECT_EVIDENCE: Final HEAD unchanged. Implementation attempt was fully removed after the contract conflict. Final worktree changes only this report.
 
-## ROOT CAUSE
+## 3. NEW OPT-IN API
 
-CODE_PATH_PROVED: Complete preparations did not bind `source_modules` to closure-derived sources; UNAVAILABLE component `model_kind` lacked an exact type/domain gate. Malformed recursive declarations could reach `asdict` during sealing/verification; the verifier's exception boundary did not include `RecursionError` or `OverflowError`.
+UNKNOWN: Not retained because the specified publication gate conflicts with the current state contract.
 
-## COMPLETE PREPARATION SOURCE DOMAIN
+## 4. PARAMETER VALIDATION
 
-CODE_PATH_PROVED: Validator now derives the sorted union of `closure.evidence_source_modules` from already computed closures and requires an exact tuple match for `PREPARED_UNPUBLISHED_NON_ATOMIC`. The existing UNAVAILABLE `source_modules == ()` rule remains.
+CONTRACT_PROVED: During the bounded attempt, non-bool opt-ins and missing-preview opt-in were rejected before analysis. This code was removed with the attempt.
 
-## UNAVAILABLE MODEL-KIND VALIDATION
+## 5. ORIGINAL-WORKER PREVIEW REUSE
 
-CODE_PATH_PROVED: UNAVAILABLE components now require exact `str` and membership in `FLAT_MODULE` or `REGULAR_PACKAGE`. Existing INDETERMINATE outcome and PREPARED branch were not changed.
+CODE_PATH_PROVED: Current `ContextorFacade.analyze_project` performs one original index, plans a reindex, performs a second original-worker capture, verifies it and calls `prepare_original_worker_cycle_manifest`. The attempted implementation did not add a third index pass.
 
-## RECEIPT VERIFIER EXCEPTION BOUNDARY
+## 6. PRE-PERSISTENCE PARTIAL AUTHORITY GATE
 
-CODE_PATH_PROVED: The existing verifier exception tuple now also contains `RecursionError` and `OverflowError`; those failures return `False`. Receipt fields, digest, version, authority and identity remain unchanged.
+CONTRACT_CONFLICT: The literal gate requires `state.resync_required is False`. `RepositoryAnalysisState` does not initialize that attribute. `facade.py:1265-1266` assigns it only when `analysis_result.resync_required` is true. Existing v2 gate at `facade.py:1399` uses `getattr(state, "resync_required", False) is False`. For normal FULL states, direct access raised `AttributeError` at the new gate before persistence. Substituting `getattr` or changing the state model would be an architectural decision outside the literal instruction.
 
-## MALFORMED DECLARATION REGRESSIONS
+## 7. SAVE_ENGINE_STATE FORWARDING
 
-CONTRACT_PROVED: R1-T01 rejects an incorrect complete source tuple. R1-T02 and T03 reject self-referencing lists for complete `source_modules` and UNAVAILABLE `model_kind` without exception. R1-T04 rejects both at seal.
+UNKNOWN: Attempted optional forwarding was removed with the conflicting facade change. Existing v2 forwarding remains.
 
-## TAMPERED SNAPSHOT HYDRATION
+## 8. REAL FULL PASS / INDETERMINATE
 
-CONTRACT_PROVED: R1-T05/T06 direct verification returned `False` for recursively tampered embedded preparations. R1-T07 persisted both tampered receipt forms through isolated snapshot fixtures; `load_snapshot` returned normally, cleared the optional receipt and preserved hard edges, cycles and fresh cycle state.
+DIRECT_EVIDENCE: The attempted focused integration test failed at direct `state.resync_required` access before a partial receipt could be committed.
 
-## PRESERVED VALID PUBLICATION
+## 9. REAL FULL PASS / HAZARD
 
-CONTRACT_PROVED: Genuine PASS/INDETERMINATE and PASS/HAZARD preparations still validate and survive hydration (R1-T08). No valid digest was fabricated.
+DIRECT_EVIDENCE: Same failure boundary as above.
 
-## V2 COMPATIBILITY
+## 10. COEXISTENCE WITH COMPLETE V2
 
-CONTRACT_PROVED: R1-T09 persisted valid v2 and partial receipts together; each verified against the same committed generation. R1-T10 repeated partial verification without state mutation.
+UNKNOWN: Could not be tested past the failing partial gate. Existing v2 code was not changed.
 
-## FOCUSED TEST RESULTS
+## 11. DEFAULT AND PREVIEW-ONLY COMPATIBILITY
 
-DIRECT_EVIDENCE: `py_compile` on all four authorized Python files exited 0. Initial focused run: 125 passed, one test-fixture failure caused by reusing `tmp_path/repo` twice. The fixture test was parameterized, then the exact requested five-module command passed: 127 passed, 0 failed, 0 skipped, 42.00 s, exit 0. `git diff --check` exited 0. No global pytest.
+DIRECT_EVIDENCE: Initial focused run produced 8 passes before the 12 failing partial-opt-in scenarios. No final implementation remains.
 
-## POST-CHANGE MCP AUDIT
+## 12. FAILURE / DRIFT FAIL-CLOSED
 
-DIRECT_EVIDENCE: Contextor `get_module_context` examined all four changed files. Final canonical revision 836, live provenance, `workspace_sync=verified` for all four. Module/graph/topology/cycles families fresh; cycle_semantics stale. Structural DFS back-edge cycle count remained 16, the same as prechange. No new production imports or hard dependency edges were added; Contextor's bounded outbound evidence showed existing dependencies. This is no active loaded-code adoption claim.
+UNKNOWN: Cannot evaluate the requested new path until the contradictory resync gate is resolved by the architect.
 
-## FILES_CHANGED
+## 13. GENERATION IDENTITY
 
-- `contextor/core/cycle_semantics/partial_scc_claims.py`
-- `contextor/core/cycle_semantics/partial_scc_publication.py`
-- `tests/test_cycle_semantics_partial_scc_claims.py`
-- `tests/test_cycle_semantics_partial_scc_publication.py`
+CODE_PATH_PROVED: Existing store owns metadata identity and sealing. The attempt would have forwarded preparation through `save_engine_state`; no retained change exists.
 
-`walkthrough.md` is this report. Complete actual diffs for the four Python files follow.
+## 14. STRUCTURAL GRAPH IMMUTABILITY
 
-## FULL_DIFFS
+DIRECT_EVIDENCE: Final source is unchanged. No new imports or hard edges remain. Preflight structural count was 16; no post-change count is meaningful because all source edits were removed.
 
+## 15. FOCUSED TEST RESULTS
 
-```diff
-diff --git a/contextor/core/cycle_semantics/partial_scc_claims.py b/contextor/core/cycle_semantics/partial_scc_claims.py
-index 09822d7..13302fc 100644
---- a/contextor/core/cycle_semantics/partial_scc_claims.py
-+++ b/contextor/core/cycle_semantics/partial_scc_claims.py
-@@ -52,6 +52,11 @@ def validate_partial_scc_claims(
-         graph_sha256 = fingerprint_hard_edges(hard_edges)
-         topology = analyze_import_cycle_topology(hard_edges)
-         closures = compute_cycle_model_source_closures(hard_edges)
-+        expected_source_modules = tuple(sorted({
-+            module_id
-+            for closure in closures
-+            for module_id in closure.evidence_source_modules
-+        }))
-         components = topology.cyclic_components
-         cyclic_members = tuple(sorted(
-             member for component in components for member in component.members
-@@ -93,6 +98,8 @@ def validate_partial_scc_claims(
-             manifest = preparation.manifest
-             if (
-                 preparation.reason is not None
-+                or type(preparation.source_modules) is not tuple
-+                or preparation.source_modules != expected_source_modules
-                 or type(manifest) is not PreparedCycleSourceManifest
-                 or manifest.components != declarations
-                 or manifest.version != MANIFEST_VERSION
-@@ -160,6 +167,8 @@ def validate_partial_scc_claims(
-             elif item.preparation_state == "UNAVAILABLE":
-                 if (
-                     item.model_classification != "INDETERMINATE"
-+                    or type(item.model_kind) is not str
-+                    or item.model_kind not in {"FLAT_MODULE", "REGULAR_PACKAGE"}
-                     or type(item.reason) is not str or not item.reason
-                     or item.source_signatures != ()
-                     or item.model_evidence_sha256 is not None
-diff --git a/contextor/core/cycle_semantics/partial_scc_publication.py b/contextor/core/cycle_semantics/partial_scc_publication.py
-index b77cbaa..9ee5c21 100644
---- a/contextor/core/cycle_semantics/partial_scc_publication.py
-+++ b/contextor/core/cycle_semantics/partial_scc_publication.py
-@@ -122,6 +122,7 @@ def verify_co_published_partial_scc_preparation(
-             repo_id=repo_id,
-             root_path=root_path,
-         )
--    except (AttributeError, KeyError, TypeError, ValueError, IndexError):
-+    except (AttributeError, KeyError, TypeError, ValueError, IndexError,
-+            RecursionError, OverflowError):
-         return False
-     return receipt == expected
-diff --git a/tests/test_cycle_semantics_partial_scc_claims.py b/tests/test_cycle_semantics_partial_scc_claims.py
-index c13289f..c44b78b 100644
---- a/tests/test_cycle_semantics_partial_scc_claims.py
-+++ b/tests/test_cycle_semantics_partial_scc_claims.py
-@@ -255,3 +255,33 @@ def test_t18_prepared_claims_are_not_manifest_or_receipt(tmp_path, isolated_dirs
-         expected_repo_id="repo",
-         expected_root_path="root",
-     ) == frozenset()
-+
-+
-+def test_r1_t01_complete_source_domain_mismatch_rejected(tmp_path, isolated_dirs):
-+    edges, snapshot, preparation = _case(tmp_path, TWO_PASS)
-+    assert preparation.status == "PREPARED_UNPUBLISHED_NON_ATOMIC"
-+    assert _validated(edges, snapshot, preparation) is not None
-+    changed = replace(preparation, source_modules=("foreign",))
-+    assert _validated(edges, snapshot, changed) is None
-+
-+
-+def test_r1_t02_recursive_complete_source_modules_rejected(tmp_path, isolated_dirs):
-+    edges, snapshot, preparation = _case(tmp_path, TWO_PASS)
-+    recursive = []
-+    recursive.append(recursive)
-+    changed = replace(preparation, source_modules=recursive)
-+    assert _validated(edges, snapshot, changed) is None
-+
-+
-+def test_r1_t03_recursive_unavailable_model_kind_rejected(tmp_path, isolated_dirs):
-+    edges, snapshot, preparation = _case(tmp_path)
-+    recursive = []
-+    recursive.append(recursive)
-+    changed = _replace_component(preparation, 1, model_kind=recursive)
-+    assert _validated(edges, snapshot, changed) is None
-+
-+
-+@pytest.mark.parametrize("sources", [PASS_AND_UNKNOWN, PASS_AND_HAZARD])
-+def test_r1_t08_valid_preparations_still_validate(tmp_path, isolated_dirs, sources):
-+    edges, snapshot, preparation = _case(tmp_path, sources)
-+    assert _validated(edges, snapshot, preparation) is not None
-diff --git a/tests/test_cycle_semantics_partial_scc_publication.py b/tests/test_cycle_semantics_partial_scc_publication.py
-index a382678..97df07b 100644
---- a/tests/test_cycle_semantics_partial_scc_publication.py
-+++ b/tests/test_cycle_semantics_partial_scc_publication.py
-@@ -329,3 +329,93 @@ def test_t20_tampered_receipt_preserves_structural_diagnostics(tmp_path, isolate
-     assert loaded.cycles_state == "fresh"
-     assert loaded.cycles == [["a", "b", "a"], ["x", "y", "x"]]
-     assert loaded.dependency_graph.hard_edges == state.dependency_graph.hard_edges
-+
-+
-+def _recursive_declaration(preparation, kind):
-+    recursive = []
-+    recursive.append(recursive)
-+    if kind == "source_modules":
-+        return replace(preparation, source_modules=recursive)
-+    components = list(preparation.component_preparations)
-+    components[1] = replace(components[1], model_kind=recursive)
-+    return replace(preparation, component_preparations=tuple(components))
-+
-+
-+@pytest.mark.parametrize("kind,sources", [
-+    ("source_modules", TWO_PASS),
-+    ("model_kind", PASS_AND_UNKNOWN),
-+])
-+def test_r1_t04_malformed_declaration_cannot_be_sealed(
-+    tmp_path, isolated_dirs, kind, sources,
-+):
-+    state, preparation = _case(tmp_path, sources)
-+    state.revision = 1
-+    state.state_id = "partial-state"
-+    malformed = _recursive_declaration(preparation, kind)
-+    with pytest.raises((ValueError, TypeError)):
-+        seal_partial_scc_preparation(
-+            state, malformed, revision=1, state_id="partial-state",
-+            repo_id="", root_path="",
-+        )
-+    assert state.cycle_partial_source_publication is None
-+
-+
-+@pytest.mark.parametrize("kind,sources", [
-+    ("source_modules", TWO_PASS),
-+    ("model_kind", PASS_AND_UNKNOWN),
-+])
-+def test_r1_t05_t06_t07_recursive_receipt_fails_verify_and_hydration(
-+    tmp_path, isolated_dirs, kind, sources,
-+):
-+    state, preparation = _case(tmp_path, sources)
-+    metadata = _save(state, tmp_path, partial=preparation)
-+    loaded, _ = load_snapshot(tmp_path, "partial-state")
-+    receipt = loaded.cycle_partial_source_publication
-+    loaded.cycle_partial_source_publication = replace(
-+        receipt,
-+        preparation=_recursive_declaration(receipt.preparation, kind),
-+    )
-+    before_edges = copy.deepcopy(loaded.dependency_graph.hard_edges)
-+    before_cycles = copy.deepcopy(loaded.cycles)
-+    assert _verify(loaded, metadata) is False
-+    assert loaded.dependency_graph.hard_edges == before_edges
-+    assert loaded.cycles == before_cycles
-+
-+    _tamper(tmp_path, metadata, lambda stored: setattr(
-+        stored,
-+        "cycle_partial_source_publication",
-+        replace(
-+            stored.cycle_partial_source_publication,
-+            preparation=_recursive_declaration(
-+                stored.cycle_partial_source_publication.preparation, kind,
-+            ),
-+        ),
-+    ))
-+    hydrated, _ = load_snapshot(tmp_path, "partial-state")
-+    assert hydrated.cycle_partial_source_publication is None
-+    assert hydrated.dependency_graph.hard_edges == before_edges
-+    assert hydrated.cycles == before_cycles
-+    assert hydrated.cycles_state == "fresh"
-+
-+
-+@pytest.mark.parametrize("sources", [PASS_AND_UNKNOWN, PASS_AND_HAZARD])
-+def test_r1_t08_valid_publication_survives_hydration(tmp_path, isolated_dirs, sources):
-+    state, preparation = _case(tmp_path, sources)
-+    metadata = _save(state, tmp_path, partial=preparation)
-+    loaded, _ = load_snapshot(tmp_path, "partial-state")
-+    assert _verify(loaded, metadata)
-+    assert loaded.cycle_partial_source_publication.preparation == preparation
-+
-+
-+def test_r1_t09_t10_v2_coexistence_and_repeat_verification(tmp_path, isolated_dirs):
-+    state, preparation = _case(tmp_path, TWO_PASS)
-+    metadata = _save(state, tmp_path, partial=preparation, manifest=preparation.manifest)
-+    loaded, _ = load_snapshot(tmp_path, "partial-state")
-+    before = copy.deepcopy(loaded.__dict__)
-+    assert _verify(loaded, metadata) is True
-+    assert _verify(loaded, metadata) is True
-+    assert verify_co_published_cycle_manifest(
-+        loaded, revision=metadata.revision, state_id=metadata.state_id,
-+        repo_id=metadata.repo_id, root_path=metadata.root_path,
-+    )
-+    assert loaded.__dict__ == before
-```
+DIRECT_EVIDENCE: `py_compile` on the attempted three files exited 0. Initial new test module run: 8 passed, 12 failed, exit 1, 18.95 s. Failure root: `AttributeError: 'RepositoryAnalysisState' object has no attribute 'resync_required'` at attempted `facade.py:1445`. Required regressions were not run after the STOP boundary. After removing the attempted implementation, `git diff --check` passed with no source/test changes.
 
-## CONTRACT_CONFLICTS
+## 16. POST-CHANGE MCP AUDIT
 
-NONE observed.
+UNKNOWN: No modified source/test file remains for a post-change audit. Preflight Contextor revision 836 reported 16 fresh structural DFS back-edge cycles. No loaded-code adoption claim is made.
 
-## REMAINING UNKNOWN
+## 17. FILES_CHANGED
 
-UNKNOWN: Active LIVE loaded-code adoption, active warning behavior and runtime import safety. No active FULL/LIVE or backend restart was performed.
+NONE (source/test/docs). Only `walkthrough.md` was overwritten for this report.
 
-## FINAL IMPLEMENTER OBSERVATION
+## 18. FULL_DIFFS
 
-CONTRACT_PROVED: The specified malformed-declaration gates and verifier exception boundary pass the focused regressions. Architectural GO remains with ChatGPT.
+ACTUAL_DIFF=DIFFS=NONE for source/test/docs.
 
+## 19. CONTRACT_CONFLICTS
+
+CONTRACT_CONFLICT — `ContextorFacade.analyze_project`, `contextor/core/api/facade.py`: requested literal `state.resync_required is False` assumes an attribute that normal `RepositoryAnalysisState` instances lack. Existing state contract uses optional dynamic attribute; existing caller accesses it via `getattr(..., False)`. The missing decision is how the new gate should interpret an absent resync flag. Without that decision, literal implementation breaks ordinary partial-opt-in FULL.
+
+## 20. REMAINING UNKNOWN
+
+UNKNOWN: Correct architect-approved absent-resync handling; genuine FULL partial receipt publication; coexistence and failure cases; active runtime adoption. No active user FULL/LIVE, restart, commit or push occurred.
+
+## 21. FINAL IMPLEMENTER OBSERVATION
+
+STOP — CONTRACT_CONFLICT. No source/test implementation remains. Await exact architect instruction.
