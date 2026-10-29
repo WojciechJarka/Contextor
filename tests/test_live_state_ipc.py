@@ -2618,13 +2618,14 @@ def test_connect_or_start_replaces_proven_orphan_with_dead_owner(tmp_path, monke
         stderr=subprocess.DEVNULL,
     )
     from contextor.core.live_state.runtime import connect
-    deadline = time.monotonic() + 5.0
-    while time.monotonic() < deadline:
-        if connect(repo):
-            break
-        time.sleep(0.05)
-    orphan_pid = proc.pid
+    client = None
     try:
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline:
+            if connect(repo):
+                break
+            time.sleep(0.05)
+        orphan_pid = proc.pid
         # connect_or_start detects owner 99999999 is dead -> stops orphan and spawns fresh owned runtime
         client = connect_or_start(repo, owner_pid=os.getpid(), owner_token="orphan-replacer")
         assert client.is_owner is False
@@ -2632,11 +2633,79 @@ def test_connect_or_start_replaces_proven_orphan_with_dead_owner(tmp_path, monke
         assert client.owner_pid == os.getpid()
         assert client.service_pid != orphan_pid
     finally:
-        client.request("shutdown")
+        body_failed = sys.exc_info()[0] is not None
         try:
-            proc.kill()
-        except OSError:
-            pass
+            if client is None:
+                try:
+                    client = connect(repo)
+                except Exception:
+                    pass
+            if client is not None:
+                try:
+                    client.request("shutdown", timeout=2.0)
+                except Exception:
+                    pass
+        finally:
+            if proc.poll() is None:
+                try:
+                    proc.kill()
+                except OSError:
+                    pass
+            try:
+                proc.wait(timeout=5.0)
+            except subprocess.TimeoutExpired:
+                if not body_failed:
+                    raise
+
+
+@pytest.mark.parametrize("failure", ["before_assignment", "shutdown"])
+def test_orphan_replacement_cleanup_regression(tmp_path, monkeypatch, failure):
+    import contextor.core.live_state.runtime as runtime
+
+    events = []
+
+    class Process:
+        pid = 123456
+        alive = True
+
+        def poll(self):
+            return None if self.alive else 0
+
+        def kill(self):
+            events.append("kill")
+            self.alive = False
+
+        def wait(self, timeout):
+            events.append(("wait", timeout))
+            return 0
+
+    process = Process()
+    monkeypatch.setattr(subprocess, "Popen", lambda *_args, **_kwargs: process)
+
+    if failure == "before_assignment":
+        def failed_connect(_root):
+            raise RuntimeError("probe failed")
+
+        monkeypatch.setattr(runtime, "connect", failed_connect)
+        with pytest.raises(RuntimeError, match="probe failed"):
+            test_connect_or_start_replaces_proven_orphan_with_dead_owner(tmp_path, monkeypatch)
+    else:
+        client = SimpleNamespace(
+            is_owner=False,
+            owner_token="unexpected-token",
+            owner_pid=os.getpid(),
+            service_pid=654321,
+            request=lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("shutdown failed")),
+        )
+        monkeypatch.setattr(runtime, "connect", lambda _root: client)
+        monkeypatch.setattr(
+            sys.modules[__name__], "connect_or_start", lambda *_args, **_kwargs: client,
+        )
+        with pytest.raises(AssertionError):
+            test_connect_or_start_replaces_proven_orphan_with_dead_owner(tmp_path, monkeypatch)
+
+    assert events == ["kill", ("wait", 5.0)]
+    assert process.poll() is not None
 
 
 def test_connect_or_start_rejects_legacy_endpoint_without_owner_pid(tmp_path, monkeypatch):

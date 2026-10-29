@@ -8,6 +8,7 @@ import sys
 import threading
 import time
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -193,14 +194,17 @@ def test_real_windows_job_object_breakaway_integration(tmp_path, monkeypatch):
     # Create Windows Job Object with KILL_ON_JOB_CLOSE (0x2000) and BREAKAWAY_OK (0x0800)
     hJob = kernel32.CreateJobObjectW(None, None)
     assert hJob, f"Failed to create Job Object: {ctypes.GetLastError()}"
+    helper = None
+    live_client = None
+    ready_path = tmp_path / "live-helper-ready"
+    try:
+        info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION()
+        info.BasicLimitInformation.LimitFlags = 0x2000 | 0x0800
+        res = kernel32.SetInformationJobObject(hJob, 9, ctypes.byref(info), ctypes.sizeof(info))
+        assert res != 0, f"Failed to set Job Object info: {ctypes.GetLastError()}"
 
-    info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION()
-    info.BasicLimitInformation.LimitFlags = 0x2000 | 0x0800
-    res = kernel32.SetInformationJobObject(hJob, 9, ctypes.byref(info), ctypes.sizeof(info))
-    assert res != 0, f"Failed to set Job Object info: {ctypes.GetLastError()}"
-
-    # Helper process assigned to that Job Object
-    helper_code = f"""
+        # Helper process assigned to that Job Object
+        helper_code = f"""
 import os, sys, time
 from pathlib import Path
 from contextor.core.live_state.runtime import connect_or_start
@@ -208,25 +212,28 @@ from contextor.core.live_state.runtime import connect_or_start
 os.environ["CONTEXTOR_CACHE_DIR"] = {repr(str(cache))}
 repo = Path({repr(str(repo))})
 client = connect_or_start(repo, owner_pid={keeper_pid}, owner_token={repr(keeper_token)})
-print("HELPER_DONE", client.service_pid, flush=True)
+Path({repr(str(ready_path))}).write_text(str(client.service_pid), encoding="ascii")
 time.sleep(60)
 """
 
-    helper = subprocess.Popen(
-        [sys.executable, "-c", helper_code],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
-    assigned = kernel32.AssignProcessToJobObject(hJob, int(helper._handle))
-    assert assigned != 0, f"Failed to assign helper to Job Object: {ctypes.GetLastError()}"
+        helper = subprocess.Popen(
+            [sys.executable, "-c", helper_code],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+        assigned = kernel32.AssignProcessToJobObject(hJob, int(helper._handle))
+        assert assigned != 0, f"Failed to assign helper to Job Object: {ctypes.GetLastError()}"
 
-    # Read output from helper confirming connect_or_start completed
-    line = helper.stdout.readline()
-    assert "HELPER_DONE" in line
+        deadline = time.monotonic() + 15.0
+        while not ready_path.is_file():
+            if helper.poll() is not None:
+                pytest.fail("LIVE helper exited before readiness")
+            if time.monotonic() >= deadline:
+                pytest.fail("LIVE helper readiness timed out after 15 seconds")
+            time.sleep(0.05)
+        service_pid = int(ready_path.read_text(encoding="ascii"))
 
-    live_client = None
-    try:
         # Close the Job Object handle and terminate the helper process
         kernel32.CloseHandle(hJob)
         hJob = None
@@ -244,17 +251,111 @@ time.sleep(60)
         assert live_client is not None, "LIVE process died when helper Job Object closed!"
         status = live_client.ping()
         assert status.get("status") == "ok"
+        assert live_client.service_pid == service_pid
         assert live_client.owner_token == keeper_token
         assert live_client.owner_pid == keeper_pid
     finally:
-        if hJob is not None:
-            kernel32.CloseHandle(hJob)
-        if live_client is not None:
-            try:
-                live_client.request("shutdown")
-            except Exception:
-                pass
         try:
-            helper.kill()
-        except Exception:
-            pass
+            if hJob is not None:
+                kernel32.CloseHandle(hJob)
+        finally:
+            try:
+                if live_client is None:
+                    from contextor.core.live_state.runtime import connect
+
+                    try:
+                        live_client = connect(repo)
+                    except Exception:
+                        pass
+                if live_client is not None:
+                    try:
+                        live_client.request("shutdown", timeout=2.0)
+                    except Exception:
+                        pass
+            finally:
+                if helper is not None:
+                    try:
+                        if helper.poll() is None:
+                            helper.terminate()
+                    except Exception:
+                        pass
+                    try:
+                        helper.wait(timeout=5.0)
+                    except subprocess.TimeoutExpired:
+                        if helper.poll() is None:
+                            helper.kill()
+                        helper.wait(timeout=5.0)
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows Job Object cleanup regression")
+@pytest.mark.parametrize("failure", ["assignment", "readiness_timeout", "shutdown"])
+def test_windows_job_object_cleanup_regression(tmp_path, monkeypatch, failure):
+    import ctypes
+    import contextor.core.live_state.runtime as runtime
+
+    events = []
+
+    class Helper:
+        _handle = 123
+        alive = True
+
+        def poll(self):
+            return None if self.alive else 0
+
+        def terminate(self):
+            events.append("terminate")
+            self.alive = False
+
+        def wait(self, timeout):
+            events.append(("wait", timeout))
+            return 0
+
+        def kill(self):
+            events.append("kill")
+            self.alive = False
+
+    helper = Helper()
+    kernel32 = SimpleNamespace(
+        CreateJobObjectW=lambda *_: 77,
+        SetInformationJobObject=lambda *_: 1,
+        AssignProcessToJobObject=lambda *_: 0 if failure == "assignment" else 1,
+        CloseHandle=lambda handle: events.append(("close", handle)),
+    )
+    monkeypatch.setattr(ctypes.windll, "kernel32", kernel32)
+
+    def fake_popen(*_args, **_kwargs):
+        if failure == "shutdown":
+            (tmp_path / "live-helper-ready").write_text("456", encoding="ascii")
+        return helper
+
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(time, "sleep", lambda _seconds: None)
+
+    client = SimpleNamespace(
+        service_pid=456,
+        owner_token="job-keeper-token-123",
+        owner_pid=os.getpid(),
+        ping=lambda: {"status": "ok"},
+        request=lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("shutdown failed")),
+    )
+    monkeypatch.setattr(runtime, "connect", lambda root: client if failure == "shutdown" else None)
+
+    if failure == "readiness_timeout":
+        import itertools
+
+        ticks = itertools.count()
+        monkeypatch.setattr(time, "monotonic", lambda: next(ticks) * 20.0)
+
+    if failure == "assignment":
+        with pytest.raises(AssertionError, match="Failed to assign helper"):
+            test_real_windows_job_object_breakaway_integration(tmp_path, monkeypatch)
+    elif failure == "readiness_timeout":
+        with pytest.raises(pytest.fail.Exception, match="readiness timed out"):
+            test_real_windows_job_object_breakaway_integration(tmp_path, monkeypatch)
+    else:
+        test_real_windows_job_object_breakaway_integration(tmp_path, monkeypatch)
+
+    assert ("close", 77) in events
+    assert "terminate" in events
+    assert ("wait", 5.0) in events or ("wait", 2) in events
+    assert helper.poll() is not None

@@ -1,87 +1,401 @@
-# CONTEXTOR P1D3-D2B-EXIT-GATE — read-only certification audit
+# CONTEXTOR P1D3-D2B-EXIT-S2 — Windows test process cleanup hardening
 
-## 1. EXECUTIVE OBSERVATION
+## PREFLIGHT
 
-DIRECT_EVIDENCE: Read-only D2B exit audit performed. Global suite was not run because safety of the complete test collection was not established. A reviewed, isolated 13-module subset passed 540 tests, with one platform skip. No architectural GO is declared.
+DIRECT_EVIDENCE: Current checkout at task start matched both named anchors. `tests/test_live_job_object.py::test_real_windows_job_object_breakaway_integration` created a Windows Job Object, configured flags `0x2000 | 0x0800`, spawned a helper, asserted assignment, then blocked on `helper.stdout.readline()` before entering cleanup `try/finally`. `tests/test_live_state_ipc.py::test_connect_or_start_replaces_proven_orphan_with_dead_owner` spawned a real runtime process, polled `connect(repo)` before cleanup, assigned `client` inside `try`, and called `client.request("shutdown")` before `proc.kill()` in `finally`. Contextor MCP resolved both test modules before edit; direct local source confirmed exact anchors. No source drift or preflight mismatch.
 
-## 2. INITIAL / FINAL HEAD
+## INITIAL / FINAL HEAD
 
-DIRECT_EVIDENCE: Initial and final HEAD `d4c1e56f2b935bcf0a1eaf45c4dab5212939f8e8`.
+DIRECT_EVIDENCE: Initial and final HEAD `b8c982d2693797ac6f4f1c8d9901bc20e0368155`. No Git mutation.
 
-## 3. INITIAL / FINAL WORKTREE
+## INITIAL / FINAL WORKTREE
 
-DIRECT_EVIDENCE: Initial `git status --short` was clean. After tests, source/test worktree remained clean. Only this `walkthrough.md` report was rewritten.
+DIRECT_EVIDENCE: Initial worktree had only pre-existing modified `walkthrough.md`. Final worktree has modified `tests/test_live_job_object.py`, `tests/test_live_state_ipc.py`, and `walkthrough.md`. The initial report was preserved until the final S2 report overwrite; no other files were edited.
 
-## 4. D2B-7 BASELINE VERIFICATION
+## ROOT CAUSE A
 
-CODE_PATH_PROVED: `contextor/core/symbol_engine/indexer.py:81` has `IMPORT_CLASSIFICATION_SEMANTICS_VERSION = 9`; lines 20-24 import `SOURCE_SUFFIXES`; lines 88-94 derive `_ALTERNATIVE_SOURCE_SUFFIXES`; lines 2490-2527 use one `root_path.rglob("*")`, preserve the `.py` branch, and set `unindexed_import_artifacts_present` for real alternative-source/binary artifacts and directory symlinks. Lines 2606-2613 reuse the global `project_effects_closed` veto. No ordinary `__pycache__` exemption occurs in the discovery branch. `original_worker_capture_status` remains `ALL_SELECTED_CAPTURED_NON_ATOMIC` (`indexer.py:1642`); planner READY remains `READY_FOR_REINDEX_NON_ATOMIC` (`original_worker_reindex_planning.py:22`). `generation_manifest.py:26` defines `cycle-source-manifest/2`; `publication_binding.py:26` defines `cycle-prepared-co-publication/2` and retains explicit v1 legacy identifiers at lines 28-29.
+CODE_PATH_PROVED: A failed `AssignProcessToJobObject` assertion or helper readiness failure occurred before cleanup, allowing test-created helper/Job resources to survive. `stdout.readline()` had no deadline. This concerned a temporary test repo; no interaction with the active user service was demonstrated.
 
-## 5. TEST SAFETY PREFLIGHT
+## ROOT CAUSE B
 
-DIRECT_EVIDENCE: `pyproject.toml:32-40` discovers all `tests/test_*.py` and defines only `live` marker. `tests/conftest.py:16-30` redirects cache/state/output only when a test requests `isolated_dirs`; lines 33-46 redirect those roots for `live`-marked tests; lines 48-53 redirect only the central registry for other tests. The collection contains 261 Python files. Tests such as `tests/test_live_job_object.py:196-275` spawn and terminate separate LIVE processes; `tests/test_live_state_ipc.py:2788` exercises connect-or-start. These examples use temporary roots, but their presence and the conditional fixture do not prove isolation for every collected test. UNKNOWN: every global test's external side effects have not been exhaustively audited. The full suite therefore failed the safety preflight for indiscriminate execution. Clearly isolated selected modules use `tmp_path`, `isolated_dirs`, local CanonicalLiveServer fixtures, or monkeypatched runtime, as inspected before execution. No active Contextor FULL, LIVE publication, service restart, or elevated privilege request was performed.
+CODE_PATH_PROVED: A readiness-loop exception occurred before the `try/finally`. A failed `connect_or_start` left `client` unbound, making cleanup raise `UnboundLocalError`; a shutdown exception could skip process kill/reap. The subprocess used a temporary repo/cache/state root.
 
-## 6. GLOBAL REGRESSION RESULTS
+## EXACT IMPLEMENTATION
 
-UNKNOWN: The exact global command `.\.venv\Scripts\python.exe -m pytest -q -rs` was not executed because complete-suite isolation was unverified. Global passed/failed/skipped/error counts, duration, and global failure taxonomy are UNKNOWN. The 540-pass selected result is not labeled global.
+DIRECT_EVIDENCE: In the Job Object test, `helper` and `live_client` are initialized immediately after successful Job creation; configuration, spawn, assignment and readiness are inside outer `try/finally`. The helper writes its returned service PID to `tmp_path/live-helper-ready`; the parent polls this file with `time.monotonic()` and a 15-second deadline, aborting on helper exit. The existing Job flags, owner identity and LIVE survival assertions remain. Cleanup closes the Job handle, attempts shutdown through the existing client or a single isolated-repo `connect(repo)`, then terminates and reaps the helper with finite waits. Shutdown failure cannot skip helper cleanup. No broad process-name termination was added.
 
-## 7. DOWNSTREAM INTEGRATION RESULTS
+DIRECT_EVIDENCE: In the orphan replacement test, `client = None` precedes `try`; the readiness loop and replacement call are protected. Cleanup attempts isolated client resolution only if needed, shuts down if available, then independently kills and waits for the originally spawned process. It records whether the body had already failed, so a reaping timeout cannot mask that original exception. Production code, endpoint schema, ownership and IPC contracts were not changed.
 
-DIRECT_EVIDENCE: Selected 13-module suite passed 540, skipped 1, failed 0, errors 0 in pytest 138.65 s (outer PowerShell stopwatch 140.9179735 s), exit 0. Executed modules: `tests/test_p1d3_d2b2_type_only.py`, `tests/test_p1d3_package_cycle_integration.py`, `tests/test_cycle_semantics_full_integration.py`, `tests/test_cycle_semantics_publication_live_integration.py`, `tests/test_original_worker_official_full_live_publication.py`, `tests/live_state/test_installed_cycle_generation_gate.py`, `tests/mcp/tools/test_get_project_architecture_full_reports.py`, `tests/test_cycle_semantics_invalidation.py`, `tests/test_cycle_semantics_registered_store_binding.py`, `tests/test_cycle_semantics_publication_binding.py`, `tests/test_original_worker_reindex_planning.py`, `tests/test_original_worker_manifest_preparation.py`, `tests/test_original_worker_full_to_live_receipt.py`. These cover the named FULL, incremental, LIVE, installed-generation, MCP, graph, source capture, cache, manifest, receipt and historical report pathways within isolated fixtures. Aggregate success does not establish arbitrary Python runtime safety.
+## FAILURE-PATH REGRESSION EVIDENCE
 
-## 8. P0/P1B INVARIANTS
+DIRECT_EVIDENCE: Five controlled-double cases passed after final edits: Job assignment failure enters cleanup; Job readiness timeout is finite; Job shutdown exception still permits helper cleanup; orphan failure before client assignment preserves its original exception and reaps the process; orphan shutdown exception does not mask a body assertion and does not skip process cleanup. These regressions launch no additional real LIVE service.
 
-CONTRACT_PROVED: The selected P1D3 integration and original-worker modules passed the existing P0/P1B fail-closed assertions, source SHA binding and original-worker non-atomic limitations. CODE_PATH_PROVED: Existing source capture and planner statuses explicitly retain `NON_ATOMIC`; no P0/P1B source or contract was edited.
+DIRECT_EVIDENCE: The first attempted regression run was interrupted with exit 1 because the initial fake monotonic clock stopped advancing after two values, causing the controlled timeout case to hang. The fake clock was changed to a monotonically increasing counter. The next run passed 5 tests in 26.46 s (outer stopwatch 28.1291439 s), and the final post-edit run passed 5 tests in 1.77 s (outer 3.5106132 s), exit 0. No claim is based on the interrupted run.
 
-## 9. MANIFEST V2
+## REAL WINDOWS TEST RESULTS
 
-CODE_PATH_PROVED: `MANIFEST_VERSION = "cycle-source-manifest/2"` in `generation_manifest.py:26`. CONTRACT_PROVED: Selected original-worker manifest preparation and publication-binding tests passed. This is declaration/consistency evidence, not general source-byte or runtime-safety certification.
+DIRECT_EVIDENCE: On Windows, the two existing real integration tests ran by exact node ID after focused regressions and passed: 2 passed in 16.98 s (outer 18.7997029 s), exit 0. After the final cleanup refinement, both ran again and passed: 2 passed in 11.62 s (outer 12.9719745 s), exit 0. The Job Object test still verifies LIVE survives closing the helper Job; the orphan test still verifies replacement ownership. No full modules or global pytest were run.
 
-## 10. RECEIPT V2
+## PROCESS CLEANUP EVIDENCE
 
-CODE_PATH_PROVED: `PUBLICATION_BINDING_VERSION = "cycle-prepared-co-publication/2"` in `publication_binding.py:26`; receipt dataclass is at lines 40-49; `verify_co_published_cycle_manifest` is at line 301. CONTRACT_PROVED: Selected binding, FULL-to-LIVE receipt, and official isolated publication tests passed. The source states that the receipt attests co-publication of claims, not source-byte provenance or runtime safety.
+DIRECT_EVIDENCE: Controlled doubles recorded helper `terminate`/`wait` and orphan `kill`/`wait` even on injected failures. The real tests completed without fixture errors. A post-run read-only Win32_Process query found 0 command lines matching both `contextor.core.live_state.runtime` and `pytest-of-DafoO`. This query cannot identify every possible test-created process and is not proof of active service state. No user process was terminated by this agent.
 
-## 11. FULL / INCREMENTAL / LIVE CONTRACTS
+## PY_COMPILE / DIFF CHECK
 
-CONTRACT_PROVED: Selected isolated FULL materialization, incremental invalidation, local CanonicalLiveServer publication, official isolated FULL-to-LIVE, and installed-generation gate modules passed. `test_cycle_semantics_full_integration.py` uses a `tmp_path` repository plus `isolated_dirs`; publication integration uses a local server/store; official FULL test uses isolated repository identity, local server endpoint and monkeypatched connect. UNKNOWN: active Desktop/MCP service and installed loaded code were not inspected or exercised; isolated publication is not active LIVE adoption.
+DIRECT_EVIDENCE: `& .\.venv\Scripts\python.exe -m py_compile tests/test_live_job_object.py tests/test_live_state_ipc.py` exited 0; final run 0.3004999 s. `git diff --check -- tests/test_live_job_object.py tests/test_live_state_ipc.py` exited 0. Git emitted only LF-to-CRLF advisory warnings; no whitespace errors.
 
-## 12. MCP PROJECTION CONTRACTS
-
-CONTRACT_PROVED: Selected `tests/mcp/tools/test_get_project_architecture_full_reports.py` passed; its fixtures install temporary JSON reports and monkeypatch runtime. Existing tests explicitly assert historical-only report metadata, stale/resync separation, unsupported-schema failure, and newer-LIVE versus historical-report distinction. No active MCP report was mutated.
-
-## 13. FAILURES AND ROOT CAUSES
-
-DIRECT_EVIDENCE: Selected suite had zero failed tests and zero collection/runtime errors. UNKNOWN: no conclusion about failures in the unrun global suite. One non-failing AuthlibDeprecationWarning came from `.venv/lib/site-packages/fastmcp/server/auth/providers/jwt.py:10` and mentions deprecated `authlib.jose`; no root-cause classification beyond the warning text is asserted.
-
-## 14. SKIPS AND PLATFORM LIMITATIONS
-
-DIRECT_EVIDENCE: One skip at `tests/test_p1d3_d2b2_type_only.py:973`: `directory symlink unavailable: [WinError 1314] A required privilege is not held by the client`, while linking the temporary `symlink-target` to temporary `repo/linked`. The symlink contract remains unverified in this run. No privileges or Windows developer settings were changed.
-
-## 15. EXACT COMMANDS / EXIT CODES
-
-DIRECT_EVIDENCE: Read-only preflight included `git rev-parse HEAD`, `git status --short`, Contextor `get_mcp_documentation` and `get_file_edit_context`, `rg`, and `Get-Content`; all returned successfully. Executed test command (exit 0):
+## EXACT EXECUTION COMMANDS
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest -q -rs tests/test_p1d3_d2b2_type_only.py tests/test_p1d3_package_cycle_integration.py tests/test_cycle_semantics_full_integration.py tests/test_cycle_semantics_publication_live_integration.py tests/test_original_worker_official_full_live_publication.py tests/live_state/test_installed_cycle_generation_gate.py tests/mcp/tools/test_get_project_architecture_full_reports.py tests/test_cycle_semantics_invalidation.py tests/test_cycle_semantics_registered_store_binding.py tests/test_cycle_semantics_publication_binding.py tests/test_original_worker_reindex_planning.py tests/test_original_worker_manifest_preparation.py tests/test_original_worker_full_to_live_receipt.py
+.\.venv\Scripts\python.exe -m pytest -q -rs tests/test_live_job_object.py::test_windows_job_object_cleanup_regression tests/test_live_state_ipc.py::test_orphan_replacement_cleanup_regression
+# final: exit 0; 5 passed in 1.77s; outer 3.5106132s
+
+.\.venv\Scripts\python.exe -m pytest -q -rs tests/test_live_job_object.py::test_real_windows_job_object_breakaway_integration tests/test_live_state_ipc.py::test_connect_or_start_replaces_proven_orphan_with_dead_owner
+# final: exit 0; 2 passed in 11.62s; outer 12.9719745s
+
+.\.venv\Scripts\python.exe -m py_compile tests/test_live_job_object.py tests/test_live_state_ipc.py
+# exit 0; 0.3004999s
+
+git diff --check -- tests/test_live_job_object.py tests/test_live_state_ipc.py
+# exit 0
 ```
 
-DIRECT_EVIDENCE: `540 passed, 1 skipped, 1 warning in 138.65s`; outer duration 140.9179735 s. The global `pytest -q -rs` command was not run.
+## POST-CHANGE MCP AUDIT
 
-## 16. FILES_CHANGED
+DIRECT_EVIDENCE: Contextor `get_file_edit_context` after final edits resolved `tests.test_live_job_object` and `tests.test_live_state_ipc`, each at canonical revision 816, `provenance=live`, `canonical_state=fresh`, `workspace_sync=verified`, with no warnings. Module/graph/topology facts were fresh; `cycle_semantics` family was stale. This confirms source/workspace alignment of these test files, not active loaded-code adoption or LIVE runtime certification.
 
-FILES_CHANGED=NONE for production/test/docs. Only permitted report `walkthrough.md` was rewritten.
+## FILES_CHANGED
 
-## 17. ACTUAL_DIFF
+`tests/test_live_job_object.py`; `tests/test_live_state_ipc.py`. `walkthrough.md` is the report and excluded from production/test changed-file inventory.
 
-ACTUAL_DIFF=NONE for production/test/docs, per report convention. `walkthrough.md` is excluded from changed-file inventory.
+## FULL_DIFFS
 
-## 18. CONTRACT_CONFLICTS
+DIRECT_EVIDENCE: Complete, unabridged `git -c core.safecrlf=false diff --no-color -- tests/test_live_job_object.py tests/test_live_state_ipc.py` follows:
 
-DIRECT_EVIDENCE: No contract conflict observed in the selected suite. UNKNOWN: unrun global suite may expose additional conflicts.
+```diff
+diff --git a/tests/test_live_job_object.py b/tests/test_live_job_object.py
+index 6c27601..6f8c7d6 100644
+--- a/tests/test_live_job_object.py
++++ b/tests/test_live_job_object.py
+@@ -8,6 +8,7 @@ import sys
+ import threading
+ import time
+ from pathlib import Path
++from types import SimpleNamespace
+ from unittest.mock import MagicMock
+ 
+ import pytest
+@@ -193,14 +194,17 @@ def test_real_windows_job_object_breakaway_integration(tmp_path, monkeypatch):
+     # Create Windows Job Object with KILL_ON_JOB_CLOSE (0x2000) and BREAKAWAY_OK (0x0800)
+     hJob = kernel32.CreateJobObjectW(None, None)
+     assert hJob, f"Failed to create Job Object: {ctypes.GetLastError()}"
++    helper = None
++    live_client = None
++    ready_path = tmp_path / "live-helper-ready"
++    try:
++        info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION()
++        info.BasicLimitInformation.LimitFlags = 0x2000 | 0x0800
++        res = kernel32.SetInformationJobObject(hJob, 9, ctypes.byref(info), ctypes.sizeof(info))
++        assert res != 0, f"Failed to set Job Object info: {ctypes.GetLastError()}"
+ 
+-    info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION()
+-    info.BasicLimitInformation.LimitFlags = 0x2000 | 0x0800
+-    res = kernel32.SetInformationJobObject(hJob, 9, ctypes.byref(info), ctypes.sizeof(info))
+-    assert res != 0, f"Failed to set Job Object info: {ctypes.GetLastError()}"
+-
+-    # Helper process assigned to that Job Object
+-    helper_code = f"""
++        # Helper process assigned to that Job Object
++        helper_code = f"""
+ import os, sys, time
+ from pathlib import Path
+ from contextor.core.live_state.runtime import connect_or_start
+@@ -208,25 +212,28 @@ from contextor.core.live_state.runtime import connect_or_start
+ os.environ["CONTEXTOR_CACHE_DIR"] = {repr(str(cache))}
+ repo = Path({repr(str(repo))})
+ client = connect_or_start(repo, owner_pid={keeper_pid}, owner_token={repr(keeper_token)})
+-print("HELPER_DONE", client.service_pid, flush=True)
++Path({repr(str(ready_path))}).write_text(str(client.service_pid), encoding="ascii")
+ time.sleep(60)
+ """
+ 
+-    helper = subprocess.Popen(
+-        [sys.executable, "-c", helper_code],
+-        stdout=subprocess.PIPE,
+-        stderr=subprocess.PIPE,
+-        text=True,
+-    )
+-    assigned = kernel32.AssignProcessToJobObject(hJob, int(helper._handle))
+-    assert assigned != 0, f"Failed to assign helper to Job Object: {ctypes.GetLastError()}"
+-
+-    # Read output from helper confirming connect_or_start completed
+-    line = helper.stdout.readline()
+-    assert "HELPER_DONE" in line
++        helper = subprocess.Popen(
++            [sys.executable, "-c", helper_code],
++            stdout=subprocess.DEVNULL,
++            stderr=subprocess.DEVNULL,
++            text=True,
++        )
++        assigned = kernel32.AssignProcessToJobObject(hJob, int(helper._handle))
++        assert assigned != 0, f"Failed to assign helper to Job Object: {ctypes.GetLastError()}"
++
++        deadline = time.monotonic() + 15.0
++        while not ready_path.is_file():
++            if helper.poll() is not None:
++                pytest.fail("LIVE helper exited before readiness")
++            if time.monotonic() >= deadline:
++                pytest.fail("LIVE helper readiness timed out after 15 seconds")
++            time.sleep(0.05)
++        service_pid = int(ready_path.read_text(encoding="ascii"))
+ 
+-    live_client = None
+-    try:
+         # Close the Job Object handle and terminate the helper process
+         kernel32.CloseHandle(hJob)
+         hJob = None
+@@ -244,17 +251,111 @@ time.sleep(60)
+         assert live_client is not None, "LIVE process died when helper Job Object closed!"
+         status = live_client.ping()
+         assert status.get("status") == "ok"
++        assert live_client.service_pid == service_pid
+         assert live_client.owner_token == keeper_token
+         assert live_client.owner_pid == keeper_pid
+     finally:
+-        if hJob is not None:
+-            kernel32.CloseHandle(hJob)
+-        if live_client is not None:
+-            try:
+-                live_client.request("shutdown")
+-            except Exception:
+-                pass
+         try:
+-            helper.kill()
+-        except Exception:
+-            pass
++            if hJob is not None:
++                kernel32.CloseHandle(hJob)
++        finally:
++            try:
++                if live_client is None:
++                    from contextor.core.live_state.runtime import connect
++
++                    try:
++                        live_client = connect(repo)
++                    except Exception:
++                        pass
++                if live_client is not None:
++                    try:
++                        live_client.request("shutdown", timeout=2.0)
++                    except Exception:
++                        pass
++            finally:
++                if helper is not None:
++                    try:
++                        if helper.poll() is None:
++                            helper.terminate()
++                    except Exception:
++                        pass
++                    try:
++                        helper.wait(timeout=5.0)
++                    except subprocess.TimeoutExpired:
++                        if helper.poll() is None:
++                            helper.kill()
++                        helper.wait(timeout=5.0)
++
++
++@pytest.mark.skipif(sys.platform != "win32", reason="Windows Job Object cleanup regression")
++@pytest.mark.parametrize("failure", ["assignment", "readiness_timeout", "shutdown"])
++def test_windows_job_object_cleanup_regression(tmp_path, monkeypatch, failure):
++    import ctypes
++    import contextor.core.live_state.runtime as runtime
++
++    events = []
++
++    class Helper:
++        _handle = 123
++        alive = True
++
++        def poll(self):
++            return None if self.alive else 0
++
++        def terminate(self):
++            events.append("terminate")
++            self.alive = False
++
++        def wait(self, timeout):
++            events.append(("wait", timeout))
++            return 0
++
++        def kill(self):
++            events.append("kill")
++            self.alive = False
++
++    helper = Helper()
++    kernel32 = SimpleNamespace(
++        CreateJobObjectW=lambda *_: 77,
++        SetInformationJobObject=lambda *_: 1,
++        AssignProcessToJobObject=lambda *_: 0 if failure == "assignment" else 1,
++        CloseHandle=lambda handle: events.append(("close", handle)),
++    )
++    monkeypatch.setattr(ctypes.windll, "kernel32", kernel32)
++
++    def fake_popen(*_args, **_kwargs):
++        if failure == "shutdown":
++            (tmp_path / "live-helper-ready").write_text("456", encoding="ascii")
++        return helper
++
++    monkeypatch.setattr(subprocess, "Popen", fake_popen)
++    monkeypatch.setattr(time, "sleep", lambda _seconds: None)
++
++    client = SimpleNamespace(
++        service_pid=456,
++        owner_token="job-keeper-token-123",
++        owner_pid=os.getpid(),
++        ping=lambda: {"status": "ok"},
++        request=lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("shutdown failed")),
++    )
++    monkeypatch.setattr(runtime, "connect", lambda root: client if failure == "shutdown" else None)
++
++    if failure == "readiness_timeout":
++        import itertools
++
++        ticks = itertools.count()
++        monkeypatch.setattr(time, "monotonic", lambda: next(ticks) * 20.0)
++
++    if failure == "assignment":
++        with pytest.raises(AssertionError, match="Failed to assign helper"):
++            test_real_windows_job_object_breakaway_integration(tmp_path, monkeypatch)
++    elif failure == "readiness_timeout":
++        with pytest.raises(pytest.fail.Exception, match="readiness timed out"):
++            test_real_windows_job_object_breakaway_integration(tmp_path, monkeypatch)
++    else:
++        test_real_windows_job_object_breakaway_integration(tmp_path, monkeypatch)
++
++    assert ("close", 77) in events
++    assert "terminate" in events
++    assert ("wait", 5.0) in events or ("wait", 2) in events
++    assert helper.poll() is not None
+diff --git a/tests/test_live_state_ipc.py b/tests/test_live_state_ipc.py
+index 89bf9e3..7f4b660 100644
+--- a/tests/test_live_state_ipc.py
++++ b/tests/test_live_state_ipc.py
+@@ -2618,13 +2618,14 @@ def test_connect_or_start_replaces_proven_orphan_with_dead_owner(tmp_path, monke
+         stderr=subprocess.DEVNULL,
+     )
+     from contextor.core.live_state.runtime import connect
+-    deadline = time.monotonic() + 5.0
+-    while time.monotonic() < deadline:
+-        if connect(repo):
+-            break
+-        time.sleep(0.05)
+-    orphan_pid = proc.pid
++    client = None
+     try:
++        deadline = time.monotonic() + 5.0
++        while time.monotonic() < deadline:
++            if connect(repo):
++                break
++            time.sleep(0.05)
++        orphan_pid = proc.pid
+         # connect_or_start detects owner 99999999 is dead -> stops orphan and spawns fresh owned runtime
+         client = connect_or_start(repo, owner_pid=os.getpid(), owner_token="orphan-replacer")
+         assert client.is_owner is False
+@@ -2632,11 +2633,79 @@ def test_connect_or_start_replaces_proven_orphan_with_dead_owner(tmp_path, monke
+         assert client.owner_pid == os.getpid()
+         assert client.service_pid != orphan_pid
+     finally:
+-        client.request("shutdown")
++        body_failed = sys.exc_info()[0] is not None
+         try:
+-            proc.kill()
+-        except OSError:
+-            pass
++            if client is None:
++                try:
++                    client = connect(repo)
++                except Exception:
++                    pass
++            if client is not None:
++                try:
++                    client.request("shutdown", timeout=2.0)
++                except Exception:
++                    pass
++        finally:
++            if proc.poll() is None:
++                try:
++                    proc.kill()
++                except OSError:
++                    pass
++            try:
++                proc.wait(timeout=5.0)
++            except subprocess.TimeoutExpired:
++                if not body_failed:
++                    raise
++
++
++@pytest.mark.parametrize("failure", ["before_assignment", "shutdown"])
++def test_orphan_replacement_cleanup_regression(tmp_path, monkeypatch, failure):
++    import contextor.core.live_state.runtime as runtime
++
++    events = []
++
++    class Process:
++        pid = 123456
++        alive = True
++
++        def poll(self):
++            return None if self.alive else 0
++
++        def kill(self):
++            events.append("kill")
++            self.alive = False
++
++        def wait(self, timeout):
++            events.append(("wait", timeout))
++            return 0
++
++    process = Process()
++    monkeypatch.setattr(subprocess, "Popen", lambda *_args, **_kwargs: process)
++
++    if failure == "before_assignment":
++        def failed_connect(_root):
++            raise RuntimeError("probe failed")
++
++        monkeypatch.setattr(runtime, "connect", failed_connect)
++        with pytest.raises(RuntimeError, match="probe failed"):
++            test_connect_or_start_replaces_proven_orphan_with_dead_owner(tmp_path, monkeypatch)
++    else:
++        client = SimpleNamespace(
++            is_owner=False,
++            owner_token="unexpected-token",
++            owner_pid=os.getpid(),
++            service_pid=654321,
++            request=lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("shutdown failed")),
++        )
++        monkeypatch.setattr(runtime, "connect", lambda _root: client)
++        monkeypatch.setattr(
++            sys.modules[__name__], "connect_or_start", lambda *_args, **_kwargs: client,
++        )
++        with pytest.raises(AssertionError):
++            test_connect_or_start_replaces_proven_orphan_with_dead_owner(tmp_path, monkeypatch)
++
++    assert events == ["kill", ("wait", 5.0)]
++    assert process.poll() is not None
+ 
+ 
+ def test_connect_or_start_rejects_legacy_endpoint_without_owner_pid(tmp_path, monkeypatch):
+```
 
-## 19. REMAINING UNKNOWN
+## CONTRACT_CONFLICTS
 
-UNKNOWN: Global suite coverage and outcomes; skipped directory-symlink behavior on this Windows account; active installed-code adoption; cross-file atomicity beyond the stated non-atomic contracts; arbitrary import hooks and dynamic imports; runtime state outside the restricted model; resource and scale limits. No item is promoted to proven by the selected suite.
+DIRECT_EVIDENCE: None encountered for the two specified test fixes. No production or shared API changes.
 
-## 20. FINAL IMPLEMENTER OBSERVATION
+## REMAINING UNKNOWN
 
-DIRECT_EVIDENCE: D2B-7 source baseline present, selected downstream tests passed, global safety preflight did not justify running all tests. Read-only audit stops here. Architectural acceptance remains with ChatGPT.
+UNKNOWN: Global pytest safety and results; all other S1-unverified test modules; exact identity of any process that may not expose the queried command-line pattern; behavior if OS process termination/reaping itself fails or hangs beyond the finite timeout; active Desktop/MCP/LIVE code adoption. Focused test success is not architectural GO.
+
+## FINAL IMPLEMENTER OBSERVATION
+
+DIRECT_EVIDENCE: Both bounded test lifecycle defects were corrected and focused/real Windows checks passed. Stop after S2; architectural acceptance remains with ChatGPT.
+
