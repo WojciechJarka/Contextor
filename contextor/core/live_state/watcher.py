@@ -16,6 +16,16 @@ from watchdog.observers import Observer
 from watchdog.observers.polling import PollingObserver
 
 from .ipc import LiveStateClient
+from contextor.core.cycle_semantics.cycle_warning_projection import (
+    InstalledCycleWarningProjection,
+)
+from contextor.core.cycle_semantics.cycle_warning_transitions import (
+    _validated_states,
+)
+from contextor.core.cycle_semantics.live_cycle_warning_query import (
+    _AUTHORITY as _WARNING_AUTHORITY,
+    _BINDING as _WARNING_BINDING,
+)
 
 
 RECOVERY_DEFERRED = object()
@@ -1048,6 +1058,129 @@ class DesktopLiveEventFeed(_PollingLiveWorker):
             return domain, sequence, event_id
         return None
 
+    def _accepted_cycle_paths_for_batch(
+        self,
+        response: object,
+    ) -> frozenset[tuple[str, ...]] | None:
+        """Trust only the owner projection for this event batch generation."""
+        if type(response) is not dict:
+            return None
+
+        revision = response.get("revision")
+        epoch = response.get("activity_epoch")
+        events = response.get("events")
+
+        if (
+            type(revision) is not int
+            or revision < 1
+            or type(epoch) is not str
+            or not epoch
+            or type(events) is not list
+        ):
+            return None
+
+        def has_current_cycle_addition(event: object) -> bool:
+            if (
+                type(event) is not dict
+                or event.get("operation") != "update_file"
+                or type(event.get("canonical_revision")) is not int
+                or event["canonical_revision"] != revision
+            ):
+                return False
+
+            changes = event.get("diagnostic_changes")
+            if type(changes) is not dict:
+                return False
+
+            items = changes.get("items")
+            return (
+                type(items) in (list, tuple)
+                and any(
+                    type(item) is dict
+                    and item.get("diagnostic_kind") == "cycle"
+                    and item.get("action") == "ADDED"
+                    for item in items
+                )
+            )
+
+        if not any(has_current_cycle_addition(event) for event in events):
+            return None
+
+        try:
+            report = self.client.get_installed_cycle_warning_projection()
+        except (
+            OSError, EOFError, ConnectionError, TimeoutError,
+            RuntimeError, AttributeError, TypeError, ValueError,
+        ):
+            return None
+
+        if (
+            type(report) is not dict
+            or report.get("status") != "ok"
+            or report.get("binding_state") != _WARNING_BINDING
+            or report.get("authority") != _WARNING_AUTHORITY
+            or type(report.get("revision")) is not int
+            or report["revision"] != revision
+            or report.get("activity_epoch") != epoch
+            or type(report.get("state_id")) is not str
+            or not report["state_id"]
+        ):
+            return None
+
+        endpoint = getattr(self.client, "endpoint", None)
+
+        for key in (
+            "repo_id",
+            "root_path",
+            "service_instance_id",
+            "process_start_identity",
+        ):
+            expected = getattr(endpoint, key, None)
+            if (
+                type(expected) is not str
+                or not expected
+                or report.get(key) != expected
+            ):
+                return None
+
+        digest = report.get("graph_sha256")
+        if (
+            type(digest) is not str
+            or len(digest) != 64
+            or any(char not in "0123456789abcdef" for char in digest)
+        ):
+            return None
+
+        structural = report.get("structural_paths")
+        accepted = report.get("model_pass_paths")
+        active = report.get("active_warning_paths")
+
+        for count_key, paths in (
+            ("structural_count", structural),
+            ("model_pass_count", accepted),
+            ("active_warning_count", active),
+        ):
+            if (
+                type(paths) is not tuple
+                or type(report.get(count_key)) is not int
+                or report[count_key] != len(paths)
+            ):
+                return None
+
+        projection = InstalledCycleWarningProjection(
+            status="FRESH",
+            reason=None,
+            revision=revision,
+            structural_paths=structural,
+            model_pass_paths=accepted,
+            active_warning_paths=active,
+        )
+
+        if _validated_states(projection) is None:
+            return None
+
+        return frozenset(accepted)
+
     @staticmethod
     def _diagnostic_detail(item: object) -> str | None:
         if not isinstance(item, dict):
@@ -1094,7 +1227,11 @@ class DesktopLiveEventFeed(_PollingLiveWorker):
 
     @classmethod
     def _format_diagnostic_payload(
-        cls, payload: object, *, suppress_syntax: bool = False
+        cls,
+        payload: object,
+        *,
+        suppress_syntax: bool = False,
+        accepted_paths: frozenset[tuple[str, ...]] | None = None,
     ) -> str | None:
         if not isinstance(payload, dict):
             return None
@@ -1111,6 +1248,15 @@ class DesktopLiveEventFeed(_PollingLiveWorker):
         for item in items:
             if suppress_syntax and isinstance(item, dict) and item.get("diagnostic_kind") == "syntax":
                 continue
+            if (
+                accepted_paths is not None
+                and type(item) is dict
+                and item.get("diagnostic_kind") == "cycle"
+                and item.get("action") == "ADDED"
+                and type(item.get("cycle_nodes")) in (list, tuple)
+                and tuple(item["cycle_nodes"]) in accepted_paths
+            ):
+                continue
             detail = cls._diagnostic_detail(item)
             if detail is not None:
                 details.append(detail)
@@ -1118,7 +1264,12 @@ class DesktopLiveEventFeed(_PollingLiveWorker):
             details.append(f"+{total - len(items)} more")
         return "; ".join(details) if details else None
 
-    def _message(self, event: dict) -> str | None:
+    def _message(
+        self,
+        event: dict,
+        *,
+        accepted_paths: frozenset[tuple[str, ...]] | None = None,
+    ) -> str | None:
         category = event.get("category", "LIVE_STATE")
         if category == "AUTHORITY":
             event_type = str(event.get("event_type") or event.get("operation") or "AUTHORITY_EVENT")
@@ -1182,10 +1333,15 @@ class DesktopLiveEventFeed(_PollingLiveWorker):
                 message = None
             if message is not None:
                 details = self._format_diagnostic_payload(
-                    diagnostic_payload, suppress_syntax=True
+                    diagnostic_payload,
+                    suppress_syntax=True,
+                    accepted_paths=accepted_paths,
                 )
                 return f"{message}; {details}" if details else message
-            details = self._format_diagnostic_payload(diagnostic_payload)
+            details = self._format_diagnostic_payload(
+                diagnostic_payload,
+                accepted_paths=accepted_paths,
+            )
             if details:
                 return f"[LIVE] Diagnostics after {file_name} (rev {rev}): {details}"
             elif origin in {"desktop_watcher", "desktop"}:
@@ -1274,6 +1430,9 @@ class DesktopLiveEventFeed(_PollingLiveWorker):
                         pass
 
                 previous_cursor = self._last_seq
+                accepted_paths = self._accepted_cycle_paths_for_batch(
+                    response
+                )
 
                 for event in events:
                     seq = event.get("seq")
@@ -1283,7 +1442,25 @@ class DesktopLiveEventFeed(_PollingLiveWorker):
                         continue
 
                     key = self._authority_key(event) if event.get("category") == "AUTHORITY" else None
-                    message = None if key is not None and key in self._replayed_authority_keys else self._message(event)
+                    event_revision = event.get("canonical_revision")
+                    current_generation = (
+                        accepted_paths is not None
+                        and type(event_revision) is int
+                        and type(response.get("revision")) is int
+                        and event_revision == response["revision"]
+                    )
+                    message = (
+                        None
+                        if key is not None and key in self._replayed_authority_keys
+                        else self._message(
+                            event,
+                            accepted_paths=(
+                                accepted_paths
+                                if current_generation
+                                else None
+                            ),
+                        )
+                    )
                     if message:
                         self._emit_status(message, event)
 

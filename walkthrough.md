@@ -1,291 +1,340 @@
-# CONTEXTOR P1D3-WARN-4I — implementer report
+# CONTEXTOR P1D3-WARN-4J — implementer report
 
 ## PREFLIGHT
 
-- DIRECT_EVIDENCE: Initial/final HEAD `cdd67d308570848d1684f737d90ba1dcab067ebe`; initial worktree clean.
-- DIRECT_EVIDENCE: Contextor MCP pre-edit resolved `contextor.mcp.tools.get_live_events` at revision 877 and reported 16 fresh structural DFS cycles.
-- DIRECT_EVIDENCE: The new test was absent. SEARCH 1, SEARCH 2 and the documentation SEARCH each occurred exactly once. MCP `get_file_edit_context` does not resolve JSON docs as a Python module; the docs file was inspected literally.
+- DIRECT_EVIDENCE: Initial/final HEAD `68381d98eef79d30038bf0acc6f905a8ef804263`; initial worktree clean.
+- DIRECT_EVIDENCE: Contextor MCP pre-edit resolved `contextor.core.live_state.watcher` at revision 879 and reported 16 fresh structural DFS cycles.
+- DIRECT_EVIDENCE: All nine specified SEARCH blocks occurred exactly once. The new test file was absent.
 
-## SEARCH / REPLACE RESULT
+## EXACT SEARCH / REPLACE
 
-- DIRECT_EVIDENCE: Applied the two exact architect-authored replacements in `get_live_events.py` and the exact replacement in `get_live_events.json`. Added the supplied test file with exact content.
-- CODE_PATH_PROVED: The successful MCP response now adds `cycle_warning_transitions` after the existing `cycle_warning_view`, leaving the event journal response intact.
+- DIRECT_EVIDENCE: Applied only the nine architect-authored replacements in `watcher.py` and added the supplied test file with exact content.
+- DIRECT_EVIDENCE: Literal new-file comparison passed. No event journal, structural graph, or validator files were changed.
 
-## REAL INSTALLED TRANSITION CHECKPOINT
+## CURRENT GENERATION VALIDATION
 
-- CONTRACT_PROVED: T01 exercises real owner-installed latest-commit reactivation transitions. T02 distinguishes `MODEL_ACCEPTED` from structural removal.
-- CODE_PATH_PROVED: The projection queries `get_installed_cycle_warning_transitions` only for a fresh current warning view and validates checkpoint shape, authority, generation, identity, path shape, uniqueness, action, and current partition before returning `fresh`.
+- CODE_PATH_PROVED: The feed queries owner-installed warning projection only when the batch contains a current-revision `update_file` cycle `ADDED` diagnostic.
+- CODE_PATH_PROVED: It validates status, binding, authority, revision, epoch, endpoint identity, graph digest, path counts, and partition before accepting model PASS paths.
+- CONTRACT_PROVED: T04 rejects mismatched generation/identity and malformed counts or digest. T06 excludes older events from current-generation suppression.
 
-## CURRENT WARNING GENERATION GATE
+## MODEL_PASS SUPPRESSION
 
-- CONTRACT_PROVED: T03–T06 cover identity/generation mismatch, invalid transition content, absent checkpoint, and unavailable current view. These paths produce `unavailable` rather than fabricated zero transitions.
-- CODE_PATH_PROVED: A transition checkpoint must match both events and current warning view revision/activity epoch.
+- CONTRACT_PROVED: T01 suppresses only the model PASS cycle in a mixed owner-backed fixture; the UNKNOWN cycle warning remains. T02 suppresses both model PASS additions while retaining the basic watcher update message.
+- CODE_PATH_PROVED: Only `cycle` + `ADDED` diagnostic items with an accepted exact path are omitted from presentation details.
 
-## HISTORICAL EVENT PRESERVATION
+## UNKNOWN / UNAVAILABLE FAIL-CLOSED
 
-- CONTRACT_PROVED: T07 checks transport failure does not remove retained history.
-- CODE_PATH_PROVED: The new projection reads the checkpoint and adds a separate response field; it does not rewrite `diagnostic_changes` or the event journal.
+- CONTRACT_PROVED: T05 retains warnings on owner query timeout. T08 makes no projection query when no cycle addition is present.
+- CODE_PATH_PROVED: Missing or invalid projection leaves `accepted_paths=None`, preserving normal diagnostic formatting.
 
-## DOC CONTRACT
+## ORIGINAL EVENT IDENTITY
 
-- DIRECT_EVIDENCE: Updated `contextor/mcp/docs/get_live_events.json` with current warning view, latest installed transition, historical structural event, and unavailable semantics. `get_mcp_documentation({tool:"get_live_events"})` returned the new transition wording.
-- CONTRACT_PROVED: T08 validates the documentation terms.
+- CONTRACT_PROVED: T01 checks that the delivered event is the original object and unchanged. T07 retains a `RESOLVED` cycle message; T03 retains syntax error text. T09 checks no change to journal, activity sequence, cycles, or hard edges.
 
 ## NEW TEST RESULTS
 
-- `& .\.venv\Scripts\python.exe -m py_compile contextor/mcp/tools/get_live_events.py tests/test_cycle_semantics_mcp_warning_transitions.py` — PASS.
-- `& .\.venv\Scripts\python.exe -m pytest -q -rs tests/test_cycle_semantics_mcp_warning_transitions.py` — 17 passed.
+- `& .\.venv\Scripts\python.exe -m py_compile contextor/core/live_state/watcher.py tests/test_cycle_semantics_desktop_live_event_warning_view.py` — PASS.
+- `& .\.venv\Scripts\python.exe -m pytest -q -rs tests/test_cycle_semantics_desktop_live_event_warning_view.py` — 13 passed.
 
 ## FOCUSED REGRESSIONS
 
-- `& .\.venv\Scripts\python.exe -m pytest -q -rs tests/test_cycle_semantics_mcp_live_warning_view.py tests/test_cycle_semantics_live_warning_transition_checkpoint.py tests/test_cycle_semantics_cycle_warning_transitions.py tests/test_mcp_documentation.py` — 69 passed; one third-party Authlib deprecation warning.
+- `& .\.venv\Scripts\python.exe -m pytest -q -rs tests/test_live_activity_status.py tests/test_cycle_semantics_live_cycle_warning_query.py tests/test_cycle_semantics_desktop_warning_presentation.py tests/test_cycle_semantics_desktop_full_partial_activation.py` — 88 passed; one third-party Authlib deprecation warning.
 - `git diff --check` and new-file `git diff --no-index --check` — no whitespace errors.
 
 ## POST-CHANGE MCP AUDIT
 
-- DIRECT_EVIDENCE: Contextor MCP `get_module_context` at revision 879 reported `canonical_state=fresh`, `workspace_sync=verified` for source and test. Graph and cycles were fresh; structural DFS cycle count remained 16.
-- DIRECT_EVIDENCE: `cycle_semantics=stale`. Workspace synchronization does not prove active backend loaded-code adoption.
+- DIRECT_EVIDENCE: An initial MCP read hit transient `Resource deadlock avoided` while watcher synchronization was underway. A later `get_module_context` call at revision 881 reported `canonical_state=fresh` and `workspace_sync=verified` for both changed files.
+- DIRECT_EVIDENCE: Graph and cycles fresh; structural DFS cycle count stayed **16**. `cycle_semantics=stale`.
+- UNKNOWN: Workspace sync does not establish active Desktop/backend loaded-code adoption.
 
 ## FILES_CHANGED
 
-- `contextor/mcp/tools/get_live_events.py`
-- `contextor/mcp/docs/get_live_events.json`
-- `tests/test_cycle_semantics_mcp_warning_transitions.py`
+- `contextor/core/live_state/watcher.py`
+- `tests/test_cycle_semantics_desktop_live_event_warning_view.py`
 
 `walkthrough.md` overwritten as report only.
 
 ## FULL_DIFFS
 
-### contextor/mcp/tools/get_live_events.py
+### contextor/core/live_state/watcher.py
 
 ```diff
-diff --git a/contextor/mcp/tools/get_live_events.py b/contextor/mcp/tools/get_live_events.py
-index b30170a..9906480 100644
---- a/contextor/mcp/tools/get_live_events.py
-+++ b/contextor/mcp/tools/get_live_events.py
-@@ -79,6 +79,159 @@ def _current_cycle_warning_view(client, events):
-     }
+diff --git a/contextor/core/live_state/watcher.py b/contextor/core/live_state/watcher.py
+index f0cb567..2717420 100644
+--- a/contextor/core/live_state/watcher.py
++++ b/contextor/core/live_state/watcher.py
+@@ -16,6 +16,16 @@ from watchdog.observers import Observer
+ from watchdog.observers.polling import PollingObserver
+ 
+ from .ipc import LiveStateClient
++from contextor.core.cycle_semantics.cycle_warning_projection import (
++    InstalledCycleWarningProjection,
++)
++from contextor.core.cycle_semantics.cycle_warning_transitions import (
++    _validated_states,
++)
++from contextor.core.cycle_semantics.live_cycle_warning_query import (
++    _AUTHORITY as _WARNING_AUTHORITY,
++    _BINDING as _WARNING_BINDING,
++)
  
  
-+def _current_cycle_warning_transitions(client, events, view):
-+    """Expose only the latest owner-verified warning transition checkpoint."""
+ RECOVERY_DEFERRED = object()
+@@ -1048,6 +1058,129 @@ class DesktopLiveEventFeed(_PollingLiveWorker):
+             return domain, sequence, event_id
+         return None
+ 
++    def _accepted_cycle_paths_for_batch(
++        self,
++        response: object,
++    ) -> frozenset[tuple[str, ...]] | None:
++        """Trust only the owner projection for this event batch generation."""
++        if type(response) is not dict:
++            return None
 +
-+    def unavailable(reason):
-+        return {"status": "unavailable", "reason": reason}
-+
-+    if type(view) is not dict or view.get("status") != "fresh":
-+        return unavailable("CURRENT_WARNING_VIEW_UNAVAILABLE")
-+
-+    try:
-+        checkpoint = client.request(
-+            "get_installed_cycle_warning_transitions",
-+            timeout=2.0,
-+        )
-+    except (
-+        OSError, EOFError, ConnectionError, TimeoutError,
-+        RuntimeError, AttributeError, TypeError, ValueError,
-+    ):
-+        return unavailable("WARNING_TRANSITION_QUERY_FAILED")
-+
-+    if type(checkpoint) is not dict or checkpoint.get("status") != "ok":
-+        return unavailable("WARNING_TRANSITION_CHECKPOINT_UNAVAILABLE")
-+
-+    required = {
-+        "status",
-+        "binding_state",
-+        "from_revision",
-+        "to_revision",
-+        "activity_epoch",
-+        "repo_id",
-+        "root_path",
-+        "service_instance_id",
-+        "process_start_identity",
-+        "transitions",
-+        "authority",
-+    }
-+
-+    if set(checkpoint) != required:
-+        return unavailable("WARNING_TRANSITION_CHECKPOINT_INVALID")
-+
-+    if (
-+        checkpoint["binding_state"]
-+        != "INSTALLED_WARNING_TRANSITION_CHECKPOINT"
-+        or checkpoint["authority"] != (
-+            "LIVE_OWNER_COMMIT_SCOPED_WARNING_TRANSITIONS"
-+            "_NOT_STRUCTURAL_REMOVAL_FOR_MODEL_ACCEPTANCE"
-+            "_NOT_RUNTIME_SAFETY"
-+        )
-+        or type(checkpoint["from_revision"]) is not int
-+        or type(checkpoint["to_revision"]) is not int
-+        or checkpoint["from_revision"] < 1
-+        or checkpoint["to_revision"] <= checkpoint["from_revision"]
-+        or checkpoint["to_revision"] != events.get("revision")
-+        or checkpoint["to_revision"] != view.get("revision")
-+        or checkpoint["activity_epoch"] != events.get("activity_epoch")
-+        or checkpoint["activity_epoch"] != view.get("activity_epoch")
-+        or type(checkpoint["activity_epoch"]) is not str
-+        or not checkpoint["activity_epoch"]
-+    ):
-+        return unavailable("WARNING_TRANSITION_GENERATION_MISMATCH")
-+
-+    for key in (
-+        "repo_id",
-+        "root_path",
-+        "service_instance_id",
-+        "process_start_identity",
-+    ):
-+        if type(checkpoint[key]) is not str or not checkpoint[key]:
-+            return unavailable("WARNING_TRANSITION_IDENTITY_INVALID")
-+
-+    transitions = checkpoint["transitions"]
-+
-+    if type(transitions) is not tuple:
-+        return unavailable("WARNING_TRANSITION_CONTENT_INVALID")
-+
-+    accepted = set(view["model_pass_paths"])
-+    active = set(view["active_warning_paths"])
-+    structural = set(view["structural_paths"])
-+    seen = set()
-+
-+    for transition in transitions:
-+        if (
-+            type(transition) is not dict
-+            or set(transition) != {
-+                "path", "action", "previous_state", "current_state",
-+            }
-+        ):
-+            return unavailable("WARNING_TRANSITION_CONTENT_INVALID")
-+
-+        path = transition["path"]
-+        action = transition["action"]
-+        before = transition["previous_state"]
-+        after = transition["current_state"]
++        revision = response.get("revision")
++        epoch = response.get("activity_epoch")
++        events = response.get("events")
 +
 +        if (
-+            type(path) is not tuple
-+            or len(path) < 2
-+            or any(type(node) is not str or not node for node in path)
-+            or path[0] != path[-1]
-+            or len(set(path[:-1])) != len(path) - 1
-+            or path in seen
++            type(revision) is not int
++            or revision < 1
++            or type(epoch) is not str
++            or not epoch
++            or type(events) is not list
 +        ):
-+            return unavailable("WARNING_TRANSITION_CONTENT_INVALID")
++            return None
 +
-+        seen.add(path)
++        def has_current_cycle_addition(event: object) -> bool:
++            if (
++                type(event) is not dict
++                or event.get("operation") != "update_file"
++                or type(event.get("canonical_revision")) is not int
++                or event["canonical_revision"] != revision
++            ):
++                return False
 +
-+        if action == "STRUCTURAL_ADDED":
-+            valid = (
-+                before is None
-+                and after in {"MODEL_PASS", "ACTIVE"}
-+                and path in structural
++            changes = event.get("diagnostic_changes")
++            if type(changes) is not dict:
++                return False
++
++            items = changes.get("items")
++            return (
++                type(items) in (list, tuple)
++                and any(
++                    type(item) is dict
++                    and item.get("diagnostic_kind") == "cycle"
++                    and item.get("action") == "ADDED"
++                    for item in items
++                )
 +            )
-+        elif action == "STRUCTURAL_REMOVED":
-+            valid = (
-+                before in {"MODEL_PASS", "ACTIVE"}
-+                and after is None
-+                and path not in structural
-+            )
-+        elif action == "MODEL_ACCEPTED":
-+            valid = (
-+                before == "ACTIVE"
-+                and after == "MODEL_PASS"
-+                and path in accepted
-+            )
-+        elif action == "WARNING_REACTIVATED":
-+            valid = (
-+                before == "MODEL_PASS"
-+                and after == "ACTIVE"
-+                and path in active
-+            )
-+        else:
-+            valid = False
 +
-+        if not valid:
-+            return unavailable("WARNING_TRANSITION_CONTENT_INVALID")
++        if not any(has_current_cycle_addition(event) for event in events):
++            return None
 +
-+        if after == "MODEL_PASS" and path not in accepted:
-+            return unavailable("WARNING_TRANSITION_CONTENT_INVALID")
++        try:
++            report = self.client.get_installed_cycle_warning_projection()
++        except (
++            OSError, EOFError, ConnectionError, TimeoutError,
++            RuntimeError, AttributeError, TypeError, ValueError,
++        ):
++            return None
 +
-+        if after == "ACTIVE" and path not in active:
-+            return unavailable("WARNING_TRANSITION_CONTENT_INVALID")
++        if (
++            type(report) is not dict
++            or report.get("status") != "ok"
++            or report.get("binding_state") != _WARNING_BINDING
++            or report.get("authority") != _WARNING_AUTHORITY
++            or type(report.get("revision")) is not int
++            or report["revision"] != revision
++            or report.get("activity_epoch") != epoch
++            or type(report.get("state_id")) is not str
++            or not report["state_id"]
++        ):
++            return None
 +
-+    return {
-+        "status": "fresh",
-+        "scope": "LATEST_INSTALLED_COMMIT_ONLY_NOT_RETAINED_EVENT_HISTORY",
-+        "from_revision": checkpoint["from_revision"],
-+        "to_revision": checkpoint["to_revision"],
-+        "activity_epoch": checkpoint["activity_epoch"],
-+        "transition_count": len(transitions),
-+        "transitions": transitions,
-+    }
++        endpoint = getattr(self.client, "endpoint", None)
 +
++        for key in (
++            "repo_id",
++            "root_path",
++            "service_instance_id",
++            "process_start_identity",
++        ):
++            expected = getattr(endpoint, key, None)
++            if (
++                type(expected) is not str
++                or not expected
++                or report.get(key) != expected
++            ):
++                return None
 +
- def get_live_events(
-     repo_path: str,
-     after_revision: int | None = None,
-@@ -145,6 +298,13 @@ def get_live_events(
-         response["cycle_warning_view"] = _current_cycle_warning_view(
-             client, events,
-         )
-+        response["cycle_warning_transitions"] = (
-+            _current_cycle_warning_transitions(
-+                client,
-+                events,
-+                response["cycle_warning_view"],
-+            )
++        digest = report.get("graph_sha256")
++        if (
++            type(digest) is not str
++            or len(digest) != 64
++            or any(char not in "0123456789abcdef" for char in digest)
++        ):
++            return None
++
++        structural = report.get("structural_paths")
++        accepted = report.get("model_pass_paths")
++        active = report.get("active_warning_paths")
++
++        for count_key, paths in (
++            ("structural_count", structural),
++            ("model_pass_count", accepted),
++            ("active_warning_count", active),
++        ):
++            if (
++                type(paths) is not tuple
++                or type(report.get(count_key)) is not int
++                or report[count_key] != len(paths)
++            ):
++                return None
++
++        projection = InstalledCycleWarningProjection(
++            status="FRESH",
++            reason=None,
++            revision=revision,
++            structural_paths=structural,
++            model_pass_paths=accepted,
++            active_warning_paths=active,
 +        )
-         return json.dumps(response, indent=2)
++
++        if _validated_states(projection) is None:
++            return None
++
++        return frozenset(accepted)
++
+     @staticmethod
+     def _diagnostic_detail(item: object) -> str | None:
+         if not isinstance(item, dict):
+@@ -1094,7 +1227,11 @@ class DesktopLiveEventFeed(_PollingLiveWorker):
  
-     except (OSError, EOFError, RuntimeError) as exc:
+     @classmethod
+     def _format_diagnostic_payload(
+-        cls, payload: object, *, suppress_syntax: bool = False
++        cls,
++        payload: object,
++        *,
++        suppress_syntax: bool = False,
++        accepted_paths: frozenset[tuple[str, ...]] | None = None,
+     ) -> str | None:
+         if not isinstance(payload, dict):
+             return None
+@@ -1111,6 +1248,15 @@ class DesktopLiveEventFeed(_PollingLiveWorker):
+         for item in items:
+             if suppress_syntax and isinstance(item, dict) and item.get("diagnostic_kind") == "syntax":
+                 continue
++            if (
++                accepted_paths is not None
++                and type(item) is dict
++                and item.get("diagnostic_kind") == "cycle"
++                and item.get("action") == "ADDED"
++                and type(item.get("cycle_nodes")) in (list, tuple)
++                and tuple(item["cycle_nodes"]) in accepted_paths
++            ):
++                continue
+             detail = cls._diagnostic_detail(item)
+             if detail is not None:
+                 details.append(detail)
+@@ -1118,7 +1264,12 @@ class DesktopLiveEventFeed(_PollingLiveWorker):
+             details.append(f"+{total - len(items)} more")
+         return "; ".join(details) if details else None
+ 
+-    def _message(self, event: dict) -> str | None:
++    def _message(
++        self,
++        event: dict,
++        *,
++        accepted_paths: frozenset[tuple[str, ...]] | None = None,
++    ) -> str | None:
+         category = event.get("category", "LIVE_STATE")
+         if category == "AUTHORITY":
+             event_type = str(event.get("event_type") or event.get("operation") or "AUTHORITY_EVENT")
+@@ -1182,10 +1333,15 @@ class DesktopLiveEventFeed(_PollingLiveWorker):
+                 message = None
+             if message is not None:
+                 details = self._format_diagnostic_payload(
+-                    diagnostic_payload, suppress_syntax=True
++                    diagnostic_payload,
++                    suppress_syntax=True,
++                    accepted_paths=accepted_paths,
+                 )
+                 return f"{message}; {details}" if details else message
+-            details = self._format_diagnostic_payload(diagnostic_payload)
++            details = self._format_diagnostic_payload(
++                diagnostic_payload,
++                accepted_paths=accepted_paths,
++            )
+             if details:
+                 return f"[LIVE] Diagnostics after {file_name} (rev {rev}): {details}"
+             elif origin in {"desktop_watcher", "desktop"}:
+@@ -1274,6 +1430,9 @@ class DesktopLiveEventFeed(_PollingLiveWorker):
+                         pass
+ 
+                 previous_cursor = self._last_seq
++                accepted_paths = self._accepted_cycle_paths_for_batch(
++                    response
++                )
+ 
+                 for event in events:
+                     seq = event.get("seq")
+@@ -1283,7 +1442,25 @@ class DesktopLiveEventFeed(_PollingLiveWorker):
+                         continue
+ 
+                     key = self._authority_key(event) if event.get("category") == "AUTHORITY" else None
+-                    message = None if key is not None and key in self._replayed_authority_keys else self._message(event)
++                    event_revision = event.get("canonical_revision")
++                    current_generation = (
++                        accepted_paths is not None
++                        and type(event_revision) is int
++                        and type(response.get("revision")) is int
++                        and event_revision == response["revision"]
++                    )
++                    message = (
++                        None
++                        if key is not None and key in self._replayed_authority_keys
++                        else self._message(
++                            event,
++                            accepted_paths=(
++                                accepted_paths
++                                if current_generation
++                                else None
++                            ),
++                        )
++                    )
+                     if message:
+                         self._emit_status(message, event)
 ```
 
-### contextor/mcp/docs/get_live_events.json
+### tests/test_cycle_semantics_desktop_live_event_warning_view.py
 
 ```diff
-diff --git a/contextor/mcp/docs/get_live_events.json b/contextor/mcp/docs/get_live_events.json
-index f04cff8..c095a8b 100644
---- a/contextor/mcp/docs/get_live_events.json
-+++ b/contextor/mcp/docs/get_live_events.json
-@@ -14,6 +14,10 @@
-     "Committed incremental ``update_file`` events may include optional post-commit ``diagnostic_changes`` evidence with exact bounded shape ``{total, truncated, items}``; ``items`` contains at most three deterministic details.",
-     "Each diagnostic item exposes ``action`` (``ADDED`` or ``RESOLVED``), ``diagnostic_kind`` (``syntax``, ``collision``, or ``cycle``), and a stable JSON-safe ``diagnostic_key``. Syntax items include ``source_path`` and ``line_number``/``column_number`` when attributable; collision items expose canonical structured collision fields; cycle items expose ``cycle_nodes``.",
-     "Diagnostic changes are emitted only when both before and after canonical diagnostic-family states are fresh. Their absence is not proof of zero diagnostics when a family is stale or deferred. Canonical state remains authoritative; the runtime JSONL trace carries the full committed diagnostic delta for operational evidence.",
-+    "When the LIVE owner can verify the current installed cycle warning partition, successful responses expose ``cycle_warning_view`` with structural, MODEL_PASS and active-warning counts and paths. Structural cycle count remains unchanged. This is static-model acceptance evidence, not runtime execution safety.",
-+    "Successful responses also expose ``cycle_warning_transitions`` for the latest installed commit only. Valid transitions distinguish ``STRUCTURAL_ADDED``, ``STRUCTURAL_REMOVED``, ``MODEL_ACCEPTED`` and ``WARNING_REACTIVATED``. Their absence or an unavailable result is not evidence of zero transitions. The checkpoint is not a reconstruction of the retained event history.",
-+    "``diagnostic_changes`` in the journal describe historical structural changes, not current active cycle warnings. The journal is preserved without deleting or rewriting its events. Current active warnings must be read from a fresh ``cycle_warning_view``.",
-+    "Warning projections require matching LIVE revision and activity epoch. If the owner, projection or checkpoint is unavailable or inconsistent, the warning view or transitions are marked ``unavailable`` without fabricated active-warning counts.",
-     "Existing syntax failure fields ``error``, ``line_number``, and ``column_number`` remain unchanged."
-   ],
-   "freshness": [],
-```
-
-### tests/test_cycle_semantics_mcp_warning_transitions.py
-
-```diff
-diff --git a/tests/test_cycle_semantics_mcp_warning_transitions.py b/tests/test_cycle_semantics_mcp_warning_transitions.py
+diff --git a/tests/test_cycle_semantics_desktop_live_event_warning_view.py b/tests/test_cycle_semantics_desktop_live_event_warning_view.py
 new file mode 100644
-index 0000000..e0a7dfe
+index 0000000..9222f6c
 --- /dev/null
-+++ b/tests/test_cycle_semantics_mcp_warning_transitions.py
-@@ -0,0 +1,320 @@
-+"""WARN-4I: MCP projects current commit warning transitions separately."""
++++ b/tests/test_cycle_semantics_desktop_live_event_warning_view.py
+@@ -0,0 +1,298 @@
++"""WARN-4J: Desktop LIVE feed suppresses only owner-proven cycle additions."""
 +
 +from __future__ import annotations
 +
 +import copy
-+import json
 +
 +import pytest
 +
-+from contextor.mcp.tools.get_live_events import get_live_events
++from contextor.core.live_state.watcher import DesktopLiveEventFeed
 +from tests.test_cycle_semantics_live_installed_partial_claims import (
-+    _fixture, _owner,
++    _fixture,
++    _owner,
 +)
-+from tests.test_cycle_semantics_live_warning_transition_checkpoint import (
-+    _installed_next,
++from tests.test_original_worker_partial_scc_preparation import (
++    PASS_AND_UNKNOWN,
++    TWO_PASS,
 +)
-+from tests.test_original_worker_partial_scc_preparation import TWO_PASS
-+from tests.test_cycle_semantics_mcp_live_warning_view import _fake_reports
 +
 +
 +@pytest.fixture(autouse=True)
@@ -293,313 +342,292 @@ index 0000000..e0a7dfe
 +    monkeypatch.setenv("CONTEXTOR_DISABLE_PROCESS_POOL", "1")
 +
 +
-+def _connect(monkeypatch, client):
-+    monkeypatch.setattr(
-+        "contextor.core.live_state.runtime.connect_existing_with_status",
-+        lambda _root: (client, "ok"),
-+    )
-+
-+
-+def _checkpoint():
++def _event(paths, revision, *, status="UPDATED", action="ADDED"):
 +    return {
-+        "status": "ok",
-+        "binding_state": "INSTALLED_WARNING_TRANSITION_CHECKPOINT",
-+        "from_revision": 11,
-+        "to_revision": 12,
-+        "activity_epoch": "epoch-1",
-+        "repo_id": "synthetic-repo",
-+        "root_path": "/synthetic",
-+        "service_instance_id": "synthetic-service",
-+        "process_start_identity": "synthetic-process",
-+        "transitions": (
-+            {
-+                "path": ("a", "b", "a"),
-+                "action": "MODEL_ACCEPTED",
-+                "previous_state": "ACTIVE",
-+                "current_state": "MODEL_PASS",
-+            },
-+            {
-+                "path": ("x", "y", "x"),
-+                "action": "STRUCTURAL_ADDED",
-+                "previous_state": None,
-+                "current_state": "ACTIVE",
-+            },
-+        ),
-+        "authority": (
-+            "LIVE_OWNER_COMMIT_SCOPED_WARNING_TRANSITIONS"
-+            "_NOT_STRUCTURAL_REMOVAL_FOR_MODEL_ACCEPTANCE"
-+            "_NOT_RUNTIME_SAFETY"
-+        ),
++        "seq": 1,
++        "category": "LIVE_STATE",
++        "operation": "update_file",
++        "origin": "desktop_watcher",
++        "status": status,
++        "file_path": "a.py",
++        "canonical_revision": revision,
++        "diagnostic_changes": {
++            "total": len(paths),
++            "truncated": False,
++            "items": [
++                {
++                    "action": action,
++                    "diagnostic_kind": "cycle",
++                    "cycle_nodes": list(path),
++                }
++                for path in paths
++            ],
++        },
 +    }
 +
 +
-+class _Client:
-+    def __init__(self, events, projection, checkpoint):
-+        self.events = events
-+        self.projection = projection
-+        self.checkpoint = checkpoint
-+        self.checkpoint_calls = 0
++def _feed(client, server, event, *, report=None, report_error=None):
++    response = {
++        "status": "ok",
++        "revision": server._revision,
++        "activity_epoch": server._activity_epoch,
++        "events": [event],
++        "truncated": False,
++    }
 +
-+    def get_events(self, **_kwargs):
-+        return self.events
++    received = []
++    reads = []
 +
-+    def get_installed_cycle_warning_projection(self):
-+        return self.projection
++    class Adapter:
++        endpoint = client.endpoint
 +
-+    def request(self, operation, **kwargs):
-+        assert operation == "get_installed_cycle_warning_transitions"
-+        assert kwargs == {"timeout": 2.0}
-+        self.checkpoint_calls += 1
-+        if isinstance(self.checkpoint, Exception):
-+            raise self.checkpoint
-+        return self.checkpoint
++        def get_events(self, **_kwargs):
++            return response
++
++        def get_installed_cycle_warning_projection(self):
++            reads.append(1)
++            if report_error is not None:
++                raise report_error
++            if report is not None:
++                return report
++            return client.get_installed_cycle_warning_projection()
++
++    feed = DesktopLiveEventFeed(
++        Adapter(),
++        lambda message, event=None: received.append(
++            (message, event)
++        ),
++        initial_seq=0,
++    )
++    return feed, received, reads, response
 +
 +
-+def test_t01_latest_installed_commit_reports_real_reactivations(
-+    tmp_path, isolated_dirs, monkeypatch,
++def test_t01_mixed_real_owner_suppresses_only_model_pass(
++    tmp_path, isolated_dirs,
++):
++    root, state, metadata = _fixture(
++        tmp_path, PASS_AND_UNKNOWN,
++    )
++
++    with _owner(state, metadata) as (server, client):
++        event = _event(state.cycles, metadata.revision)
++        original = copy.deepcopy(event)
++        feed, received, reads, response = _feed(
++            client, server, event,
++        )
++
++        feed.poll_once()
++
++        assert len(reads) == 1
++        assert len(received) == 1
++        message, delivered_event = received[0]
++
++        assert "cycle added: x -> y -> x" in message
++        assert "cycle added: a -> b -> a" not in message
++        assert delivered_event is event
++        assert event == original
++        assert len(state.cycles) == 2
++
++
++def test_t02_two_model_pass_cycles_are_both_suppressed(
++    tmp_path, isolated_dirs,
 +):
 +    root, state, metadata = _fixture(tmp_path, TWO_PASS)
 +
 +    with _owner(state, metadata) as (server, client):
-+        _connect(monkeypatch, client)
-+
-+        before = json.loads(get_live_events(str(root)))
-+
-+        assert before["status"] == "ok"
-+        assert before["cycle_warning_view"]["status"] == "fresh"
-+        assert before["cycle_warning_transitions"]["status"] == "unavailable"
-+
-+        _installed_next(root, server, partial=False)
-+
-+        journal_before = copy.deepcopy(
-+            (server._events, server._activity_seq)
++        event = _event(state.cycles, metadata.revision)
++        feed, received, reads, response = _feed(
++            client, server, event,
 +        )
 +
-+        result = json.loads(get_live_events(str(root)))
++        feed.poll_once()
 +
-+        view = result["cycle_warning_view"]
-+        delta = result["cycle_warning_transitions"]
-+
-+        assert result["status"] == "ok"
-+        assert view["status"] == "fresh"
-+        assert view["structural_count"] == 2
-+        assert view["model_pass_count"] == 0
-+        assert view["active_warning_count"] == 2
-+
-+        assert delta["status"] == "fresh"
-+        assert delta["scope"] == (
-+            "LATEST_INSTALLED_COMMIT_ONLY_NOT_RETAINED_EVENT_HISTORY"
-+        )
-+        assert delta["from_revision"] == metadata.revision
-+        assert delta["to_revision"] == result["revision"]
-+        assert delta["activity_epoch"] == result["activity_epoch"]
-+        assert delta["transition_count"] == 2
-+        assert [item["action"] for item in delta["transitions"]] == [
-+            "WARNING_REACTIVATED", "WARNING_REACTIVATED",
++        assert len(reads) == 1
++        assert received == [
++            (
++                f"[LIVE] Watcher updated a.py (rev {metadata.revision})",
++                event,
++            ),
 +        ]
 +
-+        assert (
-+            server._events, server._activity_seq
-+        ) == journal_before
 +
-+
-+def test_t02_model_acceptance_is_not_structural_removal(
-+    tmp_path, monkeypatch,
++def test_t03_syntax_error_message_survives_suppression(
++    tmp_path, isolated_dirs,
 +):
-+    events, projection = _fake_reports()
-+    checkpoint = _checkpoint()
-+    client = _Client(events, projection, checkpoint)
-+    _connect(monkeypatch, client)
++    root, state, metadata = _fixture(tmp_path, TWO_PASS)
 +
-+    result = json.loads(get_live_events(str(tmp_path)))
++    with _owner(state, metadata) as (server, client):
++        event = _event(
++            state.cycles,
++            metadata.revision,
++            status="SYNTAX_ERROR",
++        )
++        event.update({
++            "error": "invalid syntax",
++            "line_number": 2,
++            "column_number": 3,
++        })
 +
-+    delta = result["cycle_warning_transitions"]
++        feed, received, reads, response = _feed(
++            client, server, event,
++        )
 +
-+    assert delta["status"] == "fresh"
-+    assert delta["transition_count"] == 2
-+    assert [item["action"] for item in delta["transitions"]] == [
-+        "MODEL_ACCEPTED", "STRUCTURAL_ADDED",
-+    ]
-+    assert result["cycle_warning_view"]["structural_count"] == 2
-+    assert client.checkpoint_calls == 1
++        feed.poll_once()
++
++        assert len(reads) == 1
++        assert received == [
++            (
++                "[LIVE] Syntax error in a.py line 2, "
++                "column 3: invalid syntax",
++                event,
++            ),
++        ]
 +
 +
-+@pytest.mark.parametrize("change", [
-+    {"to_revision": 13},
++@pytest.mark.parametrize("mutation", [
++    {"revision": 999},
 +    {"activity_epoch": "wrong-epoch"},
-+    {"from_revision": 12},
-+    {"binding_state": "FORGED"},
-+    {"authority": "FORGED"},
-+    {"service_instance_id": ""},
++    {"service_instance_id": "foreign-owner"},
++    {"model_pass_count": 0},
++    {"graph_sha256": "invalid"},
 +])
-+def test_t03_checkpoint_identity_and_generation_mismatch_fails_closed(
-+    tmp_path, monkeypatch, change,
++def test_t04_mismatched_generation_or_identity_preserves_warning(
++    tmp_path, isolated_dirs, mutation,
 +):
-+    events, projection = _fake_reports()
-+    checkpoint = {**_checkpoint(), **change}
-+    _connect(monkeypatch, _Client(events, projection, checkpoint))
++    root, state, metadata = _fixture(tmp_path, TWO_PASS)
 +
-+    response = json.loads(get_live_events(str(tmp_path)))
-+    delta = response["cycle_warning_transitions"]
++    with _owner(state, metadata) as (server, client):
++        report = client.get_installed_cycle_warning_projection()
++        report.update(mutation)
++        event = _event(state.cycles[:1], metadata.revision)
++        feed, received, reads, response = _feed(
++            client, server, event, report=report,
++        )
 +
-+    assert delta["status"] == "unavailable"
-+    assert "transition_count" not in delta
-+    assert response["cycle_warning_view"]["status"] == "fresh"
++        feed.poll_once()
++
++        assert len(reads) == 1
++        assert len(received) == 1
++        assert "cycle added: a -> b -> a" in received[0][0]
 +
 +
-+@pytest.mark.parametrize("item", [
-+    {
-+        "path": ("a", "b", "a"),
-+        "action": "STRUCTURAL_REMOVED",
-+        "previous_state": "ACTIVE",
-+        "current_state": None,
-+    },
-+    {
-+        "path": ("a", "b", "a"),
-+        "action": "WARNING_REACTIVATED",
-+        "previous_state": "MODEL_PASS",
-+        "current_state": "ACTIVE",
-+    },
-+    {
-+        "path": ("a", "b", "a"),
-+        "action": "MODEL_ACCEPTED",
-+        "previous_state": "ACTIVE",
-+        "current_state": "ACTIVE",
-+    },
-+    {
-+        "path": ("a", "b", "a"),
-+        "action": "UNKNOWN",
-+        "previous_state": "ACTIVE",
-+        "current_state": "MODEL_PASS",
-+    },
-+    {
-+        "path": ("a", "b", "x"),
-+        "action": "MODEL_ACCEPTED",
-+        "previous_state": "ACTIVE",
-+        "current_state": "MODEL_PASS",
-+    },
-+])
-+def test_t04_invalid_transition_never_becomes_fresh(
-+    tmp_path, monkeypatch, item,
++def test_t05_unavailable_owner_preserves_original_warning(
++    tmp_path, isolated_dirs,
 +):
-+    events, projection = _fake_reports()
-+    checkpoint = _checkpoint()
-+    checkpoint["transitions"] = (item,)
-+    _connect(monkeypatch, _Client(events, projection, checkpoint))
++    root, state, metadata = _fixture(tmp_path, TWO_PASS)
 +
-+    delta = json.loads(get_live_events(str(tmp_path)))[
-+        "cycle_warning_transitions"
-+    ]
++    with _owner(state, metadata) as (server, client):
++        event = _event(state.cycles[:1], metadata.revision)
++        feed, received, reads, response = _feed(
++            client, server, event,
++            report_error=TimeoutError("synthetic timeout"),
++        )
 +
-+    assert delta["status"] == "unavailable"
-+    assert "transitions" not in delta
++        feed.poll_once()
++
++        assert len(reads) == 1
++        assert "cycle added: a -> b -> a" in received[0][0]
 +
 +
-+def test_t05_missing_checkpoint_does_not_claim_zero(
-+    tmp_path, monkeypatch,
++def test_t06_older_event_never_uses_latest_projection(
++    tmp_path, isolated_dirs,
 +):
-+    events, projection = _fake_reports()
-+    client = _Client(
-+        events,
-+        projection,
-+        {
-+            "status": "unavailable",
-+            "reason": "NO_COMMITTED_WARNING_TRANSITION",
-+        },
-+    )
-+    _connect(monkeypatch, client)
++    root, state, metadata = _fixture(tmp_path, TWO_PASS)
 +
-+    result = json.loads(get_live_events(str(tmp_path)))
++    with _owner(state, metadata) as (server, client):
++        event = _event(
++            state.cycles[:1], metadata.revision - 1,
++        )
++        feed, received, reads, response = _feed(
++            client, server, event,
++        )
 +
-+    assert result["cycle_warning_transitions"]["status"] == "unavailable"
-+    assert "transition_count" not in result["cycle_warning_transitions"]
++        feed.poll_once()
++
++        assert reads == []
++        assert "cycle added: a -> b -> a" in received[0][0]
 +
 +
-+def test_t06_unavailable_current_view_skips_transition_query(
-+    tmp_path, monkeypatch,
++def test_t07_resolved_cycle_is_not_relabelled_as_model_acceptance(
++    tmp_path, isolated_dirs,
 +):
-+    events, projection = _fake_reports()
-+    projection["revision"] = 13
-+    client = _Client(events, projection, _checkpoint())
-+    _connect(monkeypatch, client)
++    root, state, metadata = _fixture(tmp_path, TWO_PASS)
 +
-+    result = json.loads(get_live_events(str(tmp_path)))
++    with _owner(state, metadata) as (server, client):
++        event = _event(
++            state.cycles[:1],
++            metadata.revision,
++            action="RESOLVED",
++        )
++        feed, received, reads, response = _feed(
++            client, server, event,
++        )
 +
-+    assert result["cycle_warning_view"]["status"] == "unavailable"
-+    assert result["cycle_warning_transitions"]["status"] == "unavailable"
-+    assert client.checkpoint_calls == 0
++        feed.poll_once()
++
++        assert reads == []
++        assert "cycle resolved: a -> b -> a" in received[0][0]
 +
 +
-+def test_t07_transport_failure_does_not_remove_history(
-+    tmp_path, monkeypatch,
++def test_t08_no_cycle_addition_does_not_query_projection(
++    tmp_path, isolated_dirs,
 +):
-+    events, projection = _fake_reports()
-+    events["events"] = [{
-+        "canonical_revision": 12,
-+        "diagnostic_changes": {
-+            "total": 1,
-+            "truncated": False,
-+            "items": [{
-+                "diagnostic_kind": "cycle",
-+                "action": "ADDED",
-+                "cycle_nodes": ["a", "b", "a"],
-+            }],
-+        },
-+    }]
-+    original = copy.deepcopy(events)
++    root, state, metadata = _fixture(tmp_path, TWO_PASS)
 +
-+    client = _Client(
-+        events, projection, TimeoutError("synthetic timeout"),
-+    )
-+    _connect(monkeypatch, client)
++    with _owner(state, metadata) as (server, client):
++        event = _event([], metadata.revision)
++        feed, received, reads, response = _feed(
++            client, server, event,
++        )
 +
-+    result = json.loads(get_live_events(str(tmp_path)))
++        feed.poll_once()
 +
-+    assert result["status"] == "ok"
-+    assert result["events"] == original["events"]
-+    assert result["cycle_warning_transitions"]["status"] == "unavailable"
-+    assert "transition_count" not in result["cycle_warning_transitions"]
-+    assert events == original
++        assert reads == []
++        assert len(received) == 1
++        assert received[0][1] is event
 +
 +
-+def test_t08_documentation_describes_current_warning_semantics():
-+    from pathlib import Path
-+
-+    docs = (
-+        Path(__file__).resolve().parents[1]
-+        / "contextor" / "mcp" / "docs" / "get_live_events.json"
++def test_t09_current_warning_projection_does_not_change_journal(
++    tmp_path, isolated_dirs,
++):
++    root, state, metadata = _fixture(
++        tmp_path, PASS_AND_UNKNOWN,
 +    )
 +
-+    data = json.loads(docs.read_text(encoding="utf-8"))
++    with _owner(state, metadata) as (server, client):
++        event = _event(state.cycles, metadata.revision)
++        before = copy.deepcopy((
++            server._events,
++            server._activity_seq,
++            state.cycles,
++            state.dependency_graph.hard_edges,
++        ))
 +
-+    assert data["version"] == "1.0.0"
-+    assert data["tool"] == "get_live_events"
++        feed, received, reads, response = _feed(
++            client, server, event,
++        )
 +
-+    behavior = " ".join(data["behavior"])
++        feed.poll_once()
 +
-+    for term in (
-+        "cycle_warning_view",
-+        "cycle_warning_transitions",
-+        "MODEL_ACCEPTED",
-+        "WARNING_REACTIVATED",
-+        "STRUCTURAL_ADDED",
-+        "STRUCTURAL_REMOVED",
-+        "historical structural changes",
-+        "unavailable",
-+    ):
-+        assert term in behavior
++        assert len(reads) == 1
++        assert (
++            server._events,
++            server._activity_seq,
++            state.cycles,
++            state.dependency_graph.hard_edges,
++        ) == before
 ```
 
 ## CONTRACT_CONFLICTS
 
-None observed in the exact anchors, compilation, or focused tests.
+None observed in the literal anchors, compilation, or focused tests.
 
 ## REMAINING UNKNOWN
 
-- UNKNOWN: Active MCP backend loaded-code adoption; no restart was performed.
-- UNKNOWN: Global pytest outcome; prohibited in this stage.
+- UNKNOWN: Active Desktop/backend loaded-code adoption; no restart was performed.
+- UNKNOWN: Global pytest result; prohibited in this stage.
 - UNKNOWN: Semantic cycle family remains stale in MCP.
 
 ## FINAL IMPLEMENTER OBSERVATION
 
-The literal WARN-4I change passed new and specified focused tests. Structural DFS cycle count remained 16. Architectural acceptance remains with ChatGPT. STOP after WARN-4I.
+The literal WARN-4J change passed new and specified focused tests. Structural DFS cycle count remained 16. Architectural acceptance remains with ChatGPT. STOP after WARN-4J.
