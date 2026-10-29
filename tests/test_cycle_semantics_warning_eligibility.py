@@ -233,3 +233,30 @@ def test_t18_repeatable_without_state_mutation(tmp_path):
     second = _eligible(state, expected)
     assert first == second == frozenset({("a", "b", "a")})
     assert state.__dict__ == before
+
+
+def test_r1_repeated_closed_walk_fails_closed(tmp_path):
+    state, expected = _committed(tmp_path)
+    state.cycles = [["a", "b", "a", "b", "a"]]
+    assert _eligible(state, expected) == frozenset()
+
+
+def test_r1_repeated_self_loop_fails_closed_but_simple_loop_qualifies(tmp_path):
+    state, expected = _committed(
+        tmp_path, {"a": {"a"}}, {"a": "import a"}, (("a", "a"),),
+    )
+    assert _eligible(state, expected) == frozenset({("a", "a")})
+    state.cycles = [["a", "a", "a"]]
+    assert _eligible(state, expected) == frozenset()
+
+
+def test_r1_duplicate_identical_cycle_records_fail_closed(tmp_path):
+    state, expected = _committed(tmp_path)
+    state.cycles = [["a", "b", "a"], ["a", "b", "a"]]
+    assert _eligible(state, expected) == frozenset()
+
+
+def test_r1_valid_path_then_repeated_walk_has_no_partial_result(tmp_path):
+    state, expected = _committed(tmp_path)
+    state.cycles = [["a", "b", "a"], ["a", "b", "a", "b", "a"]]
+    assert _eligible(state, expected) == frozenset()

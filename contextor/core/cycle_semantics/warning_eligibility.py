@@ -74,6 +74,7 @@ def _verified_model_pass_cycle_paths(
             == "MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS"
         }
         result: set[tuple[str, ...]] = set()
+        seen_paths: set[tuple[str, ...]] = set()
         for path in paths:
             if (
                 not isinstance(path, (list, tuple))
@@ -82,6 +83,13 @@ def _verified_model_pass_cycle_paths(
                 or path[0] != path[-1]
             ):
                 return empty
+            interior = tuple(path[:-1])
+            if len(interior) != len(set(interior)):
+                return empty
+            path_identity = tuple(path)
+            if path_identity in seen_paths:
+                return empty
+            seen_paths.add(path_identity)
             if any(
                 target not in hard_edges.get(source, ())
                 for source, target in zip(path, path[1:])
