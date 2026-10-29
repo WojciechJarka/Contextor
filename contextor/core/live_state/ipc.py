@@ -2590,6 +2590,30 @@ class CanonicalLiveServer:
                         query_kind,
                         dict(payload),
                     )
+
+                    if (
+                        query_kind == "diagnostics_summary"
+                        and not self._stop.is_set()
+                        and self._pending_recovery_certificate is None
+                        and not self._recovery_release_degraded
+                    ):
+                        try:
+                            from contextor.core.cycle_semantics.live_warning_diagnostics_summary import (
+                                project_locked_warning_diagnostics_summary,
+                            )
+                            result = project_locked_warning_diagnostics_summary(
+                                result,
+                                self._owner_cycle_warning_report_locked(),
+                                canonical_revision=self._revision,
+                                activity_epoch=self._activity_epoch,
+                                authority_identity=self._authority_identity,
+                            )
+                        except Exception:
+                            # Never let an optional warning projection
+                            # invalidate the canonical diagnostics query.
+                            # Preserve the original structural warning count.
+                            pass
+
                 except Exception as exc:
                     return {
                         "status": "error",
