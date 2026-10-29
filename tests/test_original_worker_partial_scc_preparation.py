@@ -7,6 +7,7 @@ from dataclasses import FrozenInstanceError, replace
 
 import pytest
 
+import contextor.core.cycle_semantics.original_worker_preparation as preparation_module
 from contextor.core.analysis.state_manager import RepositoryAnalysisState
 from contextor.core.cycle_semantics.materialization import materialize_cycle_semantics
 from contextor.core.cycle_semantics.original_worker_preparation import (
@@ -69,6 +70,21 @@ def _real_pipeline(root, selected=SELECTED):
 
 def _prepare(index, graph, snapshot):
     return prepare_original_worker_cycle_manifest(index, graph.hard_edges, snapshot)
+
+
+def _injected_manifest_result(tmp_path, isolated_dirs, monkeypatch, mutation):
+    index, graph, snapshot = _real_pipeline(_repo(tmp_path, PASS_AND_UNKNOWN))
+    original = preparation_module.prepare_cycle_source_manifest
+
+    def altered_manifest(*args, **kwargs):
+        genuine = original(*args, **kwargs)
+        assert genuine.source_manifest_sha256 is None
+        return mutation(genuine)
+
+    monkeypatch.setattr(
+        preparation_module, "prepare_cycle_source_manifest", altered_manifest,
+    )
+    return _prepare(index, graph, snapshot), graph, snapshot
 
 
 def test_t01_mixed_pass_unknown_preserves_independent_components(tmp_path, isolated_dirs):
@@ -212,3 +228,130 @@ def test_t08_supplied_inputs_are_not_mutated(tmp_path, isolated_dirs):
         snapshot,
     )
     assert after == before
+
+
+def test_r1_t01_forged_authority_hides_partial_components(
+    tmp_path, isolated_dirs, monkeypatch,
+):
+    result, _, _ = _injected_manifest_result(
+        tmp_path, isolated_dirs, monkeypatch,
+        lambda manifest: replace(manifest, authority="FORGED"),
+    )
+    assert result.reason == "PREPARED_AUTHORITY_INVALID"
+    assert result.manifest is None
+    assert result.component_preparations == ()
+
+
+def test_r1_t02_reordered_scc_components_hide_partial_results(
+    tmp_path, isolated_dirs, monkeypatch,
+):
+    result, _, _ = _injected_manifest_result(
+        tmp_path, isolated_dirs, monkeypatch,
+        lambda manifest: replace(
+            manifest, components=tuple(reversed(manifest.components)),
+        ),
+    )
+    assert result.reason == "SCC_COMPONENT_IDENTITY_MISMATCH"
+    assert result.component_preparations == ()
+
+
+def test_r1_t03_missing_scc_component_hides_partial_results(
+    tmp_path, isolated_dirs, monkeypatch,
+):
+    result, _, _ = _injected_manifest_result(
+        tmp_path, isolated_dirs, monkeypatch,
+        lambda manifest: replace(manifest, components=manifest.components[:1]),
+    )
+    assert result.reason == "SCC_COMPONENT_IDENTITY_MISMATCH"
+    assert result.component_preparations == ()
+
+
+def test_r1_t04_graph_sha_mismatch_hides_partial_results(
+    tmp_path, isolated_dirs, monkeypatch,
+):
+    result, _, _ = _injected_manifest_result(
+        tmp_path, isolated_dirs, monkeypatch,
+        lambda manifest: replace(manifest, graph_sha256="0" * 64),
+    )
+    assert result.reason == "SOURCE_MANIFEST_GRAPH_MISMATCH"
+    assert result.component_preparations == ()
+
+
+@pytest.mark.parametrize("components", ["list", "bad_element"])
+def test_r1_t05_component_shape_or_type_hides_partial_results(
+    tmp_path, isolated_dirs, monkeypatch, components,
+):
+    def mutate(manifest):
+        value = (
+            list(manifest.components)
+            if components == "list"
+            else (manifest.components[0], object())
+        )
+        return replace(manifest, components=value)
+
+    result, _, _ = _injected_manifest_result(
+        tmp_path, isolated_dirs, monkeypatch, mutate,
+    )
+    assert result.reason == "SCC_COMPONENT_IDENTITY_MISMATCH"
+    assert result.component_preparations == ()
+
+
+def test_r1_t06_unmodified_mixed_results_remain_available(
+    tmp_path, isolated_dirs,
+):
+    index, graph, snapshot = _real_pipeline(_repo(tmp_path, PASS_AND_UNKNOWN))
+    result = _prepare(index, graph, snapshot)
+    assert result.reason == "P1C0_SOURCE_EVIDENCE_UNAVAILABLE"
+    assert result.manifest is None
+    assert tuple(item.preparation_state for item in result.component_preparations) == (
+        "PREPARED_UNPUBLISHED", "UNAVAILABLE",
+    )
+
+
+def test_r1_t07_complete_pass_hazard_remains_prepared(tmp_path, isolated_dirs):
+    index, graph, snapshot = _real_pipeline(_repo(tmp_path, PASS_AND_HAZARD))
+    result = _prepare(index, graph, snapshot)
+    assert result.status == "PREPARED_UNPUBLISHED_NON_ATOMIC"
+    assert result.component_preparations == result.manifest.components
+    assert tuple(item.model_classification for item in result.component_preparations) == (
+        "MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS",
+        "MODEL_INTERNAL_EARLY_BINDING_HAZARD",
+    )
+
+
+def test_r1_t08_invalid_manifest_cannot_create_receipt_or_eligible_path(
+    tmp_path, isolated_dirs, monkeypatch,
+):
+    result, graph, snapshot = _injected_manifest_result(
+        tmp_path, isolated_dirs, monkeypatch,
+        lambda manifest: replace(manifest, authority="FORGED"),
+    )
+    assert result.manifest is None
+    assert result.component_preparations == ()
+    state = RepositoryAnalysisState(
+        dependency_graph=ProjectGraph(
+            hard_edges={name: set(targets) for name, targets in graph.hard_edges.items()},
+            soft_edges={},
+        ),
+        cycles=[["a", "b", "a"], ["x", "y", "x"]],
+        cycles_state="fresh",
+        cycle_semantics=snapshot,
+        cycle_semantics_state="fresh",
+    )
+    save_snapshot(
+        state, tmp_path, "invalid-state", exact_revision=1,
+        file_state_payload={
+            "_meta": {"state_id": "invalid-state", "revision": 1},
+            "files": {},
+        },
+        prepared_cycle_manifest=result.manifest,
+    )
+    loaded, metadata = load_snapshot(tmp_path, "invalid-state")
+    assert loaded.cycle_source_publication is None
+    assert _verified_model_pass_cycle_paths(
+        loaded,
+        expected_revision=metadata.revision,
+        expected_state_id=metadata.state_id,
+        expected_repo_id=metadata.repo_id,
+        expected_root_path=metadata.root_path,
+    ) == frozenset()

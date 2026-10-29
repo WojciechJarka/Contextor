@@ -15,7 +15,7 @@ from contextor.core.source import (
     parse_source_snapshot,
 )
 
-from .contracts import CycleSemanticsSnapshot
+from .contracts import CycleSemanticsSnapshot, fingerprint_hard_edges
 from .evidence import build_source_bound_cycle_evidence
 from .generation_manifest import (
     PreparedCycleSourceManifest,
@@ -129,6 +129,47 @@ def prepare_original_worker_cycle_manifest(
             "SOURCE_EVIDENCE_PREPARATION_FAILED"
         )
 
+    if type(manifest) is not PreparedCycleSourceManifest:
+        return unavailable(
+            "SOURCE_EVIDENCE_PREPARATION_FAILED"
+        )
+
+    if manifest.authority != (
+        "PREPARED_ONLY_NOT_CANONICALLY_PUBLISHED"
+    ):
+        return unavailable(
+            "PREPARED_AUTHORITY_INVALID"
+        )
+
+    if not (
+        manifest.graph_sha256
+        == snapshot.graph_sha256
+        == fingerprint_hard_edges(hard_edges)
+    ):
+        return unavailable(
+            "SOURCE_MANIFEST_GRAPH_MISMATCH"
+        )
+
+    if (
+        type(manifest.components) is not tuple
+        or len(manifest.components) != len(binding.cyclic_components)
+        or any(
+            type(component) is not PreparedSCCSourceBinding
+            for component in manifest.components
+        )
+    ):
+        return unavailable(
+            "SCC_COMPONENT_IDENTITY_MISMATCH"
+        )
+
+    if tuple(
+        component.members
+        for component in manifest.components
+    ) != binding.cyclic_components:
+        return unavailable(
+            "SCC_COMPONENT_IDENTITY_MISMATCH"
+        )
+
     if (
         type(manifest.source_manifest_sha256) is not str
         or len(manifest.source_manifest_sha256) != 64
@@ -142,21 +183,6 @@ def prepare_original_worker_cycle_manifest(
         return unavailable(
             "P1C0_SOURCE_EVIDENCE_UNAVAILABLE",
             component_preparations=manifest.components,
-        )
-
-    if manifest.authority != (
-        "PREPARED_ONLY_NOT_CANONICALLY_PUBLISHED"
-    ):
-        return unavailable(
-            "PREPARED_AUTHORITY_INVALID"
-        )
-
-    if tuple(
-        component.members
-        for component in manifest.components
-    ) != binding.cyclic_components:
-        return unavailable(
-            "SCC_COMPONENT_IDENTITY_MISMATCH"
         )
 
     return OriginalWorkerManifestPreparation(
