@@ -184,12 +184,16 @@ from contextor.core.analysis.process_pool_lifecycle import (
 )
 from contextor.mcp import query_helpers
 from contextor.mcp_process_registry import (
+    classify_registered_windows_parent,
+    classify_registered_windows_process,
     process_identity,
     read_records,
     record_matches_process,
     register_process,
     registry_dir,
     remove_record,
+    sys_platform_is_windows,
+    terminate_or_confirm_registered_process,
     terminate_registered_process,
 )
 from contextor.mcp_backend_state import (
@@ -586,8 +590,138 @@ mcp = _create_mcp(
 )
 
 
+def _cleanup_orphaned_processes_windows(
+    directory: Path,
+) -> None:
+    """Resolve registered orphans with strict Windows identity proof.
+
+    Allow more than two passes so grandchildren and deeper
+    registered descendants are not dependent on file ordering.
+    """
+    max_passes = len(read_records(directory)) + 1
+
+    for _ in range(max_passes):
+        entries = read_records(directory)
+
+        if not entries:
+            return
+
+        progress = False
+
+        for record_path, record in entries:
+            state = classify_registered_windows_process(record)
+
+            if state == "DEAD":
+                remove_record(record_path)
+                progress = True
+                continue
+
+            if state == "IDENTITY_MISMATCH":
+                if not terminate_or_confirm_registered_process(
+                    record
+                ):
+                    raise RuntimeError(
+                        "registered process identity not confirmed; "
+                        f"pid={record.get('pid')!r}"
+                    )
+
+                remove_record(record_path)
+                progress = True
+                continue
+
+            if state != "ALIVE_MATCH":
+                raise RuntimeError(
+                    "registered process liveness not confirmed; "
+                    f"pid={record.get('pid')!r}"
+                )
+
+            parent_state = classify_registered_windows_parent(
+                record
+            )
+
+            if parent_state == "UNKNOWN":
+                raise RuntimeError(
+                    "registered parent identity not confirmed; "
+                    f"pid={record.get('pid')!r}"
+                )
+
+            if parent_state == "PARENT_ALIVE":
+                continue
+
+            if not terminate_or_confirm_registered_process(
+                record
+            ):
+                raise RuntimeError(
+                    "registered orphan process termination "
+                    "was not confirmed; "
+                    f"pid={record.get('pid')!r}"
+                )
+
+            remove_record(record_path)
+            progress = True
+
+        if not progress:
+            return
+
+    raise RuntimeError(
+        "registered Windows orphan cleanup exceeded "
+        "its bounded multilevel sweep"
+    )
+
+
+def _cleanup_owned_processes_windows(
+    directory: Path,
+    owner_pid: int,
+) -> None:
+    """Clean direct children only with confirmed owner identity."""
+    if type(owner_pid) is not int or not 0 < owner_pid <= 0xFFFFFFFF:
+        raise RuntimeError(
+            "registered MCP owner PID is invalid"
+        )
+
+    for record_path, record in read_records(directory):
+        if type(record.get("parent_pid")) is not int:
+            continue
+
+        if record["parent_pid"] != owner_pid:
+            continue
+
+        parent_state = classify_registered_windows_parent(
+            record
+        )
+
+        if parent_state == "UNKNOWN":
+            raise RuntimeError(
+                "registered MCP child parent identity "
+                "was not confirmed; "
+                f"pid={record.get('pid')!r}"
+            )
+
+        if parent_state == "ORPHAN":
+            # The record belongs to a different generation
+            # of this PID or its parent has already exited.
+            # The orphan sweep resolves it independently.
+            continue
+
+        if not terminate_or_confirm_registered_process(
+            record
+        ):
+            raise RuntimeError(
+                "registered MCP child termination "
+                "was not confirmed; "
+                f"pid={record.get('pid')!r}"
+            )
+
+        remove_record(record_path)
+
+
 def _cleanup_orphaned_processes(directory: Path) -> None:
     """Stop only registered MCP/Git processes whose recorded parent is gone."""
+    if sys_platform_is_windows():
+        _cleanup_orphaned_processes_windows(directory)
+        return
+
+    # Legacy non-Windows behavior.
     # Two passes handle a stale server and one of its Git children regardless
     # of filesystem iteration order: pass one stops the server, pass two the child.
     for _ in range(2):
@@ -620,6 +754,10 @@ def _cleanup_orphaned_processes(directory: Path) -> None:
 
 def _cleanup_owned_processes(directory: Path, owner_pid: int) -> None:
     """Stop registered child processes still owned by this server."""
+    if sys_platform_is_windows():
+        _cleanup_owned_processes_windows(directory, owner_pid)
+        return
+
     for record_path, record in read_records(directory):
         try:
             is_child = int(record.get("parent_pid")) == owner_pid

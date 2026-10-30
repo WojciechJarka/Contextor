@@ -99,13 +99,21 @@ def test_mcp_server_failed_owned_child_retains_record(
     child = _child()
 
     monkeypatch.setattr(
+        server, "sys_platform_is_windows", lambda: True
+    )
+    monkeypatch.setattr(
+        server,
+        "classify_registered_windows_parent",
+        lambda record: "PARENT_ALIVE",
+    )
+    monkeypatch.setattr(
         server,
         "read_records",
         lambda directory: [(path, child)],
     )
     monkeypatch.setattr(
         server,
-        "terminate_registered_process",
+        "terminate_or_confirm_registered_process",
         lambda record: False,
     )
     monkeypatch.setattr(
@@ -129,6 +137,15 @@ def test_mcp_server_successful_owned_child_cleanup(
 ):
     path = tmp_path / "child.json"
     child = _child()
+
+    monkeypatch.setattr(
+        server, "sys_platform_is_windows", lambda: True
+    )
+    monkeypatch.setattr(
+        server,
+        "classify_registered_windows_parent",
+        lambda record: "PARENT_ALIVE",
+    )
     removed = []
 
     monkeypatch.setattr(
@@ -138,7 +155,7 @@ def test_mcp_server_successful_owned_child_cleanup(
     )
     monkeypatch.setattr(
         server,
-        "terminate_registered_process",
+        "terminate_or_confirm_registered_process",
         lambda record: True,
     )
     monkeypatch.setattr(
@@ -160,6 +177,19 @@ def test_mcp_server_failed_orphan_cleanup_retains_record(
     child = _child()
 
     monkeypatch.setattr(
+        server, "sys_platform_is_windows", lambda: True
+    )
+    monkeypatch.setattr(
+        server,
+        "classify_registered_windows_process",
+        lambda record: "ALIVE_MATCH",
+    )
+    monkeypatch.setattr(
+        server,
+        "classify_registered_windows_parent",
+        lambda record: "ORPHAN",
+    )
+    monkeypatch.setattr(
         server,
         "read_records",
         lambda directory: [(path, child)],
@@ -176,7 +206,7 @@ def test_mcp_server_failed_orphan_cleanup_retains_record(
     )
     monkeypatch.setattr(
         server,
-        "terminate_registered_process",
+        "terminate_or_confirm_registered_process",
         lambda record: False,
     )
     monkeypatch.setattr(

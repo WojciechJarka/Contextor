@@ -1,201 +1,363 @@
-# PY315-R4C-2 — registered process cleanup resolution
+# PY315-R4C-3-R1 — Windows parent identity and multilevel registered cleanup
 
 ## PREFLIGHT
-DIRECT_EVIDENCE: HEAD `54d71a56354b19f8ebd00a27cfc0e285a61ab31c`; pre-edit Git status was clean. Contextor MCP returned revision 926, provenance live, and `workspace_sync=verified` for `contextor.mcp_process_registry` and `contextor.mcp_backend_control`. All six literal SEARCH blocks occurred exactly once; the new test file was absent.
+DIRECT_EVIDENCE: HEAD `113040a0351ef541de69785465b37253a0a4d66f`; only the prior `walkthrough.md` report was modified before this task. Contextor MCP reported revision 931, provenance live, and `workspace_sync=verified` for `contextor.mcp_process_registry`, `contextor.mcp_server`, and `contextor.mcp_backend_control`. Original edits 1–5 and EDIT 6 searches 1–3 each occurred once; EDIT 6 search 4 occurred twice as specified. The corrected successful owned-child SEARCH occurred exactly once. Both new test files were absent.
 
 ## EXACT_SEARCH_REPLACE_RESULTS
-CONTRACT_PROVED: All six architect-supplied replacements were applied at the exact anchors using `apply_patch`. The new test file matches the supplied content aside from final newline formatting. `mcp_server.py`, the legacy `/T` test, and launcher code were not changed.
+CONTRACT_PROVED: All original R4C-3 edits were applied with the single corrected anchor from R1. The independent `control.terminate_registered_process` mock in `stop_backend` remained unchanged. Both new test files match the architect's supplied content apart from final newline formatting. No launcher or LIVE ownership code was changed.
 
-## ALREADY_DEAD_HANDLING
-CODE_PATH_PROVED: On Windows, `terminate_or_confirm_registered_process` returns true for a classifier result of DEAD without calling termination. The deterministic test covers this branch. This is a point-in-time cleanup resolution, not proof of full descendant-tree parity.
+## PARENT_IDENTITY_CLASSIFICATION
+CODE_PATH_PROVED: On Windows, the new parent classifier requires a valid parent PID and recorded creation time. A dead parent or a live PID with different creation time is ORPHAN; matching creation time is PARENT_ALIVE; missing or uncertain evidence is UNKNOWN. It does not terminate processes.
 
-## PID_REUSE_HANDLING
-CODE_PATH PROVED: For IDENTITY_MISMATCH, `_registered_windows_identity_gone` re-probes and accepts only a live process with a different positive creation identity. A same-creation image mismatch remains unresolved. Tests cover both cases and a race where the PID changes after failed identity-bound termination.
+## REGISTERED_TREE_DEPTH
+CODE_PATH_PROVED: Windows orphan cleanup now performs at most `len(read_records(directory)) + 1` passes. It resolves DEAD and proven identity mismatch records, terminates confirmed orphans through the existing resolver, leaves children with confirmed live parents, and raises on UNKNOWN. The four-level registered-tree fake test passed. This is registered-depth behavior, not full `/T` parity for unregistered descendants.
 
-## UNKNOWN_FAIL_CLOSED
-UNKNOWN or invalid classification returns false without termination. An unconfirmed re-probe after failed termination also returns false. The new tests cover these branches. A false result retains registry evidence in the updated backend child path.
+## OWNED_PROCESS_GENERATION_CHECK
+Windows owned-child cleanup requires a valid owner PID and confirmed parent generation. It skips records whose parent is an ORPHAN for the separate sweep, fails on UNKNOWN, and removes a matching direct-child record only after terminate-or-confirm returns true.
 
-## BACKEND_CHILD_CLEANUP
-`_cleanup_owned_registry_children` now uses the central terminate-or-confirm helper. It removes a child record only after confirmed termination, confirmed prior death, or creation-time proof that the prior identity no longer owns its PID. Failed resolution raises `BackendControlError` and keeps the child record. The backend's independent `stop_backend` termination mock was preserved.
+## DEAD_AND_UNKNOWN_HANDLING
+DEAD registered orphan records are removed without a termination call. UNKNOWN child or parent state raises and retains the record. Identity mismatch requires the central safe-resolution helper. Supplied fake tests cover these branches.
 
 ## TARGETED_TEST_RESULTS
 `py_compile` for the five changed/new Python files: PASS.
-`tests/test_mcp_registered_process_cleanup.py tests/test_mcp_registered_process_classification.py tests/test_mcp_process_registry.py tests/test_mcp_process_registry_identity_termination.py tests/test_mcp_backend_control.py tests/test_mcp_child_cleanup_failure_evidence.py -q`: 114 passed, 1 AuthlibDeprecationWarning.
-`tests/test_mcp_backend_job_guard.py tests/test_mcp_backend_job_process_scope.py -q`: 18 passed, 1 AuthlibDeprecationWarning.
-No full pytest or real process termination.
+First specified suite: 47 passed, 1 deselected, 1 AuthlibDeprecationWarning.
+Second specified suite: 108 passed, 1 warning.
+Third specified suite: 32 passed, 1 warning.
+No full pytest, real process termination, runtime switch, or launcher execution.
 
 ## MCP_POST_CHANGE_AUDIT
-DIRECT_EVIDENCE: Initial post-edit reads at revision 926 reported `workspace_sync=out_of_sync` for both changed production modules, and symbol fetches returned `status=stale_source`. Intermediate reads at revisions 926–930 were `unverified` for at least one target with a generation-proof warning. Later `get_symbol_implementation` reads at revision 931 returned `status=resolved`, `workspace_sync=verified`, and complete implementations for `terminate_or_confirm_registered_process` and `_cleanup_owned_registry_children`. Canonical source synchronization and changed symbol visibility are verified for both modules at revision 931. No manual `update_file` or restart occurred. Active backend loaded-code adoption is UNKNOWN.
+DIRECT_EVIDENCE: Initial post-edit reads returned generation-proof warnings and one transient `[Errno 36] Resource deadlock avoided` error. Sequential module reads at revision 934 returned `workspace_sync=verified` for registry, server, and backend control. `get_symbol_implementation` at revision 936 returned `status=resolved`, `workspace_sync=verified`, and implementations for `classify_registered_windows_parent`, `_cleanup_orphaned_processes_windows`, and `_cleanup_owned_processes_windows`. These observations verify canonical source visibility, not active loaded-code adoption. No `update_file` or restart occurred.
 
 ## FILES_CHANGED
 - `contextor/mcp_process_registry.py`
-- `contextor/mcp_backend_control.py`
-- `tests/test_mcp_backend_control.py`
+- `contextor/mcp_server.py`
 - `tests/test_mcp_child_cleanup_failure_evidence.py`
-- `tests/test_mcp_registered_process_cleanup.py`
+- `tests/test_mcp_registered_parent_classification.py`
+- `tests/test_mcp_server_cleanup_windows.py`
 
 ## FULL_DIFFS
 ```diff
-diff --git a/contextor/mcp_backend_control.py b/contextor/mcp_backend_control.py
-index 7c26b42..f83a8f5 100644
---- a/contextor/mcp_backend_control.py
-+++ b/contextor/mcp_backend_control.py
-@@ -37,10 +37,10 @@ from contextor.mcp_process_registry import (
-     read_records,
-     record_matches_process,
-     remove_record,
-+    terminate_or_confirm_registered_process,
-     terminate_registered_process,
- )
- 
--
- BACKEND_HOST = "127.0.0.1"
- BACKEND_PORT = 8765
- BACKEND_MCP_PATH = "/mcp"
-@@ -960,15 +960,14 @@ def _cleanup_owned_registry_children(
-             ):
-                 continue
- 
--        if not terminate_registered_process(
-+        if not terminate_or_confirm_registered_process(
-             child
-         ):
-             raise BackendControlError(
--                "registered backend child termination "
-+                "registered backend child cleanup "
-                 "was not confirmed; "
-                 f"pid={child.get('pid')!r}"
-             )
--
-         remove_record(
-             record_path
-         )
 diff --git a/contextor/mcp_process_registry.py b/contextor/mcp_process_registry.py
-index 4a63ec2..149692a 100644
+index 149692a..1016f53 100644
 --- a/contextor/mcp_process_registry.py
 +++ b/contextor/mcp_process_registry.py
-@@ -379,6 +379,77 @@ def classify_registered_windows_process(
+@@ -379,6 +379,58 @@ def classify_registered_windows_process(
      return "ALIVE_MATCH"
  
  
-+def _registered_windows_identity_gone(
++WindowsRegisteredParentState = Literal[
++    "PARENT_ALIVE",
++    "ORPHAN",
++    "UNKNOWN",
++]
++
++
++def classify_registered_windows_parent(
 +    record: dict[str, Any],
-+) -> bool:
-+    """Confirm that the recorded process no longer owns its PID.
++) -> WindowsRegisteredParentState:
++    """Classify the registered parent using PID and creation time."""
++    if not sys_platform_is_windows():
++        return "UNKNOWN"
 +
-+    A different creation time proves the recorded process
-+    has exited. An image mismatch with the same creation
-+    time is not sufficient to discard ownership evidence.
-+    """
-+    state = classify_registered_windows_process(record)
++    if not isinstance(record, dict):
++        return "UNKNOWN"
 +
-+    if state == "DEAD":
-+        return True
++    parent_pid = record.get("parent_pid")
++    expected_creation = record.get("parent_creation_time")
 +
-+    if state != "IDENTITY_MISMATCH":
-+        return False
++    if type(parent_pid) is not int or not 0 < parent_pid <= 0xFFFFFFFF:
++        return "UNKNOWN"
++
++    if (
++        type(expected_creation) is not int
++        or not 0 < expected_creation <= 0xFFFFFFFFFFFFFFFF
++    ):
++        return "UNKNOWN"
 +
 +    try:
-+        probe = probe_process_identity(record["pid"])
++        probe = probe_process_identity(parent_pid)
 +    except (OSError, AttributeError, TypeError, ValueError):
-+        return False
++        return "UNKNOWN"
 +
-+    expected_creation = record.get("creation_time")
++    if probe.state == "dead":
++        return "ORPHAN"
 +
-+    return (
-+        probe.state == "alive"
-+        and type(expected_creation) is int
-+        and expected_creation > 0
-+        and type(probe.creation_time) is int
-+        and probe.creation_time > 0
-+        and probe.creation_time != expected_creation
++    if probe.state != "alive":
++        return "UNKNOWN"
++
++    if (
++        type(probe.creation_time) is not int
++        or not 0 < probe.creation_time <= 0xFFFFFFFFFFFFFFFF
++    ):
++        return "UNKNOWN"
++
++    if probe.creation_time != expected_creation:
++        return "ORPHAN"
++
++    return "PARENT_ALIVE"
++
++
+ def _registered_windows_identity_gone(
+     record: dict[str, Any],
+ ) -> bool:
+diff --git a/contextor/mcp_server.py b/contextor/mcp_server.py
+index 8ce08c4..c1ee7e5 100644
+--- a/contextor/mcp_server.py
++++ b/contextor/mcp_server.py
+@@ -184,12 +184,16 @@ from contextor.core.analysis.process_pool_lifecycle import (
+ )
+ from contextor.mcp import query_helpers
+ from contextor.mcp_process_registry import (
++    classify_registered_windows_parent,
++    classify_registered_windows_process,
+     process_identity,
+     read_records,
+     record_matches_process,
+     register_process,
+     registry_dir,
+     remove_record,
++    sys_platform_is_windows,
++    terminate_or_confirm_registered_process,
+     terminate_registered_process,
+ )
+ from contextor.mcp_backend_state import (
+@@ -586,8 +590,138 @@ mcp = _create_mcp(
+ )
+ 
+ 
++def _cleanup_orphaned_processes_windows(
++    directory: Path,
++) -> None:
++    """Resolve registered orphans with strict Windows identity proof.
++
++    Allow more than two passes so grandchildren and deeper
++    registered descendants are not dependent on file ordering.
++    """
++    max_passes = len(read_records(directory)) + 1
++
++    for _ in range(max_passes):
++        entries = read_records(directory)
++
++        if not entries:
++            return
++
++        progress = False
++
++        for record_path, record in entries:
++            state = classify_registered_windows_process(record)
++
++            if state == "DEAD":
++                remove_record(record_path)
++                progress = True
++                continue
++
++            if state == "IDENTITY_MISMATCH":
++                if not terminate_or_confirm_registered_process(
++                    record
++                ):
++                    raise RuntimeError(
++                        "registered process identity not confirmed; "
++                        f"pid={record.get('pid')!r}"
++                    )
++
++                remove_record(record_path)
++                progress = True
++                continue
++
++            if state != "ALIVE_MATCH":
++                raise RuntimeError(
++                    "registered process liveness not confirmed; "
++                    f"pid={record.get('pid')!r}"
++                )
++
++            parent_state = classify_registered_windows_parent(
++                record
++            )
++
++            if parent_state == "UNKNOWN":
++                raise RuntimeError(
++                    "registered parent identity not confirmed; "
++                    f"pid={record.get('pid')!r}"
++                )
++
++            if parent_state == "PARENT_ALIVE":
++                continue
++
++            if not terminate_or_confirm_registered_process(
++                record
++            ):
++                raise RuntimeError(
++                    "registered orphan process termination "
++                    "was not confirmed; "
++                    f"pid={record.get('pid')!r}"
++                )
++
++            remove_record(record_path)
++            progress = True
++
++        if not progress:
++            return
++
++    raise RuntimeError(
++        "registered Windows orphan cleanup exceeded "
++        "its bounded multilevel sweep"
 +    )
 +
 +
-+def terminate_or_confirm_registered_process(
-+    record: dict[str, Any],
-+) -> bool:
-+    """Terminate the recorded process or prove its absence.
++def _cleanup_owned_processes_windows(
++    directory: Path,
++    owner_pid: int,
++) -> None:
++    """Clean direct children only with confirmed owner identity."""
++    if type(owner_pid) is not int or not 0 < owner_pid <= 0xFFFFFFFF:
++        raise RuntimeError(
++            "registered MCP owner PID is invalid"
++        )
 +
-+    True means that the registered identity was confirmed
-+    terminated, already dead, or replaced at its former PID.
++    for record_path, record in read_records(directory):
++        if type(record.get("parent_pid")) is not int:
++            continue
 +
-+    False means cleanup remains unresolved. No registry
-+    record should be removed on False.
++        if record["parent_pid"] != owner_pid:
++            continue
 +
-+    The strict Windows termination primitive independently
-+    verifies identity on one process handle.
-+    """
-+    if not sys_platform_is_windows():
-+        return terminate_registered_process(record)
++        parent_state = classify_registered_windows_parent(
++            record
++        )
 +
-+    state = classify_registered_windows_process(record)
++        if parent_state == "UNKNOWN":
++            raise RuntimeError(
++                "registered MCP child parent identity "
++                "was not confirmed; "
++                f"pid={record.get('pid')!r}"
++            )
 +
-+    if state == "DEAD":
-+        return True
++        if parent_state == "ORPHAN":
++            # The record belongs to a different generation
++            # of this PID or its parent has already exited.
++            # The orphan sweep resolves it independently.
++            continue
 +
-+    if state == "IDENTITY_MISMATCH":
-+        return _registered_windows_identity_gone(record)
++        if not terminate_or_confirm_registered_process(
++            record
++        ):
++            raise RuntimeError(
++                "registered MCP child termination "
++                "was not confirmed; "
++                f"pid={record.get('pid')!r}"
++            )
 +
-+    if state != "ALIVE_MATCH":
-+        return False
-+
-+    if terminate_registered_process(record):
-+        return True
-+
-+    # The process may have exited between classification
-+    # and the identity-bound termination attempt.
-+    # Never retry against an unverified PID.
-+    return _registered_windows_identity_gone(record)
++        remove_record(record_path)
 +
 +
- def _terminate_windows_record_identity_bound(
-     record: dict[str, Any],
- ) -> bool:
-diff --git a/tests/test_mcp_backend_control.py b/tests/test_mcp_backend_control.py
-index 78a7568..149c7dc 100644
---- a/tests/test_mcp_backend_control.py
-+++ b/tests/test_mcp_backend_control.py
-@@ -617,11 +617,10 @@ def test_owned_registry_child_cleanup_is_parent_identity_scoped(
-     )
-     monkeypatch.setattr(
-         control,
--        "terminate_registered_process",
-+        "terminate_or_confirm_registered_process",
-         lambda child: terminated.append(child) or True,
-     )
-     monkeypatch.setattr(control, "remove_record", lambda path: removed.append(path))
--
-     control._cleanup_owned_registry_children(backend_record)
+ def _cleanup_orphaned_processes(directory: Path) -> None:
+     """Stop only registered MCP/Git processes whose recorded parent is gone."""
++    if sys_platform_is_windows():
++        _cleanup_orphaned_processes_windows(directory)
++        return
++
++    # Legacy non-Windows behavior.
+     # Two passes handle a stale server and one of its Git children regardless
+     # of filesystem iteration order: pass one stops the server, pass two the child.
+     for _ in range(2):
+@@ -620,6 +754,10 @@ def _cleanup_orphaned_processes(directory: Path) -> None:
  
-     assert terminated == [good]
+ def _cleanup_owned_processes(directory: Path, owner_pid: int) -> None:
+     """Stop registered child processes still owned by this server."""
++    if sys_platform_is_windows():
++        _cleanup_owned_processes_windows(directory, owner_pid)
++        return
++
+     for record_path, record in read_records(directory):
+         try:
+             is_child = int(record.get("parent_pid")) == owner_pid
 diff --git a/tests/test_mcp_child_cleanup_failure_evidence.py b/tests/test_mcp_child_cleanup_failure_evidence.py
-index a83ef83..ef636fa 100644
+index ef636fa..7fa7e76 100644
 --- a/tests/test_mcp_child_cleanup_failure_evidence.py
 +++ b/tests/test_mcp_child_cleanup_failure_evidence.py
-@@ -43,7 +43,7 @@ def test_backend_failed_child_termination_retains_record(
+@@ -98,6 +98,14 @@ def test_mcp_server_failed_owned_child_retains_record(
+     path = tmp_path / "child.json"
+     child = _child()
+ 
++    monkeypatch.setattr(
++        server, "sys_platform_is_windows", lambda: True
++    )
++    monkeypatch.setattr(
++        server,
++        "classify_registered_windows_parent",
++        lambda record: "PARENT_ALIVE",
++    )
+     monkeypatch.setattr(
+         server,
+         "read_records",
+@@ -105,7 +113,7 @@ def test_mcp_server_failed_owned_child_retains_record(
      )
      monkeypatch.setattr(
-         control,
+         server,
 -        "terminate_registered_process",
 +        "terminate_or_confirm_registered_process",
          lambda record: False,
      )
      monkeypatch.setattr(
-@@ -77,7 +77,7 @@ def test_backend_successful_child_termination_removes_record(
+@@ -129,6 +137,15 @@ def test_mcp_server_successful_owned_child_cleanup(
+ ):
+     path = tmp_path / "child.json"
+     child = _child()
++
++    monkeypatch.setattr(
++        server, "sys_platform_is_windows", lambda: True
++    )
++    monkeypatch.setattr(
++        server,
++        "classify_registered_windows_parent",
++        lambda record: "PARENT_ALIVE",
++    )
+     removed = []
+ 
+     monkeypatch.setattr(
+@@ -138,7 +155,7 @@ def test_mcp_server_successful_owned_child_cleanup(
      )
      monkeypatch.setattr(
-         control,
+         server,
 -        "terminate_registered_process",
 +        "terminate_or_confirm_registered_process",
          lambda record: True,
      )
      monkeypatch.setattr(
-diff --git a/tests/test_mcp_registered_process_cleanup.py b/tests/test_mcp_registered_process_cleanup.py
+@@ -159,6 +176,19 @@ def test_mcp_server_failed_orphan_cleanup_retains_record(
+     path = tmp_path / "orphan.json"
+     child = _child()
+ 
++    monkeypatch.setattr(
++        server, "sys_platform_is_windows", lambda: True
++    )
++    monkeypatch.setattr(
++        server,
++        "classify_registered_windows_process",
++        lambda record: "ALIVE_MATCH",
++    )
++    monkeypatch.setattr(
++        server,
++        "classify_registered_windows_parent",
++        lambda record: "ORPHAN",
++    )
+     monkeypatch.setattr(
+         server,
+         "read_records",
+@@ -176,7 +206,7 @@ def test_mcp_server_failed_orphan_cleanup_retains_record(
+     )
+     monkeypatch.setattr(
+         server,
+-        "terminate_registered_process",
++        "terminate_or_confirm_registered_process",
+         lambda record: False,
+     )
+     monkeypatch.setattr(
+diff --git a/tests/test_mcp_registered_parent_classification.py b/tests/test_mcp_registered_parent_classification.py
 new file mode 100644
 --- /dev/null
-+++ b/tests/test_mcp_registered_process_cleanup.py
-@@ -0,0 +1,314 @@
++++ b/tests/test_mcp_registered_parent_classification.py
+@@ -0,0 +1,129 @@
 +from __future__ import annotations
 +
 +import pytest
@@ -204,316 +366,473 @@ new file mode 100644
 +
 +
 +RECORD = {
-+    "pid": 2500,
-+    "creation_time": 123456789,
-+    "executable": r"C:\Contextor\.venv\Scripts\python.exe",
++    "pid": 501,
++    "parent_pid": 500,
++    "parent_creation_time": 123456789,
++    "creation_time": 123456790,
++    "executable": r"C:\Python\python.exe",
 +}
 +
 +
 +@pytest.fixture
-+def windows_cleanup(monkeypatch):
++def parent_probe(monkeypatch):
 +    monkeypatch.setattr(
-+        registry,
-+        "sys_platform_is_windows",
-+        lambda: True,
++        registry, "sys_platform_is_windows", lambda: True
 +    )
 +
++    def set_probe(state, creation=None):
++        monkeypatch.setattr(
++            registry,
++            "probe_process_identity",
++            lambda pid: registry.ProcessIdentityProbe(
++                state,
++                None,
++                creation,
++            ),
++        )
 +
-+def test_already_dead_requires_no_termination(
-+    windows_cleanup,
-+    monkeypatch,
-+):
-+    monkeypatch.setattr(
-+        registry,
-+        "classify_registered_windows_process",
-+        lambda record: "DEAD",
-+    )
-+    monkeypatch.setattr(
-+        registry,
-+        "terminate_registered_process",
-+        lambda record: pytest.fail(
-+            "dead process was terminated"
-+        ),
-+    )
++    return set_probe
 +
-+    assert registry.terminate_or_confirm_registered_process(
++
++def test_live_exact_parent(parent_probe):
++    parent_probe("alive", 123456789)
++    assert registry.classify_registered_windows_parent(
 +        RECORD
-+    )
++    ) == "PARENT_ALIVE"
 +
 +
-+def test_live_matching_process_is_terminated(
-+    windows_cleanup,
-+    monkeypatch,
-+):
-+    calls = []
-+
-+    monkeypatch.setattr(
-+        registry,
-+        "classify_registered_windows_process",
-+        lambda record: "ALIVE_MATCH",
-+    )
-+    monkeypatch.setattr(
-+        registry,
-+        "terminate_registered_process",
-+        lambda record: calls.append(record) or True,
-+    )
-+
-+    assert registry.terminate_or_confirm_registered_process(
++def test_dead_parent_is_orphan(parent_probe):
++    parent_probe("dead")
++    assert registry.classify_registered_windows_parent(
 +        RECORD
-+    )
-+    assert calls == [RECORD]
++    ) == "ORPHAN"
 +
 +
-+def test_unknown_never_terminates(
-+    windows_cleanup,
-+    monkeypatch,
-+):
-+    monkeypatch.setattr(
-+        registry,
-+        "classify_registered_windows_process",
-+        lambda record: "UNKNOWN",
-+    )
-+    monkeypatch.setattr(
-+        registry,
-+        "terminate_registered_process",
-+        lambda record: pytest.fail(
-+            "unknown identity was terminated"
-+        ),
-+    )
-+
-+    assert not registry.terminate_or_confirm_registered_process(
++def test_reused_parent_pid_is_orphan(parent_probe):
++    parent_probe("alive", 123456791)
++    assert registry.classify_registered_windows_parent(
 +        RECORD
-+    )
++    ) == "ORPHAN"
 +
 +
-+def test_live_process_exits_before_termination(
-+    windows_cleanup,
-+    monkeypatch,
++@pytest.mark.parametrize(
++    "creation",
++    [None, False, 0, -1, "123456789"],
++)
++def test_unverified_actual_creation_is_unknown(
++    parent_probe,
++    creation,
 +):
-+    states = iter([
-+        "ALIVE_MATCH",
-+        "DEAD",
-+    ])
-+
-+    monkeypatch.setattr(
-+        registry,
-+        "classify_registered_windows_process",
-+        lambda record: next(states),
-+    )
-+    monkeypatch.setattr(
-+        registry,
-+        "terminate_registered_process",
-+        lambda record: False,
-+    )
-+
-+    assert registry.terminate_or_confirm_registered_process(
++    parent_probe("alive", creation)
++    assert registry.classify_registered_windows_parent(
 +        RECORD
-+    )
++    ) == "UNKNOWN"
 +
 +
-+def test_pid_reuse_clears_old_identity_without_killing_new(
-+    windows_cleanup,
-+    monkeypatch,
++@pytest.mark.parametrize(
++    ("field", "value"),
++    [
++        ("parent_pid", None),
++        ("parent_pid", False),
++        ("parent_pid", 0),
++        ("parent_pid", -1),
++        ("parent_pid", 0x100000000),
++        ("parent_creation_time", None),
++        ("parent_creation_time", False),
++        ("parent_creation_time", 0),
++        ("parent_creation_time", "123456789"),
++    ],
++)
++def test_invalid_parent_identity_is_unknown(
++    parent_probe,
++    field,
++    value,
 +):
-+    monkeypatch.setattr(
-+        registry,
-+        "classify_registered_windows_process",
-+        lambda record: "IDENTITY_MISMATCH",
-+    )
++    parent_probe("alive", 123456789)
++    record = {**RECORD, field: value}
++
++    assert registry.classify_registered_windows_parent(
++        record
++    ) == "UNKNOWN"
++
++
++def test_unknown_parent_probe_is_unknown(parent_probe):
++    parent_probe("unknown")
++    assert registry.classify_registered_windows_parent(
++        RECORD
++    ) == "UNKNOWN"
++
++
++def test_probe_error_is_unknown(parent_probe, monkeypatch):
 +    monkeypatch.setattr(
 +        registry,
 +        "probe_process_identity",
-+        lambda pid: registry.ProcessIdentityProbe(
-+            "alive",
-+            r"C:\Other\python.exe",
-+            123456790,
-+        ),
-+    )
-+    monkeypatch.setattr(
-+        registry,
-+        "terminate_registered_process",
-+        lambda record: pytest.fail(
-+            "replacement PID was targeted"
++        lambda pid: (_ for _ in ()).throw(
++            OSError("access denied")
 +        ),
 +    )
 +
-+    assert registry.terminate_or_confirm_registered_process(
++    assert registry.classify_registered_windows_parent(
 +        RECORD
-+    )
++    ) == "UNKNOWN"
 +
 +
-+def test_same_creation_different_image_is_unresolved(
-+    windows_cleanup,
++def test_nonwindows_does_not_claim_parent_identity(
 +    monkeypatch,
 +):
 +    monkeypatch.setattr(
-+        registry,
++        registry, "sys_platform_is_windows", lambda: False
++    )
++
++    assert registry.classify_registered_windows_parent(
++        RECORD
++    ) == "UNKNOWN"
+diff --git a/tests/test_mcp_server_cleanup_windows.py b/tests/test_mcp_server_cleanup_windows.py
+new file mode 100644
+--- /dev/null
++++ b/tests/test_mcp_server_cleanup_windows.py
+@@ -0,0 +1,337 @@
++from __future__ import annotations
++
++from pathlib import Path
++
++import pytest
++
++import contextor.mcp_server as server
++
++
++def _record(pid, parent_pid=500, parent_creation=111):
++    return {
++        "pid": pid,
++        "parent_pid": parent_pid,
++        "parent_creation_time": parent_creation,
++        "creation_time": 100000 + pid,
++        "executable": r"C:\Contextor\python.exe",
++    }
++
++
++@pytest.fixture
++def cleanup(monkeypatch, tmp_path):
++    records = {}
++    removed = []
++    terminated = []
++    process_states = {}
++    parent_states = {}
++
++    monkeypatch.setattr(
++        server, "sys_platform_is_windows", lambda: True
++    )
++
++    monkeypatch.setattr(
++        server,
++        "read_records",
++        lambda directory: list(records.items()),
++    )
++    monkeypatch.setattr(
++        server,
++        "remove_record",
++        lambda path: (
++            removed.append(path),
++            records.pop(path, None),
++        ),
++    )
++    monkeypatch.setattr(
++        server,
 +        "classify_registered_windows_process",
-+        lambda record: "IDENTITY_MISMATCH",
-+    )
-+    monkeypatch.setattr(
-+        registry,
-+        "probe_process_identity",
-+        lambda pid: registry.ProcessIdentityProbe(
-+            "alive",
-+            r"C:\Other\python.exe",
-+            RECORD["creation_time"],
-+        ),
-+    )
-+
-+    assert not registry.terminate_or_confirm_registered_process(
-+        RECORD
-+    )
-+
-+
-+def test_failed_termination_with_unknown_reprobe_is_unresolved(
-+    windows_cleanup,
-+    monkeypatch,
-+):
-+    states = iter([
-+        "ALIVE_MATCH",
-+        "UNKNOWN",
-+    ])
-+
-+    monkeypatch.setattr(
-+        registry,
-+        "classify_registered_windows_process",
-+        lambda record: next(states),
-+    )
-+    monkeypatch.setattr(
-+        registry,
-+        "terminate_registered_process",
-+        lambda record: False,
-+    )
-+
-+    assert not registry.terminate_or_confirm_registered_process(
-+        RECORD
-+    )
-+
-+
-+def test_failed_termination_with_reused_pid_is_safe(
-+    windows_cleanup,
-+    monkeypatch,
-+):
-+    states = iter([
-+        "ALIVE_MATCH",
-+        "IDENTITY_MISMATCH",
-+    ])
-+
-+    monkeypatch.setattr(
-+        registry,
-+        "classify_registered_windows_process",
-+        lambda record: next(states),
-+    )
-+    monkeypatch.setattr(
-+        registry,
-+        "probe_process_identity",
-+        lambda pid: registry.ProcessIdentityProbe(
-+            "alive",
-+            r"C:\Other\python.exe",
-+            123456791,
++        lambda record: process_states.get(
++            record["pid"], "ALIVE_MATCH"
 +        ),
 +    )
 +    monkeypatch.setattr(
-+        registry,
-+        "terminate_registered_process",
-+        lambda record: False,
-+    )
-+
-+    assert registry.terminate_or_confirm_registered_process(
-+        RECORD
-+    )
-+
-+
-+def test_pid_reuse_without_creation_evidence_is_unresolved(
-+    windows_cleanup,
-+    monkeypatch,
-+):
-+    monkeypatch.setattr(
-+        registry,
-+        "classify_registered_windows_process",
-+        lambda record: "IDENTITY_MISMATCH",
++        server,
++        "classify_registered_windows_parent",
++        lambda record: parent_states.get(
++            record["pid"], "ORPHAN"
++        ),
 +    )
 +    monkeypatch.setattr(
-+        registry,
-+        "probe_process_identity",
-+        lambda pid: registry.ProcessIdentityProbe(
-+            "alive",
-+            r"C:\Other\python.exe",
-+            None,
++        server,
++        "terminate_or_confirm_registered_process",
++        lambda record: (
++            terminated.append(record["pid"]) or True
 +        ),
 +    )
 +
-+    assert not registry.terminate_or_confirm_registered_process(
-+        RECORD
++    def add(pid, parent_pid=500, parent_creation=111):
++        path = tmp_path / f"{pid}.json"
++        records[path] = _record(
++            pid,
++            parent_pid,
++            parent_creation,
++        )
++        return path
++
++    return (
++        add,
++        records,
++        removed,
++        terminated,
++        process_states,
++        parent_states,
 +    )
 +
 +
-+def test_nonwindows_preserves_existing_termination(
-+    monkeypatch,
++def test_dead_orphan_record_is_removed_without_termination(
++    cleanup,
++    tmp_path,
 +):
-+    calls = []
++    add, records, removed, terminated, states, parents = cleanup
++    path = add(501)
++    states[501] = "DEAD"
 +
-+    monkeypatch.setattr(
-+        registry,
-+        "sys_platform_is_windows",
-+        lambda: False,
-+    )
-+    monkeypatch.setattr(
-+        registry,
-+        "terminate_registered_process",
-+        lambda record: calls.append(record) or True,
-+    )
++    server._cleanup_orphaned_processes(tmp_path)
 +
-+    assert registry.terminate_or_confirm_registered_process(
-+        RECORD
-+    )
-+    assert calls == [RECORD]
++    assert path in removed
++    assert records == {}
++    assert terminated == []
 +
 +
-+def test_backend_cleanup_confirms_dead_child_without_termination(
++def test_unknown_child_blocks_cleanup(
++    cleanup,
++    tmp_path,
++):
++    add, records, removed, terminated, states, parents = cleanup
++    path = add(501)
++    states[501] = "UNKNOWN"
++
++    with pytest.raises(RuntimeError, match="not confirmed"):
++        server._cleanup_orphaned_processes(tmp_path)
++
++    assert path in records
++    assert removed == []
++    assert terminated == []
++
++
++def test_parent_unknown_blocks_orphan_cleanup(
++    cleanup,
++    tmp_path,
++):
++    add, records, removed, terminated, states, parents = cleanup
++    path = add(501)
++    parents[501] = "UNKNOWN"
++
++    with pytest.raises(RuntimeError, match="not confirmed"):
++        server._cleanup_orphaned_processes(tmp_path)
++
++    assert path in records
++    assert terminated == []
++
++
++def test_live_parent_is_not_terminated(
++    cleanup,
++    tmp_path,
++):
++    add, records, removed, terminated, states, parents = cleanup
++    path = add(501)
++    parents[501] = "PARENT_ALIVE"
++
++    server._cleanup_orphaned_processes(tmp_path)
++
++    assert path in records
++    assert terminated == []
++    assert removed == []
++
++
++def test_orphan_is_terminated_and_removed(
++    cleanup,
++    tmp_path,
++):
++    add, records, removed, terminated, states, parents = cleanup
++    path = add(501)
++
++    server._cleanup_orphaned_processes(tmp_path)
++
++    assert path in removed
++    assert terminated == [501]
++    assert records == {}
++
++
++def test_failed_orphan_resolution_retains_record(
++    cleanup,
 +    monkeypatch,
 +    tmp_path,
 +):
-+    import contextor.mcp_backend_control as control
-+
-+    child = {
-+        **RECORD,
-+        "parent_pid": 500,
-+        "parent_creation_time": 123456788,
-+    }
-+    path = tmp_path / "child.json"
-+
-+    class Owner:
-+        pid = 500
-+        creation_time = 123456788
-+        process_registry = str(tmp_path)
-+
-+    removed = []
++    add, records, removed, terminated, states, parents = cleanup
++    path = add(501)
 +
 +    monkeypatch.setattr(
-+        control,
-+        "read_records",
-+        lambda directory: [(path, child)],
-+    )
-+    monkeypatch.setattr(
-+        control,
++        server,
 +        "terminate_or_confirm_registered_process",
-+        lambda record: True,
++        lambda record: False,
 +    )
++
++    with pytest.raises(RuntimeError, match="not confirmed"):
++        server._cleanup_orphaned_processes(tmp_path)
++
++    assert path in records
++    assert removed == []
++
++
++def test_identity_mismatch_requires_safe_resolution(
++    cleanup,
++    monkeypatch,
++    tmp_path,
++):
++    add, records, removed, terminated, states, parents = cleanup
++    path = add(501)
++    states[501] = "IDENTITY_MISMATCH"
++
 +    monkeypatch.setattr(
-+        control,
-+        "remove_record",
-+        lambda target: removed.append(target),
++        server,
++        "terminate_or_confirm_registered_process",
++        lambda record: False,
 +    )
 +
-+    control._cleanup_owned_registry_children(Owner())
++    with pytest.raises(RuntimeError, match="not confirmed"):
++        server._cleanup_orphaned_processes(tmp_path)
 +
-+    assert removed == [path]
++    assert path in records
++    assert removed == []
++
++
++def test_identity_mismatch_proven_gone_removes_record(
++    cleanup,
++    tmp_path,
++):
++    add, records, removed, terminated, states, parents = cleanup
++    path = add(501)
++    states[501] = "IDENTITY_MISMATCH"
++
++    server._cleanup_orphaned_processes(tmp_path)
++
++    assert path in removed
++    assert terminated == [501]
++
++
++def test_four_level_registered_tree_is_fully_swept(
++    cleanup,
++    monkeypatch,
++    tmp_path,
++):
++    add, records, removed, terminated, states, parents = cleanup
++
++    # Reverse ordering requires more than two passes.
++    for pid, parent in (
++        (504, 503),
++        (503, 502),
++        (502, 501),
++        (501, 500),
++    ):
++        add(pid, parent)
++
++    def parent_state(record):
++        if record["parent_pid"] in {
++            entry["pid"] for entry in records.values()
++        }:
++            return "PARENT_ALIVE"
++        return "ORPHAN"
++
++    monkeypatch.setattr(
++        server,
++        "classify_registered_windows_parent",
++        parent_state,
++    )
++
++    server._cleanup_orphaned_processes(tmp_path)
++
++    assert terminated == [501, 502, 503, 504]
++    assert records == {}
++    assert len(removed) == 4
++
++
++def test_owned_child_requires_exact_parent_generation(
++    cleanup,
++    tmp_path,
++):
++    add, records, removed, terminated, states, parents = cleanup
++    good = add(501)
++    stale = add(502)
++    other = add(503, parent_pid=800)
++
++    parents[501] = "PARENT_ALIVE"
++    parents[502] = "ORPHAN"
++
++    server._cleanup_owned_processes(tmp_path, 500)
++
++    assert terminated == [501]
++    assert good in removed
++    assert stale in records
++    assert other in records
++
++
++def test_owned_unknown_parent_blocks_cleanup(
++    cleanup,
++    tmp_path,
++):
++    add, records, removed, terminated, states, parents = cleanup
++    path = add(501)
++    parents[501] = "UNKNOWN"
++
++    with pytest.raises(RuntimeError, match="not confirmed"):
++        server._cleanup_owned_processes(tmp_path, 500)
++
++    assert path in records
++    assert removed == []
++    assert terminated == []
++
++
++def test_owned_already_dead_child_is_resolved(
++    cleanup,
++    tmp_path,
++):
++    add, records, removed, terminated, states, parents = cleanup
++    path = add(501)
++    states[501] = "DEAD"
++    parents[501] = "PARENT_ALIVE"
++
++    server._cleanup_owned_processes(tmp_path, 500)
++
++    assert path in removed
++    assert terminated == [501]
++
++
++def test_owned_failed_resolution_retains_record(
++    cleanup,
++    monkeypatch,
++    tmp_path,
++):
++    add, records, removed, terminated, states, parents = cleanup
++    path = add(501)
++    parents[501] = "PARENT_ALIVE"
++
++    monkeypatch.setattr(
++        server,
++        "terminate_or_confirm_registered_process",
++        lambda record: False,
++    )
++
++    with pytest.raises(RuntimeError, match="not confirmed"):
++        server._cleanup_owned_processes(tmp_path, 500)
++
++    assert path in records
++    assert removed == []
++
++
++@pytest.mark.parametrize(
++    "owner_pid",
++    [None, False, 0, -1, 0x100000000],
++)
++def test_invalid_owned_parent_pid_is_rejected(
++    cleanup,
++    tmp_path,
++    owner_pid,
++):
++    with pytest.raises(RuntimeError, match="invalid"):
++        server._cleanup_owned_processes(tmp_path, owner_pid)
 ```
 
 ## REMAINING_UNKNOWN
-Active runtime adoption; real Windows process behavior; MCP server cleanup callers, which are pending; legacy `/T` tree parity. The dual launchers were not resumed.
+Active backend loaded-code adoption, real Windows process-tree behavior, and unregistered descendant cleanup remain uncertified. The legacy `/T` test remains an explicit open parity gate and was deselected only by the supplied test filter. Python 3.15 launchers were not resumed.
 
 ## FINAL_VERDICT
-PASS_BACKEND_CHILD_RESOLUTION_MCP_CLEANUP_PENDING for the exact source and targeted test contract; MCP canonical source visibility is verified, while runtime adoption remains unverified.
+PASS_REGISTERED_TREE_CLEANUP_RUNTIME_GATE_OPEN.

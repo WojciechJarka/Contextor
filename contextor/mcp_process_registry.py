@@ -379,6 +379,58 @@ def classify_registered_windows_process(
     return "ALIVE_MATCH"
 
 
+WindowsRegisteredParentState = Literal[
+    "PARENT_ALIVE",
+    "ORPHAN",
+    "UNKNOWN",
+]
+
+
+def classify_registered_windows_parent(
+    record: dict[str, Any],
+) -> WindowsRegisteredParentState:
+    """Classify the registered parent using PID and creation time."""
+    if not sys_platform_is_windows():
+        return "UNKNOWN"
+
+    if not isinstance(record, dict):
+        return "UNKNOWN"
+
+    parent_pid = record.get("parent_pid")
+    expected_creation = record.get("parent_creation_time")
+
+    if type(parent_pid) is not int or not 0 < parent_pid <= 0xFFFFFFFF:
+        return "UNKNOWN"
+
+    if (
+        type(expected_creation) is not int
+        or not 0 < expected_creation <= 0xFFFFFFFFFFFFFFFF
+    ):
+        return "UNKNOWN"
+
+    try:
+        probe = probe_process_identity(parent_pid)
+    except (OSError, AttributeError, TypeError, ValueError):
+        return "UNKNOWN"
+
+    if probe.state == "dead":
+        return "ORPHAN"
+
+    if probe.state != "alive":
+        return "UNKNOWN"
+
+    if (
+        type(probe.creation_time) is not int
+        or not 0 < probe.creation_time <= 0xFFFFFFFFFFFFFFFF
+    ):
+        return "UNKNOWN"
+
+    if probe.creation_time != expected_creation:
+        return "ORPHAN"
+
+    return "PARENT_ALIVE"
+
+
 def _registered_windows_identity_gone(
     record: dict[str, Any],
 ) -> bool:
