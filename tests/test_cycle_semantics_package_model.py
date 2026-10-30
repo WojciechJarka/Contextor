@@ -279,6 +279,62 @@ def test_from_package_child_loads_indexed_child(tmp_path):
     assert _actual(tmp_path, source, "entry")
 
 
+def test_warn_5h_namespace_rejected_before_ast_compilation(
+    monkeypatch,
+):
+    from contextor.core.cycle_semantics import package_model
+
+    calls = []
+
+    def forbidden_compile(*args, **kwargs):
+        calls.append((args, kwargs))
+        raise AssertionError(
+            "unsupported layout must reject before compilation"
+        )
+
+    monkeypatch.setattr(
+        package_model,
+        "compile",
+        forbidden_compile,
+        raising=False,
+    )
+
+    result = _model(
+        {"pkg.sub": "value=7"},
+        "pkg.sub",
+    )
+
+    assert result.outcome == "UNKNOWN"
+    assert result.target_module == "pkg"
+    assert result.events == ()
+    assert calls == []
+
+
+def test_warn_5h_regular_layout_still_checks_compile_time_errors():
+    source = {
+        "pkg.__init__": "pass",
+        "pkg.a": "def f():\n    break",
+    }
+
+    result = _model(source, "pkg.a")
+
+    assert result.outcome == "UNKNOWN"
+    assert result.target_module == "pkg.a"
+    assert result.events == ()
+
+
+def test_warn_5h_regular_layout_still_proves_safe_import(tmp_path):
+    source = {
+        "pkg.__init__": "value=1\nimport pkg.a",
+        "pkg.a": "import pkg\nx=pkg.value",
+    }
+
+    result = _model(source, "pkg")
+
+    assert result.outcome == "MODEL_PASS"
+    assert _actual(tmp_path, source, "pkg")
+
+
 def test_namespace_ambiguous_external_unknown():
     assert _model(
         {"pkg.sub": "value=7"},

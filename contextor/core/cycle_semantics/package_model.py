@@ -630,6 +630,29 @@ def evaluate_package_import_order(
     ):
         return result("UNKNOWN")
 
+    # An unsupported package layout cannot establish MODEL_PASS,
+    # regardless of the AST contents. Reject before repeatedly
+    # compiling an entire large SCC source closure.
+    try:
+        layout = build_package_layout(indexed_sources)
+    except (TypeError, ValueError):
+        return result("UNKNOWN")
+
+    nodes = {node.name: node for node in layout.nodes}
+    unsupported_layout = next(
+        (
+            node.name
+            for node in layout.nodes
+            if node.kind not in {
+                "REGULAR_PACKAGE",
+                "MODULE_FILE",
+            }
+        ),
+        None,
+    )
+    if unsupported_layout is not None:
+        return result("UNKNOWN", unsupported_layout)
+
     # AST parsing alone does not enforce every CPython
     # compilation rule. Even an uncalled function body
     # may contain a compile-time SyntaxError.
@@ -653,13 +676,6 @@ def evaluate_package_import_order(
             OverflowError,
         ):
             return result("UNKNOWN", indexed_id)
-
-    try:
-        layout = build_package_layout(indexed_sources)
-    except (TypeError, ValueError):
-        return result("UNKNOWN")
-
-    nodes = {node.name: node for node in layout.nodes}
 
     logical_sources: dict[str, ast.Module] = {}
     packages: set[str] = set()
