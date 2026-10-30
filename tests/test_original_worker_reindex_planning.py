@@ -155,7 +155,7 @@ def test_p1d2e_t04_large_closure_rejected_before_reindex(
     root = _repo(tmp_path)
 
     imports = [b"import b", b"import helper"]
-    for number in range(15):
+    for number in range(255):
         name = f"h{number}"
         (root / f"{name}.py").write_bytes(b"value = 1\n")
         imports.append(f"import {name}".encode("ascii"))
@@ -170,6 +170,55 @@ def test_p1d2e_t04_large_closure_rejected_before_reindex(
     assert plan.status == "UNAVAILABLE"
     assert plan.reason == "CLOSURE_MODULE_LIMIT"
     assert plan.selected_module_ids == frozenset()
+
+
+def test_warn_5c_217_module_cohort_remains_verified(
+    tmp_path, isolated_dirs,
+):
+    root = _repo(tmp_path)
+    imports = [b"import b", b"import helper"]
+
+    for number in range(214):
+        name = f"h{number}"
+        (root / f"{name}.py").write_bytes(b"value = 1\n")
+        imports.append(f"import {name}".encode("ascii"))
+
+    (root / "a.py").write_bytes(
+        b"\n".join(imports) + b"\nvalue = 1\n"
+    )
+
+    first, graph = _index_and_graph(root)
+    plan = plan_original_worker_reindex(first, graph)
+
+    assert plan.status == "READY_FOR_REINDEX_NON_ATOMIC"
+    assert plan.reason is None
+    assert len(plan.selected_module_ids) == 217
+
+    second, second_graph = _index_and_graph(
+        root,
+        plan.selected_module_ids,
+    )
+
+    assert second.original_worker_capture_status == (
+        "ALL_SELECTED_CAPTURED_NON_ATOMIC"
+    )
+    assert len(second.original_worker_source_snapshots) == 217
+    assert len(second.original_worker_ast_modes) == 217
+
+    verified = _verify(
+        first,
+        graph,
+        plan,
+        second,
+        second_graph,
+    )
+
+    assert verified.status == (
+        "REINDEX_COHERENT_SELECTED_BYTES_NON_ATOMIC"
+    )
+    assert verified.source_modules == tuple(
+        sorted(plan.selected_module_ids)
+    )
 
 
 def test_p1d2e_t05_source_change_between_passes_rejected(

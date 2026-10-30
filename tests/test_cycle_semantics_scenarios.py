@@ -7,7 +7,6 @@ import pytest
 from contextor.core.cycle_semantics.scenarios import (
     analyze_cycle_scenarios,
     MAX_COMPONENT_ENTRIES,
-    MAX_CLOSURE_AST_NODES,
 )
 
 
@@ -168,11 +167,26 @@ def test_downstream_scc_hazard_not_attributed_to_upstream_scc():
     ]
 
 
-def test_ast_budget_one_large_statement():
-    n = MAX_CLOSURE_AST_NODES + 2
-    literal = ",".join("1" for _ in range(n))
+def test_ast_budget_one_large_statement(monkeypatch):
+    monkeypatch.setattr(
+        "contextor.core.cycle_semantics.scenarios.MAX_CLOSURE_AST_NODES",
+        256,
+    )
+    literal = ",".join("1" for _ in range(260))
     r = _assess(
         {"a": "import b\nx=[" + literal + "]", "b": "import a"},
         {"a": {"b"}, "b": {"a"}},
     )
     assert r.components[0].reason == "AST_NODE_BUDGET_EXCEEDED"
+
+
+def test_expanded_ast_capacity_does_not_accept_unsupported_source():
+    literal = ",".join("1" for _ in range(17000))
+    r = _assess(
+        {"a": "import b\nx=[" + literal + "]", "b": "import a"},
+        {"a": {"b"}, "b": {"a"}},
+    )
+    component = r.components[0]
+
+    assert component.reason != "AST_NODE_BUDGET_EXCEEDED"
+    assert component.classification == "INDETERMINATE"

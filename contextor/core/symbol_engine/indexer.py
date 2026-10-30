@@ -1543,6 +1543,10 @@ class RepositoryIndex:
     original_worker_capture_reason: str | None = None
 
 
+_MAX_ORIGINAL_WORKER_CAPTURE_MODULES = 256
+_MAX_ORIGINAL_WORKER_CAPTURE_TOTAL_BYTES = 32 * 1024 * 1024
+
+
 def index_repository(
     root: str,
     excludes: list[str] = None,
@@ -1565,15 +1569,20 @@ def index_repository(
             type(name) is not str or not name
             for name in source_capture_module_ids
         )
-        or len(source_capture_module_ids) > 16
+        or len(source_capture_module_ids)
+        > _MAX_ORIGINAL_WORKER_CAPTURE_MODULES
     ):
-        raise ValueError("source_capture_module_ids must be <=16 module names")
+        raise ValueError(
+            "source_capture_module_ids exceeds bounded module capacity"
+        )
     else:
         selected_captures = source_capture_module_ids
 
-    # At most 16 selected results of 2 MiB each (32 MiB raw payload).
+    # A bounded selected cohort. Its aggregate retained raw-byte budget
+    # is enforced separately from the per-source worker transport limit.
     # This does not bound unrelated indexing memory overhead.
     capture_per_source_max = 2 * 1024 * 1024
+    captured_total_bytes = 0
     captures: dict[str, SourceSnapshot] = {}
     capture_modes: dict[str, str] = {}
     capture_errors: dict[str, str] = {}
@@ -1583,6 +1592,7 @@ def index_repository(
         return capture_per_source_max if module_id in selected_captures else None
 
     def record_capture(result: dict, path: Path) -> None:
+        nonlocal captured_total_bytes
         if not selected_captures:
             return
         module_id = ".".join(path.relative_to(root_path).with_suffix("").parts)
@@ -1620,8 +1630,22 @@ def index_repository(
         ):
             capture_errors[module_id] = "INVALID_WORKER_CAPTURE"
             return
-        captures[module_id] = SourceSnapshot(raw=raw, source_fingerprint=fingerprint)
+        if module_id in captures:
+            capture_errors[module_id] = "DUPLICATE_WORKER_CAPTURE"
+            return
+        if (
+            captured_total_bytes + len(raw)
+            > _MAX_ORIGINAL_WORKER_CAPTURE_TOTAL_BYTES
+        ):
+            capture_errors[module_id] = "CAPTURE_TOTAL_BYTE_LIMIT"
+            return
+
+        captures[module_id] = SourceSnapshot(
+            raw=raw,
+            source_fingerprint=fingerprint,
+        )
         capture_modes[module_id] = mode
+        captured_total_bytes += len(raw)
 
     def capture_result_fields() -> dict[str, object]:
         if not selected_captures:

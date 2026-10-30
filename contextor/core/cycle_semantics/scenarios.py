@@ -18,7 +18,7 @@ from .scc import CyclicImportComponent, ImportCycleTopology, analyze_import_cycl
 
 MAX_COMPONENT_ENTRIES = 64
 MAX_CLOSURE_STATEMENTS = 4096
-MAX_CLOSURE_AST_NODES = 16384
+MAX_CLOSURE_AST_NODES = 393216
 
 
 @dataclass(frozen=True)

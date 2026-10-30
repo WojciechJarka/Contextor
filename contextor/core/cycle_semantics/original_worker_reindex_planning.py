@@ -18,7 +18,7 @@ from .model_source_closure import compute_cycle_model_source_closures
 from .scc import analyze_import_cycle_topology
 
 
-_MAX_SELECTED = 16
+_MAX_SELECTED = 256
 _READY = "READY_FOR_REINDEX_NON_ATOMIC"
 _VERIFIED = "REINDEX_COHERENT_SELECTED_BYTES_NON_ATOMIC"
 
