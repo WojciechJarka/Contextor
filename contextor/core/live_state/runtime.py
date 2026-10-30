@@ -790,7 +790,7 @@ def _spawn_runtime_subprocess(
     primary_flags = base_flags | CREATE_BREAKAWAY_FROM_JOB
 
     try:
-        return subprocess.Popen(
+        process = subprocess.Popen(
             cmd,
             cwd=str(cwd),
             env=env,
@@ -799,9 +799,38 @@ def _spawn_runtime_subprocess(
             stderr=subprocess.DEVNULL,
             creationflags=primary_flags,
         )
+
+        if os.environ.get("CONTEXTOR_BACKEND_JOB_GUARD") == "1":
+            from contextor.mcp_backend_job import (
+                require_live_outside_backend_job,
+            )
+
+            try:
+                require_live_outside_backend_job(process)
+            except BaseException:
+                try:
+                    process.terminate()
+                    process.wait(timeout=2.0)
+                except Exception:
+                    try:
+                        process.kill()
+                        process.wait(timeout=2.0)
+                    except Exception:
+                        pass
+                raise
+
+        return process
+
     except OSError as exc:
         if getattr(exc, "winerror", None) != 5:
             raise
+
+        if os.environ.get("CONTEXTOR_BACKEND_JOB_GUARD") == "1":
+            raise RuntimeError(
+                "LIVE breakaway failed while persistent "
+                "backend Job Object protection is active"
+            ) from exc
+
         import logging
 
         logging.getLogger("contextor.core.live_state.runtime").info(
