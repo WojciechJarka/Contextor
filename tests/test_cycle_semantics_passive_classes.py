@@ -273,7 +273,9 @@ def test_c24_unsupported_class_definitions_unknown(
     ).outcome == "UNKNOWN"
 
 
-def test_c24_class_body_import_unknown():
+def test_c24_class_body_import_executes_before_class_binding(
+    tmp_path,
+):
     sources = {
         "pkg.__init__": "pass",
         "pkg.a": (
@@ -283,9 +285,22 @@ def test_c24_class_body_import_unknown():
         "pkg.child": "pass",
     }
 
-    assert _model(
-        sources, "pkg.a"
-    ).outcome == "UNKNOWN"
+    result = _model(sources, "pkg.a")
+
+    assert result.outcome == "MODEL_PASS"
+    assert any(
+        event.operation == "CLASS_LOCAL_IMPORT"
+        and event.target == "pkg.child"
+        for event in result.events
+    )
+    assert any(
+        event.operation == "DEFINE_PASSIVE_CLASS"
+        and event.symbol == "C"
+        for event in result.events
+    )
+    assert _actual(
+        tmp_path, sources, "pkg.a"
+    ).returncode == 0
 
 
 def test_c24_main_guard_selected_class(tmp_path):
