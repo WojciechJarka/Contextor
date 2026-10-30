@@ -296,3 +296,36 @@ def test_t09_current_warning_projection_does_not_change_journal(
             state.cycles,
             state.dependency_graph.hard_edges,
         ) == before
+
+
+@pytest.mark.parametrize("bad_nodes", [
+    [["a"], "b", "a"],
+    [{"module": "a"}, "b", "a"],
+    ["a", ["b"], "a"],
+])
+def test_t10_malformed_cycle_nodes_do_not_crash_event_feed(
+    tmp_path, isolated_dirs, bad_nodes,
+):
+    root, state, metadata = _fixture(tmp_path, TWO_PASS)
+
+    with _owner(state, metadata) as (server, client):
+        event = _event(state.cycles[:1], metadata.revision)
+        event["diagnostic_changes"]["items"][0]["cycle_nodes"] = bad_nodes
+
+        original = copy.deepcopy(event)
+
+        feed, received, reads, response = _feed(
+            client, server, event,
+        )
+
+        feed.poll_once()
+
+        assert len(reads) == 1
+        assert received == [
+            (
+                f"[LIVE] Watcher updated a.py (rev {metadata.revision})",
+                event,
+            ),
+        ]
+        assert feed._last_seq == 1
+        assert event == original

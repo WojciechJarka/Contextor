@@ -1254,6 +1254,10 @@ class DesktopLiveEventFeed(_PollingLiveWorker):
                 and item.get("diagnostic_kind") == "cycle"
                 and item.get("action") == "ADDED"
                 and type(item.get("cycle_nodes")) in (list, tuple)
+                and all(
+                    type(node) is str and bool(node)
+                    for node in item["cycle_nodes"]
+                )
                 and tuple(item["cycle_nodes"]) in accepted_paths
             ):
                 continue
