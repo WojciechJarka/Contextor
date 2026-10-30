@@ -617,11 +617,10 @@ def test_owned_registry_child_cleanup_is_parent_identity_scoped(
     )
     monkeypatch.setattr(
         control,
-        "terminate_registered_process",
+        "terminate_or_confirm_registered_process",
         lambda child: terminated.append(child) or True,
     )
     monkeypatch.setattr(control, "remove_record", lambda path: removed.append(path))
-
     control._cleanup_owned_registry_children(backend_record)
 
     assert terminated == [good]

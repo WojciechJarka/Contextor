@@ -43,7 +43,7 @@ def test_backend_failed_child_termination_retains_record(
     )
     monkeypatch.setattr(
         control,
-        "terminate_registered_process",
+        "terminate_or_confirm_registered_process",
         lambda record: False,
     )
     monkeypatch.setattr(
@@ -77,7 +77,7 @@ def test_backend_successful_child_termination_removes_record(
     )
     monkeypatch.setattr(
         control,
-        "terminate_registered_process",
+        "terminate_or_confirm_registered_process",
         lambda record: True,
     )
     monkeypatch.setattr(

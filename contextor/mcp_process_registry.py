@@ -379,6 +379,77 @@ def classify_registered_windows_process(
     return "ALIVE_MATCH"
 
 
+def _registered_windows_identity_gone(
+    record: dict[str, Any],
+) -> bool:
+    """Confirm that the recorded process no longer owns its PID.
+
+    A different creation time proves the recorded process
+    has exited. An image mismatch with the same creation
+    time is not sufficient to discard ownership evidence.
+    """
+    state = classify_registered_windows_process(record)
+
+    if state == "DEAD":
+        return True
+
+    if state != "IDENTITY_MISMATCH":
+        return False
+
+    try:
+        probe = probe_process_identity(record["pid"])
+    except (OSError, AttributeError, TypeError, ValueError):
+        return False
+
+    expected_creation = record.get("creation_time")
+
+    return (
+        probe.state == "alive"
+        and type(expected_creation) is int
+        and expected_creation > 0
+        and type(probe.creation_time) is int
+        and probe.creation_time > 0
+        and probe.creation_time != expected_creation
+    )
+
+
+def terminate_or_confirm_registered_process(
+    record: dict[str, Any],
+) -> bool:
+    """Terminate the recorded process or prove its absence.
+
+    True means that the registered identity was confirmed
+    terminated, already dead, or replaced at its former PID.
+
+    False means cleanup remains unresolved. No registry
+    record should be removed on False.
+
+    The strict Windows termination primitive independently
+    verifies identity on one process handle.
+    """
+    if not sys_platform_is_windows():
+        return terminate_registered_process(record)
+
+    state = classify_registered_windows_process(record)
+
+    if state == "DEAD":
+        return True
+
+    if state == "IDENTITY_MISMATCH":
+        return _registered_windows_identity_gone(record)
+
+    if state != "ALIVE_MATCH":
+        return False
+
+    if terminate_registered_process(record):
+        return True
+
+    # The process may have exited between classification
+    # and the identity-bound termination attempt.
+    # Never retry against an unverified PID.
+    return _registered_windows_identity_gone(record)
+
+
 def _terminate_windows_record_identity_bound(
     record: dict[str, Any],
 ) -> bool:

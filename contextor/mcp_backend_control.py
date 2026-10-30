@@ -37,9 +37,9 @@ from contextor.mcp_process_registry import (
     read_records,
     record_matches_process,
     remove_record,
+    terminate_or_confirm_registered_process,
     terminate_registered_process,
 )
-
 
 BACKEND_HOST = "127.0.0.1"
 BACKEND_PORT = 8765
@@ -960,15 +960,14 @@ def _cleanup_owned_registry_children(
             ):
                 continue
 
-        if not terminate_registered_process(
+        if not terminate_or_confirm_registered_process(
             child
         ):
             raise BackendControlError(
-                "registered backend child termination "
+                "registered backend child cleanup "
                 "was not confirmed; "
                 f"pid={child.get('pid')!r}"
             )
-
         remove_record(
             record_path
         )
