@@ -10,7 +10,11 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 
 from .initialization_model import ImportOrderAssessment, evaluate_flat_import_order
-from .package_model import PackageImportAssessment, evaluate_package_import_order
+from .package_model import (
+    PackageImportAssessment,
+    _PackageSourceSession,
+    evaluate_package_import_order,
+)
 from .model_source_closure import compute_cycle_model_source_closures
 from .model_identity import indexed_to_logical_module, logical_to_indexed_module
 from .package_graph_consistency import assess_package_graph_consistency
@@ -203,9 +207,12 @@ def analyze_cycle_scenarios(
                 ))
                 continue
             model_kind = "REGULAR_PACKAGE"
+            session = _PackageSourceSession()
             assessments = tuple(
                 evaluate_package_import_order(
-                    sources, indexed_to_logical_module(entry),
+                    sources,
+                    indexed_to_logical_module(entry),
+                    _session=session,
                 )
                 for entry in component.members
             )

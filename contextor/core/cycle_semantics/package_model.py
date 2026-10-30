@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import ast
 from collections.abc import Mapping
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 
 from contextor.core.cycle_semantics.package_layout import build_package_layout
 from contextor.core.cycle_semantics.typing_guard import (
@@ -46,6 +46,18 @@ class _Step:
     function_body: tuple[_Step, ...] = ()
     function_local: bool = False
     class_local: bool = False
+
+
+@dataclass
+class _PackageSourceSession:
+    """Ephemeral SCC-local cache; never published or shared across analyses."""
+
+    source_trees: tuple[tuple[str, ast.Module], ...] | None = None
+    layout: object | None = None
+    validated_code: set[str] = field(default_factory=set)
+    compiled_steps: dict[str, tuple[_Step, ...]] = field(
+        default_factory=dict
+    )
 
 
 def _safe_passive_function_definition(
@@ -594,6 +606,8 @@ def _compile(
 def evaluate_package_import_order(
     indexed_sources: Mapping[str, ast.AST],
     entry_module: str,
+    *,
+    _session: _PackageSourceSession | None = None,
 ) -> PackageImportAssessment:
     """Simulate a restricted closed regular-package source set.
 
@@ -630,13 +644,38 @@ def evaluate_package_import_order(
     ):
         return result("UNKNOWN")
 
-    # An unsupported package layout cannot establish MODEL_PASS,
-    # regardless of the AST contents. Reject before repeatedly
-    # compiling an entire large SCC source closure.
-    try:
-        layout = build_package_layout(indexed_sources)
-    except (TypeError, ValueError):
-        return result("UNKNOWN")
+    # Reuse source-independent preparation only for the exact same
+    # AST objects inside one SCC evaluation. This private cache must
+    # never outlive the analyze_cycle_scenarios invocation.
+    if _session is not None:
+        if type(_session) is not _PackageSourceSession:
+            return result("UNKNOWN")
+
+        current_sources = tuple(sorted(indexed_sources.items()))
+
+        if _session.source_trees is None:
+            _session.source_trees = current_sources
+        elif (
+            len(_session.source_trees) != len(current_sources)
+            or any(
+                stored_name != name or stored_tree is not tree
+                for (stored_name, stored_tree), (name, tree)
+                in zip(_session.source_trees, current_sources)
+            )
+        ):
+            return result("UNKNOWN")
+
+    # An unsupported package layout cannot establish MODEL_PASS.
+    # Retain fail-fast rejection before CPython compilation.
+    if _session is not None and _session.layout is not None:
+        layout = _session.layout
+    else:
+        try:
+            layout = build_package_layout(indexed_sources)
+        except (TypeError, ValueError):
+            return result("UNKNOWN")
+        if _session is not None:
+            _session.layout = layout
 
     nodes = {node.name: node for node in layout.nodes}
     unsupported_layout = next(
@@ -661,6 +700,12 @@ def evaluate_package_import_order(
     # Fail closed instead of accepting an invalid
     # opaque function definition as MODEL_PASS.
     for indexed_id, tree in indexed_sources.items():
+        if (
+            _session is not None
+            and indexed_id in _session.validated_code
+        ):
+            continue
+
         try:
             compile(
                 tree,
@@ -676,6 +721,9 @@ def evaluate_package_import_order(
             OverflowError,
         ):
             return result("UNKNOWN", indexed_id)
+
+        if _session is not None:
+            _session.validated_code.add(indexed_id)
 
     logical_sources: dict[str, ast.Module] = {}
     packages: set[str] = set()
@@ -722,16 +770,26 @@ def evaluate_package_import_order(
             indexed_sources[indexed_id],
             frozenset(indexed_sources),
         )
-        program = _compile(
-            tree,
-            name,
-            name in packages,
-            typing_guard=typing_guard,
-        )
+        if (
+            _session is not None
+            and name in _session.compiled_steps
+        ):
+            program = _session.compiled_steps[name]
+        else:
+            program = _compile(
+                tree,
+                name,
+                name in packages,
+                typing_guard=typing_guard,
+            )
+            if program is not None and _session is not None:
+                _session.compiled_steps[name] = program
 
         if program is None:
             return result("UNKNOWN", name)
 
+        # The interpreter can splice function body steps into
+        # programs[module]. Never execute a cached list directly.
         programs[name] = list(program)
 
     # A package may prebind a same-named attribute before a later

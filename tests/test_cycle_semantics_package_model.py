@@ -335,6 +335,146 @@ def test_warn_5h_regular_layout_still_proves_safe_import(tmp_path):
     assert _actual(tmp_path, source, "pkg")
 
 
+def test_warn_5i_preparation_reused_between_entries(monkeypatch):
+    from contextor.core.cycle_semantics import package_model
+
+    source = {
+        "pkg.__init__": "value=1\nimport pkg.a",
+        "pkg.a": "import pkg\nx=pkg.value",
+    }
+    trees = {
+        name: ast.parse(code)
+        for name, code in source.items()
+    }
+
+    calls = {
+        "layout": 0,
+        "code": 0,
+        "model": 0,
+    }
+
+    original_layout = package_model.build_package_layout
+    original_compile = compile
+    original_model = package_model._compile
+
+    def counted_layout(*args, **kwargs):
+        calls["layout"] += 1
+        return original_layout(*args, **kwargs)
+
+    def counted_compile(*args, **kwargs):
+        calls["code"] += 1
+        return original_compile(*args, **kwargs)
+
+    def counted_model(*args, **kwargs):
+        calls["model"] += 1
+        return original_model(*args, **kwargs)
+
+    monkeypatch.setattr(
+        package_model, "build_package_layout", counted_layout
+    )
+    monkeypatch.setattr(
+        package_model, "compile", counted_compile, raising=False
+    )
+    monkeypatch.setattr(
+        package_model, "_compile", counted_model
+    )
+
+    session = package_model._PackageSourceSession()
+    first = package_model.evaluate_package_import_order(
+        trees, "pkg", _session=session
+    )
+    second = package_model.evaluate_package_import_order(
+        trees, "pkg.a", _session=session
+    )
+
+    assert first.outcome == "MODEL_PASS"
+    assert second.outcome == "MODEL_PASS"
+    assert calls == {
+        "layout": 1,
+        "code": 2,
+        "model": 2,
+    }
+
+
+def test_warn_5i_function_expansion_does_not_mutate_cache():
+    from contextor.core.cycle_semantics import package_model
+
+    trees = {
+        "pkg.__init__": ast.parse(
+            "def load():\n"
+            "    import pkg.child\n"
+            "value=7\n"
+            "load()"
+        ),
+        "pkg.child": ast.parse(
+            "import pkg\n"
+            "x=pkg.value"
+        ),
+    }
+
+    before = {
+        key: ast.dump(tree, include_attributes=True)
+        for key, tree in trees.items()
+    }
+
+    session = package_model._PackageSourceSession()
+    first = package_model.evaluate_package_import_order(
+        trees, "pkg", _session=session
+    )
+    cached_second = package_model.evaluate_package_import_order(
+        trees, "pkg.child", _session=session
+    )
+    fresh_second = package_model.evaluate_package_import_order(
+        trees, "pkg.child"
+    )
+
+    assert first.outcome == "MODEL_PASS"
+    assert any(
+        event.operation == "CALL_FUNCTION"
+        for event in first.events
+    )
+    assert cached_second == fresh_second
+    assert {
+        key: ast.dump(tree, include_attributes=True)
+        for key, tree in trees.items()
+    } == before
+
+    assert all(
+        type(program) is tuple
+        for program in session.compiled_steps.values()
+    )
+
+
+def test_warn_5i_session_rejects_different_ast_identity():
+    from contextor.core.cycle_semantics import package_model
+
+    source = {
+        "pkg.__init__": "value=1",
+        "pkg.child": "import pkg",
+    }
+    first_trees = {
+        name: ast.parse(code)
+        for name, code in source.items()
+    }
+    second_trees = {
+        name: ast.parse(code)
+        for name, code in source.items()
+    }
+
+    session = package_model._PackageSourceSession()
+
+    first = package_model.evaluate_package_import_order(
+        first_trees, "pkg", _session=session
+    )
+    reused = package_model.evaluate_package_import_order(
+        second_trees, "pkg", _session=session
+    )
+
+    assert first.outcome == "MODEL_PASS"
+    assert reused.outcome == "UNKNOWN"
+    assert reused.events == ()
+
+
 def test_namespace_ambiguous_external_unknown():
     assert _model(
         {"pkg.sub": "value=7"},
