@@ -285,4 +285,37 @@ def test_m14_unindexed_shadowing_source_blocks_binding():
     result = _bind(roots, rows, hashes, snapshots)
 
     assert result.status == "INDETERMINATE"
-    assert result.reason == "INVENTORY_SOURCE_BINDING_MISMATCH"
+    assert result.reason == "MODULE_IS_NOT_A_PACKAGE"
+    assert result.evidence_sha256 is None
+    assert result.selected_sources == ()
+    assert result.resolution is not None
+    assert result.resolution.status == "INDETERMINATE"
+    assert result.resolution.steps[-1].kind == "MODULE_FILE"
+    assert result.resolution.steps[-1].source == "root:pkg/ns.py"
+
+
+def test_m15_indexed_shadowing_source_still_blocks_child():
+    roots, rows, hashes, snapshots = _base()
+
+    roots = (
+        SearchPortion(
+            "root",
+            roots[0].files | frozenset({"pkg/ns.py"}),
+        ),
+    )
+
+    rows = rows + (
+        IndexedSourcePath("pkg.ns", "root", "pkg/ns.py"),
+    )
+    snapshots["pkg.ns"] = _snapshot("value = 3\n")
+    hashes["pkg.ns"] = snapshots["pkg.ns"].source_fingerprint
+
+    result = _bind(roots, rows, hashes, snapshots)
+
+    assert result.status == "INDETERMINATE"
+    assert result.reason == "MODULE_IS_NOT_A_PACKAGE"
+    assert result.evidence_sha256 is None
+    assert result.selected_sources == ()
+    assert result.resolution is not None
+    assert result.resolution.steps[-1].kind == "MODULE_FILE"
+    assert result.resolution.steps[-1].source == "root:pkg/ns.py"

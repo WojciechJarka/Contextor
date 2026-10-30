@@ -1,659 +1,477 @@
-# CONTEXTOR P1D3-WARN-5M — index-bound conditional namespace source evidence
+# CONTEXTOR P1D3-WARN-5O — CPython namespace cycle parity
 
 ## PREFLIGHT
 
-- DIRECT_EVIDENCE: HEAD `5711f482c0310460952b47046ea9c40b310e9356`; initial worktree clean. Both authorized target files were absent. Contextor MCP first resolved existing namespace path model and original worker binding at canonical revision 905, workspace_sync verified, graph/cycles fresh, cycle_semantics stale, structural DFS count 16 and active warnings 16.
+DIRECT_EVIDENCE: HEAD `7a2c0830d49dfe359fc88f9588e07828b1aae6cc`. Target test file absent before edit. Pre-existing changes to `tests/test_cycle_semantics_namespace_source_binding.py` and `walkthrough.md` preserved. Contextor MCP `get_module_context` for package_model first: revision 908, workspace_sync verified, graph/cycles fresh, cycle_semantics stale, structural_count 16.
 
-## FILE_CREATION
+## INTERPRETER_DISCOVERY
 
-- DIRECT_EVIDENCE: Created exactly the two architect-supplied new Python files. No existing production or test file was edited.
+The exact architect-authored 410-line test module was added without production changes. Its `_interpreter` probes each candidate with isolated CPython `sys.version_info` and `sys.implementation.name`. `py -0p` is unavailable because the Windows launcher is not installed/accessible; `Get-Command` found no additional matching executable or CONTEXTOR_PYTHON_3_* override.
 
-## BINDING_DOMAIN_CONTRACT
+## EXACT_PYTHON_VERSIONS_AND_EXECUTABLES
 
-- CODE_PATH_PROVED: The new binder accepts caller-supplied ordered roots, indexed source paths, index fingerprints and `SourceSnapshot` objects. It first calls `resolve_namespace_path`; a non-CONDITIONAL result is returned as INDETERMINATE with its reason. It checks source domain equality against supplied inventory `.py` entries, without filesystem reads or analyzed-source imports.
-- CODE_PATH_PROVED: Constants cap 256 sources, 2 MiB per source, 32 MiB aggregate and 16,384 inventory files. No global cache or shared evaluation state was introduced.
+CPython 3.10.9: `C:\Temp\Contextor_Repo\.venv\Scripts\python.exe`, verified. CPython 3.11, 3.12, 3.13, 3.14 and 3.15: no interpreter verified by the exact test's discovery contract.
 
-## SOURCE_BYTE_AND_INDEX_PROOF
+## COVERED_VERSIONS
 
-- CODE_PATH_PROVED: For supplied indexed sources, the binder checks exact module-derived relative paths, root membership, one-to-one source identities, snapshot shape and SHA-256 of raw bytes against both snapshot and index fingerprints. This binds caller-supplied bytes/index claims, not physical path provenance or LIVE authority.
+3.10: all 15 namespace entry scenarios plus the pre-3.15 lazy syntax negative passed.
 
-## CONDITIONAL_RESOLUTION_BINDING
+## NOT_COVERED_VERSIONS
 
-- CODE_PATH_PROVED: Selected regular initializer and module steps are matched to indexed source bindings and ordered into `selected_sources`; namespace steps have no source bytes. The digest canonically encodes caller-supplied inventory order, bindings and resolution steps. Authority explicitly says `CALLER_SUPPLIED_INDEXED_SOURCE_BYTES_NOT_RUNTIME_OR_LIVE_CERTIFIED`.
+3.11–3.14: 16 skipped cases each. 3.15: 17 skipped cases. All marked NOT_COVERED, not PASS.
 
-## NEGATIVE_FAIL_CLOSED_CASES
+## VERSION_MATRIX_RESULTS
 
-- DIRECT_EVIDENCE: M03–M13 passed in the focused run, including finder assumption, byte/hash/path/domain/duplicate/loader/budget negatives and deterministic digest. M14 failed on the exact reason, described below.
-- CONTRACT_CONFLICT: M14 adds `pkg/ns.py` to a supplied inventory containing `pkg/ns/child.py`, then expects `INVENTORY_SOURCE_BINDING_MISMATCH`. The exact implementation calls path resolution first. That resolver selects `pkg/ns.py` and returns `INDETERMINATE / MODULE_IS_NOT_A_PACKAGE` before inventory binding validation. The actual status is INDETERMINATE as expected, but reason differs. The architect must decide the contract; no assertion or production gate was changed by the agent.
+Command: `& .\.venv\Scripts\python.exe -m py_compile tests/test_cycle_semantics_namespace_cycle_parity.py` — PASS.
+Command: `& .\.venv\Scripts\python.exe -m pytest -q -rs tests/test_cycle_semantics_namespace_cycle_parity.py` — 18 passed, 81 skipped, 1 failed. The only failure is the required `COVERAGE_INCOMPLETE` gate listing 3.11, 3.12, 3.13, 3.14, 3.15. The module collected 100 cases as specified. No available interpreter produced a contradictory semantic result; CONTRACT_CONFLICT=NONE.
 
-## TEST_RESULTS
+## PYTHON_315_LAZY_IMPORT_CONTRACT
 
-- DIRECT_EVIDENCE: `python -m py_compile` on both new files passed.
-- DIRECT_EVIDENCE: `python -m pytest -q -rs tests/test_cycle_semantics_namespace_source_binding.py tests/test_cycle_semantics_namespace_path_model.py tests/test_cycle_semantics_namespace_pep420_contract.py` → 33 passed, 1 failed in 3.41s. Failure: `test_m14_unindexed_shadowing_source_blocks_binding`, expected `INVENTORY_SOURCE_BINDING_MISMATCH`, actual `MODULE_IS_NOT_A_PACKAGE` at test line 288.
-- DIRECT_EVIDENCE: `git diff --check` and `git diff --no-index --check -- /dev/null` for both new files found no whitespace errors. Git emitted only LF-to-CRLF advisories.
+UNKNOWN / NOT_COVERED: 3.15 unavailable. The lazy and eager 3.15 tests were skipped. No 3.15 parity claim.
+
+## REGULAR_MODEL_UNKNOWN_PARITY
+
+Both unchanged restricted regular-package model UNKNOWN cases passed on the current test Python. This is model contract parity only, not runtime safety.
+
+## TARGETED_REGRESSIONS
+
+`& .\.venv\Scripts\python.exe -m pytest -q -rs tests/test_cycle_semantics_namespace_pep420_contract.py tests/test_cycle_semantics_namespace_path_model.py tests/test_cycle_semantics_namespace_source_binding.py` — 35 passed. Pre-existing namespace_source_binding.py test modification remained untouched. `git diff --check` passed for tracked changes; the new-file diff below has no whitespace errors.
 
 ## MCP_POST_CHANGE_AUDIT
 
-- DIRECT_EVIDENCE: Both new files returned `not_found` from MCP active module registry at the post-change read; their canonical workspace_sync is UNKNOWN. MCP `get_live_events` returned revision 905, activity_epoch `d08a5a93184d473f8bc124596f4a44c9`, fresh warning view with 16 structural and 16 active warnings. Earlier module context showed graph/cycles fresh and cycle_semantics stale. No manual update_file, FULL or restart was performed.
+DIRECT_EVIDENCE: `get_module_context` for the new test module returned `not_found` in active module registry; registration/workspace_sync for it are UNKNOWN. No manual update_file. Bounded `get_live_events(after_revision=908,limit=1)`: status ok, revision/latest_revision 908, activity_epoch `d08a5a93184d473f8bc124596f4a44c9`, resync_required false, no new canonical events. Cycle warning view: structural_count 16, model_pass_count 0, active_warning_count 16. Earlier module context: graph/cycles fresh, cycle_semantics stale. No loaded-code adoption claimed.
 
 ## FILES_CHANGED
 
-- `contextor/core/cycle_semantics/namespace_source_binding.py` (new, untracked)
-- `tests/test_cycle_semantics_namespace_source_binding.py` (new, untracked)
-
-`walkthrough.md` was overwritten as the report.
+`tests/test_cycle_semantics_namespace_cycle_parity.py` (new). `walkthrough.md` overwritten as required report; its self-diff excluded. Existing prior test modification is not part of this task.
 
 ## FULL_DIFFS
 
+Complete actual diff of the new test file:
+
 ```diff
-diff --git a/contextor/core/cycle_semantics/namespace_source_binding.py b/contextor/core/cycle_semantics/namespace_source_binding.py
+diff --git a/tests/test_cycle_semantics_namespace_cycle_parity.py b/tests/test_cycle_semantics_namespace_cycle_parity.py
 new file mode 100644
-index 0000000..1dc0750
+index 0000000..f3416a6
 --- /dev/null
-+++ b/contextor/core/cycle_semantics/namespace_source_binding.py
-@@ -0,0 +1,302 @@
-+"""Bind supplied namespace inventories to indexed source byte snapshots.
++++ b/tests/test_cycle_semantics_namespace_cycle_parity.py
+@@ -0,0 +1,410 @@
++"""Cross-version CPython namespace-cycle execution contracts.
 +
-+This is conditional caller-supplied evidence only. It does not
-+authenticate runtime import resolution, filesystem completeness,
-+canonical LIVE generations, or cycle-warning suppression.
++Python 3.10–3.15 are independent execution targets.
++Missing interpreters are NOT_COVERED, never PASS.
++No LIVE runtime safety or warning suppression is certified.
 +"""
 +
 +from __future__ import annotations
 +
-+import hashlib
++import ast
++import functools
 +import json
-+from collections.abc import Mapping
-+from dataclasses import dataclass
++import os
++from pathlib import Path
++import shutil
++import subprocess
++import sys
 +
-+from contextor.core.source import SourceSnapshot
++import pytest
 +
-+from .namespace_path_model import (
-+    NamespacePathResult,
-+    SearchPortion,
-+    resolve_namespace_path,
++from contextor.core.cycle_semantics.package_model import (
++    evaluate_package_import_order,
 +)
 +
 +
-+_MAX_SOURCES = 256
-+_MAX_SOURCE_BYTES = 2 * 1024 * 1024
-+_MAX_TOTAL_BYTES = 32 * 1024 * 1024
-+_MAX_INVENTORY_FILES = 16384
++VERSIONS = (10, 11, 12, 13, 14, 15)
 +
-+_AUTHORITY = (
-+    "CALLER_SUPPLIED_INDEXED_SOURCE_BYTES_"
-+    "NOT_RUNTIME_OR_LIVE_CERTIFIED"
++_SAFE_NESTED = {
++    "ctxpkg/__init__.py": "pass\n",
++    "ctxpkg/ns/a.py": "value=1\nimport ctxpkg.ns.b\n",
++    "ctxpkg/ns/b.py": "from ctxpkg.ns.a import value\nx=value\n",
++}
++
++_HAZARD_NESTED = {
++    "ctxpkg/__init__.py": "pass\n",
++    "ctxpkg/ns/a.py": "import ctxpkg.ns.b\nvalue=1\n",
++    "ctxpkg/ns/b.py": "from ctxpkg.ns.a import value\nx=value\n",
++}
++
++_SAFE_TOP = {
++    "ctxns/a.py": "value=1\nimport ctxns.b\n",
++    "ctxns/b.py": "from ctxns.a import value\nx=value\n",
++}
++
++_HAZARD_ATTRIBUTE = {
++    "ctxns/a.py": "import ctxns.b\nvalue=1\n",
++    "ctxns/b.py": "import ctxns.a\nx=ctxns.a.value\n",
++}
++
++_CLASS_EAGER = {
++    "ctxns/a.py": (
++        "class C:\n"
++        "    import ctxns.b\n"
++        "value=1\n"
++    ),
++    "ctxns/b.py": "from ctxns.a import value\nx=value\n",
++}
++
++_FUNCTION_DEFERRED = {
++    "ctxns/a.py": (
++        "def load():\n"
++        "    import ctxns.b\n"
++        "value=1\n"
++    ),
++    "ctxns/b.py": "import ctxns.a\nx=ctxns.a.value\n",
++}
++
++_TWO_PORTIONS = (
++    {"ctxns/a.py": "value=1\nimport ctxns.b\n"},
++    {"ctxns/b.py": "from ctxns.a import value\nx=value\n"},
 +)
 +
-+_VERSION = "namespace-conditional-source-binding/1"
++_SHADOWED = (
++    _SAFE_TOP,
++    {"ctxns/__init__.py": "value=99\n"},
++)
++
++CASES = (
++    ("nested_safe_a", (_SAFE_NESTED,), "ctxpkg.ns.a", None),
++    ("nested_safe_b", (_SAFE_NESTED,), "ctxpkg.ns.b", None),
++    ("nested_hazard_a", (_HAZARD_NESTED,), "ctxpkg.ns.a", "ImportError"),
++    ("nested_hazard_b", (_HAZARD_NESTED,), "ctxpkg.ns.b", None),
++    ("top_safe_a", (_SAFE_TOP,), "ctxns.a", None),
++    ("top_safe_b", (_SAFE_TOP,), "ctxns.b", None),
++    ("two_portions_a", _TWO_PORTIONS, "ctxns.a", None),
++    ("two_portions_b", _TWO_PORTIONS, "ctxns.b", None),
++    (
++        "parent_attribute_hazard_a",
++        (_HAZARD_ATTRIBUTE,),
++        "ctxns.a",
++        "AttributeError",
++    ),
++    (
++        "parent_attribute_hazard_b",
++        (_HAZARD_ATTRIBUTE,),
++        "ctxns.b",
++        None,
++    ),
++    ("class_eager_a", (_CLASS_EAGER,), "ctxns.a", "ImportError"),
++    ("class_eager_b", (_CLASS_EAGER,), "ctxns.b", None),
++    ("function_deferred_a", (_FUNCTION_DEFERRED,), "ctxns.a", None),
++    ("function_deferred_b", (_FUNCTION_DEFERRED,), "ctxns.b", None),
++    (
++        "regular_package_shadows_namespace",
++        _SHADOWED,
++        "ctxns.a",
++        "ModuleNotFoundError",
++    ),
++)
 +
 +
-+@dataclass(frozen=True)
-+class IndexedSourcePath:
-+    module_id: str
-+    root_id: str
-+    relative_path: str
++@functools.lru_cache(maxsize=None)
++def _interpreter(minor):
++    """Locate and verify an actual CPython interpreter version."""
++    candidates = []
 +
-+
-+@dataclass(frozen=True)
-+class BoundNamespaceResolution:
-+    status: str
-+    reason: str | None
-+    requested_name: str
-+    resolution: NamespacePathResult | None
-+    selected_sources: tuple[tuple[str, str, str], ...]
-+    evidence_sha256: str | None
-+    authority: str = _AUTHORITY
-+    version: str = _VERSION
-+
-+
-+def bind_indexed_namespace_resolution(
-+    roots: tuple[SearchPortion, ...],
-+    bindings: tuple[IndexedSourcePath, ...],
-+    indexed_fingerprints: Mapping[str, str],
-+    source_snapshots: Mapping[str, SourceSnapshot],
-+    requested_name: str,
-+    *,
-+    standard_finder_assumed: bool = False,
-+) -> BoundNamespaceResolution:
-+    """Verify supplied source identities and conditional path selection.
-+
-+    No file reads, imports of analyzed modules, LIVE IPC or publication.
-+    An inventory hash describes supplied input; it is not a trusted
-+    signature or proof of actual interpreter search paths.
-+    """
-+    resolution = resolve_namespace_path(
-+        roots,
-+        requested_name,
-+        standard_finder_assumed=standard_finder_assumed,
++    override = os.environ.get(
++        "CONTEXTOR_PYTHON_3_" + str(minor)
 +    )
++    if override:
++        candidates.append((override,))
 +
-+    def reject(reason: str) -> BoundNamespaceResolution:
-+        return BoundNamespaceResolution(
-+            "INDETERMINATE",
-+            reason,
-+            requested_name,
-+            resolution,
-+            (),
-+            None,
-+        )
++    if sys.version_info[:2] == (3, minor):
++        candidates.append((sys.executable,))
 +
-+    if resolution.status != "CONDITIONAL":
-+        return reject(
-+            resolution.reason or "PATH_RESOLUTION_INDETERMINATE"
-+        )
++    direct = shutil.which("python3." + str(minor))
++    if direct:
++        candidates.append((direct,))
 +
-+    if (
-+        type(bindings) is not tuple
-+        or not bindings
-+        or len(bindings) > _MAX_SOURCES
-+        or not isinstance(indexed_fingerprints, Mapping)
-+        or not isinstance(source_snapshots, Mapping)
-+    ):
-+        return reject("SOURCE_BINDING_INPUT_INVALID")
++    launcher = shutil.which("py")
++    if launcher:
++        candidates.append((launcher, "-3." + str(minor)))
 +
-+    if (
-+        sum(len(root.files) for root in roots)
-+        > _MAX_INVENTORY_FILES
-+    ):
-+        return reject("INVENTORY_FILE_LIMIT")
-+
-+    root_by_id = {}
-+
-+    for root in roots:
-+        if (
-+            not root.root_id.isidentifier()
-+            or root.root_id in root_by_id
-+        ):
-+            return reject("ROOT_ID_INVALID")
-+
-+        root_by_id[root.root_id] = root
-+
-+    module_to_binding = {}
-+    path_to_binding = {}
-+
-+    for binding in bindings:
-+        if type(binding) is not IndexedSourcePath:
-+            return reject("SOURCE_BINDING_SHAPE_INVALID")
-+
-+        module_id = binding.module_id
-+
-+        if (
-+            type(module_id) is not str
-+            or not module_id
-+            or any(
-+                not segment.isidentifier()
-+                for segment in module_id.split(".")
++    for command in candidates:
++        try:
++            result = subprocess.run(
++                command + (
++                    "-I",
++                    "-B",
++                    "-c",
++                    (
++                        "import sys\n"
++                        "print('%s.%s' % sys.version_info[:2])\n"
++                        "print(sys.implementation.name)\n"
++                    ),
++                ),
++                capture_output=True,
++                text=True,
++                timeout=5,
++                check=False,
 +            )
-+            or type(binding.root_id) is not str
-+            or binding.root_id not in root_by_id
-+            or type(binding.relative_path) is not str
-+        ):
-+            return reject("SOURCE_BINDING_IDENTITY_INVALID")
-+
-+        expected_path = module_id.replace(".", "/") + ".py"
-+
-+        if binding.relative_path != expected_path:
-+            return reject("SOURCE_MODULE_PATH_MISMATCH")
-+
-+        if binding.relative_path not in (
-+            root_by_id[binding.root_id].files
-+        ):
-+            return reject("SOURCE_PATH_NOT_IN_INVENTORY")
-+
-+        source_key = (
-+            binding.root_id + ":" + binding.relative_path
-+        )
-+
-+        if (
-+            module_id in module_to_binding
-+            or source_key in path_to_binding
-+        ):
-+            return reject("DUPLICATE_SOURCE_BINDING")
-+
-+        module_to_binding[module_id] = binding
-+        path_to_binding[source_key] = binding
-+
-+    required_ids = set(module_to_binding)
-+
-+    if (
-+        set(indexed_fingerprints) != required_ids
-+        or set(source_snapshots) != required_ids
-+    ):
-+        return reject("SOURCE_INDEX_DOMAIN_MISMATCH")
-+
-+    # Every supplied .py entry must be represented by a source
-+    # identity. This proves only completeness relative to the
-+    # supplied inventory, never completeness of actual sys.path.
-+    inventory_python_files = {
-+        root.root_id + ":" + filename
-+        for root in roots
-+        for filename in root.files
-+        if filename.endswith(".py")
-+    }
-+
-+    if inventory_python_files != set(path_to_binding):
-+        return reject("INVENTORY_SOURCE_BINDING_MISMATCH")
-+
-+    signatures = {}
-+    retained_bytes = 0
-+
-+    for module_id in sorted(required_ids):
-+        snapshot = source_snapshots[module_id]
-+        claimed_sha = indexed_fingerprints[module_id]
-+
-+        if (
-+            type(snapshot) is not SourceSnapshot
-+            or type(snapshot.raw) is not bytes
-+            or type(snapshot.source_fingerprint) is not str
-+            or type(claimed_sha) is not str
-+            or len(claimed_sha) != 64
-+            or any(
-+                character not in "0123456789abcdef"
-+                for character in claimed_sha
-+            )
-+        ):
-+            return reject("SOURCE_SNAPSHOT_SHAPE_INVALID")
-+
-+        if len(snapshot.raw) > _MAX_SOURCE_BYTES:
-+            return reject("SOURCE_BYTE_LIMIT")
-+
-+        retained_bytes += len(snapshot.raw)
-+
-+        if retained_bytes > _MAX_TOTAL_BYTES:
-+            return reject("SOURCE_TOTAL_BYTE_LIMIT")
-+
-+        actual_sha = hashlib.sha256(snapshot.raw).hexdigest()
-+
-+        if (
-+            actual_sha != claimed_sha
-+            or snapshot.source_fingerprint != claimed_sha
-+        ):
-+            return reject("SOURCE_FINGERPRINT_MISMATCH")
-+
-+        signatures[module_id] = actual_sha
-+
-+    selected = []
-+
-+    for step in resolution.steps:
-+        if step.kind == "NAMESPACE_PACKAGE":
++        except (OSError, subprocess.TimeoutExpired):
 +            continue
 +
++        lines = result.stdout.strip().splitlines()
++
 +        if (
-+            step.kind not in {"REGULAR_PACKAGE", "MODULE_FILE"}
-+            or type(step.source) is not str
++            result.returncode == 0
++            and lines == ["3." + str(minor), "cpython"]
 +        ):
-+            return reject("UNSUPPORTED_SELECTED_SOURCE_KIND")
++            return command
 +
-+        binding = path_to_binding.get(step.source)
++    return None
 +
-+        if binding is None:
-+            return reject("SELECTED_SOURCE_NOT_INDEXED")
 +
-+        expected_module = (
-+            step.name + ".__init__"
-+            if step.kind == "REGULAR_PACKAGE"
-+            else step.name
++def _require(minor):
++    interpreter = _interpreter(minor)
++    if interpreter is None:
++        pytest.skip(
++            "NOT_COVERED: CPython 3." + str(minor)
++            + " interpreter unavailable"
++        )
++    return interpreter
++
++
++def _execute(
++    tmp_path,
++    interpreter,
++    portions,
++    entry,
++    *,
++    suffix="",
++    script_extra="",
++    minor=None,
++):
++    paths = []
++
++    for number, files in enumerate(portions):
++        root = tmp_path / ("portion_" + str(number) + suffix)
++        paths.append(str(root))
++
++        for relative, body in files.items():
++            target = root / relative
++            target.parent.mkdir(parents=True, exist_ok=True)
++            target.write_text(body, encoding="utf-8")
++
++    script = (
++        "import importlib, json, sys\n"
++        "sys.path[:0] = json.loads(sys.argv[1])\n"
++        "module = importlib.import_module(sys.argv[2])\n"
++        + script_extra
++    )
++
++    flags = ("-I", "-B")
++    if minor == 15:
++        flags += ("-X", "lazy_imports=normal")
++
++    return subprocess.run(
++        interpreter
++        + flags
++        + (
++            "-c",
++            script,
++            json.dumps(paths),
++            entry,
++        ),
++        capture_output=True,
++        text=True,
++        timeout=10,
++        check=False,
++    )
++
++
++@pytest.mark.parametrize("minor", VERSIONS)
++@pytest.mark.parametrize(
++    "scenario,portions,entry,error",
++    CASES,
++    ids=[case[0] for case in CASES],
++)
++def test_namespace_cycle_entry_matrix(
++    tmp_path,
++    minor,
++    scenario,
++    portions,
++    entry,
++    error,
++):
++    interpreter = _require(minor)
++
++    result = _execute(
++        tmp_path,
++        interpreter,
++        portions,
++        entry,
++        minor=minor,
++    )
++
++    if error is None:
++        assert result.returncode == 0, (
++            minor,
++            scenario,
++            result.stderr,
++        )
++    else:
++        assert result.returncode != 0, (
++            minor,
++            scenario,
++        )
++        assert result.stderr.strip().splitlines()[-1].startswith(
++            error + ":"
++        ), (
++            minor,
++            scenario,
++            result.stderr,
 +        )
 +
-+        if binding.module_id != expected_module:
-+            return reject("SELECTED_MODULE_IDENTITY_MISMATCH")
 +
-+        selected.append((
-+            binding.module_id,
-+            step.source,
-+            signatures[binding.module_id],
-+        ))
-+
-+    # Canonical serialization of caller-supplied information only.
-+    # This digest does not authenticate where that information
-+    # originated or whether files outside the inventory exist.
-+    digest_input = (
-+        _VERSION,
-+        requested_name,
-+        tuple(
-+            (
-+                root.root_id,
-+                tuple(sorted(root.files)),
-+            )
-+            for root in roots
++@pytest.mark.parametrize(
++    "sources,entry",
++    (
++        (
++            {
++                "ctxns.a": _SAFE_TOP["ctxns/a.py"],
++                "ctxns.b": _SAFE_TOP["ctxns/b.py"],
++            },
++            "ctxns.a",
 +        ),
-+        tuple(
-+            sorted(
-+                (
-+                    binding.module_id,
-+                    binding.root_id,
-+                    binding.relative_path,
-+                    signatures[binding.module_id],
-+                )
-+                for binding in bindings
-+            )
++        (
++            {
++                "ctxpkg.__init__": "pass",
++                "ctxpkg.ns.a": _HAZARD_NESTED[
++                    "ctxpkg/ns/a.py"
++                ],
++                "ctxpkg.ns.b": _HAZARD_NESTED[
++                    "ctxpkg/ns/b.py"
++                ],
++            },
++            "ctxpkg.ns.a",
 +        ),
-+        tuple(
-+            (
-+                step.name,
-+                step.kind,
-+                step.source,
-+                step.portions,
-+            )
-+            for step in resolution.steps
-+        ),
-+    )
-+
-+    encoded = json.dumps(
-+        digest_input,
-+        ensure_ascii=True,
-+        separators=(",", ":"),
-+    ).encode("utf-8")
-+
-+    return BoundNamespaceResolution(
-+        "SOURCE_BOUND_CONDITIONAL",
-+        None,
-+        requested_name,
-+        resolution,
-+        tuple(selected),
-+        hashlib.sha256(encoded).hexdigest(),
-+    )
-diff --git a/tests/test_cycle_semantics_namespace_source_binding.py b/tests/test_cycle_semantics_namespace_source_binding.py
-new file mode 100644
-index 0000000..99a6b1f
---- /dev/null
-+++ b/tests/test_cycle_semantics_namespace_source_binding.py
-@@ -0,0 +1,288 @@
-+"""Source-byte and index-identity binding for conditional namespace paths."""
-+
-+from __future__ import annotations
-+
-+import hashlib
-+from dataclasses import asdict
-+
-+from contextor.core.source import SourceSnapshot
-+from contextor.core.cycle_semantics.namespace_path_model import (
-+    SearchPortion,
++    ),
 +)
-+from contextor.core.cycle_semantics.namespace_source_binding import (
-+    IndexedSourcePath,
-+    bind_indexed_namespace_resolution,
-+)
-+
-+
-+def _snapshot(text):
-+    raw = text.encode("utf-8")
-+    return SourceSnapshot(
-+        raw,
-+        hashlib.sha256(raw).hexdigest(),
-+    )
-+
-+
-+def _base():
-+    roots = (
-+        SearchPortion(
-+            "root",
-+            frozenset({
-+                "pkg/__init__.py",
-+                "pkg/ns/child.py",
-+            }),
-+        ),
-+    )
-+    bindings = (
-+        IndexedSourcePath(
-+            "pkg.__init__", "root", "pkg/__init__.py"
-+        ),
-+        IndexedSourcePath(
-+            "pkg.ns.child", "root", "pkg/ns/child.py"
-+        ),
-+    )
-+    snapshots = {
-+        "pkg.__init__": _snapshot("value = 1\n"),
-+        "pkg.ns.child": _snapshot("value = 7\n"),
-+    }
-+    fingerprints = {
-+        name: snapshot.source_fingerprint
-+        for name, snapshot in snapshots.items()
-+    }
-+    return roots, bindings, fingerprints, snapshots
-+
-+
-+def _bind(
-+    roots,
-+    bindings,
-+    fingerprints,
-+    snapshots,
-+    requested="pkg.ns.child",
-+    *,
-+    finder=True,
++def test_restricted_regular_model_remains_unknown(
++    sources,
++    entry,
 +):
-+    return bind_indexed_namespace_resolution(
-+        roots,
-+        bindings,
-+        fingerprints,
-+        snapshots,
-+        requested,
-+        standard_finder_assumed=finder,
++    assessment = evaluate_package_import_order(
++        {
++            name: ast.parse(body)
++            for name, body in sources.items()
++        },
++        entry,
 +    )
 +
-+
-+def test_m01_namespace_source_bytes_are_bound():
-+    args = _base()
-+    result = _bind(*args)
-+
-+    assert result.status == "SOURCE_BOUND_CONDITIONAL"
-+    assert result.reason is None
-+    assert len(result.selected_sources) == 2
-+    assert result.selected_sources[0][0] == "pkg.__init__"
-+    assert result.selected_sources[1][0] == "pkg.ns.child"
-+    assert result.resolution.steps[1].kind == "NAMESPACE_PACKAGE"
-+    assert len(result.evidence_sha256) == 64
++    assert assessment.outcome == "UNKNOWN"
++    assert assessment.events == ()
 +
 +
-+def test_m02_two_portions_bind_distinct_children():
-+    roots = (
-+        SearchPortion("first", frozenset({"nsp/left.py"})),
-+        SearchPortion("second", frozenset({"nsp/right.py"})),
-+    )
-+    bindings = (
-+        IndexedSourcePath("nsp.left", "first", "nsp/left.py"),
-+        IndexedSourcePath("nsp.right", "second", "nsp/right.py"),
-+    )
-+    snapshots = {
-+        "nsp.left": _snapshot("value = 1"),
-+        "nsp.right": _snapshot("value = 2"),
-+    }
-+    hashes = {
-+        key: value.source_fingerprint
-+        for key, value in snapshots.items()
-+    }
++@pytest.mark.parametrize("minor", VERSIONS[:-1])
++def test_lazy_import_syntax_before_315(tmp_path, minor):
++    interpreter = _require(minor)
 +
-+    result = _bind(
-+        roots, bindings, hashes, snapshots, "nsp.right"
++    portions = (
++        {
++            "ctxns/a.py": (
++                "lazy import ctxns.b\n"
++                "value=1\n"
++            ),
++            "ctxns/b.py": "pass\n",
++        },
 +    )
 +
-+    assert result.status == "SOURCE_BOUND_CONDITIONAL"
-+    assert result.selected_sources == ((
-+        "nsp.right",
-+        "second:nsp/right.py",
-+        hashes["nsp.right"],
-+    ),)
++    result = _execute(
++        tmp_path,
++        interpreter,
++        portions,
++        "ctxns.a",
++        minor=minor,
++    )
++
++    assert result.returncode != 0
++    assert result.stderr.strip().splitlines()[-1].startswith(
++        "SyntaxError:"
++    ), result.stderr
 +
 +
-+def test_m03_finder_assumption_is_not_automatic():
-+    result = _bind(*_base(), finder=False)
++def test_315_lazy_import_defers_cycle(tmp_path):
++    interpreter = _require(15)
 +
-+    assert result.status == "INDETERMINATE"
-+    assert result.reason == "IMPORT_FINDER_ENVIRONMENT_NOT_PROVED"
-+    assert result.evidence_sha256 is None
++    portions = (
++        {
++            "ctxns/a.py": (
++                "lazy import ctxns.b\n"
++                "value=1\n"
++            ),
++            "ctxns/b.py": (
++                "from ctxns.a import value\n"
++                "x=value\n"
++            ),
++        },
++    )
 +
-+
-+def test_m04_modified_raw_bytes_are_rejected():
-+    roots, rows, hashes, snapshots = _base()
-+    snapshots["pkg.ns.child"] = _snapshot("value = 99")
-+
-+    result = _bind(roots, rows, hashes, snapshots)
-+
-+    assert result.status == "INDETERMINATE"
-+    assert result.reason == "SOURCE_FINGERPRINT_MISMATCH"
-+
-+
-+def test_m05_forged_fingerprint_is_rejected():
-+    roots, rows, hashes, snapshots = _base()
-+    hashes["pkg.ns.child"] = "0" * 64
-+
-+    result = _bind(roots, rows, hashes, snapshots)
-+
-+    assert result.reason == "SOURCE_FINGERPRINT_MISMATCH"
-+
-+
-+def test_m06_incorrect_module_path_is_rejected():
-+    roots, rows, hashes, snapshots = _base()
-+
-+    bad_rows = (
-+        rows[0],
-+        IndexedSourcePath(
-+            "pkg.ns.child",
-+            "root",
-+            "pkg/child.py",
++    result = _execute(
++        tmp_path,
++        interpreter,
++        portions,
++        "ctxns.a",
++        minor=15,
++        script_extra=(
++            "assert 'ctxns.b' not in sys.modules\n"
++            "assert module.ctxns.b.x == 1\n"
++            "assert 'ctxns.b' in sys.modules\n"
 +        ),
 +    )
 +
-+    result = _bind(
-+        roots, bad_rows, hashes, snapshots
++    assert result.returncode == 0, result.stderr
++
++
++def test_315_eager_import_still_has_hazard(tmp_path):
++    interpreter = _require(15)
++
++    portions = (
++        {
++            "ctxns/a.py": (
++                "import ctxns.b\n"
++                "value=1\n"
++            ),
++            "ctxns/b.py": (
++                "from ctxns.a import value\n"
++                "x=value\n"
++            ),
++        },
 +    )
 +
-+    assert result.reason == "SOURCE_MODULE_PATH_MISMATCH"
-+
-+
-+def test_m07_unbound_python_inventory_entry_is_rejected():
-+    roots, rows, hashes, snapshots = _base()
-+    roots = (
-+        SearchPortion(
-+            "root",
-+            roots[0].files | frozenset({"pkg/extra.py"}),
-+        ),
++    result = _execute(
++        tmp_path,
++        interpreter,
++        portions,
++        "ctxns.a",
++        minor=15,
 +    )
 +
-+    result = _bind(roots, rows, hashes, snapshots)
-+
-+    assert result.reason == "INVENTORY_SOURCE_BINDING_MISMATCH"
-+
-+
-+def test_m08_missing_capture_is_rejected():
-+    roots, rows, hashes, snapshots = _base()
-+    del snapshots["pkg.ns.child"]
-+
-+    result = _bind(roots, rows, hashes, snapshots)
-+
-+    assert result.reason == "SOURCE_INDEX_DOMAIN_MISMATCH"
++    assert result.returncode != 0
++    assert result.stderr.strip().splitlines()[-1].startswith(
++        "ImportError:"
++    ), result.stderr
 +
 +
-+def test_m09_duplicate_module_identity_is_rejected():
-+    roots, rows, hashes, snapshots = _base()
++def test_required_interpreter_coverage_gate():
++    missing = [
++        "3." + str(minor)
++        for minor in VERSIONS
++        if _interpreter(minor) is None
++    ]
 +
-+    result = _bind(
-+        roots,
-+        rows + (rows[0],),
-+        hashes,
-+        snapshots,
-+    )
-+
-+    assert result.reason == "DUPLICATE_SOURCE_BINDING"
-+
-+
-+def test_m10_alternative_loader_remains_indeterminate():
-+    roots, rows, hashes, snapshots = _base()
-+    roots = (
-+        SearchPortion(
-+            "root",
-+            roots[0].files | frozenset({
-+                "pkg/ns/child.cp310-win_amd64.pyd",
-+            }),
-+        ),
-+    )
-+
-+    result = _bind(roots, rows, hashes, snapshots)
-+
-+    assert result.status == "INDETERMINATE"
-+    assert result.reason == "ALTERNATIVE_LOADER_CANDIDATE"
-+
-+
-+def test_m11_inventory_order_changes_digest():
-+    roots, rows, hashes, snapshots = _base()
-+
-+    extra_root = SearchPortion(
-+        "other",
-+        frozenset({"notes.txt"}),
-+    )
-+
-+    first = _bind(
-+        roots + (extra_root,),
-+        rows,
-+        hashes,
-+        snapshots,
-+    )
-+    second = _bind(
-+        (extra_root,) + roots,
-+        rows,
-+        hashes,
-+        snapshots,
-+    )
-+
-+    assert first.status == "SOURCE_BOUND_CONDITIONAL"
-+    assert second.status == "SOURCE_BOUND_CONDITIONAL"
-+    assert first.evidence_sha256 != second.evidence_sha256
-+
-+
-+def test_m12_source_byte_budget_fails_closed():
-+    roots, rows, hashes, snapshots = _base()
-+
-+    oversized = b"x" * (2 * 1024 * 1024 + 1)
-+    digest = hashlib.sha256(oversized).hexdigest()
-+
-+    snapshots["pkg.ns.child"] = SourceSnapshot(
-+        oversized,
-+        digest,
-+    )
-+    hashes["pkg.ns.child"] = digest
-+
-+    result = _bind(roots, rows, hashes, snapshots)
-+
-+    assert result.reason == "SOURCE_BYTE_LIMIT"
-+    assert result.evidence_sha256 is None
-+
-+
-+def test_m13_deterministic_without_live_authority():
-+    args = _base()
-+
-+    first = _bind(*args)
-+    second = _bind(*args)
-+
-+    assert first == second
-+    assert asdict(first) == asdict(second)
-+    assert first.authority == (
-+        "CALLER_SUPPLIED_INDEXED_SOURCE_BYTES_"
-+        "NOT_RUNTIME_OR_LIVE_CERTIFIED"
-+    )
-+    assert first.status == "SOURCE_BOUND_CONDITIONAL"
-+
-+
-+def test_m14_unindexed_shadowing_source_blocks_binding():
-+    roots, rows, hashes, snapshots = _base()
-+
-+    roots = (
-+        SearchPortion(
-+            "root",
-+            roots[0].files | frozenset({"pkg/ns.py"}),
-+        ),
-+    )
-+
-+    result = _bind(roots, rows, hashes, snapshots)
-+
-+    assert result.status == "INDETERMINATE"
-+    assert result.reason == "INVENTORY_SOURCE_BINDING_MISMATCH"
++    if missing:
++        pytest.fail(
++            "COVERAGE_INCOMPLETE: missing CPython interpreters: "
++            + ", ".join(missing)
++            + "; skipped cases are NOT_COVERED, not PASS"
++        )
 ```
 
-## UNPROVED_RUNTIME_ASSUMPTIONS
+## REMAINING_UNKNOWN
 
-- Actual `sys.path`, finder behavior, absence of external namespace portions, physical filesystem completeness, canonical LIVE source identity and runtime import safety remain unproved. No MODEL_PASS or warning suppression was introduced.
+Python 3.11–3.15 execution results; 3.15 lazy import behavior; new-file canonical registry/workspace synchronization; active loaded-code adoption. No runtime import safety or warning suppression is certified.
 
 ## FINAL_VERDICT
 
-CONTRACT_CONFLICT. The exact two files are present and compile, but the required focused set has one M14 reason mismatch. STOP without independent repair or test expectation change; architect decision required.
+PARTIAL_COVERAGE. Exact implementation and available 3.10 tests passed; required complete cross-version coverage gate failed because five interpreters are absent. STOP after WARN-5O.
