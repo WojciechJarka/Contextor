@@ -167,8 +167,28 @@ def protect_persistent_backend() -> None:
     _active_handle = handle
     _active_pid = current_pid
 
-    # This marker is set ONLY after successful installation.
-    os.environ["CONTEXTOR_BACKEND_JOB_GUARD"] = "1"
+    # Environment variables can be inherited by unrelated children.
+    # Ownership authority remains exclusively in this process.
+
+
+def backend_job_active_for_current_process() -> bool:
+    """Return true only for the process holding the backend Job."""
+    if sys.platform != "win32":
+        return False
+
+    if _active_handle is None:
+        if _active_pid is not None:
+            raise BackendJobError(
+                "backend Job Object ownership state is inconsistent"
+            )
+        return False
+
+    if _active_pid != os.getpid():
+        raise BackendJobError(
+            "backend Job Object belongs to a different process"
+        )
+
+    return True
 
 
 def require_live_outside_backend_job(
@@ -221,6 +241,7 @@ def require_live_outside_backend_job(
 
 __all__ = [
     "BackendJobError",
+    "backend_job_active_for_current_process",
     "protect_persistent_backend",
     "require_live_outside_backend_job",
 ]

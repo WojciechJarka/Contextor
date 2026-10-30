@@ -121,7 +121,8 @@ def test_backend_job_owns_descendant_lifetime(
     assert fake_job.CloseHandle.calls == []
     assert guard._active_handle == 71
     assert guard._active_pid == os.getpid()
-    assert os.environ["CONTEXTOR_BACKEND_JOB_GUARD"] == "1"
+    assert guard.backend_job_active_for_current_process()
+    assert "CONTEXTOR_BACKEND_JOB_GUARD" not in os.environ
 
 
 def test_guard_install_is_idempotent(fake_job):
@@ -324,9 +325,10 @@ def test_guarded_live_refuses_breakaway_fallback(
         "platform",
         "win32",
     )
-    monkeypatch.setenv(
-        "CONTEXTOR_BACKEND_JOB_GUARD",
-        "1",
+    monkeypatch.setattr(
+        guard,
+        "backend_job_active_for_current_process",
+        lambda: True,
     )
     monkeypatch.setattr(
         live_runtime.subprocess,
@@ -358,9 +360,10 @@ def test_guarded_live_verifies_spawn_before_return(
         "platform",
         "win32",
     )
-    monkeypatch.setenv(
-        "CONTEXTOR_BACKEND_JOB_GUARD",
-        "1",
+    monkeypatch.setattr(
+        guard,
+        "backend_job_active_for_current_process",
+        lambda: True,
     )
     monkeypatch.setattr(
         live_runtime.subprocess,
@@ -405,9 +408,10 @@ def test_guarded_live_rejects_membership_and_terminates(
         "platform",
         "win32",
     )
-    monkeypatch.setenv(
-        "CONTEXTOR_BACKEND_JOB_GUARD",
-        "1",
+    monkeypatch.setattr(
+        guard,
+        "backend_job_active_for_current_process",
+        lambda: True,
     )
     monkeypatch.setattr(
         live_runtime.subprocess,
