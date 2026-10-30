@@ -10,56 +10,44 @@ import contextor.mcp_server as mcp_server
 from contextor.mcp import analysis_jobs
 
 
-def test_windows_registered_process_termination_uses_tree_kill(
+def test_windows_registered_process_uses_identity_bound_termination(
     monkeypatch,
 ):
+    record = {
+        "pid": 1234,
+        "executable": r"C:\Python\python.exe",
+        "creation_time": 100,
+    }
     calls = []
-    identities = iter(
-        [
-            ("C:/Python/python.exe", 100, True),
-            (None, None, False),
-        ]
-    )
+
     monkeypatch.setattr(
         registry,
         "sys_platform_is_windows",
         lambda: True,
     )
+
+    def forbid_legacy_match(_record):
+        raise AssertionError(
+            "Windows termination used the old PID-only matcher"
+        )
+
     monkeypatch.setattr(
         registry,
-        "process_identity",
-        lambda _pid: next(identities),
+        "record_matches_process",
+        forbid_legacy_match,
     )
-
-    class _Result:
-        returncode = 0
 
     monkeypatch.setattr(
-        registry.subprocess,
-        "run",
-        lambda command, **_kwargs: (
-            calls.append(command)
-            or _Result()
-        ),
+        registry,
+        "_terminate_windows_record_identity_bound",
+        lambda value: calls.append(value) or True,
     )
-    record = {
-        "pid": 1234,
-        "executable": "C:/Python/python.exe",
-        "creation_time": 100,
-    }
+
     assert registry.terminate_registered_process(
         record
     ) is True
-    assert calls == [
-        [
-            "taskkill",
-            "/F",
-            "/T",
-            "/PID",
-            "1234",
-        ]
-    ]
 
+    assert calls == [record]
 
 def test_analysis_worker_preserves_preconfigured_server_registry(
     tmp_path,
