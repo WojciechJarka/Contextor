@@ -1,130 +1,76 @@
-# PY315-R4D-R1 — Windows venv redirector PID correction
+# CONTEXTOR PY315-R4E — discovery
 
 ## PREFLIGHT
-DIRECT_EVIDENCE: HEAD `d43d5fd36b533b3497ee516da3890eb072339714`; pre-edit Git status was clean. Contextor MCP reported revision 938, provenance live, and `workspace_sync=verified` for the changed test module and the related registry, Job guard, and server modules. Exact SEARCH counts were EDIT 1 = 5, EDIT 2 = 1, EDIT 3 = 1. No other source or test change was required.
 
-## EXACT_SEARCH_REPLACE_RESULTS
-CONTRACT_PROVED: All five `sys.executable` occurrences were replaced with `sys._base_executable`; the base executable existence check and PID self-report assertions were inserted at their exact anchors using `apply_patch`. The file now has zero `sys.executable` occurrences and six `sys._base_executable` occurrences, including the new existence check. No production file changed.
+HEAD `af528d8dc5dfc05a80489c35cbf5d5e2198b975f`; Git worktree clean before probes. Contextor MCP used first for implementations and call context (revision 939); lineage preview was fresh but `workspace_sync=unverified`, so exact source was checked locally. No repo source/test edits, production restart, LIVE switch, or full pytest.
 
-## VENV_REDIRECTOR_PID_CAUSE
-The prior R4D test observed `Popen.pid` differing from the PID written by the Python owner process. The corrected test bypasses the venv executable and both scenarios pass. This supports the venv redirector explanation for the prior discrepancy; the current test does not independently trace the redirector implementation.
+## EXACT_SOURCE_EVIDENCE
 
-## OWNER_PID_ATTESTATION
-CONTRACT_PROVED: Both scenarios passed the unchanged assertion `identifiers["owner"] == owner.pid`. The Popen PID was not separately persisted, so the numeric owner PIDs below are from `ready.json`, with equality established by the passing assertion. Normal: owner 11308. Forced: owner 5272.
+- `contextor/mcp_backend_control.py:514-539`: `_backend_python()` selects `.venv/Scripts/python.exe` on Windows.
+- `:582-654`: `_spawn_backend_process()` launches `-u -m contextor.mcp_main`, first with `CREATE_NO_WINDOW | CREATE_BREAKAWAY_FROM_JOB`, falling back to `CREATE_NO_WINDOW` on WinError 5.
+- `:657-680`: `_spawn_identity_record()` takes identity from `process.pid` (Popen PID).
+- `:683-691`: `_cleanup_spawned_process()` calls `terminate_registered_process(identity_record)` without checking its result.
+- `:706-765`: readiness polls authenticated backend status; `process.poll()` watches Popen PID.
+- `:768-863`: `start_backend()` uses that Popen identity record for exception cleanup.
+- `:1011-1094`: `stop_backend()` terminates the backend record owner by creation identity, waits for owner exit, then cleans registered children.
+- `contextor/mcp_main.py:6-20`: only role `persistent-backend` invokes `protect_persistent_backend()`.
+- `contextor/mcp_backend_job.py:104-168`: protection assigns current process to a Job with kill-on-close and breakaway allowed.
+- `contextor/mcp_server.py:1092-1104,1122-1135`: default role is `host-owned`; its server root is registered, while persistent backend root is not.
+- `contextor/mcp_server.py:776-798`: shutdown terminates pools, then cleans owned and orphaned registry processes.
+- `contextor/mcp_process_registry.py:669-687`: Windows termination invokes one identity-bound handle termination; no `/T` equivalent.
+- `contextor/core/live_state/runtime.py:765-857`: LIVE subprocess requests breakaway and guarded backend Job checks it is outside the Job.
 
-## CHILD_AND_GRANDCHILD_PID_ATTESTATION
-DIRECT_EVIDENCE: In pytest run `pytest-1022`, normal `ready.json` reported child 4708, grandchild 5888, LIVE analogue 2764; `child.json` self-reported child 4708 and grandchild 5888; `grandchild.pid` and `live.pid` matched. Forced `ready.json` reported child 8988, grandchild 15084, LIVE analogue 10496; `child.json` and PID files matched. Normal sentinel self-report was 8892; forced sentinel self-report was 8120. The passing assertions also bound sentinel self-report to `Popen.pid`.
+## WINDOWS_VENV_REDIRECTOR_PID_MAP
 
-## NORMAL_EXIT_RESULT
-PASS: The normal scenario reached `stop.owner`, owner exit, and the post-shutdown liveness assertions. The recorded child and grandchild identities were confirmed gone within the test timeout.
+DIRECT_EVIDENCE, private Python 3.10 probe: venv Popen PID 13076 (`.venv\Scripts\python.exe`, creation 134378744512960938) spawned actual Python PID 13376 (base `python.exe`, creation 134378744513547395), whose parent was 13076. Popen remained waiting while actual Python ran. Both exited 0. Base executable control: Popen PID = actual PID = 624, creation 134378744545772205. Thus `_spawn_identity_record()` identifies redirector on this machine.
 
-## FORCED_EXIT_RESULT
-PASS: The forced scenario reached `owner.terminate()`, owner exit, and the post-shutdown liveness assertions. The recorded child and grandchild identities were confirmed gone within the test timeout.
+## VENV_ISOLATION_EVIDENCE
+
+Venv child: `sys.executable=C:\Temp\Contextor_Repo\.venv\Scripts\python.exe`, `sys._base_executable=C:\SpiralProphet\python\WPy64-31090\python-3.10.9.amd64\python.exe`, `sys.prefix=C:\Temp\Contextor_Repo\.venv`; `fastmcp` and `orjson` import specs were present. Base executable control reported `sys.prefix=sys.base_prefix` at the base installation. This proves interpreter identity and two dependency lookups, not full dependency isolation.
+
+## NESTED_JOB_NORMAL_EXIT
+
+DIRECT_EVIDENCE, isolated scripts reused from `tests/test_mcp_job_tree_isolated_windows.py`, owner launched via actual venv redirector: redirector 8564, Job owner 8604, child 6332, grandchild 10352, breakaway LIVE analogue 12560. Creation identities captured. On normal owner exit: owner, redirector, child and grandchild DEAD; LIVE analogue ALIVE.
+
+## NESTED_JOB_FORCED_EXIT
+
+DIRECT_EVIDENCE: redirector 988, Job owner 2200, child 15164, grandchild 7948, LIVE analogue 11084. Creation-bound termination of **actual owner 2200** returned true. Owner, redirector, child and grandchild DEAD; LIVE analogue ALIVE. This does not establish the effect of terminating only the redirector.
 
 ## LIVE_ANALOGUE_SURVIVAL
-PASS in both isolated scenarios: the breakaway leaf's recorded identity was alive after owner exit. This is a LIVE analogue, not the production Contextor LIVE service.
 
-## SENTINEL_SURVIVAL
-PASS in both isolated scenarios: the unrelated test-created sentinel's recorded identity was alive after owner exit.
+Both isolated variants verified the breakaway process ALIVE after owner exit, then terminated it by captured creation identity. Production LIVE was not started.
 
-## TEST_PROCESS_CLEANUP
-The test `finally` block used identity-bound cleanup for its breakaway leaf and bounded cleanup for its owner/sentinel. A read-only Win32_Process command-line census after the run found zero processes referencing the `pytest-1022` private test root. The test emitted no unresolved-process failure. The census does not substitute for a retained creation-identity audit of every PID after cleanup.
+## HOST_OWNED_MCP_TREE_COVERAGE
 
-## TARGETED_TEST_RESULTS
-`py_compile tests/test_mcp_job_tree_isolated_windows.py`: PASS.
-`tests/test_mcp_child_process_cleanup.py tests/test_mcp_job_tree_isolated_windows.py -q`: 6 passed, 1 AuthlibDeprecationWarning.
-`tests/test_live_job_object.py -q`: 10 passed.
-`tests/test_mcp_process_registry_identity_termination.py tests/test_mcp_registered_process_cleanup.py tests/test_mcp_server_cleanup_windows.py tests/test_mcp_backend_job_guard.py tests/test_mcp_backend_job_process_scope.py -q`: 78 passed, 1 warning.
-No full suite, Contextor restart, or launcher execution.
+CODE_PATH_PROVED: host-owned role does not install the backend Job. Its root is registered. Windows registry termination targets one identity-bound process handle. Shutdown handles registered owned children/orphans and pools; no blanket cleanup of an unregistered grandchild after root loss was demonstrated. Runtime coverage of all host-owned spawn paths is UNKNOWN. Legacy `/F /T /PID` descendant parity is not established.
 
-## MCP_POST_CHANGE_AUDIT
-Contextor MCP at revision 939 reported `workspace_sync=verified` for the changed test module and unchanged `contextor.mcp_backend_job`, `contextor.mcp_process_registry`, and `contextor.mcp_server`. This is canonical source synchronization, not evidence of active backend loaded-code adoption. No manual `update_file` or restart occurred.
+## PRIVATE_PROBE_CLEANUP
 
-## FILES_CHANGED
-- `tests/test_mcp_job_tree_isolated_windows.py`
+All owner, redirector, child and grandchild records resolved; `cleanup_unresolved=[]` in both Job variants. Both LIVE analogues were creation-bound terminated after survival checks. Boundary-A children exited 0. Private files remain under `%LOCALAPPDATA%\Temp\contextor_r4e_probe_874447f4836a47d19f300e053897ba45`; no production process was targeted.
 
-## FULL_DIFFS
-```diff
-diff --git a/tests/test_mcp_job_tree_isolated_windows.py b/tests/test_mcp_job_tree_isolated_windows.py
-index 71a9553..b63a4bb 100644
---- a/tests/test_mcp_job_tree_isolated_windows.py
-+++ b/tests/test_mcp_job_tree_isolated_windows.py
-@@ -42,7 +42,7 @@ from pathlib import Path
- root = Path(sys.argv[1])
- flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
- grandchild = subprocess.Popen(
--    [sys.executable, str(root / "leaf.py"), str(root / "grandchild.pid")],
-+    [sys._base_executable, str(root / "leaf.py"), str(root / "grandchild.pid")],
-     stdin=subprocess.DEVNULL,
-     stdout=subprocess.DEVNULL,
-     stderr=subprocess.DEVNULL,
-@@ -72,7 +72,7 @@ root = Path(sys.argv[1])
- protect_persistent_backend()
- flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
- child = subprocess.Popen(
--    [sys.executable, str(root / "child.py"), str(root)],
-+    [sys._base_executable, str(root / "child.py"), str(root)],
-     stdin=subprocess.DEVNULL,
-     stdout=subprocess.DEVNULL,
-     stderr=subprocess.DEVNULL,
-@@ -87,7 +87,7 @@ while not (root / "grandchild.pid").exists():
-     time.sleep(0.05)
- 
- live = subprocess.Popen(
--    [sys.executable, str(root / "leaf.py"), str(root / "live.pid")],
-+    [sys._base_executable, str(root / "leaf.py"), str(root / "live.pid")],
-     stdin=subprocess.DEVNULL,
-     stdout=subprocess.DEVNULL,
-     stderr=subprocess.DEVNULL,
-@@ -163,13 +163,17 @@ def test_isolated_backend_job_kills_unregistered_child_and_grandchild_but_not_li
-         (tmp_path / name).write_text(code, encoding="utf-8")
- 
-     flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-+    base_python = Path(sys._base_executable)
-+    assert base_python.is_file(), (
-+        "Windows base Python executable is unavailable"
-+    )
-     repo_root = Path(__file__).resolve().parents[1]
-     env = os.environ.copy()
-     env["PYTHONPATH"] = os.pathsep.join(
-         filter(None, (str(repo_root), env.get("PYTHONPATH", "")))
-     )
-     sentinel = subprocess.Popen(
--        [sys.executable, str(tmp_path / "leaf.py"), str(tmp_path / "sentinel.pid")],
-+        [sys._base_executable, str(tmp_path / "leaf.py"), str(tmp_path / "sentinel.pid")],
-         stdin=subprocess.DEVNULL,
-         stdout=subprocess.DEVNULL,
-         stderr=subprocess.DEVNULL,
-@@ -179,7 +183,7 @@ def test_isolated_backend_job_kills_unregistered_child_and_grandchild_but_not_li
-     identities = {}
-     try:
-         owner = subprocess.Popen(
--            [sys.executable, str(tmp_path / "owner.py"), str(tmp_path)],
-+            [sys._base_executable, str(tmp_path / "owner.py"), str(tmp_path)],
-             cwd=str(repo_root),
-             env=env,
-             stdin=subprocess.DEVNULL,
-@@ -204,6 +208,16 @@ def test_isolated_backend_job_kills_unregistered_child_and_grandchild_but_not_li
-         )
-         assert _wait_until(lambda: (tmp_path / "live.pid").is_file())
-         assert _wait_until(lambda: (tmp_path / "sentinel.pid").is_file())
-+        assert _wait_until(lambda: (tmp_path / "child.json").is_file())
-+
-+        child_report = json.loads(
-+            (tmp_path / "child.json").read_text(encoding="utf-8")
-+        )
-+        assert child_report["pid"] == identifiers["child"]
-+        assert child_report["grandchild_pid"] == identifiers["grandchild"]
-+        assert _read_pid(tmp_path / "grandchild.pid") == identifiers["grandchild"]
-+        assert _read_pid(tmp_path / "live.pid") == identifiers["live"]
-+        assert _read_pid(tmp_path / "sentinel.pid") == sentinel.pid
- 
-         for key in ("child", "grandchild", "live"):
-             identities[key] = _identity_record(identifiers[key])
-```
+## PRODUCTION_STARTUP_IMPLICATIONS
+
+CODE_PATH_PROVED plus DIRECT_EVIDENCE: production launch records the venv redirector PID, while the backend Job belongs to the actual interpreter. Startup exception cleanup terminates only the recorded redirector and ignores the result. Whether that also ends the actual owner and Job tree is UNKNOWN. Separate backend status may record actual owner, but no production restart was performed.
+
+## MCP_AUDIT
+
+MCP call context confirmed `_spawn_backend_process` caller `start_backend`, `_spawn_runtime_subprocess` caller `connect_or_start`, and shutdown helper dependencies. Lineage preview returned complete but `workspace_sync=unverified`; exact source was cross-checked. No MCP `update_file`.
 
 ## REMAINING_UNKNOWN
-Production persistent backend and production LIVE runtime adoption remain untested; full suite and user restart checkpoint remain outstanding. The isolated breakaway leaf verifies a LIVE analogue. PID numeric mappings are from test artifacts, while Popen equality and post-shutdown identity checks are evidenced by passing assertions.
+
+- Effect of terminating redirector only on actual owner and Job tree during failed startup.
+- Whether production backend status publishes actual interpreter PID and creation identity under this venv redirector.
+- Exhaustive host-owned unregistered grandchild coverage after abnormal exit/restart.
+- Fresh restarted MCP/Desktop adoption and production backend/LIVE behavior.
 
 ## FINAL_VERDICT
-PASS_R4D_READY_FOR_USER_RESTART_AND_FULL_SUITE for this R4D-R1 test checkpoint. No runtime restart or full suite was performed.
+
+`BLOCKED_MULTIPLE_BOUNDARIES` — redirector/actual-owner startup cleanup boundary and host-owned unregistered descendant tree parity remain unverified. Isolated actual-owner Job termination passed normal and forced exit probes, without certifying those production boundaries.
+
+## FILES_CHANGED
+
+None (source/test/docs). `walkthrough.md` overwritten for this report.
+
+## ACTUAL_DIFF / FULL_DIFF
+
+DIFFS=NONE (source/test/docs).
