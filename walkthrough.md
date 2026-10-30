@@ -1,346 +1,391 @@
-# PY315-R4B-FIX — process-local Job ownership
+# PY315-R4C-1 — Windows process identity classification
 
 ## PREFLIGHT
-DIRECT_EVIDENCE: HEAD `5ce14c50770957fd32c401765728c44c650e2748`; pre-edit Git status was clean. Contextor MCP returned revision 920, provenance live, `workspace_sync=verified` for `contextor.mcp_backend_job` and `contextor.core.live_state.runtime`. Exact SEARCH occurrence counts were 1, 1, 1, 2, 1, 3 for edits 1–6; the new test file was absent.
+DIRECT_EVIDENCE: HEAD `c1f3f8c3decb80c49ec457e37f22cc205838fc26`; pre-edit Git status was clean. Contextor MCP reported revision 924, provenance live, and `workspace_sync=verified` for `contextor.mcp_process_registry` and `contextor.core.live_state.runtime`. The literal SEARCH block occurred exactly once; the target test file did not exist.
 
 ## EXACT_SEARCH_REPLACE_RESULTS
-CONTRACT_PROVED: All six replacements were applied at the specified counts with `apply_patch`. The new test file matches the architect's supplied content aside from final newline formatting. No other source/test changes were made.
+CONTRACT_PROVED: The architect's insertion was applied once with `apply_patch`, after `record_matches_process()`. The legacy matcher and Windows termination implementation were not changed. The new test file matches the supplied exact content apart from final newline formatting.
 
-## PROCESS_LOCAL_JOB_AUTHORITY
-CODE_PATH_PROVED: The successful Job installation no longer sets an inheritable environment marker. `backend_job_active_for_current_process()` returns true only with an active handle owned by the current Windows PID, returns false for an unset guard, and raises for inconsistent or foreign process state.
+## WINDOWS_CLASSIFICATION_CONTRACT
+CODE_PATH_PROVED: `classify_registered_windows_process()` returns one of DEAD, ALIVE_MATCH, IDENTITY_MISMATCH, UNKNOWN. It reads a Windows process probe and compares exact creation identity and normalized full executable path; it does not terminate a process. Non-Windows calls return UNKNOWN.
 
-## LIVE_BREAKAWAY_BEHAVIOR
-CODE_PATH_PROVED: Windows LIVE spawn consults process-local Job ownership before spawning. A true guard requires membership verification and refuses the legacy access-denied fallback; an inherited environment marker alone cannot activate those restrictions. The supplied fake-process tests exercise both paths. No real Windows process was started or terminated.
+## PID_REUSE_EVIDENCE
+The deterministic test with a live probe at the same PID but a different creation time passed and returned IDENTITY_MISMATCH. A different full executable path also returns IDENTITY_MISMATCH in the supplied tests. These are code/test results, not a real PID reuse experiment.
 
-## REGRESSION_RESULTS
-`py_compile` of the four changed/new Python files: PASS.
-`tests/test_mcp_backend_job_guard.py tests/test_mcp_backend_job_process_scope.py -q`: 18 passed, 1 warning.
-`tests/test_live_job_object.py -q -k "not real_windows_job_object_breakaway_integration and not windows_job_object_cleanup_regression"`: 6 passed, 4 deselected.
-`tests/test_mcp_shared_backend_server_mode.py tests/test_mcp_backend_control.py -q`: 34 passed, 1 warning.
-The legacy tree-kill regression gate remains open; it was not modified or rerun in this task.
+## UNKNOWN_FAIL_CLOSED
+Invalid PID, absent or malformed record identity, absent actual identity fields, unconfirmed probe state, probe error, and non-Windows use return UNKNOWN. The supplied tests cover these cases. No cleanup caller was changed to use the classifier in this task.
+
+## TARGETED_TEST_RESULTS
+`py_compile contextor/mcp_process_registry.py tests/test_mcp_registered_process_classification.py`: PASS.
+`tests/test_mcp_registered_process_classification.py tests/test_mcp_process_registry.py tests/test_mcp_process_registry_identity_termination.py -q`: 77 passed.
+`tests/test_mcp_backend_job_guard.py tests/test_mcp_backend_job_process_scope.py -q`: 18 passed, 1 AuthlibDeprecationWarning.
+No full pytest or actual process termination.
 
 ## MCP_POST_CHANGE_AUDIT
-DIRECT_EVIDENCE: Initial post-edit Contextor MCP reads for both changed production modules at revisions 920–921 reported `workspace_sync=out_of_sync`. A later read for `contextor.mcp_backend_job` at revision 921 reported `workspace_sync=verified`. The corresponding read for `contextor.core.live_state.runtime` at revision 921 remained `out_of_sync`, with the advisory that disk content changed since the canonical revision. Source synchronization is verified for the Job module and unverified for the LIVE runtime module. No `update_file` or restart was performed. Active backend loaded-code adoption is UNKNOWN.
+DIRECT_EVIDENCE: Initial post-edit `contextor.mcp_process_registry` reads at revision 924 showed `workspace_sync=out_of_sync` and `status=stale_source`. A later module read at revision 925 showed `workspace_sync=verified`; `get_symbol_implementation` at revision 926 returned `status=resolved`, `workspace_sync=verified`, and the new classifier implementation. Source implementation visibility is verified. The reread of `contextor.core.live_state.runtime` at revision 924 returned `workspace_sync=verified`; its earlier out_of_sync status cleared naturally. No manual `update_file` or restart occurred. Active loaded-code adoption is UNKNOWN.
 
 ## FILES_CHANGED
-- `contextor/mcp_backend_job.py`
-- `contextor/core/live_state/runtime.py`
-- `tests/test_mcp_backend_job_guard.py`
-- `tests/test_mcp_backend_job_process_scope.py`
+- `contextor/mcp_process_registry.py`
+- `tests/test_mcp_registered_process_classification.py`
 
 ## FULL_DIFFS
 ```diff
-diff --git a/contextor/core/live_state/runtime.py b/contextor/core/live_state/runtime.py
-index 5053056..64a4ff6 100644
---- a/contextor/core/live_state/runtime.py
-+++ b/contextor/core/live_state/runtime.py
-@@ -786,6 +786,12 @@ def _spawn_runtime_subprocess(
-             creationflags=0,
-         )
+diff --git a/contextor/mcp_process_registry.py b/contextor/mcp_process_registry.py
+index b0f715c..4a63ec2 100644
+--- a/contextor/mcp_process_registry.py
++++ b/contextor/mcp_process_registry.py
+@@ -297,6 +297,88 @@ def record_matches_process(record: dict[str, Any]) -> bool:
+     return True
  
-+    from contextor.mcp_backend_job import (
-+        backend_job_active_for_current_process,
-+    )
-+
-+    backend_job_guarded = backend_job_active_for_current_process()
-+
-     base_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-     primary_flags = base_flags | CREATE_BREAKAWAY_FROM_JOB
  
-@@ -800,7 +806,7 @@ def _spawn_runtime_subprocess(
-             creationflags=primary_flags,
-         )
- 
--        if os.environ.get("CONTEXTOR_BACKEND_JOB_GUARD") == "1":
-+        if backend_job_guarded:
-             from contextor.mcp_backend_job import (
-                 require_live_outside_backend_job,
-             )
-@@ -825,7 +831,7 @@ def _spawn_runtime_subprocess(
-         if getattr(exc, "winerror", None) != 5:
-             raise
- 
--        if os.environ.get("CONTEXTOR_BACKEND_JOB_GUARD") == "1":
-+        if backend_job_guarded:
-             raise RuntimeError(
-                 "LIVE breakaway failed while persistent "
-                 "backend Job Object protection is active"
-diff --git a/contextor/mcp_backend_job.py b/contextor/mcp_backend_job.py
-index 0d314da..ee78b31 100644
---- a/contextor/mcp_backend_job.py
-+++ b/contextor/mcp_backend_job.py
-@@ -167,8 +167,28 @@ def protect_persistent_backend() -> None:
-     _active_handle = handle
-     _active_pid = current_pid
- 
--    # This marker is set ONLY after successful installation.
--    os.environ["CONTEXTOR_BACKEND_JOB_GUARD"] = "1"
-+    # Environment variables can be inherited by unrelated children.
-+    # Ownership authority remains exclusively in this process.
++WindowsRegisteredProcessState = Literal[
++    "DEAD",
++    "ALIVE_MATCH",
++    "IDENTITY_MISMATCH",
++    "UNKNOWN",
++]
 +
 +
-+def backend_job_active_for_current_process() -> bool:
-+    """Return true only for the process holding the backend Job."""
-+    if sys.platform != "win32":
-+        return False
++def classify_registered_windows_process(
++    record: dict[str, Any],
++) -> WindowsRegisteredProcessState:
++    """Classify a registry record without changing process state.
 +
-+    if _active_handle is None:
-+        if _active_pid is not None:
-+            raise BackendJobError(
-+                "backend Job Object ownership state is inconsistent"
-+            )
-+        return False
++    This is a point-in-time observation, not authorization
++    to terminate a process. Termination must independently
++    verify identity on its own bound Windows process handle.
++    """
++    if not sys_platform_is_windows():
++        return "UNKNOWN"
 +
-+    if _active_pid != os.getpid():
-+        raise BackendJobError(
-+            "backend Job Object belongs to a different process"
-+        )
++    if not isinstance(record, dict):
++        return "UNKNOWN"
 +
-+    return True
- 
- 
- def require_live_outside_backend_job(
-@@ -221,6 +241,7 @@ def require_live_outside_backend_job(
- 
- __all__ = [
-     "BackendJobError",
-+    "backend_job_active_for_current_process",
-     "protect_persistent_backend",
-     "require_live_outside_backend_job",
- ]
-diff --git a/tests/test_mcp_backend_job_guard.py b/tests/test_mcp_backend_job_guard.py
-index eeae701..7fc35f9 100644
---- a/tests/test_mcp_backend_job_guard.py
-+++ b/tests/test_mcp_backend_job_guard.py
-@@ -121,7 +121,8 @@ def test_backend_job_owns_descendant_lifetime(
-     assert fake_job.CloseHandle.calls == []
-     assert guard._active_handle == 71
-     assert guard._active_pid == os.getpid()
--    assert os.environ["CONTEXTOR_BACKEND_JOB_GUARD"] == "1"
-+    assert guard.backend_job_active_for_current_process()
-+    assert "CONTEXTOR_BACKEND_JOB_GUARD" not in os.environ
- 
- 
- def test_guard_install_is_idempotent(fake_job):
-@@ -324,9 +325,10 @@ def test_guarded_live_refuses_breakaway_fallback(
-         "platform",
-         "win32",
-     )
--    monkeypatch.setenv(
--        "CONTEXTOR_BACKEND_JOB_GUARD",
--        "1",
-+    monkeypatch.setattr(
-+        guard,
-+        "backend_job_active_for_current_process",
-+        lambda: True,
-     )
-     monkeypatch.setattr(
-         live_runtime.subprocess,
-@@ -358,9 +360,10 @@ def test_guarded_live_verifies_spawn_before_return(
-         "platform",
-         "win32",
-     )
--    monkeypatch.setenv(
--        "CONTEXTOR_BACKEND_JOB_GUARD",
--        "1",
-+    monkeypatch.setattr(
-+        guard,
-+        "backend_job_active_for_current_process",
-+        lambda: True,
-     )
-     monkeypatch.setattr(
-         live_runtime.subprocess,
-@@ -405,9 +408,10 @@ def test_guarded_live_rejects_membership_and_terminates(
-         "platform",
-         "win32",
-     )
--    monkeypatch.setenv(
--        "CONTEXTOR_BACKEND_JOB_GUARD",
--        "1",
-+    monkeypatch.setattr(
-+        guard,
-+        "backend_job_active_for_current_process",
-+        lambda: True,
-     )
-     monkeypatch.setattr(
-         live_runtime.subprocess,
-diff --git a/tests/test_mcp_backend_job_process_scope.py b/tests/test_mcp_backend_job_process_scope.py
++    pid = record.get("pid")
++
++    if type(pid) is not int or not 0 < pid <= 0xFFFFFFFF:
++        return "UNKNOWN"
++
++    try:
++        probe = probe_process_identity(pid)
++    except (OSError, AttributeError, TypeError, ValueError):
++        return "UNKNOWN"
++
++    if probe.state == "dead":
++        return "DEAD"
++
++    if probe.state != "alive":
++        return "UNKNOWN"
++
++    expected_creation = record.get("creation_time")
++
++    if (
++        type(expected_creation) is not int
++        or not 0 < expected_creation <= 0xFFFFFFFFFFFFFFFF
++        or type(probe.creation_time) is not int
++        or not 0 < probe.creation_time <= 0xFFFFFFFFFFFFFFFF
++    ):
++        return "UNKNOWN"
++
++    if probe.creation_time != expected_creation:
++        return "IDENTITY_MISMATCH"
++
++    expected_image = record.get("executable")
++
++    if (
++        not isinstance(expected_image, str)
++        or not expected_image
++        or not ntpath.isabs(expected_image)
++        or not ntpath.splitdrive(expected_image)[0]
++    ):
++        return "UNKNOWN"
++
++    actual_image = probe.image
++
++    if (
++        not isinstance(actual_image, str)
++        or not actual_image
++        or not ntpath.isabs(actual_image)
++        or not ntpath.splitdrive(actual_image)[0]
++    ):
++        return "UNKNOWN"
++
++    if ntpath.normcase(
++        ntpath.normpath(actual_image)
++    ) != ntpath.normcase(
++        ntpath.normpath(expected_image)
++    ):
++        return "IDENTITY_MISMATCH"
++
++    return "ALIVE_MATCH"
++
++
+ def _terminate_windows_record_identity_bound(
+     record: dict[str, Any],
+ ) -> bool:
+diff --git a/tests/test_mcp_registered_process_classification.py b/tests/test_mcp_registered_process_classification.py
 new file mode 100644
 --- /dev/null
-+++ b/tests/test_mcp_backend_job_process_scope.py
-@@ -0,0 +1,168 @@
++++ b/tests/test_mcp_registered_process_classification.py
+@@ -0,0 +1,254 @@
 +from __future__ import annotations
-+
-+import os
-+from pathlib import Path
-+from types import SimpleNamespace
 +
 +import pytest
 +
-+import contextor.mcp_backend_job as guard
-+import contextor.core.live_state.runtime as runtime
++from contextor import mcp_process_registry as registry
 +
 +
-+def test_inherited_environment_cannot_fake_job_guard(
-+    monkeypatch,
-+):
++IMAGE = r"C:\Contextor\.venv\Scripts\python.exe"
++
++RECORD = {
++    "pid": 2500,
++    "creation_time": 123456789,
++    "executable": IMAGE,
++}
++
++
++@pytest.fixture
++def windows_probe(monkeypatch):
 +    monkeypatch.setattr(
-+        runtime.sys,
-+        "platform",
-+        "win32",
-+    )
-+    monkeypatch.setattr(guard, "_active_handle", None)
-+    monkeypatch.setattr(guard, "_active_pid", None)
-+    monkeypatch.setenv(
-+        "CONTEXTOR_BACKEND_JOB_GUARD",
-+        "1",
++        registry,
++        "sys_platform_is_windows",
++        lambda: True,
 +    )
 +
-+    process = SimpleNamespace(_handle=42)
-+
-+    monkeypatch.setattr(
-+        runtime.subprocess,
-+        "Popen",
-+        lambda *_args, **_kwargs: process,
-+    )
-+    monkeypatch.setattr(
-+        guard,
-+        "require_live_outside_backend_job",
-+        lambda *_args: pytest.fail(
-+            "inherited environment marker was trusted"
-+        ),
-+    )
-+
-+    result = runtime._spawn_runtime_subprocess(
-+        ["python.exe"],
-+        Path("."),
-+        {},
-+    )
-+
-+    assert result is process
-+    assert not guard.backend_job_active_for_current_process()
-+
-+
-+def test_stale_process_local_guard_refuses_spawn(
-+    monkeypatch,
-+):
-+    monkeypatch.setattr(
-+        runtime.sys,
-+        "platform",
-+        "win32",
-+    )
-+    monkeypatch.setattr(guard, "_active_handle", 77)
-+    monkeypatch.setattr(
-+        guard,
-+        "_active_pid",
-+        os.getpid() + 1,
-+    )
-+
-+    monkeypatch.setattr(
-+        runtime.subprocess,
-+        "Popen",
-+        lambda *_args, **_kwargs: pytest.fail(
-+            "spawn occurred with stale Job owner"
-+        ),
-+    )
-+
-+    with pytest.raises(
-+        guard.BackendJobError,
-+        match="different process",
-+    ):
-+        runtime._spawn_runtime_subprocess(
-+            ["python.exe"],
-+            Path("."),
-+            {},
++    def set_probe(state, image=IMAGE, creation=123456789):
++        monkeypatch.setattr(
++            registry,
++            "probe_process_identity",
++            lambda _pid: registry.ProcessIdentityProbe(
++                state,
++                image,
++                creation,
++            ),
 +        )
 +
++    return set_probe
 +
-+def test_inconsistent_guard_state_is_rejected(
++
++def test_exact_live_identity_is_match(windows_probe):
++    windows_probe("alive")
++
++    assert registry.classify_registered_windows_process(
++        RECORD
++    ) == "ALIVE_MATCH"
++
++
++def test_case_and_separator_normalization(windows_probe):
++    windows_probe(
++        "alive",
++        image="c:/CONTEXTOR/.venv/SCRIPTS/PYTHON.EXE",
++    )
++
++    assert registry.classify_registered_windows_process(
++        RECORD
++    ) == "ALIVE_MATCH"
++
++
++def test_dead_process_is_dead(windows_probe):
++    windows_probe("dead", None, None)
++
++    assert registry.classify_registered_windows_process(
++        RECORD
++    ) == "DEAD"
++
++
++def test_reused_pid_is_identity_mismatch(windows_probe):
++    windows_probe(
++        "alive",
++        creation=123456790,
++    )
++
++    assert registry.classify_registered_windows_process(
++        RECORD
++    ) == "IDENTITY_MISMATCH"
++
++
++def test_different_full_executable_is_mismatch(windows_probe):
++    windows_probe(
++        "alive",
++        image=r"C:\Other\.venv315\Scripts\python.exe",
++    )
++
++    assert registry.classify_registered_windows_process(
++        RECORD
++    ) == "IDENTITY_MISMATCH"
++
++
++@pytest.mark.parametrize(
++    "state",
++    ["unknown", "unexpected"],
++)
++def test_unconfirmed_liveness_is_unknown(
++    windows_probe,
++    state,
++):
++    windows_probe(state, None, None)
++
++    assert registry.classify_registered_windows_process(
++        RECORD
++    ) == "UNKNOWN"
++
++
++@pytest.mark.parametrize(
++    "creation",
++    [None, 0, False, -1, "123456789"],
++)
++def test_missing_or_invalid_actual_creation(
++    windows_probe,
++    creation,
++):
++    windows_probe(
++        "alive",
++        creation=creation,
++    )
++
++    assert registry.classify_registered_windows_process(
++        RECORD
++    ) == "UNKNOWN"
++
++
++@pytest.mark.parametrize(
++    "image",
++    [None, "", "python.exe", r"\Contextor\python.exe"],
++)
++def test_missing_or_invalid_actual_image(
++    windows_probe,
++    image,
++):
++    windows_probe(
++        "alive",
++        image=image,
++    )
++
++    assert registry.classify_registered_windows_process(
++        RECORD
++    ) == "UNKNOWN"
++
++
++@pytest.mark.parametrize(
++    ("field", "value"),
++    [
++        ("creation_time", None),
++        ("creation_time", False),
++        ("creation_time", 0),
++        ("creation_time", "123456789"),
++        ("executable", ""),
++        ("executable", None),
++        ("executable", "python.exe"),
++        ("executable", r"\Contextor\python.exe"),
++    ],
++)
++def test_invalid_record_identity_is_unknown(
++    windows_probe,
++    field,
++    value,
++):
++    windows_probe("alive")
++
++    candidate = {
++        **RECORD,
++        field: value,
++    }
++
++    assert registry.classify_registered_windows_process(
++        candidate
++    ) == "UNKNOWN"
++
++
++@pytest.mark.parametrize(
++    "pid",
++    [None, False, True, 0, -1, "2500", 0x100000000],
++)
++def test_invalid_pid_never_probes(
++    windows_probe,
++    monkeypatch,
++    pid,
++):
++    def forbidden_probe(_pid):
++        pytest.fail(
++            "invalid PID was probed"
++        )
++
++    monkeypatch.setattr(
++        registry,
++        "probe_process_identity",
++        forbidden_probe,
++    )
++
++    candidate = {
++        **RECORD,
++        "pid": pid,
++    }
++
++    assert registry.classify_registered_windows_process(
++        candidate
++    ) == "UNKNOWN"
++
++
++def test_unknown_windows_probe_failure_is_closed(
++    windows_probe,
 +    monkeypatch,
 +):
 +    monkeypatch.setattr(
-+        guard.sys,
-+        "platform",
-+        "win32",
-+    )
-+    monkeypatch.setattr(guard, "_active_handle", None)
-+    monkeypatch.setattr(
-+        guard,
-+        "_active_pid",
-+        os.getpid(),
++        registry,
++        "probe_process_identity",
++        lambda _pid: (_ for _ in ()).throw(
++            OSError("query unavailable")
++        ),
 +    )
 +
-+    with pytest.raises(
-+        guard.BackendJobError,
-+        match="inconsistent",
-+    ):
-+        guard.backend_job_active_for_current_process()
++    assert registry.classify_registered_windows_process(
++        RECORD
++    ) == "UNKNOWN"
 +
 +
-+def test_untrusted_marker_does_not_disable_legacy_fallback(
++def test_nonwindows_does_not_claim_windows_identity(
 +    monkeypatch,
 +):
 +    monkeypatch.setattr(
-+        runtime.sys,
-+        "platform",
-+        "win32",
++        registry,
++        "sys_platform_is_windows",
++        lambda: False,
 +    )
-+    monkeypatch.setattr(guard, "_active_handle", None)
-+    monkeypatch.setattr(guard, "_active_pid", None)
-+    monkeypatch.setenv(
-+        "CONTEXTOR_BACKEND_JOB_GUARD",
-+        "1",
-+    )
-+
-+    calls = []
-+    process = SimpleNamespace(_handle=92)
-+
-+    def fake_spawn(*_args, **kwargs):
-+        calls.append(kwargs["creationflags"])
-+        if len(calls) == 1:
-+            error = PermissionError(
-+                "Access denied"
-+            )
-+            error.winerror = 5
-+            raise error
-+        return process
 +
 +    monkeypatch.setattr(
-+        runtime.subprocess,
-+        "Popen",
-+        fake_spawn,
++        registry,
++        "probe_process_identity",
++        lambda _pid: pytest.fail(
++            "Windows identity probe used on another platform"
++        ),
 +    )
 +
-+    result = runtime._spawn_runtime_subprocess(
-+        ["python.exe"],
-+        Path("."),
-+        {},
-+    )
-+
-+    assert result is process
-+    assert len(calls) == 2
-+    assert calls[0] & runtime.CREATE_BREAKAWAY_FROM_JOB
-+    assert not (
-+        calls[1] & runtime.CREATE_BREAKAWAY_FROM_JOB
-+    )
++    assert registry.classify_registered_windows_process(
++        RECORD
++    ) == "UNKNOWN"
 +
 +
-+def test_non_windows_guard_is_inactive(
++def test_classifier_does_not_terminate_process(
++    windows_probe,
 +    monkeypatch,
 +):
-+    monkeypatch.setattr(
-+        guard.sys,
-+        "platform",
-+        "linux",
-+    )
-+    monkeypatch.setattr(guard, "_active_handle", None)
-+    monkeypatch.setattr(guard, "_active_pid", None)
++    windows_probe("alive")
 +
-+    assert not guard.backend_job_active_for_current_process()
++    monkeypatch.setattr(
++        registry,
++        "terminate_registered_process",
++        lambda _record: pytest.fail(
++            "classifier attempted process termination"
++        ),
++    )
++
++    assert registry.classify_registered_windows_process(
++        RECORD
++    ) == "ALIVE_MATCH"
 ```
 
 ## REMAINING_UNKNOWN
-Canonical synchronization of `contextor.core.live_state.runtime`; real Windows Job Object integration; active backend adoption; full descendant-tree parity. The legacy tree-kill regression remains open. Dual-launcher work and process cleanup classification were not resumed.
+Active backend loaded-code adoption and real Windows process behavior. Cleanup callers remain unchanged, the legacy `/T` gate remains open, and Python 3.15 launcher work was not resumed.
 
 ## FINAL_VERDICT
-PASS_PROCESS_SCOPE_FIX_TREE_GATE_OPEN for the exact source and targeted test contract; canonical synchronization and runtime adoption remain unverified.
+PASS_CLASSIFIER_IMPLEMENTED_CLEANUP_PENDING for the exact source/test contract. Canonical MCP source visibility is verified; runtime adoption remains unverified.

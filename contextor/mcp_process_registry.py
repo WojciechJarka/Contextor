@@ -297,6 +297,88 @@ def record_matches_process(record: dict[str, Any]) -> bool:
     return True
 
 
+WindowsRegisteredProcessState = Literal[
+    "DEAD",
+    "ALIVE_MATCH",
+    "IDENTITY_MISMATCH",
+    "UNKNOWN",
+]
+
+
+def classify_registered_windows_process(
+    record: dict[str, Any],
+) -> WindowsRegisteredProcessState:
+    """Classify a registry record without changing process state.
+
+    This is a point-in-time observation, not authorization
+    to terminate a process. Termination must independently
+    verify identity on its own bound Windows process handle.
+    """
+    if not sys_platform_is_windows():
+        return "UNKNOWN"
+
+    if not isinstance(record, dict):
+        return "UNKNOWN"
+
+    pid = record.get("pid")
+
+    if type(pid) is not int or not 0 < pid <= 0xFFFFFFFF:
+        return "UNKNOWN"
+
+    try:
+        probe = probe_process_identity(pid)
+    except (OSError, AttributeError, TypeError, ValueError):
+        return "UNKNOWN"
+
+    if probe.state == "dead":
+        return "DEAD"
+
+    if probe.state != "alive":
+        return "UNKNOWN"
+
+    expected_creation = record.get("creation_time")
+
+    if (
+        type(expected_creation) is not int
+        or not 0 < expected_creation <= 0xFFFFFFFFFFFFFFFF
+        or type(probe.creation_time) is not int
+        or not 0 < probe.creation_time <= 0xFFFFFFFFFFFFFFFF
+    ):
+        return "UNKNOWN"
+
+    if probe.creation_time != expected_creation:
+        return "IDENTITY_MISMATCH"
+
+    expected_image = record.get("executable")
+
+    if (
+        not isinstance(expected_image, str)
+        or not expected_image
+        or not ntpath.isabs(expected_image)
+        or not ntpath.splitdrive(expected_image)[0]
+    ):
+        return "UNKNOWN"
+
+    actual_image = probe.image
+
+    if (
+        not isinstance(actual_image, str)
+        or not actual_image
+        or not ntpath.isabs(actual_image)
+        or not ntpath.splitdrive(actual_image)[0]
+    ):
+        return "UNKNOWN"
+
+    if ntpath.normcase(
+        ntpath.normpath(actual_image)
+    ) != ntpath.normcase(
+        ntpath.normpath(expected_image)
+    ):
+        return "IDENTITY_MISMATCH"
+
+    return "ALIVE_MATCH"
+
+
 def _terminate_windows_record_identity_bound(
     record: dict[str, Any],
 ) -> bool:
