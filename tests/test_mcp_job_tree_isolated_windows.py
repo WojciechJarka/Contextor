@@ -42,7 +42,7 @@ from pathlib import Path
 root = Path(sys.argv[1])
 flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 grandchild = subprocess.Popen(
-    [sys.executable, str(root / "leaf.py"), str(root / "grandchild.pid")],
+    [sys._base_executable, str(root / "leaf.py"), str(root / "grandchild.pid")],
     stdin=subprocess.DEVNULL,
     stdout=subprocess.DEVNULL,
     stderr=subprocess.DEVNULL,
@@ -72,7 +72,7 @@ root = Path(sys.argv[1])
 protect_persistent_backend()
 flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 child = subprocess.Popen(
-    [sys.executable, str(root / "child.py"), str(root)],
+    [sys._base_executable, str(root / "child.py"), str(root)],
     stdin=subprocess.DEVNULL,
     stdout=subprocess.DEVNULL,
     stderr=subprocess.DEVNULL,
@@ -87,7 +87,7 @@ while not (root / "grandchild.pid").exists():
     time.sleep(0.05)
 
 live = subprocess.Popen(
-    [sys.executable, str(root / "leaf.py"), str(root / "live.pid")],
+    [sys._base_executable, str(root / "leaf.py"), str(root / "live.pid")],
     stdin=subprocess.DEVNULL,
     stdout=subprocess.DEVNULL,
     stderr=subprocess.DEVNULL,
@@ -163,13 +163,17 @@ def test_isolated_backend_job_kills_unregistered_child_and_grandchild_but_not_li
         (tmp_path / name).write_text(code, encoding="utf-8")
 
     flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    base_python = Path(sys._base_executable)
+    assert base_python.is_file(), (
+        "Windows base Python executable is unavailable"
+    )
     repo_root = Path(__file__).resolve().parents[1]
     env = os.environ.copy()
     env["PYTHONPATH"] = os.pathsep.join(
         filter(None, (str(repo_root), env.get("PYTHONPATH", "")))
     )
     sentinel = subprocess.Popen(
-        [sys.executable, str(tmp_path / "leaf.py"), str(tmp_path / "sentinel.pid")],
+        [sys._base_executable, str(tmp_path / "leaf.py"), str(tmp_path / "sentinel.pid")],
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
@@ -179,7 +183,7 @@ def test_isolated_backend_job_kills_unregistered_child_and_grandchild_but_not_li
     identities = {}
     try:
         owner = subprocess.Popen(
-            [sys.executable, str(tmp_path / "owner.py"), str(tmp_path)],
+            [sys._base_executable, str(tmp_path / "owner.py"), str(tmp_path)],
             cwd=str(repo_root),
             env=env,
             stdin=subprocess.DEVNULL,
@@ -204,6 +208,16 @@ def test_isolated_backend_job_kills_unregistered_child_and_grandchild_but_not_li
         )
         assert _wait_until(lambda: (tmp_path / "live.pid").is_file())
         assert _wait_until(lambda: (tmp_path / "sentinel.pid").is_file())
+        assert _wait_until(lambda: (tmp_path / "child.json").is_file())
+
+        child_report = json.loads(
+            (tmp_path / "child.json").read_text(encoding="utf-8")
+        )
+        assert child_report["pid"] == identifiers["child"]
+        assert child_report["grandchild_pid"] == identifiers["grandchild"]
+        assert _read_pid(tmp_path / "grandchild.pid") == identifiers["grandchild"]
+        assert _read_pid(tmp_path / "live.pid") == identifiers["live"]
+        assert _read_pid(tmp_path / "sentinel.pid") == sentinel.pid
 
         for key in ("child", "grandchild", "live"):
             identities[key] = _identity_record(identifiers[key])
