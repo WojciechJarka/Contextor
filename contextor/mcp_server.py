@@ -606,7 +606,13 @@ def _cleanup_orphaned_processes(directory: Path) -> None:
             if expected_parent_creation is not None and parent_creation_time is not None:
                 parent_alive = int(expected_parent_creation) == parent_creation_time
             if not parent_alive:
-                stopped_process = terminate_registered_process(record) or stopped_process
+                if not terminate_registered_process(record):
+                    raise RuntimeError(
+                        "registered orphan process termination "
+                        "was not confirmed; "
+                        f"pid={record.get('pid')!r}"
+                    )
+                stopped_process = True
                 remove_record(record_path)
         if not stopped_process:
             break
@@ -620,7 +626,12 @@ def _cleanup_owned_processes(directory: Path, owner_pid: int) -> None:
         except (TypeError, ValueError):
             is_child = False
         if is_child:
-            terminate_registered_process(record)
+            if not terminate_registered_process(record):
+                raise RuntimeError(
+                    "registered MCP child termination "
+                    "was not confirmed; "
+                    f"pid={record.get('pid')!r}"
+                )
             remove_record(record_path)
 
 

@@ -1,477 +1,387 @@
-# CONTEXTOR P1D3-WARN-5O — CPython namespace cycle parity
+# PY315-R4A — child cleanup failure evidence
 
 ## PREFLIGHT
+DIRECT_EVIDENCE: Contextor MCP module contexts for the four edited Python modules reported canonical revision 911, provenance live, and workspace_sync verified before edits. Exact SEARCH blocks 1–5 each occurred exactly once in their specified files; the new test file was absent. Existing R3 modifications to `contextor/mcp_process_registry.py` and its new test were preserved. No commit or runtime restart occurred.
 
-DIRECT_EVIDENCE: HEAD `7a2c0830d49dfe359fc88f9588e07828b1aae6cc`. Target test file absent before edit. Pre-existing changes to `tests/test_cycle_semantics_namespace_source_binding.py` and `walkthrough.md` preserved. Contextor MCP `get_module_context` for package_model first: revision 908, workspace_sync verified, graph/cycles fresh, cycle_semantics stale, structural_count 16.
+## EXACT_SEARCH_REPLACE_RESULTS
+CONTRACT_PROVED: All five specified replacements were applied literally once. `tests/test_mcp_child_cleanup_failure_evidence.py` was created from the supplied exact content. No other source or test file was changed in this task.
 
-## INTERPRETER_DISCOVERY
+## PROCESS_REGISTRY_EVIDENCE_RETENTION
+CODE_PATH_PROVED: Backend child, MCP orphan, and MCP owned-child cleanup now raise when `terminate_registered_process()` returns false and remove the registry record only after true. Backend stop cannot report success when `_cleanup_owned_registry_children` raises. Profile worker `finally` removes its record only when `process.returncode` is known; Git cleanup removes only when `record_path` exists and `process.poll()` is non-None. These changes preserve evidence for the specified failed termination paths. They do not establish descendant-tree termination.
 
-The exact architect-authored 410-line test module was added without production changes. Its `_interpreter` probes each candidate with isolated CPython `sys.version_info` and `sys.implementation.name`. `py -0p` is unavailable because the Windows launcher is not installed/accessible; `Get-Command` found no additional matching executable or CONTEXTOR_PYTHON_3_* override.
+## TARGETED_TEST_RESULTS
+`py_compile` for the four edited production modules and new test file: PASS.
+Specified focused suite: `76 passed, 1 AuthlibDeprecationWarning in 7.20s`.
+Separate legacy gate: `tests/test_mcp_child_process_cleanup.py::test_windows_registered_process_termination_uses_tree_kill` FAILED at line 38 with `AttributeError: module 'contextor.mcp_process_registry' has no attribute 'subprocess'`. The test stopped before any process API call. It was not modified. No full pytest or actual process termination occurred.
 
-## EXACT_PYTHON_VERSIONS_AND_EXECUTABLES
-
-CPython 3.10.9: `C:\Temp\Contextor_Repo\.venv\Scripts\python.exe`, verified. CPython 3.11, 3.12, 3.13, 3.14 and 3.15: no interpreter verified by the exact test's discovery contract.
-
-## COVERED_VERSIONS
-
-3.10: all 15 namespace entry scenarios plus the pre-3.15 lazy syntax negative passed.
-
-## NOT_COVERED_VERSIONS
-
-3.11–3.14: 16 skipped cases each. 3.15: 17 skipped cases. All marked NOT_COVERED, not PASS.
-
-## VERSION_MATRIX_RESULTS
-
-Command: `& .\.venv\Scripts\python.exe -m py_compile tests/test_cycle_semantics_namespace_cycle_parity.py` — PASS.
-Command: `& .\.venv\Scripts\python.exe -m pytest -q -rs tests/test_cycle_semantics_namespace_cycle_parity.py` — 18 passed, 81 skipped, 1 failed. The only failure is the required `COVERAGE_INCOMPLETE` gate listing 3.11, 3.12, 3.13, 3.14, 3.15. The module collected 100 cases as specified. No available interpreter produced a contradictory semantic result; CONTRACT_CONFLICT=NONE.
-
-## PYTHON_315_LAZY_IMPORT_CONTRACT
-
-UNKNOWN / NOT_COVERED: 3.15 unavailable. The lazy and eager 3.15 tests were skipped. No 3.15 parity claim.
-
-## REGULAR_MODEL_UNKNOWN_PARITY
-
-Both unchanged restricted regular-package model UNKNOWN cases passed on the current test Python. This is model contract parity only, not runtime safety.
-
-## TARGETED_REGRESSIONS
-
-`& .\.venv\Scripts\python.exe -m pytest -q -rs tests/test_cycle_semantics_namespace_pep420_contract.py tests/test_cycle_semantics_namespace_path_model.py tests/test_cycle_semantics_namespace_source_binding.py` — 35 passed. Pre-existing namespace_source_binding.py test modification remained untouched. `git diff --check` passed for tracked changes; the new-file diff below has no whitespace errors.
+## REMAINING_CHILD_TREE_REGRESSION
+OPEN REGRESSION GATE: R3 removed the Windows `taskkill /F /T /PID` path. The current identity-bound helper terminates one process handle; it does not implement `/T` child-tree semantics. R4A does not restore tree-level termination or certify descendant cleanup.
 
 ## MCP_POST_CHANGE_AUDIT
-
-DIRECT_EVIDENCE: `get_module_context` for the new test module returned `not_found` in active module registry; registration/workspace_sync for it are UNKNOWN. No manual update_file. Bounded `get_live_events(after_revision=908,limit=1)`: status ok, revision/latest_revision 908, activity_epoch `d08a5a93184d473f8bc124596f4a44c9`, resync_required false, no new canonical events. Cycle warning view: structural_count 16, model_pass_count 0, active_warning_count 16. Earlier module context: graph/cycles fresh, cycle_semantics stale. No loaded-code adoption claimed.
+DIRECT_EVIDENCE: Initial post-edit module reads at revision 912 were mixed (`verified`, `out_of_sync`, and `unverified`). Subsequent Contextor MCP module contexts for all four edited modules reported revision 916, provenance live, canonical_state fresh, and workspace_sync verified. This supports current canonical source synchronization only. The attempted batched `get_symbol_implementation` audit returned a tool error for at least one call and was not treated as implementation visibility evidence. No manual `update_file`, backend restart, or loaded-code verification occurred; active LIVE code-byte adoption remains UNKNOWN.
 
 ## FILES_CHANGED
-
-`tests/test_cycle_semantics_namespace_cycle_parity.py` (new). `walkthrough.md` overwritten as required report; its self-diff excluded. Existing prior test modification is not part of this task.
+- `contextor/mcp_backend_control.py`
+- `contextor/mcp_server.py`
+- `contextor/mcp/tools/contextor_profile_analysis.py`
+- `contextor/core/analysis/git_context.py`
+- `tests/test_mcp_child_cleanup_failure_evidence.py`
 
 ## FULL_DIFFS
-
-Complete actual diff of the new test file:
-
+### contextor/mcp_backend_control.py
 ```diff
-diff --git a/tests/test_cycle_semantics_namespace_cycle_parity.py b/tests/test_cycle_semantics_namespace_cycle_parity.py
-new file mode 100644
-index 0000000..f3416a6
+--- a/contextor/mcp_backend_control.py
++++ b/contextor/mcp_backend_control.py
+@@ -960,9 +960,14 @@
+             ):
+                 continue
+ 
+-        terminate_registered_process(
++        if not terminate_registered_process(
+             child
+-        )
++        ):
++            raise BackendControlError(
++                "registered backend child termination "
++                "was not confirmed; "
++                f"pid={child.get('pid')!r}"
++            )
+ 
+         remove_record(
+             record_path
+```
+
+### contextor/mcp_server.py
+```diff
+--- a/contextor/mcp_server.py
++++ b/contextor/mcp_server.py
+@@ -606,7 +606,13 @@
+             if expected_parent_creation is not None and parent_creation_time is not None:
+                 parent_alive = int(expected_parent_creation) == parent_creation_time
+             if not parent_alive:
+-                stopped_process = terminate_registered_process(record) or stopped_process
++                if not terminate_registered_process(record):
++                    raise RuntimeError(
++                        "registered orphan process termination "
++                        "was not confirmed; "
++                        f"pid={record.get('pid')!r}"
++                    )
++                stopped_process = True
+                 remove_record(record_path)
+         if not stopped_process:
+             break
+@@ -620,7 +626,12 @@
+         except (TypeError, ValueError):
+             is_child = False
+         if is_child:
+-            terminate_registered_process(record)
++            if not terminate_registered_process(record):
++                raise RuntimeError(
++                    "registered MCP child termination "
++                    "was not confirmed; "
++                    f"pid={record.get('pid')!r}"
++                )
+             remove_record(record_path)
+ 
+ 
+```
+
+### contextor/mcp/tools/contextor_profile_analysis.py
+```diff
+--- a/contextor/mcp/tools/contextor_profile_analysis.py
++++ b/contextor/mcp/tools/contextor_profile_analysis.py
+@@ -142,7 +142,8 @@
+         )
+         raise
+     finally:
+-        remove_record(record_path)
++        if process.returncode is not None:
++            remove_record(record_path)
+ 
+     if process.returncode != 0:
+         error = stderr.decode(
+```
+
+### contextor/core/analysis/git_context.py
+```diff
+--- a/contextor/core/analysis/git_context.py
++++ b/contextor/core/analysis/git_context.py
+@@ -58,7 +58,8 @@
+     except Exception:
+         return None
+     finally:
+-        remove_record(record_path)
++        if record_path is not None and process.poll() is not None:
++            remove_record(record_path)
+ 
+ 
+ def collect_git_context(file_path: str, root_path: str) -> dict:
+```
+
+### tests/test_mcp_child_cleanup_failure_evidence.py
+```diff
 --- /dev/null
-+++ b/tests/test_cycle_semantics_namespace_cycle_parity.py
-@@ -0,0 +1,410 @@
-+"""Cross-version CPython namespace-cycle execution contracts.
-+
-+Python 3.10–3.15 are independent execution targets.
-+Missing interpreters are NOT_COVERED, never PASS.
-+No LIVE runtime safety or warning suppression is certified.
-+"""
-+
++++ b/tests/test_mcp_child_cleanup_failure_evidence.py
+@@ -0,0 +1,255 @@
 +from __future__ import annotations
 +
-+import ast
-+import functools
-+import json
-+import os
++from contextlib import nullcontext
 +from pathlib import Path
-+import shutil
-+import subprocess
-+import sys
++from types import SimpleNamespace
 +
 +import pytest
 +
-+from contextor.core.cycle_semantics.package_model import (
-+    evaluate_package_import_order,
-+)
++import contextor.mcp_backend_control as control
++import contextor.mcp_server as server
 +
 +
-+VERSIONS = (10, 11, 12, 13, 14, 15)
-+
-+_SAFE_NESTED = {
-+    "ctxpkg/__init__.py": "pass\n",
-+    "ctxpkg/ns/a.py": "value=1\nimport ctxpkg.ns.b\n",
-+    "ctxpkg/ns/b.py": "from ctxpkg.ns.a import value\nx=value\n",
-+}
-+
-+_HAZARD_NESTED = {
-+    "ctxpkg/__init__.py": "pass\n",
-+    "ctxpkg/ns/a.py": "import ctxpkg.ns.b\nvalue=1\n",
-+    "ctxpkg/ns/b.py": "from ctxpkg.ns.a import value\nx=value\n",
-+}
-+
-+_SAFE_TOP = {
-+    "ctxns/a.py": "value=1\nimport ctxns.b\n",
-+    "ctxns/b.py": "from ctxns.a import value\nx=value\n",
-+}
-+
-+_HAZARD_ATTRIBUTE = {
-+    "ctxns/a.py": "import ctxns.b\nvalue=1\n",
-+    "ctxns/b.py": "import ctxns.a\nx=ctxns.a.value\n",
-+}
-+
-+_CLASS_EAGER = {
-+    "ctxns/a.py": (
-+        "class C:\n"
-+        "    import ctxns.b\n"
-+        "value=1\n"
-+    ),
-+    "ctxns/b.py": "from ctxns.a import value\nx=value\n",
-+}
-+
-+_FUNCTION_DEFERRED = {
-+    "ctxns/a.py": (
-+        "def load():\n"
-+        "    import ctxns.b\n"
-+        "value=1\n"
-+    ),
-+    "ctxns/b.py": "import ctxns.a\nx=ctxns.a.value\n",
-+}
-+
-+_TWO_PORTIONS = (
-+    {"ctxns/a.py": "value=1\nimport ctxns.b\n"},
-+    {"ctxns/b.py": "from ctxns.a import value\nx=value\n"},
-+)
-+
-+_SHADOWED = (
-+    _SAFE_TOP,
-+    {"ctxns/__init__.py": "value=99\n"},
-+)
-+
-+CASES = (
-+    ("nested_safe_a", (_SAFE_NESTED,), "ctxpkg.ns.a", None),
-+    ("nested_safe_b", (_SAFE_NESTED,), "ctxpkg.ns.b", None),
-+    ("nested_hazard_a", (_HAZARD_NESTED,), "ctxpkg.ns.a", "ImportError"),
-+    ("nested_hazard_b", (_HAZARD_NESTED,), "ctxpkg.ns.b", None),
-+    ("top_safe_a", (_SAFE_TOP,), "ctxns.a", None),
-+    ("top_safe_b", (_SAFE_TOP,), "ctxns.b", None),
-+    ("two_portions_a", _TWO_PORTIONS, "ctxns.a", None),
-+    ("two_portions_b", _TWO_PORTIONS, "ctxns.b", None),
-+    (
-+        "parent_attribute_hazard_a",
-+        (_HAZARD_ATTRIBUTE,),
-+        "ctxns.a",
-+        "AttributeError",
-+    ),
-+    (
-+        "parent_attribute_hazard_b",
-+        (_HAZARD_ATTRIBUTE,),
-+        "ctxns.b",
-+        None,
-+    ),
-+    ("class_eager_a", (_CLASS_EAGER,), "ctxns.a", "ImportError"),
-+    ("class_eager_b", (_CLASS_EAGER,), "ctxns.b", None),
-+    ("function_deferred_a", (_FUNCTION_DEFERRED,), "ctxns.a", None),
-+    ("function_deferred_b", (_FUNCTION_DEFERRED,), "ctxns.b", None),
-+    (
-+        "regular_package_shadows_namespace",
-+        _SHADOWED,
-+        "ctxns.a",
-+        "ModuleNotFoundError",
-+    ),
-+)
-+
-+
-+@functools.lru_cache(maxsize=None)
-+def _interpreter(minor):
-+    """Locate and verify an actual CPython interpreter version."""
-+    candidates = []
-+
-+    override = os.environ.get(
-+        "CONTEXTOR_PYTHON_3_" + str(minor)
++def _owner(tmp_path):
++    return SimpleNamespace(
++        pid=500,
++        creation_time=123456789,
++        process_registry=str(tmp_path),
 +    )
-+    if override:
-+        candidates.append((override,))
 +
-+    if sys.version_info[:2] == (3, minor):
-+        candidates.append((sys.executable,))
 +
-+    direct = shutil.which("python3." + str(minor))
-+    if direct:
-+        candidates.append((direct,))
++def _child():
++    return {
++        "pid": 501,
++        "parent_pid": 500,
++        "parent_creation_time": 123456789,
++        "executable": r"C:\Python\python.exe",
++        "creation_time": 123456790,
++    }
 +
-+    launcher = shutil.which("py")
-+    if launcher:
-+        candidates.append((launcher, "-3." + str(minor)))
 +
-+    for command in candidates:
-+        try:
-+            result = subprocess.run(
-+                command + (
-+                    "-I",
-+                    "-B",
-+                    "-c",
-+                    (
-+                        "import sys\n"
-+                        "print('%s.%s' % sys.version_info[:2])\n"
-+                        "print(sys.implementation.name)\n"
-+                    ),
-+                ),
-+                capture_output=True,
-+                text=True,
-+                timeout=5,
-+                check=False,
++def test_backend_failed_child_termination_retains_record(
++    tmp_path,
++    monkeypatch,
++):
++    owner = _owner(tmp_path)
++    path = tmp_path / "child.json"
++    child = _child()
++
++    monkeypatch.setattr(
++        control,
++        "read_records",
++        lambda directory: [(path, child)],
++    )
++    monkeypatch.setattr(
++        control,
++        "terminate_registered_process",
++        lambda record: False,
++    )
++    monkeypatch.setattr(
++        control,
++        "remove_record",
++        lambda path: pytest.fail(
++            "failed child termination erased evidence"
++        ),
++    )
++
++    with pytest.raises(
++        control.BackendControlError,
++        match="not confirmed",
++    ):
++        control._cleanup_owned_registry_children(owner)
++
++
++def test_backend_successful_child_termination_removes_record(
++    tmp_path,
++    monkeypatch,
++):
++    owner = _owner(tmp_path)
++    path = tmp_path / "child.json"
++    child = _child()
++    removed = []
++
++    monkeypatch.setattr(
++        control,
++        "read_records",
++        lambda directory: [(path, child)],
++    )
++    monkeypatch.setattr(
++        control,
++        "terminate_registered_process",
++        lambda record: True,
++    )
++    monkeypatch.setattr(
++        control,
++        "remove_record",
++        lambda target: removed.append(target),
++    )
++
++    control._cleanup_owned_registry_children(owner)
++
++    assert removed == [path]
++
++
++def test_mcp_server_failed_owned_child_retains_record(
++    tmp_path,
++    monkeypatch,
++):
++    path = tmp_path / "child.json"
++    child = _child()
++
++    monkeypatch.setattr(
++        server,
++        "read_records",
++        lambda directory: [(path, child)],
++    )
++    monkeypatch.setattr(
++        server,
++        "terminate_registered_process",
++        lambda record: False,
++    )
++    monkeypatch.setattr(
++        server,
++        "remove_record",
++        lambda target: pytest.fail(
++            "failed owned-child termination erased evidence"
++        ),
++    )
++
++    with pytest.raises(
++        RuntimeError,
++        match="not confirmed",
++    ):
++        server._cleanup_owned_processes(tmp_path, 500)
++
++
++def test_mcp_server_successful_owned_child_cleanup(
++    tmp_path,
++    monkeypatch,
++):
++    path = tmp_path / "child.json"
++    child = _child()
++    removed = []
++
++    monkeypatch.setattr(
++        server,
++        "read_records",
++        lambda directory: [(path, child)],
++    )
++    monkeypatch.setattr(
++        server,
++        "terminate_registered_process",
++        lambda record: True,
++    )
++    monkeypatch.setattr(
++        server,
++        "remove_record",
++        lambda target: removed.append(target),
++    )
++
++    server._cleanup_owned_processes(tmp_path, 500)
++
++    assert removed == [path]
++
++
++def test_mcp_server_failed_orphan_cleanup_retains_record(
++    tmp_path,
++    monkeypatch,
++):
++    path = tmp_path / "orphan.json"
++    child = _child()
++
++    monkeypatch.setattr(
++        server,
++        "read_records",
++        lambda directory: [(path, child)],
++    )
++    monkeypatch.setattr(
++        server,
++        "record_matches_process",
++        lambda record: True,
++    )
++    monkeypatch.setattr(
++        server,
++        "process_identity",
++        lambda pid: (None, None, False),
++    )
++    monkeypatch.setattr(
++        server,
++        "terminate_registered_process",
++        lambda record: False,
++    )
++    monkeypatch.setattr(
++        server,
++        "remove_record",
++        lambda target: pytest.fail(
++            "failed orphan termination erased evidence"
++        ),
++    )
++
++    with pytest.raises(
++        RuntimeError,
++        match="not confirmed",
++    ):
++        server._cleanup_orphaned_processes(tmp_path)
++
++
++def test_failed_child_cleanup_blocks_backend_stop_success(
++    tmp_path,
++    monkeypatch,
++):
++    owner = _owner(tmp_path)
++    owner.to_dict = lambda: {
++        "pid": owner.pid,
++        "executable": r"C:\Python\python.exe",
++        "creation_time": owner.creation_time,
++    }
++
++    monkeypatch.setattr(
++        control,
++        "_BackendControlLock",
++        lambda *args, **kwargs: nullcontext(),
++    )
++    monkeypatch.setattr(
++        control,
++        "read_backend_record",
++        lambda: owner,
++    )
++    monkeypatch.setattr(
++        control,
++        "_backend_owner_identity_matches",
++        lambda record: True,
++    )
++    monkeypatch.setattr(
++        control,
++        "terminate_registered_process",
++        lambda record: True,
++    )
++    monkeypatch.setattr(
++        control,
++        "_wait_for_owner_exit",
++        lambda record, *, timeout: True,
++    )
++    monkeypatch.setattr(
++        control,
++        "_cleanup_owned_registry_children",
++        lambda record: (_ for _ in ()).throw(
++            control.BackendControlError(
++                "child termination was not confirmed"
 +            )
-+        except (OSError, subprocess.TimeoutExpired):
-+            continue
-+
-+        lines = result.stdout.strip().splitlines()
-+
-+        if (
-+            result.returncode == 0
-+            and lines == ["3." + str(minor), "cpython"]
-+        ):
-+            return command
-+
-+    return None
-+
-+
-+def _require(minor):
-+    interpreter = _interpreter(minor)
-+    if interpreter is None:
-+        pytest.skip(
-+            "NOT_COVERED: CPython 3." + str(minor)
-+            + " interpreter unavailable"
-+        )
-+    return interpreter
-+
-+
-+def _execute(
-+    tmp_path,
-+    interpreter,
-+    portions,
-+    entry,
-+    *,
-+    suffix="",
-+    script_extra="",
-+    minor=None,
-+):
-+    paths = []
-+
-+    for number, files in enumerate(portions):
-+        root = tmp_path / ("portion_" + str(number) + suffix)
-+        paths.append(str(root))
-+
-+        for relative, body in files.items():
-+            target = root / relative
-+            target.parent.mkdir(parents=True, exist_ok=True)
-+            target.write_text(body, encoding="utf-8")
-+
-+    script = (
-+        "import importlib, json, sys\n"
-+        "sys.path[:0] = json.loads(sys.argv[1])\n"
-+        "module = importlib.import_module(sys.argv[2])\n"
-+        + script_extra
-+    )
-+
-+    flags = ("-I", "-B")
-+    if minor == 15:
-+        flags += ("-X", "lazy_imports=normal")
-+
-+    return subprocess.run(
-+        interpreter
-+        + flags
-+        + (
-+            "-c",
-+            script,
-+            json.dumps(paths),
-+            entry,
 +        ),
-+        capture_output=True,
-+        text=True,
-+        timeout=10,
-+        check=False,
 +    )
-+
-+
-+@pytest.mark.parametrize("minor", VERSIONS)
-+@pytest.mark.parametrize(
-+    "scenario,portions,entry,error",
-+    CASES,
-+    ids=[case[0] for case in CASES],
-+)
-+def test_namespace_cycle_entry_matrix(
-+    tmp_path,
-+    minor,
-+    scenario,
-+    portions,
-+    entry,
-+    error,
-+):
-+    interpreter = _require(minor)
-+
-+    result = _execute(
-+        tmp_path,
-+        interpreter,
-+        portions,
-+        entry,
-+        minor=minor,
-+    )
-+
-+    if error is None:
-+        assert result.returncode == 0, (
-+            minor,
-+            scenario,
-+            result.stderr,
-+        )
-+    else:
-+        assert result.returncode != 0, (
-+            minor,
-+            scenario,
-+        )
-+        assert result.stderr.strip().splitlines()[-1].startswith(
-+            error + ":"
-+        ), (
-+            minor,
-+            scenario,
-+            result.stderr,
-+        )
-+
-+
-+@pytest.mark.parametrize(
-+    "sources,entry",
-+    (
-+        (
-+            {
-+                "ctxns.a": _SAFE_TOP["ctxns/a.py"],
-+                "ctxns.b": _SAFE_TOP["ctxns/b.py"],
-+            },
-+            "ctxns.a",
-+        ),
-+        (
-+            {
-+                "ctxpkg.__init__": "pass",
-+                "ctxpkg.ns.a": _HAZARD_NESTED[
-+                    "ctxpkg/ns/a.py"
-+                ],
-+                "ctxpkg.ns.b": _HAZARD_NESTED[
-+                    "ctxpkg/ns/b.py"
-+                ],
-+            },
-+            "ctxpkg.ns.a",
-+        ),
-+    ),
-+)
-+def test_restricted_regular_model_remains_unknown(
-+    sources,
-+    entry,
-+):
-+    assessment = evaluate_package_import_order(
-+        {
-+            name: ast.parse(body)
-+            for name, body in sources.items()
-+        },
-+        entry,
-+    )
-+
-+    assert assessment.outcome == "UNKNOWN"
-+    assert assessment.events == ()
-+
-+
-+@pytest.mark.parametrize("minor", VERSIONS[:-1])
-+def test_lazy_import_syntax_before_315(tmp_path, minor):
-+    interpreter = _require(minor)
-+
-+    portions = (
-+        {
-+            "ctxns/a.py": (
-+                "lazy import ctxns.b\n"
-+                "value=1\n"
-+            ),
-+            "ctxns/b.py": "pass\n",
-+        },
-+    )
-+
-+    result = _execute(
-+        tmp_path,
-+        interpreter,
-+        portions,
-+        "ctxns.a",
-+        minor=minor,
-+    )
-+
-+    assert result.returncode != 0
-+    assert result.stderr.strip().splitlines()[-1].startswith(
-+        "SyntaxError:"
-+    ), result.stderr
-+
-+
-+def test_315_lazy_import_defers_cycle(tmp_path):
-+    interpreter = _require(15)
-+
-+    portions = (
-+        {
-+            "ctxns/a.py": (
-+                "lazy import ctxns.b\n"
-+                "value=1\n"
-+            ),
-+            "ctxns/b.py": (
-+                "from ctxns.a import value\n"
-+                "x=value\n"
-+            ),
-+        },
-+    )
-+
-+    result = _execute(
-+        tmp_path,
-+        interpreter,
-+        portions,
-+        "ctxns.a",
-+        minor=15,
-+        script_extra=(
-+            "assert 'ctxns.b' not in sys.modules\n"
-+            "assert module.ctxns.b.x == 1\n"
-+            "assert 'ctxns.b' in sys.modules\n"
++    monkeypatch.setattr(
++        control,
++        "remove_backend_record_if_exact",
++        lambda record: pytest.fail(
++            "backend stop discarded unresolved child evidence"
 +        ),
 +    )
 +
-+    assert result.returncode == 0, result.stderr
++    with pytest.raises(
++        control.BackendControlError,
++        match="not confirmed",
++    ):
++        control.stop_backend()
 +
-+
-+def test_315_eager_import_still_has_hazard(tmp_path):
-+    interpreter = _require(15)
-+
-+    portions = (
-+        {
-+            "ctxns/a.py": (
-+                "import ctxns.b\n"
-+                "value=1\n"
-+            ),
-+            "ctxns/b.py": (
-+                "from ctxns.a import value\n"
-+                "x=value\n"
-+            ),
-+        },
-+    )
-+
-+    result = _execute(
-+        tmp_path,
-+        interpreter,
-+        portions,
-+        "ctxns.a",
-+        minor=15,
-+    )
-+
-+    assert result.returncode != 0
-+    assert result.stderr.strip().splitlines()[-1].startswith(
-+        "ImportError:"
-+    ), result.stderr
-+
-+
-+def test_required_interpreter_coverage_gate():
-+    missing = [
-+        "3." + str(minor)
-+        for minor in VERSIONS
-+        if _interpreter(minor) is None
-+    ]
-+
-+    if missing:
-+        pytest.fail(
-+            "COVERAGE_INCOMPLETE: missing CPython interpreters: "
-+            + ", ".join(missing)
-+            + "; skipped cases are NOT_COVERED, not PASS"
-+        )
 ```
 
 ## REMAINING_UNKNOWN
-
-Python 3.11–3.15 execution results; 3.15 lazy import behavior; new-file canonical registry/workspace synchronization; active loaded-code adoption. No runtime import safety or warning suppression is certified.
+Actual child/grandchild survival and loaded-code adoption; tree-level parity; whether additional cleanup paths outside this literal R4A scope discard failed termination evidence. These were not certified or changed.
 
 ## FINAL_VERDICT
-
-PARTIAL_COVERAGE. Exact implementation and available 3.10 tests passed; required complete cross-version coverage gate failed because five interpreters are absent. STOP after WARN-5O.
+PARTIAL_FIX_TREE_REGRESSION_OPEN. R4A exact patch and focused tests passed, while the mandatory legacy tree-kill regression remains open.

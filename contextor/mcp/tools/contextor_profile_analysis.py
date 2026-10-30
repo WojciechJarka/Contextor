@@ -142,7 +142,8 @@ async def _run_profile_subprocess(
         )
         raise
     finally:
-        remove_record(record_path)
+        if process.returncode is not None:
+            remove_record(record_path)
 
     if process.returncode != 0:
         error = stderr.decode(

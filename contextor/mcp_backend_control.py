@@ -960,9 +960,14 @@ def _cleanup_owned_registry_children(
             ):
                 continue
 
-        terminate_registered_process(
+        if not terminate_registered_process(
             child
-        )
+        ):
+            raise BackendControlError(
+                "registered backend child termination "
+                "was not confirmed; "
+                f"pid={child.get('pid')!r}"
+            )
 
         remove_record(
             record_path

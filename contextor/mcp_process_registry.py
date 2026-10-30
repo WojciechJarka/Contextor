@@ -7,9 +7,9 @@ from ctypes import wintypes
 from dataclasses import dataclass
 import errno
 import json
+import ntpath
 import os
 import signal
-import subprocess
 import time
 from pathlib import Path
 from typing import Any, Literal
@@ -297,78 +297,184 @@ def record_matches_process(record: dict[str, Any]) -> bool:
     return True
 
 
-def terminate_registered_process(
+def _terminate_windows_record_identity_bound(
     record: dict[str, Any],
 ) -> bool:
-    if not record_matches_process(record):
+    """Terminate only the process identified by one verified Windows handle."""
+    if not isinstance(record, dict):
         return False
-    pid = int(record["pid"])
-    if sys_platform_is_windows():
-        try:
-            subprocess.run(
-                [
-                    "taskkill",
-                    "/F",
-                    "/T",
-                    "/PID",
-                    str(pid),
-                ],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                check=False,
-                timeout=5.0,
-            )
-        except Exception:
-            pass
-        _, _, alive = process_identity(pid)
-        if not alive:
-            return True
+
+    pid = record.get("pid")
+    creation_time = record.get("creation_time")
+    executable = record.get("executable")
+
+    if type(pid) is not int or not 0 < pid <= 0xFFFFFFFF:
+        return False
+
+    if (
+        type(creation_time) is not int
+        or not 0 < creation_time <= 0xFFFFFFFFFFFFFFFF
+    ):
+        return False
+
+    if (
+        not isinstance(executable, str)
+        or not executable
+        or not ntpath.isabs(executable)
+        or not ntpath.splitdrive(executable)[0]
+    ):
+        return False
+
+    expected_image = ntpath.normcase(
+        ntpath.normpath(executable)
+    )
+
+    try:
         kernel32 = ctypes.WinDLL(
             "kernel32",
             use_last_error=True,
         )
+
         kernel32.OpenProcess.argtypes = [
             wintypes.DWORD,
             wintypes.BOOL,
             wintypes.DWORD,
         ]
         kernel32.OpenProcess.restype = wintypes.HANDLE
-        kernel32.TerminateProcess.argtypes = [
-            wintypes.HANDLE,
-            wintypes.UINT,
-        ]
-        kernel32.TerminateProcess.restype = wintypes.BOOL
+
         kernel32.WaitForSingleObject.argtypes = [
             wintypes.HANDLE,
             wintypes.DWORD,
         ]
         kernel32.WaitForSingleObject.restype = wintypes.DWORD
+
+        kernel32.QueryFullProcessImageNameW.argtypes = [
+            wintypes.HANDLE,
+            wintypes.DWORD,
+            wintypes.LPWSTR,
+            ctypes.POINTER(wintypes.DWORD),
+        ]
+        kernel32.QueryFullProcessImageNameW.restype = wintypes.BOOL
+
+        kernel32.GetProcessTimes.argtypes = [
+            wintypes.HANDLE,
+            ctypes.POINTER(wintypes.FILETIME),
+            ctypes.POINTER(wintypes.FILETIME),
+            ctypes.POINTER(wintypes.FILETIME),
+            ctypes.POINTER(wintypes.FILETIME),
+        ]
+        kernel32.GetProcessTimes.restype = wintypes.BOOL
+
+        kernel32.TerminateProcess.argtypes = [
+            wintypes.HANDLE,
+            wintypes.UINT,
+        ]
+        kernel32.TerminateProcess.restype = wintypes.BOOL
+
         kernel32.CloseHandle.argtypes = [
             wintypes.HANDLE,
         ]
         kernel32.CloseHandle.restype = wintypes.BOOL
+
+        # PROCESS_TERMINATE | PROCESS_QUERY_LIMITED_INFORMATION
+        # | SYNCHRONIZE
         handle = kernel32.OpenProcess(
-            0x0001,
+            0x00101001,
             False,
             pid,
         )
+
         if not handle:
             return False
+
         try:
-            terminated = bool(
-                kernel32.TerminateProcess(
-                    handle,
-                    1,
-                )
+            # WAIT_TIMEOUT means the handle identifies a live process.
+            if kernel32.WaitForSingleObject(handle, 0) != 258:
+                return False
+
+            length = wintypes.DWORD(32768)
+            image_buffer = ctypes.create_unicode_buffer(
+                length.value
             )
-            if terminated:
-                kernel32.WaitForSingleObject(
-                    handle,
-                    2000,
-                )
-            return terminated
+
+            if not kernel32.QueryFullProcessImageNameW(
+                handle,
+                0,
+                image_buffer,
+                ctypes.byref(length),
+            ):
+                return False
+
+            actual_image = image_buffer.value
+
+            if (
+                not actual_image
+                or not ntpath.isabs(actual_image)
+                or not ntpath.splitdrive(actual_image)[0]
+            ):
+                return False
+
+            if (
+                ntpath.normcase(ntpath.normpath(actual_image))
+                != expected_image
+            ):
+                return False
+
+            creation = wintypes.FILETIME()
+            exit_time = wintypes.FILETIME()
+            kernel_time = wintypes.FILETIME()
+            user_time = wintypes.FILETIME()
+
+            if not kernel32.GetProcessTimes(
+                handle,
+                ctypes.byref(creation),
+                ctypes.byref(exit_time),
+                ctypes.byref(kernel_time),
+                ctypes.byref(user_time),
+            ):
+                return False
+
+            actual_creation = (
+                (creation.dwHighDateTime << 32)
+                | creation.dwLowDateTime
+            )
+
+            if actual_creation != creation_time:
+                return False
+
+            # Verification and termination use the SAME handle.
+            # No second PID lookup and no taskkill.
+            if not kernel32.TerminateProcess(handle, 1):
+                return False
+
+            # TerminateProcess is asynchronous.
+            # WAIT_OBJECT_0 confirms that this process exited.
+            return kernel32.WaitForSingleObject(
+                handle,
+                2000,
+            ) == 0
+
         finally:
             kernel32.CloseHandle(handle)
+
+    except (OSError, AttributeError, TypeError, ValueError):
+        return False
+
+
+def terminate_registered_process(
+    record: dict[str, Any],
+) -> bool:
+    if sys_platform_is_windows():
+        return _terminate_windows_record_identity_bound(
+            record
+        )
+
+    # Preserve the existing POSIX contract.
+    if not record_matches_process(record):
+        return False
+
+    pid = int(record["pid"])
+
     try:
         os.kill(pid, signal.SIGTERM)
         return True
@@ -391,7 +497,9 @@ def terminate_registered_record(
     if not isinstance(value, dict):
         remove_record(path)
         return False
-    try:
-        return terminate_registered_process(value)
-    finally:
+    terminated = terminate_registered_process(value)
+
+    if terminated:
         remove_record(path)
+
+    return terminated

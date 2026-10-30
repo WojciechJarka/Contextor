@@ -58,7 +58,8 @@ def _run_git(args, cwd):
     except Exception:
         return None
     finally:
-        remove_record(record_path)
+        if record_path is not None and process.poll() is not None:
+            remove_record(record_path)
 
 
 def collect_git_context(file_path: str, root_path: str) -> dict:
