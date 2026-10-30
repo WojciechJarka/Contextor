@@ -192,7 +192,19 @@ def _compile(
     if _depth >= 32:
         return None
 
-    for stmt in tree.body:
+    for statement_index, stmt in enumerate(tree.body):
+        if (
+            _depth == 0
+            and statement_index == 0
+            and isinstance(stmt, ast.Expr)
+            and isinstance(stmt.value, ast.Constant)
+            and type(stmt.value.value) is str
+        ):
+            # A module docstring literal has no import-time side effects.
+            # The restricted model cannot observe __doc__ through its
+            # supported attribute/import operations.
+            continue
+
         if (
             _depth == 0
             and typing_guard is not None

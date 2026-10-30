@@ -90,6 +90,83 @@ def test_parent_initializer_precedes_submodule(tmp_path):
     assert _actual(tmp_path, source, "pkg.sub")
 
 
+def test_warn_5g_module_docstrings_preserve_safe_order(tmp_path):
+    source = {
+        "pkg.__init__": (
+            '"""Package documentation."""\n'
+            "value=2\n"
+            "import pkg.sub"
+        ),
+        "pkg.sub": (
+            '"""Submodule documentation."""\n'
+            "import pkg\n"
+            "x=pkg.value"
+        ),
+    }
+
+    result = _model(source, "pkg")
+
+    assert result.outcome == "MODEL_PASS"
+    assert _actual(tmp_path, source, "pkg")
+
+
+def test_warn_5g_docstrings_do_not_hide_early_binding_hazard(
+    tmp_path,
+):
+    source = {
+        "pkg.__init__": (
+            '"""Package documentation."""\n'
+            "import pkg.sub\n"
+            "value=2"
+        ),
+        "pkg.sub": (
+            '"""Submodule documentation."""\n'
+            "import pkg\n"
+            "x=pkg.value"
+        ),
+    }
+
+    result = _model(source, "pkg")
+
+    assert result.outcome == "EARLY_BINDING_HAZARD"
+    assert result.target_module == "pkg"
+    assert result.symbol == "value"
+    assert not _actual(tmp_path, source, "pkg")
+
+
+def test_warn_5g_nonleading_string_expression_remains_unknown():
+    source = {
+        "pkg.__init__": (
+            "pass\n"
+            "'not a module docstring'"
+        ),
+    }
+
+    assert _model(source, "pkg").outcome == "UNKNOWN"
+
+
+def test_warn_5g_nested_string_expression_remains_unknown():
+    source = {
+        "pkg.__init__": (
+            "if True:\n"
+            "    'not a module docstring'"
+        ),
+    }
+
+    assert _model(source, "pkg").outcome == "UNKNOWN"
+
+
+def test_warn_5g_docstring_does_not_hide_unsupported_effect():
+    source = {
+        "pkg.__init__": (
+            '"""Package documentation."""\n'
+            'raise RuntimeError("unsupported")'
+        ),
+    }
+
+    assert _model(source, "pkg").outcome == "UNKNOWN"
+
+
 def test_package_early_attribute_failure(tmp_path):
     source = {
         "pkg.__init__": "import pkg.sub\nvalue=2",
