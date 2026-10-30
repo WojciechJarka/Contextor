@@ -145,6 +145,61 @@ def test_t08_alternative_loader_fails_closed():
     )
 
 
+def test_t08b_tagged_alternative_loaders_fail_closed():
+    variants = (
+        "pkg/child.cp310-win_amd64.pyd",
+        "pkg/child.cpython-310-x86_64-linux-gnu.so",
+        "pkg/child.pyc",
+        "pkg/__init__.cp310-win_amd64.pyd",
+        "pkg/__init__.cpython-310-x86_64-linux-gnu.so",
+    )
+
+    for filename in variants:
+        result = _resolve(
+            [_p(
+                "root",
+                "pkg/__init__.py",
+                "pkg/child.py",
+                filename,
+            )],
+            "pkg.child",
+        )
+
+        assert result.status == "INDETERMINATE"
+        assert result.reason == "ALTERNATIVE_LOADER_CANDIDATE"
+
+
+def test_t08c_alternative_in_earlier_namespace_portion():
+    roots = (
+        _p(
+            "first",
+            "nsp/left.py",
+            "nsp/child.cp310-win_amd64.pyd",
+        ),
+        _p("second", "nsp/child.py"),
+    )
+
+    result = _resolve(roots, "nsp.child")
+
+    assert result.status == "INDETERMINATE"
+    assert result.reason == "ALTERNATIVE_LOADER_CANDIDATE"
+
+
+def test_t08d_unrelated_file_does_not_block_source():
+    result = _resolve(
+        [_p(
+            "root",
+            "pkg/__init__.py",
+            "pkg/child.py",
+            "pkg/child.notes.txt",
+        )],
+        "pkg.child",
+    )
+
+    assert result.status == "CONDITIONAL"
+    assert result.source == "root:pkg/child.py"
+
+
 def test_t09_invalid_inventory_fails_closed():
     assert _resolve(
         [_p("root", "../evil.py")],

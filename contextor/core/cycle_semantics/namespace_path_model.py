@@ -127,15 +127,18 @@ def resolve_namespace_path(
                 (parent + "/" if parent else "") + fragment
             )
 
-            if (
-                any(
-                    candidate + extension in root.files
-                    for extension in (".pyc", ".pyd", ".so")
-                )
-                or any(
-                    candidate + "/__init__" + extension in root.files
-                    for extension in (".pyc", ".pyd", ".so")
-                )
+            # Tagged extension modules such as module.cp310-win_amd64.pyd
+            # and module.cpython-310-x86_64-linux-gnu.so are not
+            # recognized by testing only the bare ".pyd"/".so" suffix.
+            # Reject conservatively; this is not a loader selection proof.
+            alternative_prefixes = (
+                candidate + ".",
+                candidate + "/__init__.",
+            )
+            if any(
+                filename.startswith(alternative_prefixes)
+                and filename.endswith((".pyc", ".pyd", ".so"))
+                for filename in root.files
             ):
                 return reject("ALTERNATIVE_LOADER_CANDIDATE")
 
