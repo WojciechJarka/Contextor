@@ -1,4 +1,4 @@
-"""Windows process-tree ownership for the persistent MCP backend."""
+"""Windows Job Object ownership for MCP server processes."""
 
 from __future__ import annotations
 
@@ -101,8 +101,8 @@ def _kernel32() -> Any:
     return kernel
 
 
-def protect_persistent_backend() -> None:
-    """Own backend descendants until the backend process exits."""
+def _protect_mcp_server_job() -> None:
+    """Own server descendants until the server process exits."""
     global _active_handle
     global _active_pid
 
@@ -169,6 +169,16 @@ def protect_persistent_backend() -> None:
 
     # Environment variables can be inherited by unrelated children.
     # Ownership authority remains exclusively in this process.
+
+
+def protect_persistent_backend() -> None:
+    """Protect a persistent backend before importing its MCP server."""
+    _protect_mcp_server_job()
+
+
+def protect_host_owned_mcp() -> None:
+    """Protect a host-owned MCP server and its normal descendants."""
+    _protect_mcp_server_job()
 
 
 def backend_job_active_for_current_process() -> bool:
@@ -242,6 +252,7 @@ def require_live_outside_backend_job(
 __all__ = [
     "BackendJobError",
     "backend_job_active_for_current_process",
+    "protect_host_owned_mcp",
     "protect_persistent_backend",
     "require_live_outside_backend_job",
 ]

@@ -151,14 +151,26 @@ def _read_pid(path):
         return None
 
 
+@pytest.mark.parametrize(
+    "job_role",
+    ["persistent-backend", "host-owned"],
+)
 @pytest.mark.parametrize("shutdown", ["normal", "forced"])
 def test_isolated_backend_job_kills_unregistered_child_and_grandchild_but_not_live_or_unrelated(
-    tmp_path: Path, shutdown: str,
+    tmp_path: Path, shutdown: str, job_role: str,
 ):
     for name, code in (
         ("leaf.py", LEAF_CODE),
         ("child.py", CHILD_CODE),
-        ("owner.py", OWNER_CODE),
+        (
+            "owner.py",
+            OWNER_CODE
+            if job_role == "persistent-backend"
+            else OWNER_CODE.replace(
+                "protect_persistent_backend",
+                "protect_host_owned_mcp",
+            ),
+        ),
     ):
         (tmp_path / name).write_text(code, encoding="utf-8")
 
@@ -277,8 +289,13 @@ def test_isolated_backend_job_kills_unregistered_child_and_grandchild_but_not_li
             pytest.fail(f"isolated test-owned processes unresolved: {unresolved}")
 
 
+@pytest.mark.parametrize(
+    "job_role",
+    ["persistent-backend", "host-owned"],
+)
 def test_venv_redirector_only_termination_closes_backend_job_tree(
     tmp_path: Path,
+    job_role: str,
 ):
     """Prove cleanup behavior when only the venv launcher is terminated."""
     repo_root = Path(__file__).resolve().parents[1]
@@ -289,7 +306,15 @@ def test_venv_redirector_only_termination_closes_backend_job_tree(
     for name, code in (
         ("leaf.py", LEAF_CODE),
         ("child.py", CHILD_CODE),
-        ("owner.py", OWNER_CODE),
+        (
+            "owner.py",
+            OWNER_CODE
+            if job_role == "persistent-backend"
+            else OWNER_CODE.replace(
+                "protect_persistent_backend",
+                "protect_host_owned_mcp",
+            ),
+        ),
     ):
         (tmp_path / name).write_text(code, encoding="utf-8")
 

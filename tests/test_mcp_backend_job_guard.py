@@ -275,7 +275,7 @@ def test_mcp_entry_refuses_server_after_guard_failure(
         entry.main()
 
 
-def test_nonpersistent_mcp_skips_guard(
+def test_host_owned_mcp_installs_guard_before_server(
     monkeypatch,
 ):
     events = []
@@ -293,8 +293,13 @@ def test_nonpersistent_mcp_skips_guard(
         guard,
         "protect_persistent_backend",
         lambda: pytest.fail(
-            "nonpersistent MCP entered backend job"
+            "host-owned entry selected persistent protection"
         ),
+    )
+    monkeypatch.setattr(
+        guard,
+        "protect_host_owned_mcp",
+        lambda: events.append("guard"),
     )
     monkeypatch.setattr(
         server,
@@ -304,7 +309,7 @@ def test_nonpersistent_mcp_skips_guard(
 
     entry.main()
 
-    assert events == ["server"]
+    assert events == ["guard", "server"]
 
 
 def test_guarded_live_refuses_breakaway_fallback(

@@ -1282,6 +1282,17 @@ def main():
             "Streamable HTTP transport."
         )
 
+    if sys.platform == "win32":
+        from contextor.mcp_backend_job import (
+            protect_host_owned_mcp,
+            protect_persistent_backend,
+        )
+
+        if role == "host-owned":
+            protect_host_owned_mcp()
+        else:
+            protect_persistent_backend()
+
     process_directory = (
         _process_directory_from_environment()
     )
@@ -1344,19 +1355,19 @@ def main():
             if cleanup_done:
                 return
 
-            cleanup_done = True
-
             try:
                 _shutdown_mcp_owned_processes(
                     process_directory,
                     os.getpid(),
                 )
-            finally:
+
                 if server_record is not None:
                     remove_record(
                         server_record
                     )
 
+                cleanup_done = True
+            finally:
                 if previous_registry is None:
                     os.environ.pop(
                         "CONTEXTOR_MCP_PROCESS_REGISTRY",

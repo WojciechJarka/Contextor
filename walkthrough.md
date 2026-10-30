@@ -1,272 +1,557 @@
-# CONTEXTOR PY315-R4F-1
+# CONTEXTOR PY315-R4F-2 — host-owned MCP Job guard
 
 ## PREFLIGHT
 
-Contextor MCP module discovery first: `tests.test_mcp_job_tree_isolated_windows`, canonical revision 939, `workspace_sync=verified` before edit. HEAD `dff0f6364d8ad509d0645c3d27c2e828738d9328`; worktree clean. Exact anchor counts: `def _read_pid(path):` = 1; existing `def test_isolated_backend_job_kills_unregistered_child_and_grandchild_but_not_live_or_unrelated(` = 1. Neither existing function changed.
+DIRECT_EVIDENCE: HEAD `539a8431b619140882f812ef804bef344b26f213`; clean worktree before edit. Contextor MCP module reads for the five relevant modules were revision 940 and `workspace_sync=verified`. Exact anchor counts before edit: four unique searches in `mcp_backend_job.py` each 1; `mcp_main.py` 1; two `mcp_server.py` searches each 1; existing entry test 1; two role-matrix signature searches each 1; `("owner.py", OWNER_CODE)` exactly 2. No drift.
 
-## EXACT_TEST_IMPLEMENTATION
+## EXACT_SEARCH_REPLACE_RESULTS
 
-Appended the exact supplied `test_venv_redirector_only_termination_closes_backend_job_tree` at lines 280-468 of `tests/test_mcp_job_tree_isolated_windows.py`. Production source unchanged. Test launches a private venv redirector, confirms distinct actual owner, captures creation-bound identities, terminates redirector only, asserts owner/child/grandchild gone while breakaway LIVE analogue and unrelated sentinel survive, then cleans private processes.
+All supplied replacements applied literally. Added the supplied new test file exactly. No production source outside the three allowlisted production files changed. Existing process registry, identity-bound termination, transport selection and venv launcher code were untouched.
 
-## REDIRECTOR_PID_AND_CREATION
+## PERSISTENT_BACKEND_NONREGRESSION
 
-The test captured and asserted a live creation-bound redirector identity internally. Its PID and creation number are **not emitted** by the exact supplied test. An external observation attempt read the actual owner PID 11288, but CIM returned no parent PID before the short test completed. Therefore numerical redirector PID/creation for this test is UNKNOWN; it would be incorrect to substitute R4E's separate probe value.
+CODE_PATH_PROVED: `protect_persistent_backend()` now delegates to the same process-local `_protect_mcp_server_job()`; the native Job limits and idempotent same-PID handle state remain in that installer. Both `mcp_main.main()` and direct `mcp_server.main()` select persistent protection for the persistent-backend role. Focused guard and Windows integration tests passed.
 
-## ACTUAL_OWNER_PID_AND_CREATION
+## HOST_OWNED_ENTRY_GUARD
 
-Direct external observation during an additional targeted run: actual owner PID 6416, `creation_time=134378748411564920`, state ALIVE, base Python image. In the first targeted run the owner PID artifact was 2964; in the regression run it was 15128. These runs must not be conflated.
+CODE_PATH_PROVED: Windows `mcp_main.main()` defaults to host-owned and installs its Job before importing `mcp_server`. The entry regression confirms guard-before-server ordering and refusal when installation fails. Existing role/transport validation in the server remains.
 
-## CHILD_AND_GRANDCHILD_IDENTITIES
+## DIRECT_MCP_SERVER_ENTRY_GUARD
 
-Same externally observed targeted run: child PID 11428, creation 134378748413677800; grandchild PID 6412, creation 134378748415786168. Both ALIVE at capture. The exact test subsequently asserted both gone after redirector termination. Separate regression run artifacts: child 8632, grandchild 2820; their creation numbers were not recorded.
+CODE_PATH_PROVED: direct `mcp_server.main()` installs the role-selected Job before process-directory and lifecycle setup. Two parameterized tests prove guard failure blocks both host-owned stdio and persistent HTTP lifecycle. The same-PID installer avoids a second Job when both entry paths invoke it.
 
-## REDIRECTOR_TERMINATION_RESULT
+## JOB_HANDLE_PROCESS_SCOPE
 
-CONTRACT_PROVED by passing test assertion: `terminate_or_confirm_registered_process(identities["redirector"])` returned true. Numerical redirector identity was retained by the test but not printed. No production process was targeted.
+CONTRACT_PROVED by focused tests: the shared installer retains one process-local handle and recognizes repeat calls in the same PID. `test_host_owned_wrapper_reuses_shared_job` confirms both public wrappers delegate to it. The earlier process-scope regression passed.
 
-## OWNER_AND_TREE_EXIT_RESULT
+## FAILED_CLEANUP_EVIDENCE
 
-CONTRACT_PROVED by passing test assertions: after redirector-only identity-bound termination and `redirector.wait(timeout=8)`, actual owner, child and grandchild were confirmed gone using the captured creation identities. This directly exercises the missing R4E boundary in an isolated test.
+CODE_PATH_PROVED: root record is removed and `cleanup_done` set only after `_shutdown_mcp_owned_processes()` succeeds. If cleanup raises, the exception propagates, root record remains, cleanup remains eligible for retry, and registry environment restoration still runs in `finally`. New failure test passed.
 
-## LIVE_ANALOGUE_SURVIVAL
+## REAL_WINDOWS_ROLE_MATRIX
 
-Same observed run: LIVE analogue PID 4100, creation 134378748417974748, ALIVE at capture. Passing test asserts it remained ALIVE after redirector termination. Cleanup then terminated it by identity.
+DIRECT_EVIDENCE: isolated Windows matrix executed persistent-backend and host-owned Jobs under normal and forced actual-owner exits, plus redirector-only termination for both roles. The integration subset `tests/test_mcp_job_tree_isolated_windows.py tests/test_live_job_object.py` passed all 16 cases. No production service was restarted or switched.
 
-## SENTINEL_SURVIVAL
+## REDIRECTOR_ONLY_HOST_OWNED_EXIT
 
-Same observed run: unrelated sentinel PID 7644, creation 134378748410702877, ALIVE at capture. Passing test asserts it remained ALIVE after redirector termination. Cleanup then terminated it. Regression run sentinel artifact PID 1236.
+CONTRACT PROVED by the passing host-owned redirector-only matrix case: terminating the captured venv redirector identity led to identity-confirmed exit of actual owner, child and grandchild. This is isolated test evidence, not loaded production runtime adoption.
 
-## PRIVATE_PROCESS_CLEANUP
+## BREAKAWAY_LIVE_ANALOGUE_SURVIVAL
 
-Both targeted and regression pytest processes exited 0. Test `finally` confirms each captured owner/child/grandchild/LIVE/redirector identity resolved; sentinel Popen was waited. No `private redirector probe cleanup unresolved` failure occurred. No existing Contextor, Codex, Antigravity, Desktop or production LIVE process was terminated.
+CONTRACT PROVED by the real Windows matrix: breakaway LIVE analogue remained alive after normal, forced and redirector-only owner shutdown in both roles; test cleanup subsequently terminated its private identity. Existing LIVE Job tests also passed.
+
+## UNRELATED_PROCESS_SURVIVAL
+
+CONTRACT PROVED by the real Windows matrix: unrelated sentinel remained alive after owner shutdown in both roles and was then cleaned by the test.
 
 ## TARGETED_TEST_RESULTS
 
-- Compile `tests/test_mcp_job_tree_isolated_windows.py`: PASS.
-- New test first: `1 passed, 2 deselected`.
-- Required regression subset: `13 passed`.
-- Additional identical new-test run for numerical creation identities: `1 passed, 2 deselected`.
-- Final additional run attempted external redirector parent observation: `1 passed, 2 deselected`; parent number remained unavailable. No full pytest.
+- Compile all six changed Python files: PASS.
+- Host-owned guard, existing guard and process-scope tests: 23 passed, 1 upstream Authlib deprecation warning.
+- Shared server mode, child cleanup failure evidence and Windows server cleanup: 38 passed, same warning.
+- Real Windows isolated Job matrix and LIVE Job tests: 16 passed.
+- Remaining child/identity/registered/backend-control regressions: 86 passed, same warning.
+- `git diff --check`: PASS. No full pytest.
 
 ## MCP_POST_CHANGE_AUDIT
 
-First read after edit: canonical revision 939, `workspace_sync=out_of_sync`. Subsequent Contextor MCP module read: revision 940, `workspace_sync=verified`, export degree 11. `get_symbol_implementation` resolved the new test at lines 280-468 with revision 940 and `workspace_sync=verified`. No `update_file` or restart.
+Transient MCP generation response on the first parallel audit: one module read returned a non-JSON generation message; the completed retry resolved. Final module reads: `contextor.mcp_backend_job`, `contextor.mcp_main`, `contextor.mcp_server`, `tests.test_mcp_host_owned_job_guard`, and `tests.test_mcp_job_tree_isolated_windows` all `workspace_sync=verified`, canonical revision 945–946 during successive watcher updates, no advisory warning on successful reads. New `protect_host_owned_mcp`, shared installer, and new cleanup regression resolved through `get_symbol_implementation` at revision 946 with verified sync. This is source indexing evidence, not loaded-code adoption.
 
 ## FILES_CHANGED
 
-`tests/test_mcp_job_tree_isolated_windows.py` only. `walkthrough.md` overwritten as report.
+- `contextor/mcp_backend_job.py`
+- `contextor/mcp_main.py`
+- `contextor/mcp_server.py`
+- `tests/test_mcp_backend_job_guard.py`
+- `tests/test_mcp_job_tree_isolated_windows.py`
+- `tests/test_mcp_host_owned_job_guard.py` (new)
+
+`walkthrough.md` overwritten as the report.
 
 ## FULL_DIFFS
 
 Full actual diff:
 
 ```diff
+diff --git a/contextor/mcp_backend_job.py b/contextor/mcp_backend_job.py
+index ee78b31..6174371 100644
+--- a/contextor/mcp_backend_job.py
++++ b/contextor/mcp_backend_job.py
+@@ -1,4 +1,4 @@
+-"""Windows process-tree ownership for the persistent MCP backend."""
++"""Windows Job Object ownership for MCP server processes."""
+ 
+ from __future__ import annotations
+ 
+@@ -101,8 +101,8 @@ def _kernel32() -> Any:
+     return kernel
+ 
+ 
+-def protect_persistent_backend() -> None:
+-    """Own backend descendants until the backend process exits."""
++def _protect_mcp_server_job() -> None:
++    """Own server descendants until the server process exits."""
+     global _active_handle
+     global _active_pid
+ 
+@@ -171,6 +171,16 @@ def protect_persistent_backend() -> None:
+     # Ownership authority remains exclusively in this process.
+ 
+ 
++def protect_persistent_backend() -> None:
++    """Protect a persistent backend before importing its MCP server."""
++    _protect_mcp_server_job()
++
++
++def protect_host_owned_mcp() -> None:
++    """Protect a host-owned MCP server and its normal descendants."""
++    _protect_mcp_server_job()
++
++
+ def backend_job_active_for_current_process() -> bool:
+     """Return true only for the process holding the backend Job."""
+     if sys.platform != "win32":
+@@ -242,6 +252,7 @@ def require_live_outside_backend_job(
+ __all__ = [
+     "BackendJobError",
+     "backend_job_active_for_current_process",
++    "protect_host_owned_mcp",
+     "protect_persistent_backend",
+     "require_live_outside_backend_job",
+ ]
+diff --git a/contextor/mcp_main.py b/contextor/mcp_main.py
+index 86a90cd..8b1d2a6 100644
+--- a/contextor/mcp_main.py
++++ b/contextor/mcp_main.py
+@@ -4,16 +4,21 @@ import sys
+ 
+ 
+ def main() -> None:
+-    if (
+-        sys.platform == "win32"
+-        and os.environ.get("CONTEXTOR_MCP_SERVER_ROLE")
+-        == "persistent-backend"
+-    ):
++    if sys.platform == "win32":
+         from contextor.mcp_backend_job import (
++            protect_host_owned_mcp,
+             protect_persistent_backend,
+         )
+ 
+-        protect_persistent_backend()
++        role = os.environ.get(
++            "CONTEXTOR_MCP_SERVER_ROLE",
++            "host-owned",
++        ).strip().lower()
++
++        if role == "persistent-backend":
++            protect_persistent_backend()
++        elif role == "host-owned":
++            protect_host_owned_mcp()
+ 
+     from contextor.mcp_server import main as run_server
+ 
+diff --git a/contextor/mcp_server.py b/contextor/mcp_server.py
+index c1ee7e5..2de3cc4 100644
+--- a/contextor/mcp_server.py
++++ b/contextor/mcp_server.py
+@@ -1282,6 +1282,17 @@ def main():
+             "Streamable HTTP transport."
+         )
+ 
++    if sys.platform == "win32":
++        from contextor.mcp_backend_job import (
++            protect_host_owned_mcp,
++            protect_persistent_backend,
++        )
++
++        if role == "host-owned":
++            protect_host_owned_mcp()
++        else:
++            protect_persistent_backend()
++
+     process_directory = (
+         _process_directory_from_environment()
+     )
+@@ -1344,19 +1355,19 @@ def main():
+             if cleanup_done:
+                 return
+ 
+-            cleanup_done = True
+-
+             try:
+                 _shutdown_mcp_owned_processes(
+                     process_directory,
+                     os.getpid(),
+                 )
+-            finally:
++
+                 if server_record is not None:
+                     remove_record(
+                         server_record
+                     )
+ 
++                cleanup_done = True
++            finally:
+                 if previous_registry is None:
+                     os.environ.pop(
+                         "CONTEXTOR_MCP_PROCESS_REGISTRY",
+diff --git a/tests/test_mcp_backend_job_guard.py b/tests/test_mcp_backend_job_guard.py
+index 7fc35f9..dcbc1a9 100644
+--- a/tests/test_mcp_backend_job_guard.py
++++ b/tests/test_mcp_backend_job_guard.py
+@@ -275,7 +275,7 @@ def test_mcp_entry_refuses_server_after_guard_failure(
+         entry.main()
+ 
+ 
+-def test_nonpersistent_mcp_skips_guard(
++def test_host_owned_mcp_installs_guard_before_server(
+     monkeypatch,
+ ):
+     events = []
+@@ -293,9 +293,14 @@ def test_nonpersistent_mcp_skips_guard(
+         guard,
+         "protect_persistent_backend",
+         lambda: pytest.fail(
+-            "nonpersistent MCP entered backend job"
++            "host-owned entry selected persistent protection"
+         ),
+     )
++    monkeypatch.setattr(
++        guard,
++        "protect_host_owned_mcp",
++        lambda: events.append("guard"),
++    )
+     monkeypatch.setattr(
+         server,
+         "main",
+@@ -304,7 +309,7 @@ def test_nonpersistent_mcp_skips_guard(
+ 
+     entry.main()
+ 
+-    assert events == ["server"]
++    assert events == ["guard", "server"]
+ 
+ 
+ def test_guarded_live_refuses_breakaway_fallback(
 diff --git a/tests/test_mcp_job_tree_isolated_windows.py b/tests/test_mcp_job_tree_isolated_windows.py
-index b63a4bb..e645e4c 100644
+index e645e4c..a58b82c 100644
 --- a/tests/test_mcp_job_tree_isolated_windows.py
 +++ b/tests/test_mcp_job_tree_isolated_windows.py
-@@ -276,3 +276,194 @@ def test_isolated_backend_job_kills_unregistered_child_and_grandchild_but_not_li
-         if unresolved:
+@@ -151,14 +151,26 @@ def _read_pid(path):
+         return None
+ 
+ 
++@pytest.mark.parametrize(
++    "job_role",
++    ["persistent-backend", "host-owned"],
++)
+ @pytest.mark.parametrize("shutdown", ["normal", "forced"])
+ def test_isolated_backend_job_kills_unregistered_child_and_grandchild_but_not_live_or_unrelated(
+-    tmp_path: Path, shutdown: str,
++    tmp_path: Path, shutdown: str, job_role: str,
+ ):
+     for name, code in (
+         ("leaf.py", LEAF_CODE),
+         ("child.py", CHILD_CODE),
+-        ("owner.py", OWNER_CODE),
++        (
++            "owner.py",
++            OWNER_CODE
++            if job_role == "persistent-backend"
++            else OWNER_CODE.replace(
++                "protect_persistent_backend",
++                "protect_host_owned_mcp",
++            ),
++        ),
+     ):
+         (tmp_path / name).write_text(code, encoding="utf-8")
+ 
+@@ -277,8 +289,13 @@ def test_isolated_backend_job_kills_unregistered_child_and_grandchild_but_not_li
              pytest.fail(f"isolated test-owned processes unresolved: {unresolved}")
  
-+
-+def test_venv_redirector_only_termination_closes_backend_job_tree(
-+    tmp_path: Path,
-+):
-+    """Prove cleanup behavior when only the venv launcher is terminated."""
-+    repo_root = Path(__file__).resolve().parents[1]
-+    venv_python = repo_root / ".venv" / "Scripts" / "python.exe"
-+
-+    assert venv_python.is_file()
-+
-+    for name, code in (
-+        ("leaf.py", LEAF_CODE),
-+        ("child.py", CHILD_CODE),
-+        ("owner.py", OWNER_CODE),
-+    ):
-+        (tmp_path / name).write_text(code, encoding="utf-8")
-+
-+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-+    env = os.environ.copy()
-+    env["PYTHONPATH"] = os.pathsep.join(
-+        filter(None, (str(repo_root), env.get("PYTHONPATH", "")))
-+    )
-+
-+    sentinel = subprocess.Popen(
-+        [
-+            sys._base_executable,
-+            str(tmp_path / "leaf.py"),
-+            str(tmp_path / "sentinel.pid"),
-+        ],
-+        stdin=subprocess.DEVNULL,
-+        stdout=subprocess.DEVNULL,
-+        stderr=subprocess.DEVNULL,
-+        creationflags=flags,
-+    )
-+
-+    redirector = None
-+    identities = {}
-+    try:
-+        redirector = subprocess.Popen(
-+            [
-+                str(venv_python),
-+                str(tmp_path / "owner.py"),
-+                str(tmp_path),
-+            ],
-+            cwd=str(repo_root),
-+            env=env,
-+            stdin=subprocess.DEVNULL,
-+            stdout=subprocess.DEVNULL,
-+            stderr=subprocess.PIPE,
-+            creationflags=flags,
-+        )
-+
-+        identities["redirector"] = _identity_record(redirector.pid)
-+
-+        assert _wait_until(
-+            lambda: (
-+                (tmp_path / "ready.json").is_file()
-+                or redirector.poll() is not None
-+            )
-+        ), "venv redirector readiness timeout"
-+
-+        if redirector.poll() is not None:
-+            detail = redirector.stderr.read().decode(
-+                "utf-8", errors="replace"
-+            )
-+            pytest.fail(
-+                f"venv redirector exited before readiness: {detail}"
-+            )
-+
-+        info = json.loads(
-+            (tmp_path / "ready.json").read_text(encoding="utf-8")
-+        )
-+
-+        assert redirector.pid != info["owner"], (
-+            "expected a distinct Windows venv redirector PID"
-+        )
-+
-+        assert _wait_until(
-+            lambda: (tmp_path / "child.json").is_file()
-+        )
-+        assert _wait_until(
-+            lambda: (tmp_path / "grandchild.pid").is_file()
-+        )
-+        assert _wait_until(
-+            lambda: (tmp_path / "live.pid").is_file()
-+        )
-+        assert _wait_until(
-+            lambda: (tmp_path / "sentinel.pid").is_file()
-+        )
-+
-+        child_info = json.loads(
-+            (tmp_path / "child.json").read_text(encoding="utf-8")
-+        )
-+
-+        assert child_info["pid"] == info["child"]
-+        assert child_info["grandchild_pid"] == info["grandchild"]
-+        assert _read_pid(tmp_path / "grandchild.pid") == info["grandchild"]
-+        assert _read_pid(tmp_path / "live.pid") == info["live"]
-+        assert _read_pid(tmp_path / "sentinel.pid") == sentinel.pid
-+
-+        for key, pid in (
-+            ("actual_owner", info["owner"]),
-+            ("child", info["child"]),
-+            ("grandchild", info["grandchild"]),
-+            ("live", info["live"]),
-+            ("sentinel", sentinel.pid),
-+        ):
-+            identities[key] = _identity_record(pid)
-+
-+        assert all(
-+            _recorded_identity_alive(record)
-+            for record in identities.values()
-+        )
-+
-+        assert registry.terminate_or_confirm_registered_process(
-+            identities["redirector"]
-+        ), "identity-bound redirector termination was not confirmed"
-+
-+        redirector.wait(timeout=8)
-+
-+        assert _wait_until(
-+            lambda: (
-+                _recorded_identity_gone(identities["actual_owner"])
-+                and _recorded_identity_gone(identities["child"])
-+                and _recorded_identity_gone(identities["grandchild"])
+ 
++@pytest.mark.parametrize(
++    "job_role",
++    ["persistent-backend", "host-owned"],
++)
+ def test_venv_redirector_only_termination_closes_backend_job_tree(
+     tmp_path: Path,
++    job_role: str,
+ ):
+     """Prove cleanup behavior when only the venv launcher is terminated."""
+     repo_root = Path(__file__).resolve().parents[1]
+@@ -289,7 +306,15 @@ def test_venv_redirector_only_termination_closes_backend_job_tree(
+     for name, code in (
+         ("leaf.py", LEAF_CODE),
+         ("child.py", CHILD_CODE),
+-        ("owner.py", OWNER_CODE),
++        (
++            "owner.py",
++            OWNER_CODE
++            if job_role == "persistent-backend"
++            else OWNER_CODE.replace(
++                "protect_persistent_backend",
++                "protect_host_owned_mcp",
 +            ),
-+            timeout=8,
-+        ), (
-+            "terminating the venv redirector left the actual "
-+            "backend Job owner or its descendants alive"
++        ),
+     ):
+         (tmp_path / name).write_text(code, encoding="utf-8")
+ 
+diff --git a/tests/test_mcp_host_owned_job_guard.py b/tests/test_mcp_host_owned_job_guard.py
+new file mode 100644
+index 0000000..d9442f6
+--- /dev/null
++++ b/tests/test_mcp_host_owned_job_guard.py
+@@ -0,0 +1,241 @@
++from __future__ import annotations
++
++from types import SimpleNamespace
++
++import pytest
++
++import contextor.mcp_backend_job as guard
++import contextor.mcp_main as entry
++import contextor.mcp_server as server
++
++
++def test_host_owned_wrapper_reuses_shared_job(
++    monkeypatch,
++):
++    calls = []
++
++    monkeypatch.setattr(
++        guard,
++        "_protect_mcp_server_job",
++        lambda: calls.append("shared"),
++    )
++
++    guard.protect_host_owned_mcp()
++    guard.protect_persistent_backend()
++
++    assert calls == ["shared", "shared"]
++
++
++def test_host_owned_entry_refuses_server_when_guard_fails(
++    monkeypatch,
++):
++    monkeypatch.setattr(
++        entry.sys,
++        "platform",
++        "win32",
++    )
++    monkeypatch.setenv(
++        "CONTEXTOR_MCP_SERVER_ROLE",
++        "host-owned",
++    )
++
++    def fail_guard():
++        raise guard.BackendJobError(
++            "host-owned Job installation failed"
 +        )
 +
-+        assert _recorded_identity_alive(
-+            identities["live"]
-+        ), "redirector termination killed the breakaway LIVE analogue"
++    monkeypatch.setattr(
++        guard,
++        "protect_host_owned_mcp",
++        fail_guard,
++    )
++    monkeypatch.setattr(
++        server,
++        "main",
++        lambda: pytest.fail(
++            "unprotected host-owned MCP started"
++        ),
++    )
 +
-+        assert _recorded_identity_alive(
-+            identities["sentinel"]
-+        ), "redirector termination killed the unrelated sentinel"
++    with pytest.raises(
++        guard.BackendJobError,
++        match="installation failed",
++    ):
++        entry.main()
 +
-+    finally:
-+        unresolved = []
 +
-+        for key in (
-+            "actual_owner",
-+            "child",
-+            "grandchild",
-+            "live",
-+        ):
-+            record = identities.get(key)
-+            if record is not None:
-+                if not registry.terminate_or_confirm_registered_process(
-+                    record
-+                ):
-+                    unresolved.append(key)
++@pytest.mark.parametrize(
++    "role,transport",
++    [
++        ("host-owned", "stdio"),
++        ("persistent-backend", "streamable-http"),
++    ],
++)
++def test_direct_server_entry_requires_job_before_lifecycle(
++    monkeypatch,
++    role,
++    transport,
++):
++    monkeypatch.setattr(
++        server.sys,
++        "platform",
++        "win32",
++    )
++    monkeypatch.setattr(
++        server.sys,
++        "stdout",
++        SimpleNamespace(
++            reconfigure=lambda **_kwargs: None
++        ),
++    )
++    monkeypatch.setattr(
++        server.sys,
++        "stderr",
++        SimpleNamespace(
++            reconfigure=lambda **_kwargs: None
++        ),
++    )
 +
-+        if redirector is not None:
-+            record = identities.get("redirector")
-+            if record is not None:
-+                if not registry.terminate_or_confirm_registered_process(
-+                    record
-+                ):
-+                    unresolved.append("redirector")
++    monkeypatch.setenv(
++        "CONTEXTOR_MCP_SERVER_ROLE",
++        role,
++    )
++    monkeypatch.setenv(
++        "CONTEXTOR_MCP_TRANSPORT",
++        transport,
++    )
++    monkeypatch.setattr(
++        server,
++        "_MCP_BOOTSTRAP_TRANSPORT",
++        transport,
++    )
 +
-+            try:
-+                redirector.wait(timeout=5)
-+            except subprocess.TimeoutExpired:
-+                if redirector.poll() is None:
-+                    redirector.terminate()
-+                try:
-+                    redirector.wait(timeout=5)
-+                except subprocess.TimeoutExpired:
-+                    unresolved.append("redirector_wait")
++    events = []
 +
-+            if redirector.stderr is not None:
-+                redirector.stderr.close()
++    def fail_guard():
++        events.append("guard")
++        raise guard.BackendJobError(
++            "direct entry Job installation failed"
++        )
 +
-+        if sentinel.poll() is None:
-+            sentinel.terminate()
++    selected = (
++        "protect_host_owned_mcp"
++        if role == "host-owned"
++        else "protect_persistent_backend"
++    )
++    monkeypatch.setattr(
++        guard,
++        selected,
++        fail_guard,
++    )
++    monkeypatch.setattr(
++        server,
++        "_process_directory_from_environment",
++        lambda: pytest.fail(
++            "lifecycle started without Job"
++        ),
++    )
 +
-+        try:
-+            sentinel.wait(timeout=5)
-+        except subprocess.TimeoutExpired:
-+            sentinel.kill()
-+            sentinel.wait(timeout=5)
++    with pytest.raises(
++        guard.BackendJobError,
++        match="direct entry",
++    ):
++        server.main()
 +
-+        if unresolved:
-+            pytest.fail(
-+                f"private redirector probe cleanup unresolved: {unresolved}"
-+            )
++    assert events == ["guard"]
 +
++
++def test_failed_host_owned_cleanup_preserves_root_record(
++    monkeypatch,
++    tmp_path,
++):
++    monkeypatch.setattr(
++        server.sys,
++        "platform",
++        "linux",
++    )
++    monkeypatch.setenv(
++        "CONTEXTOR_MCP_SERVER_ROLE",
++        "host-owned",
++    )
++    monkeypatch.setenv(
++        "CONTEXTOR_MCP_TRANSPORT",
++        "stdio",
++    )
++    monkeypatch.delenv(
++        "CONTEXTOR_MCP_PROCESS_REGISTRY",
++        raising=False,
++    )
++    monkeypatch.setattr(
++        server,
++        "_MCP_BOOTSTRAP_TRANSPORT",
++        "stdio",
++    )
++
++    root_record = tmp_path / "server-root.json"
++    actions = []
++
++    monkeypatch.setattr(
++        server,
++        "_process_directory_from_environment",
++        lambda: tmp_path,
++    )
++    monkeypatch.setattr(
++        server,
++        "_cleanup_orphaned_processes",
++        lambda directory: actions.append("orphan"),
++    )
++    monkeypatch.setattr(
++        server,
++        "_register_server_root",
++        lambda directory, role: root_record,
++    )
++
++    def fail_cleanup(*_args):
++        actions.append("cleanup")
++        raise RuntimeError(
++            "registered child cleanup unresolved"
++        )
++
++    monkeypatch.setattr(
++        server,
++        "_shutdown_mcp_owned_processes",
++        fail_cleanup,
++    )
++    monkeypatch.setattr(
++        server,
++        "remove_record",
++        lambda path: pytest.fail(
++            "failed cleanup discarded server root"
++        ),
++    )
++    monkeypatch.setattr(
++        server.atexit,
++        "register",
++        lambda callback: None,
++    )
++
++    async def fake_stdio():
++        actions.append("stdio")
++
++    monkeypatch.setattr(
++        server.mcp,
++        "run_stdio_async",
++        fake_stdio,
++    )
++
++    with pytest.raises(
++        RuntimeError,
++        match="cleanup unresolved",
++    ):
++        server.main()
++
++    assert actions == [
++        "orphan",
++        "stdio",
++        "cleanup",
++    ]
++    assert (
++        "CONTEXTOR_MCP_PROCESS_REGISTRY"
++        not in server.os.environ
++    )
 ```
 
 ## REMAINING_UNKNOWN
 
-Numerical PID and creation time of redirector in these exact pytest runs were not externally emitted. Production backend startup and host-owned MCP tree coverage remain untested here.
+Production MCP/Desktop loaded-code adoption, actual service startup and Python 3.15 launcher migration were not exercised. A user-controlled restart and fresh runtime identity/schema verification remain separate.
 
 ## FINAL_VERDICT
 
-`PASS_REDIRECTOR_CLEANUP_HOST_OWNED_GATE_OPEN` for the isolated redirector termination boundary. This verdict does not close host-owned tree parity or production restart gates.
+`PASS_HOST_OWNED_TREE_PARITY_RESTART_GATE_OPEN` for the exact source/test scope. No production restart performed.
 
