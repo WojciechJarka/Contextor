@@ -63,10 +63,12 @@ def test_acyclic_lease_import_contract():
         "(root_dir: str, layer_dir: str, log=None, progress_callback=None, "
         "additional_excludes: list[str] | None = None) -> str"
     )
-    assert str(inspect.signature(facade.ContextorFacade.analyze_single_file)) == (
+    assert str(inspect.signature(facade.ContextorFacade.analyze_single_file)).replace(
+        "typing.Any", "Any"
+    ) == (
         "(file_path: str, repo_root: str, log=None, progress_callback=None, "
         "additional_excludes: list[str] | None = None, "
-        "publication_result: dict[str, typing.Any] | None = None) -> str"
+        "publication_result: dict[str, Any] | None = None) -> str"
     )
 
 
