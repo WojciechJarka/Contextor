@@ -214,6 +214,75 @@ def test_verified_existing_authority_attaches_and_second_desktop_is_rejected(
         _stop(first)
 
 
+def test_concurrent_cold_start_has_one_real_live_authority(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    from concurrent.futures import ThreadPoolExecutor
+
+    repo = _repo(tmp_path, monkeypatch)
+    barrier = threading.Barrier(3)
+    clients = []
+
+    def attach():
+        barrier.wait(timeout=10)
+        return connect_or_start(
+            repo,
+            client_kind="protocol",
+            timeout=10,
+            cold_start_timeout=20,
+        )
+
+    try:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            futures = [pool.submit(attach) for _ in range(2)]
+            barrier.wait(timeout=10)
+            for future in futures:
+                clients.append(future.result(timeout=30))
+
+        first, second = clients
+
+        assert first.ping()["status"] == "ok"
+        assert second.ping()["status"] == "ok"
+
+        assert first.service_pid == second.service_pid
+        assert (
+            first.endpoint.service_instance_id
+            == second.endpoint.service_instance_id
+        )
+        assert (
+            first.endpoint.lease_generation
+            == second.endpoint.lease_generation
+        )
+        assert (
+            first.endpoint.fingerprint()
+            == second.endpoint.fingerprint()
+        )
+
+        identity = read_repository_identity(repo)
+        assert identity is not None
+
+        domain = RuntimeDomain.from_identity(
+            identity, mode="production"
+        )
+        manager = RuntimeLeaseManager(domain)
+        generation = manager.read_generation()
+
+        assert generation.status == "active"
+        assert generation.last_lease_generation == 1
+        assert manager.read_live_lease() is not None
+        assert endpoint_file(repo).is_file()
+
+    finally:
+        for client in clients:
+            _stop(client)
+
+        attached = connect(repo)
+        if attached is not None:
+            _stop(attached)
+
+    assert not endpoint_file(repo).exists()
+
+
 def test_protocol_attach_ignores_broken_desktop_claim_storage_and_desktop_admission_fails(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):

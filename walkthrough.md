@@ -1,93 +1,150 @@
-# CONTEXTOR PY315-M3B — Windows venv redirector cross-version test
+# CONTEXTOR PY315-M3C-R1 — real LIVE single-owner concurrency certification
 
 ## PREFLIGHT
 
-DIRECT_EVIDENCE: Contextor MCP was used first. It returned the complete `test_venv_redirector_only_termination_closes_backend_job_tree` implementation and `_protect_mcp_server_job` implementation, both at canonical revision 957 with `workspace_sync=verified`, fresh state, and no advisory warning. HEAD was `13993e6ddd0fc866b779faad36a3f75893d2d1dc`; only pre-existing worktree modification was `walkthrough.md`. The exact SEARCH occurred once. Lab Python was 3.15.2, production `.venv` Python was 3.10.9, and lab `pip check` reported no broken requirements.
+DIRECT_EVIDENCE: Contextor MCP was queried first. `tests.test_live_authority_bootstrap` was fresh at canonical revision 958 with `workspace_sync=verified` before the edit. Contextor returned exact implementations for the insertion target, `_repo`, `_stop`, and both existing desktop admission tests. HEAD was `6f1003ef2d2340d575bb979787920005b41016cb`; only pre-existing worktree modification was `walkthrough.md`. The insertion anchor occurred once. Lab Python was 3.15.2, production `.venv` Python was 3.10.9, and lab `pip check` passed.
 
-## EXACT_TEST_PATCH
+## SOURCE_EVIDENCE
 
-Applied the supplied test-only `CONTEXTOR_TEST_VENV_PYTHON` override at the unique anchor. When unset, the original repository `.venv/Scripts/python.exe` path remains selected. No production source or other test was changed. All existing redirector/owner distinctness, descendant, survival, identity, and cleanup assertions remain.
+CODE_PATH_PROVED: `_repo` creates a `tmp_path` repository and sets cache/state beneath `tmp_path`; `tests/conftest.py` isolates the registry beneath `tmp_path`. `connect_or_start` launches the real LIVE child through the calling interpreter's `sys.executable`, uses an exclusive startup lock, and verifies an existing endpoint against repository and authority identity. `_stop` requests shutdown and polls for disconnection. The selected cross-process lease test uses two spawned processes and asserts exactly one winner and one `LeaseAlreadyHeld`; it does not launch a LIVE service.
 
-## PY_COMPILE
+## EXACT_TEST_ADDITION
 
-PASS: Lab Python 3.15 `py_compile.compile(..., doraise=True)` wrote bytecode to `C:\Temp\Contextor_PY315_M2_Lab\test_mcp_job_tree_isolated_windows.pyc`, outside the repository.
+Inserted the architect-supplied complete `test_concurrent_cold_start_has_one_real_live_authority` immediately before `test_protocol_attach_ignores_broken_desktop_claim_storage_and_desktop_admission_fails`. Existing tests and production source were untouched. Python 3.15 `py_compile` passed with `.pyc` written outside the repository to `C:\Temp\Contextor_PY315_M2_Lab\test_live_authority_bootstrap.pyc`.
 
-## PY315_REDIRECTOR_RESULTS
+## CONCURRENT_COLD_START
 
-PASS: With the override set only in the test command process to `C:\Temp\Contextor_PY315_M2_Lab\venv\Scripts\python.exe`, the exact test returned `2 passed in 2.27s`, exit code 0. Both `persistent-backend` and `host-owned` variants ran. The lab venv executable is Python 3.15.2 and its `sys._base_executable` is `C:\Python315\python.exe`.
+PASS: The new test uses a three-party barrier to release two `connect_or_start` calls concurrently. Both returned authenticated clients and equal service PID, service instance ID, lease generation, and endpoint fingerprint. It asserted an active generation 1, live lease, and endpoint during the test. It passed alone on Python 3.15 (`1 passed in 9.22s`) and again in the four-test gate. After shutdown, retained Python 3.15 gate evidence shows one repository identity `ctx_e295a6f5`, service PID 14700, start identity `134379338813945673`, generation 1, final status `released`, and read-only process state `dead`.
 
-## PY310_REDIRECTOR_RESULTS
+## EXISTING_DESKTOP_ADMISSION_TESTS
 
-PASS: In a separate command process with `CONTEXTOR_TEST_VENV_PYTHON` removed, production Python 3.10 ran the exact same two variants using the original repository `.venv`: `2 passed in 2.37s`, exit code 0. The persistent user/system environment was not modified.
+PASS: `test_verified_existing_authority_attaches_and_second_desktop_is_rejected` and `test_protocol_first_authority_has_single_durable_desktop_claim` passed in the Python 3.15 four-test gate. The first retained real LIVE service PID was 8440 with repo ID `ctx_50cb4a7d`, start identity `134379338894815284`, final `released`, and dead postcheck. The second retained final service PID was 1508 with repo ID `ctx_d163ad7b`, start identity `134379339017985423`, final generation 2 and `released`; it was dead at postcheck. The second test intentionally starts a successor generation after shutdown, so final generation 2 is expected.
 
-## REDIRECTOR_AND_OWNER_IDENTITIES
+## CROSS_PROCESS_LEASE_ARBITRATION
 
-CONTRACT_PROVED by the passing test: `_identity_record` verifies positive creation time and executable image for the redirector and actual owner; `assert redirector.pid != info["owner"]` verifies distinct PIDs. The override path selects the lab Python 3.15 venv redirector; the `owner.py` script is launched through that interpreter. The test does not record owner `sys.version` or redirector PID to a persistent file, so those exact runtime values are not independently available after exit. The lab test's in-memory identity assertions passed.
+PASS: `tests/live_state/test_runtime_lease.py::test_cross_process_acquisitions_have_exactly_one_winner` passed. Its source asserts two spawned process exit codes zero, one `winner`, and one `LeaseAlreadyHeld`. Its separate synthetic test-domain lease artifact remains `active` with recorded PID 14616 and synthetic start identity `child-1`; that PID was `dead` at postcheck. This artifact is a lease-arbitration fixture, not an uncleaned LIVE service. No endpoint was left in that test directory.
 
-The subsequent Python 3.10 run reused `--basetemp`, replacing the first run's external PID files. Its retained `ready.json` evidence is:
+## PY315_FOUR_TEST_GATE
 
-| Case | Actual owner PID | Child PID | Grandchild PID | LIVE PID | Sentinel PID |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| 0 | 8524 | 14112 | 8288 | 15652 | 11388 |
-| 1 | 14100 | 11876 | 12260 | 2204 | 15308 |
+PASS: The exact new test plus three specified existing tests ran with lab Python and `-q -rs -p no:cacheprovider`, `PYTHONDONTWRITEBYTECODE=1`, and external `--basetemp C:\Temp\Contextor_PY315_M2_Lab\pytest-m3c-r1`: `4 passed in 30.40s`, exit code 0.
 
-Read-only `probe_process_identity` after the Python 3.10 run returned `dead` for every PID in the table. Lab-run PID values were not preserved across the second run; its test itself completed all identity-bound assertions and cleanup.
+## PY310_REGRESSION
 
-## JOB_DESCENDANT_TERMINATION
+PASS: The new single test ran once with production Python 3.10 and separate external `--basetemp C:\Temp\Contextor_PY315_M2_Lab\pytest-m3c-r1-py310`: `1 passed in 7.77s`, exit code 0. Its retained repo ID was `ctx_df11c285`, service PID 9668, start identity `134379339311050199`, generation 1, final `released`, dead process, no endpoint, and no live lease.
 
-CONTRACT_PROVED by four passing variants: after identity-bound redirector termination, the test waited for the recorded actual owner, child, and grandchild identities to be gone. This includes both job roles on each Python version.
+## LIVE_SERVICE_IDENTITIES
 
-## BREAKAWAY_SURVIVAL
+DIRECT_EVIDENCE: Retained generation metadata after the four-test Python 3.15 gate identified real LIVE services for the new concurrency test (PID 14700), verified existing authority test (PID 8440), and protocol-first test's final generation (PID 1508). Their repo IDs and start identities are listed above. The initial predecessor service in the protocol-first test was not retained as a separate generation artifact, but the test's assertions and subsequent successful generation 2 prove its lifecycle contract. The single-test Python 3.15 run was audited before the gate replaced its `--basetemp`: PID 9596, start identity `134379338549102640`, repo ID `ctx_435ae7d8`, generation 1, `released`, dead. The Python 3.10 run's PID 9668 is separately retained.
 
-CONTRACT_PROVED by four passing variants: the recorded breakaway LIVE analogue was alive after redirector and Job owner termination, before the test's `finally` cleanup.
+## ENDPOINT_AND_LEASE_CLEANUP
 
-## SENTINEL_SURVIVAL
-
-CONTRACT_PROVED by four passing variants: the unrelated sentinel was alive after redirector and Job owner termination, before its `finally` cleanup.
-
-## PROCESS_CLEANUP
-
-CONTRACT_PROVED: The test's `finally` block applies identity-bound `terminate_or_confirm_registered_process` to actual owner, child, grandchild, LIVE analogue, and redirector, then terminates/waits for the sentinel; unresolved cleanup would fail the test. All four variants passed. DIRECT_EVIDENCE: all ten retained Python 3.10 owner/child/grandchild/LIVE/sentinel PIDs were `dead` at postcheck. A read-only Win32 process query found no Python process with the selected test `--basetemp` path in its command line. Exact lab-run PIDs are UNKNOWN because pytest replaced its temp directory on the second run; no unrelated process was terminated during postcheck.
+DIRECT_EVIDENCE: Following the standalone Python 3.15 run, generation was `released`, PID 9596 was dead, and no endpoint or live lease remained. Following the four-test gate, all three real LIVE generation artifacts were `released`, PIDs 14700, 8440, and 1508 were dead, and no LIVE endpoint remained. The only retained lease was the deliberately active synthetic cross-process arbitration fixture with a dead recorded PID; it is not associated with a running LIVE endpoint. Following the Python 3.10 regression, generation was `released`, PID 9668 was dead, and no endpoint or live lease remained. Read-only process listing found no Python command line referencing either M3C-R1 temp tree. No process was terminated during postcheck.
 
 ## PRODUCTION_ISOLATION
 
-Postcheck: lab Python remained 3.15.2, production Python remained 3.10.9, and lab `pip check` still passed. Git showed only the specified test and `walkthrough.md` modified. No production source, dependencies, launchers, autostart, backend, or LIVE state was changed; no restart, `update_file`, or commit occurred. The test terminated only its own synthetic processes.
+Lab remained Python 3.15.2; production `.venv` remained Python 3.10.9; lab `pip check` still passed. Git showed only the specified test and this report modified. No backend or production LIVE restart, production configuration/dependency change, `update_file`, commit, or full suite occurred. All test repositories/cache/state/registry resources were under external `--basetemp` roots.
 
-## MCP_POST_CHANGE_AUDIT
+## MCP_POSTCHANGE_AUDIT
 
-DIRECT_EVIDENCE: Read-only Contextor module context for `tests.test_mcp_job_tree_isolated_windows` returned canonical revision 958, `workspace_sync=verified`, `canonical_state=fresh`, `provenance=live`, and no advisory warning. This establishes current source/index synchronization, not a production interpreter switch.
+BLOCKED: Read-only Contextor MCP module context for the edited `tests.test_live_authority_bootstrap` returned `canonical_revision=958`, `canonical_state=fresh`, `workspace_sync=out_of_sync`, and advisory warning `Target file on disk has been modified since canonical state revision was generated.` The same result repeated after a short wait. Thus the required post-change `workspace_sync=verified` was not obtained. The task forbids `update_file`; no manual sync or restart was performed. Test PASS is direct runtime evidence for the isolated tests, but does not satisfy this separate freshness gate.
 
 ## FILES_CHANGED
 
-- `tests/test_mcp_job_tree_isolated_windows.py`
+- `tests/test_live_authority_bootstrap.py`
 
-`walkthrough.md` is the report and is excluded from source/test diff accounting.
+`walkthrough.md` is the required report and excluded from source/test diff accounting.
 
 ## FULL_DIFFS
 
-### tests/test_mcp_job_tree_isolated_windows.py — complete actual diff
+### tests/test_live_authority_bootstrap.py — complete actual diff
 
 ```diff
-diff --git a/tests/test_mcp_job_tree_isolated_windows.py b/tests/test_mcp_job_tree_isolated_windows.py
-index a58b82c..b058440 100644
---- a/tests/test_mcp_job_tree_isolated_windows.py
-+++ b/tests/test_mcp_job_tree_isolated_windows.py
-@@ -299,7 +299,12 @@ def test_venv_redirector_only_termination_closes_backend_job_tree(
+diff --git a/tests/test_live_authority_bootstrap.py b/tests/test_live_authority_bootstrap.py
+index 706a8fb..767a505 100644
+--- a/tests/test_live_authority_bootstrap.py
++++ b/tests/test_live_authority_bootstrap.py
+@@ -214,6 +214,75 @@ def test_verified_existing_authority_attaches_and_second_desktop_is_rejected(
+         _stop(first)
+ 
+ 
++def test_concurrent_cold_start_has_one_real_live_authority(
++    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
++):
++    from concurrent.futures import ThreadPoolExecutor
++
++    repo = _repo(tmp_path, monkeypatch)
++    barrier = threading.Barrier(3)
++    clients = []
++
++    def attach():
++        barrier.wait(timeout=10)
++        return connect_or_start(
++            repo,
++            client_kind="protocol",
++            timeout=10,
++            cold_start_timeout=20,
++        )
++
++    try:
++        with ThreadPoolExecutor(max_workers=2) as pool:
++            futures = [pool.submit(attach) for _ in range(2)]
++            barrier.wait(timeout=10)
++            for future in futures:
++                clients.append(future.result(timeout=30))
++
++        first, second = clients
++
++        assert first.ping()["status"] == "ok"
++        assert second.ping()["status"] == "ok"
++
++        assert first.service_pid == second.service_pid
++        assert (
++            first.endpoint.service_instance_id
++            == second.endpoint.service_instance_id
++        )
++        assert (
++            first.endpoint.lease_generation
++            == second.endpoint.lease_generation
++        )
++        assert (
++            first.endpoint.fingerprint()
++            == second.endpoint.fingerprint()
++        )
++
++        identity = read_repository_identity(repo)
++        assert identity is not None
++
++        domain = RuntimeDomain.from_identity(
++            identity, mode="production"
++        )
++        manager = RuntimeLeaseManager(domain)
++        generation = manager.read_generation()
++
++        assert generation.status == "active"
++        assert generation.last_lease_generation == 1
++        assert manager.read_live_lease() is not None
++        assert endpoint_file(repo).is_file()
++
++    finally:
++        for client in clients:
++            _stop(client)
++
++        attached = connect(repo)
++        if attached is not None:
++            _stop(attached)
++
++    assert not endpoint_file(repo).exists()
++
++
+ def test_protocol_attach_ignores_broken_desktop_claim_storage_and_desktop_admission_fails(
+     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
  ):
-     """Prove cleanup behavior when only the venv launcher is terminated."""
-     repo_root = Path(__file__).resolve().parents[1]
--    venv_python = repo_root / ".venv" / "Scripts" / "python.exe"
-+    override_python = os.environ.get("CONTEXTOR_TEST_VENV_PYTHON")
-+    venv_python = (
-+        Path(override_python)
-+        if override_python is not None
-+        else repo_root / ".venv" / "Scripts" / "python.exe"
-+    )
- 
-     assert venv_python.is_file()
- 
 ```
+
+## REMAINING_UNKNOWN
+
+Whether the Desktop watcher will ingest the edited test and advance Contextor's canonical revision; the mandatory post-change workspace sync is currently out of sync. Production LIVE adoption of Python 3.15 was outside scope.
 
 ## FINAL_VERDICT
 
-`PASS_PY315_M3B`. STOP.
+`BLOCKED_WITH_EXACT_EVIDENCE`: focused Python 3.15 and 3.10 tests and real LIVE cleanup passed, but the mandatory Contextor post-change `workspace_sync=verified` gate did not. STOP.
