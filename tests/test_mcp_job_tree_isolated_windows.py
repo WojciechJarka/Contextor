@@ -299,7 +299,12 @@ def test_venv_redirector_only_termination_closes_backend_job_tree(
 ):
     """Prove cleanup behavior when only the venv launcher is terminated."""
     repo_root = Path(__file__).resolve().parents[1]
-    venv_python = repo_root / ".venv" / "Scripts" / "python.exe"
+    override_python = os.environ.get("CONTEXTOR_TEST_VENV_PYTHON")
+    venv_python = (
+        Path(override_python)
+        if override_python is not None
+        else repo_root / ".venv" / "Scripts" / "python.exe"
+    )
 
     assert venv_python.is_file()
 

@@ -1,77 +1,93 @@
-# CONTEXTOR PY315-M2-R4 — async watcher test synchronization
+# CONTEXTOR PY315-M3B — Windows venv redirector cross-version test
 
 ## PREFLIGHT
 
-DIRECT_EVIDENCE: Contextor MCP was used first. `tests.test_live_watcher_watchdog` and `contextor.core.live_state.watcher` were fresh at canonical revision 956 with `workspace_sync=verified`. Contextor returned the complete test function and watcher source ranges. HEAD was `f0fc80c1f71bb08001380bcdcc0f2a6bd00d11a9`; the sole pre-existing worktree modification was `walkthrough.md`. The prescribed SEARCH occurred exactly once.
+DIRECT_EVIDENCE: Contextor MCP was used first. It returned the complete `test_venv_redirector_only_termination_closes_backend_job_tree` implementation and `_protect_mcp_server_job` implementation, both at canonical revision 957 with `workspace_sync=verified`, fresh state, and no advisory warning. HEAD was `13993e6ddd0fc866b779faad36a3f75893d2d1dc`; only pre-existing worktree modification was `walkthrough.md`. The exact SEARCH occurred once. Lab Python was 3.15.2, production `.venv` Python was 3.10.9, and lab `pip check` reported no broken requirements.
 
-## ASYNC_CONTRACT_EVIDENCE
+## EXACT_TEST_PATCH
 
-CODE_PATH_PROVED: `DesktopLiveWatcher.poll_once()` calls `submit_update_file`, records an accepted `job_id` in `_inflight_updates`, and returns reconciled completions from `_poll_inflight_updates()`. An accepted but unfinished update can therefore yield `[]`. The test starts `CanonicalLiveServer` and uses manual `_enqueue_path`; it does not start a native watchdog Observer. The existing recovery phase already used a bounded polling wait.
-
-## EXACT_PATCH
-
-Replaced the first immediate `watcher.poll_once()` assertion with the supplied 5-second polling loop and 10-ms sleep. The existing recovery wait, event order, statuses, syntax/recovery assertions, and diagnostics remain intact. No source or other test file changed.
+Applied the supplied test-only `CONTEXTOR_TEST_VENV_PYTHON` override at the unique anchor. When unset, the original repository `.venv/Scripts/python.exe` path remains selected. No production source or other test was changed. All existing redirector/owner distinctness, descendant, survival, identity, and cleanup assertions remain.
 
 ## PY_COMPILE
 
-PASS: Python 3.15 `py_compile.compile(..., doraise=True)` wrote its `.pyc` outside the repository to `C:\Temp\Contextor_PY315_M2_Lab\test_live_watcher_watchdog.pyc`.
+PASS: Lab Python 3.15 `py_compile.compile(..., doraise=True)` wrote bytecode to `C:\Temp\Contextor_PY315_M2_Lab\test_mcp_job_tree_isolated_windows.pyc`, outside the repository.
 
-## PY315_SINGLE_TEST
+## PY315_REDIRECTOR_RESULTS
 
-PASS: `test_syntax_error_and_recovery_contract_survives_watchdog_adapter` — `1 passed in 2.72s`.
+PASS: With the override set only in the test command process to `C:\Temp\Contextor_PY315_M2_Lab\venv\Scripts\python.exe`, the exact test returned `2 passed in 2.27s`, exit code 0. Both `persistent-backend` and `host-owned` variants ran. The lab venv executable is Python 3.15.2 and its `sys._base_executable` is `C:\Python315\python.exe`.
 
-## PY315_FIVE_REPETITIONS
+## PY310_REDIRECTOR_RESULTS
 
-PASS: Five independent runs of that exact test, each `1 passed` (2.14s, 1.71s, 1.65s, 2.03s, 1.85s). All returned exit code 0.
+PASS: In a separate command process with `CONTEXTOR_TEST_VENV_PYTHON` removed, production Python 3.10 ran the exact same two variants using the original repository `.venv`: `2 passed in 2.37s`, exit code 0. The persistent user/system environment was not modified.
 
-## PY310_SINGLE_TEST
+## REDIRECTOR_AND_OWNER_IDENTITIES
 
-PASS: Production Python 3.10 environment ran the exact test once — `1 passed in 1.23s`. The production environment was not changed.
+CONTRACT_PROVED by the passing test: `_identity_record` verifies positive creation time and executable image for the redirector and actual owner; `assert redirector.pid != info["owner"]` verifies distinct PIDs. The override path selects the lab Python 3.15 venv redirector; the `owner.py` script is launched through that interpreter. The test does not record owner `sys.version` or redirector PID to a persistent file, so those exact runtime values are not independently available after exit. The lab test's in-memory identity assertions passed.
 
-## PY315_FIVE_MODULE_SUITE
+The subsequent Python 3.10 run reused `--basetemp`, replacing the first run's external PID files. Its retained `ready.json` evidence is:
 
-PASS: The five specified M2 modules ran on the lab Python 3.15 with `-q -rs -p no:cacheprovider`, `PYTHONDONTWRITEBYTECODE=1`, `CONTEXTOR_PYTHON_3_10=C:\Temp\Contextor_Repo\.venv\Scripts\python.exe`, and `--basetemp C:\Temp\Contextor_PY315_M2_Lab\pytest-tmp`. Result: `156 passed, 64 skipped in 24.30s`; exit code 0.
+| Case | Actual owner PID | Child PID | Grandchild PID | LIVE PID | Sentinel PID |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 0 | 8524 | 14112 | 8288 | 15652 | 11388 |
+| 1 | 14100 | 11876 | 12260 | 2204 | 15308 |
 
-## SKIP_REASONS
+Read-only `probe_process_identity` after the Python 3.10 run returned `dead` for every PID in the table. Lab-run PID values were not preserved across the second run; its test itself completed all identity-bound assertions and cleanup.
 
-Exactly 64 optional interpreter skips remain: 16 each for unavailable CPython 3.11, 3.12, 3.13, and 3.14 at `tests/test_cycle_semantics_namespace_cycle_parity.py:171`, each marked `NOT_COVERED`.
+## JOB_DESCENDANT_TERMINATION
+
+CONTRACT_PROVED by four passing variants: after identity-bound redirector termination, the test waited for the recorded actual owner, child, and grandchild identities to be gone. This includes both job roles on each Python version.
+
+## BREAKAWAY_SURVIVAL
+
+CONTRACT_PROVED by four passing variants: the recorded breakaway LIVE analogue was alive after redirector and Job owner termination, before the test's `finally` cleanup.
+
+## SENTINEL_SURVIVAL
+
+CONTRACT_PROVED by four passing variants: the unrelated sentinel was alive after redirector and Job owner termination, before its `finally` cleanup.
+
+## PROCESS_CLEANUP
+
+CONTRACT_PROVED: The test's `finally` block applies identity-bound `terminate_or_confirm_registered_process` to actual owner, child, grandchild, LIVE analogue, and redirector, then terminates/waits for the sentinel; unresolved cleanup would fail the test. All four variants passed. DIRECT_EVIDENCE: all ten retained Python 3.10 owner/child/grandchild/LIVE/sentinel PIDs were `dead` at postcheck. A read-only Win32 process query found no Python process with the selected test `--basetemp` path in its command line. Exact lab-run PIDs are UNKNOWN because pytest replaced its temp directory on the second run; no unrelated process was terminated during postcheck.
+
+## PRODUCTION_ISOLATION
+
+Postcheck: lab Python remained 3.15.2, production Python remained 3.10.9, and lab `pip check` still passed. Git showed only the specified test and `walkthrough.md` modified. No production source, dependencies, launchers, autostart, backend, or LIVE state was changed; no restart, `update_file`, or commit occurred. The test terminated only its own synthetic processes.
 
 ## MCP_POST_CHANGE_AUDIT
 
-DIRECT_EVIDENCE: Contextor module context for `tests.test_live_watcher_watchdog` returned canonical revision 957, `canonical_state=fresh`, `workspace_sync=verified`, `provenance=live`, and no advisory warning. Git status showed only `tests/test_live_watcher_watchdog.py` and the report modified. No `update_file`, restart, dependency change, or commit occurred.
+DIRECT_EVIDENCE: Read-only Contextor module context for `tests.test_mcp_job_tree_isolated_windows` returned canonical revision 958, `workspace_sync=verified`, `canonical_state=fresh`, `provenance=live`, and no advisory warning. This establishes current source/index synchronization, not a production interpreter switch.
 
 ## FILES_CHANGED
 
-- `tests/test_live_watcher_watchdog.py`
+- `tests/test_mcp_job_tree_isolated_windows.py`
 
-`walkthrough.md` was overwritten as the required report and is excluded from source/test diff accounting.
+`walkthrough.md` is the report and is excluded from source/test diff accounting.
 
 ## FULL_DIFFS
 
-### tests/test_live_watcher_watchdog.py — complete actual diff
+### tests/test_mcp_job_tree_isolated_windows.py — complete actual diff
 
 ```diff
-diff --git a/tests/test_live_watcher_watchdog.py b/tests/test_live_watcher_watchdog.py
-index 1ecb2f2..c421cc4 100644
---- a/tests/test_live_watcher_watchdog.py
-+++ b/tests/test_live_watcher_watchdog.py
-@@ -233,7 +233,13 @@ def test_syntax_error_and_recovery_contract_survives_watchdog_adapter(tmp_path):
+diff --git a/tests/test_mcp_job_tree_isolated_windows.py b/tests/test_mcp_job_tree_isolated_windows.py
+index a58b82c..b058440 100644
+--- a/tests/test_mcp_job_tree_isolated_windows.py
++++ b/tests/test_mcp_job_tree_isolated_windows.py
+@@ -299,7 +299,12 @@ def test_venv_redirector_only_termination_closes_backend_job_tree(
+ ):
+     """Prove cleanup behavior when only the venv launcher is terminated."""
+     repo_root = Path(__file__).resolve().parents[1]
+-    venv_python = repo_root / ".venv" / "Scripts" / "python.exe"
++    override_python = os.environ.get("CONTEXTOR_TEST_VENV_PYTHON")
++    venv_python = (
++        Path(override_python)
++        if override_python is not None
++        else repo_root / ".venv" / "Scripts" / "python.exe"
++    )
  
-     try:
-         watcher._enqueue_path(str(target))
--        assert watcher.poll_once() == [str(target.resolve())]
-+        syntax_updated = []
-+        syntax_deadline = time.monotonic() + 5.0
-+        while time.monotonic() < syntax_deadline and not syntax_updated:
-+            syntax_updated = watcher.poll_once()
-+            if not syntax_updated:
-+                time.sleep(0.01)
-+        assert syntax_updated == [str(target.resolve())]
+     assert venv_python.is_file()
  
-         target.write_text("def repaired():\n    return 1\n", encoding="utf-8")
-         watcher._enqueue_path(str(target))
 ```
 
 ## FINAL_VERDICT
 
-`PASS_PY315_M2_TARGETED`. STOP; await `proceduj`.
+`PASS_PY315_M3B`. STOP.
