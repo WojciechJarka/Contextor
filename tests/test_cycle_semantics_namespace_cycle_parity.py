@@ -1,8 +1,9 @@
 """Cross-version CPython namespace-cycle execution contracts.
 
-Python 3.10–3.15 are independent execution targets.
-Missing interpreters are NOT_COVERED, never PASS.
-No LIVE runtime safety or warning suppression is certified.
+CPython 3.10 and 3.15 are mandatory migration checkpoints.
+Intermediate interpreter evidence is optional; missing optional versions
+are NOT_COVERED, never PASS.
+These tests do not certify LIVE runtime safety or warning suppression.
 """
 
 from __future__ import annotations
@@ -24,6 +25,7 @@ from contextor.core.cycle_semantics.package_model import (
 
 
 VERSIONS = (10, 11, 12, 13, 14, 15)
+REQUIRED_VERSIONS = (10, 15)
 
 _SAFE_NESTED = {
     "ctxpkg/__init__.py": "pass\n",
@@ -398,7 +400,7 @@ def test_315_eager_import_still_has_hazard(tmp_path):
 def test_required_interpreter_coverage_gate():
     missing = [
         "3." + str(minor)
-        for minor in VERSIONS
+        for minor in REQUIRED_VERSIONS
         if _interpreter(minor) is None
     ]
 

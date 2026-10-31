@@ -732,11 +732,11 @@ def test_p0_rejects_package_assessment_disguised_as_flat(tmp_path, isolated_dirs
     assert result[0].reason == "INCOMPLETE_MEMBER_ENTRY_ASSESSMENTS"
 
 
-def test_seventeen_selected_modules_fail_before_capture(tmp_path, isolated_dirs):
+def test_two_hundred_fifty_seven_selected_modules_fail_before_capture(tmp_path, isolated_dirs):
     sources = {"a.py": "import b\n" + "".join(
-        f"import m{i:02d}\n" for i in range(15)
+        f"import m{i:02d}\n" for i in range(255)
     ), "b.py": "import a\n"}
-    sources.update({f"m{i:02d}.py": "pass\n" for i in range(15)})
+    sources.update({f"m{i:02d}.py": "pass\n" for i in range(255)})
     root = write_synthetic_repository(tmp_path / "repo", sources)
     index, graph = _indexed(root)
     plan = plan_original_worker_reindex(index, graph.hard_edges)

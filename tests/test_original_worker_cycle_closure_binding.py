@@ -111,7 +111,7 @@ def test_p1d2b_t06_nonindexed_reachable_module_rejected(tmp_path, isolated_dirs)
 
 def test_p1d2b_t07_closure_above_selection_budget_rejected(tmp_path, isolated_dirs):
     index = _index(_repo(tmp_path), "a", "b", "helper")
-    graph = {"a": {"a", *(f"x{i}" for i in range(16))}}
+    graph = {"a": {"a", *(f"x{i}" for i in range(256))}}
     result = assess_original_worker_cycle_closure(index, graph)
     assert result.reason == "CLOSURE_MODULE_LIMIT"
     assert result.source_snapshots == {}

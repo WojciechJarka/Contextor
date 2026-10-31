@@ -237,7 +237,7 @@ def test_p1d2g_t05_oversized_closure_skips_second_index(
         b"import helper",
     ]
 
-    for number in range(14):
+    for number in range(254):
         module_id = f"x{number}"
 
         (root / f"{module_id}.py").write_bytes(

@@ -3223,6 +3223,9 @@ def test_git_never_inherits_mcp_stdin_and_unregisters_after_exit(tmp_path, monke
         def communicate(self):
             return "abc123\n", ""
 
+        def poll(self):
+            return self.returncode
+
     registered = []
     removed = []
 
@@ -3259,6 +3262,9 @@ def test_git_unregisters_even_when_communication_fails(tmp_path, monkeypatch):
         def communicate(self):
             raise OSError("simulated pipe failure")
 
+        def poll(self):
+            return 1
+
     record = registry / "git-9876.json"
     removed = []
     monkeypatch.setattr(git_context.subprocess, "Popen", BrokenProcess)
@@ -3267,6 +3273,54 @@ def test_git_unregisters_even_when_communication_fails(tmp_path, monkeypatch):
 
     assert git_context._run_git(["status"], str(tmp_path)) is None
     assert removed == [record]
+
+
+def test_git_communication_failure_retains_record_while_process_alive(
+    tmp_path, monkeypatch,
+):
+    registry = tmp_path / "registry"
+    monkeypatch.setenv(
+        "CONTEXTOR_MCP_PROCESS_REGISTRY",
+        str(registry),
+    )
+
+    class RunningProcess:
+        pid = 9877
+        returncode = None
+
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def communicate(self):
+            raise OSError("simulated live pipe failure")
+
+        def poll(self):
+            return None
+
+    record = registry / "git-9877.json"
+    removed = []
+
+    monkeypatch.setattr(
+        git_context.subprocess,
+        "Popen",
+        RunningProcess,
+    )
+    monkeypatch.setattr(
+        git_context,
+        "register_process",
+        lambda *_args, **_kwargs: record,
+    )
+    monkeypatch.setattr(
+        git_context,
+        "remove_record",
+        removed.append,
+    )
+
+    assert git_context._run_git(
+        ["status"], str(tmp_path)
+    ) is None
+
+    assert removed == []
 
 
 def test_registry_rejects_reused_pid(monkeypatch):
@@ -3301,15 +3355,28 @@ def test_startup_cleanup_stops_only_orphaned_registered_processes(tmp_path, monk
     )
     stopped = []
 
-    monkeypatch.setattr(mcp_server, "record_matches_process", lambda _record: True)
     monkeypatch.setattr(
         mcp_server,
-        "process_identity",
-        lambda pid: ("python.exe", None, pid == 21),
+        "sys_platform_is_windows",
+        lambda: True,
     )
     monkeypatch.setattr(
         mcp_server,
-        "terminate_registered_process",
+        "classify_registered_windows_process",
+        lambda _record: "ALIVE_MATCH",
+    )
+    monkeypatch.setattr(
+        mcp_server,
+        "classify_registered_windows_parent",
+        lambda record: (
+            "ORPHAN"
+            if record["parent_pid"] == 20
+            else "PARENT_ALIVE"
+        ),
+    )
+    monkeypatch.setattr(
+        mcp_server,
+        "terminate_or_confirm_registered_process",
         lambda record: stopped.append(record["pid"]) or True,
     )
 
@@ -3331,7 +3398,21 @@ def test_shutdown_cleanup_stops_only_children_owned_by_server(tmp_path, monkeypa
     stopped = []
     monkeypatch.setattr(
         mcp_server,
-        "terminate_registered_process",
+        "sys_platform_is_windows",
+        lambda: True,
+    )
+    monkeypatch.setattr(
+        mcp_server,
+        "classify_registered_windows_parent",
+        lambda record: (
+            "PARENT_ALIVE"
+            if record["parent_pid"] == 100
+            else "ORPHAN"
+        ),
+    )
+    monkeypatch.setattr(
+        mcp_server,
+        "terminate_or_confirm_registered_process",
         lambda record: stopped.append(record["pid"]) or True,
     )
 

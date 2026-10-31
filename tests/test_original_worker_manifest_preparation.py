@@ -148,7 +148,7 @@ def test_p1d2c_t05_inconsistent_semantic_graph_rejected(
 
     assert result.status == "UNAVAILABLE"
     assert result.reason == (
-        "P1C0_SOURCE_EVIDENCE_UNAVAILABLE"
+        "SOURCE_MANIFEST_GRAPH_MISMATCH"
     )
     assert result.manifest is None
 

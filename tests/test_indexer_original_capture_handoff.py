@@ -91,7 +91,7 @@ def test_p1d2a_t06_invalid_selector_rejected(tmp_path, isolated_dirs):
         "a",
         frozenset({""}),
         frozenset({"a", 7}),
-        frozenset(f"x{i}" for i in range(17)),
+        frozenset(f"x{i}" for i in range(257)),
     ]
     for selected in invalid:
         with pytest.raises(ValueError):
