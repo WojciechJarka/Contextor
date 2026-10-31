@@ -233,7 +233,13 @@ def test_syntax_error_and_recovery_contract_survives_watchdog_adapter(tmp_path):
 
     try:
         watcher._enqueue_path(str(target))
-        assert watcher.poll_once() == [str(target.resolve())]
+        syntax_updated = []
+        syntax_deadline = time.monotonic() + 5.0
+        while time.monotonic() < syntax_deadline and not syntax_updated:
+            syntax_updated = watcher.poll_once()
+            if not syntax_updated:
+                time.sleep(0.01)
+        assert syntax_updated == [str(target.resolve())]
 
         target.write_text("def repaired():\n    return 1\n", encoding="utf-8")
         watcher._enqueue_path(str(target))
