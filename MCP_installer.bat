@@ -1,4 +1,12 @@
 @echo off
+setlocal DisableDelayedExpansion
+cd /d "%~dp0"
+if errorlevel 1 exit /b 1
+if exist "%CD%\.contextor_py315_cutover.guard" (
+    echo CONTEXTOR_CUTOVER_ACTIVE
+    exit /b 86
+)
+endlocal
 setlocal enabledelayedexpansion
 
 title Contextor MCP Server Environment Installer
@@ -15,41 +23,15 @@ echo [INFO] Working directory set to: %CD%
 echo.
 
 :: =======================================================
-:: 1/3: Searching for Python interpreter
+:: 1/2: Selecting the project-local interpreter
 :: =======================================================
-echo [1/3] Searching for Python interpreter...
+echo [1/2] Selecting the project-local interpreter...
 
-set "PYTHON_EXE="
-
-:: 1. Check embedded WinPython / SpiralProphet path
-if exist "C:\SpiralProphet\python\WPy64-31090\python-3.10.9.amd64\python.exe" (
-    set "PYTHON_EXE=C:\SpiralProphet\python\WPy64-31090\python-3.10.9.amd64\python.exe"
-    goto :PYTHON_FOUND
-)
-
-:: 2. Check system PATH
-python --version >nul 2>&1
-if not errorlevel 1 (
-    set "PYTHON_EXE=python"
-    goto :PYTHON_FOUND
-)
-
-:: 3. Scan local directories (venv, .venv, WinPython)
-for /d %%d in (venv .venv Python python WPy64*) do (
-    if exist "%%d\Scripts\python.exe" (
-        set "PYTHON_EXE=%%d\Scripts\python.exe"
-        goto :PYTHON_FOUND
-    )
-    if exist "%%d\python.exe" (
-        set "PYTHON_EXE=%%d\python.exe"
-        goto :PYTHON_FOUND
-    )
-)
+set "PYTHON_EXE=%CD%\.venv\Scripts\python.exe"
 
 :PYTHON_FOUND
-if "%PYTHON_EXE%"=="" (
-    echo [ERROR] Python interpreter not found in system PATH or standard directories.
-    echo Please install Python 3.10+ or set up WinPython.
+if not exist "%PYTHON_EXE%" (
+    echo [ERROR] The local Contextor .venv must be created explicitly before running this installer.
     pause
     exit /b 1
 )
@@ -58,9 +40,9 @@ echo [INFO] Python interpreter found: "%PYTHON_EXE%"
 echo.
 
 :: =======================================================
-:: 2/3: Checking mcp version
+:: 2/2: Checking mcp version
 :: =======================================================
-echo [2/3] Checking mcp version...
+echo [2/2] Checking mcp version...
 
 set "INSTALLED_VER="
 "%PYTHON_EXE%" -c "import importlib.metadata; print(importlib.metadata.version('mcp'))" > "%TEMP%\mcp_ver.tmp" 2>nul
@@ -103,20 +85,6 @@ if "!INSTALLED_VER!"=="" (
     ) else (
         echo [INFO] Skipping mcp reinstallation.
     )
-)
-echo.
-
-:: =======================================================
-:: 3/3: Reinstalling Contextor in editable mode
-:: =======================================================
-echo [3/3] Linking contextor-mcp script...
-echo.
-set /p "link_choice=Do you want to run pip install -e . to link the new contextor-mcp script? (Y/N): "
-if /i "!link_choice!"=="Y" (
-    "%PYTHON_EXE%" -m pip install -e .
-    echo [SUCCESS] Linked successfully.
-) else (
-    echo [INFO] Skipping linking.
 )
 echo.
 

@@ -1,4 +1,12 @@
 @echo off
+setlocal DisableDelayedExpansion
+cd /d "%~dp0"
+if errorlevel 1 exit /b 1
+if exist "%CD%\.contextor_py315_cutover.guard" (
+    echo CONTEXTOR_CUTOVER_ACTIVE
+    exit /b 86
+)
+endlocal
 setlocal enabledelayedexpansion
 
 title GUI Test Suite Environment Installer
@@ -15,9 +23,9 @@ echo [INFO] Working directory set to: %CD%
 echo.
 
 :: =======================================================
-:: 1/5: Searching for Python interpreter
+:: 1/4: Searching for Python interpreter
 :: =======================================================
-echo [1/5] Searching for Python interpreter...
+echo [1/4] Searching for Python interpreter...
 
 set "PYTHON_EXE="
 set "VENV_PY=%CD%\.venv\Scripts\python.exe"
@@ -28,13 +36,14 @@ if exist "%VENV_PY%" (
     goto :PYTHON_FOUND
 )
 
-:: 2. Create the project virtual environment with an available base Python.
+:: 2. Create the project virtual environment with validated CPython 3.15.
 set "BOOTSTRAP_PY="
-if exist "C:\SpiralProphet\python\WPy64-31090\python-3.10.9.amd64\python.exe" (
-    set "BOOTSTRAP_PY=C:\SpiralProphet\python\WPy64-31090\python-3.10.9.amd64\python.exe"
+if exist "C:\Python315\python.exe" (
+    "C:\Python315\python.exe" -I -B -c "import sys; sys.exit(0 if sys.implementation.name == 'cpython' and sys.version_info[:2] == (3, 15) else 1)" >nul 2>&1
+    if not errorlevel 1 set "BOOTSTRAP_PY=C:\Python315\python.exe"
 )
 if not defined BOOTSTRAP_PY (
-    python --version >nul 2>&1
+    python -I -B -c "import sys; sys.exit(0 if sys.implementation.name == 'cpython' and sys.version_info[:2] == (3, 15) else 1)" >nul 2>&1
     if not errorlevel 1 set "BOOTSTRAP_PY=python"
 )
 if not defined BOOTSTRAP_PY goto :PYTHON_FOUND
@@ -50,8 +59,7 @@ if exist "%VENV_PY%" set "PYTHON_EXE=%VENV_PY%"
 
 :PYTHON_FOUND
 if "%PYTHON_EXE%"=="" (
-    echo [ERROR] Python interpreter not found in system PATH or standard directories.
-    echo Please install Python 3.9+ or set up WinPython.
+    echo [ERROR] A project .venv or validated CPython 3.15 is required.
     pause
     exit /b 1
 )
@@ -60,9 +68,9 @@ echo [INFO] Python interpreter found: "%PYTHON_EXE%"
 echo.
 
 :: =======================================================
-:: 2/5: Checking setuptools version
+:: 2/4: Checking setuptools version
 :: =======================================================
-echo [2/5] Checking setuptools version...
+echo [2/4] Checking setuptools version...
 
 set "INSTALLED_VER="
 "%PYTHON_EXE%" -c "import importlib.metadata; print(importlib.metadata.version('setuptools'))" > "%TEMP%\st_ver.tmp" 2>nul
@@ -112,9 +120,9 @@ if "!INSTALLED_VER!"=="" (
 echo.
 
 :: =======================================================
-:: 3/5: Checking pytest
+:: 3/4: Checking pytest
 :: =======================================================
-echo [3/5] Checking pytest installation...
+echo [3/4] Checking pytest installation...
 
 set "PYTEST_INSTALLED="
 "%PYTHON_EXE%" -c "import importlib.util; print('YES') if importlib.util.find_spec('pytest') else print('')" > "%TEMP%\pytest_check.tmp" 2>nul
@@ -147,9 +155,9 @@ if "!PYTEST_INSTALLED!"=="" (
 echo.
 
 :: =======================================================
-:: 4/5: Checking project dependencies (requirements.txt / orjson)
+:: 4/4: Checking project dependencies (requirements.txt / orjson)
 :: =======================================================
-echo [4/5] Checking project dependencies...
+echo [4/4] Checking project dependencies...
 
 if exist "Requirements.txt" set "REQ_FILE=Requirements.txt"
 if exist "requirements.txt" set "REQ_FILE=requirements.txt"
@@ -174,20 +182,6 @@ if defined REQ_FILE (
 )
 
 echo.
-
-:: =======================================================
-:: 5/5: Installing editable dev environment (e DEV)
-:: =======================================================
-echo [5/5] Installing editable dev environment...
-
-echo [INFO] Running pip install -e .[dev] in the script directory...
-"%PYTHON_EXE%" -m pip install -e ".[dev]"
-if errorlevel 1 (
-    echo [ERROR] Failed to install editable dev environment.
-    pause
-    exit /b 1
-)
-echo [SUCCESS] Editable dev environment installed.
 
 echo.
 echo =======================================================

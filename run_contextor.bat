@@ -18,6 +18,7 @@ cd /d "%~dp0"
 if errorlevel 1 goto no_project_dir
 
 set "PROJECT_DIR=%CD%"
+if exist "%PROJECT_DIR%\.contextor_py315_cutover.guard" goto cutover_blocked
 set "VENV_DIR=%PROJECT_DIR%\.venv"
 set "VENV_PY=%VENV_DIR%\Scripts\python.exe"
 
@@ -26,33 +27,25 @@ goto check_deps
 
 
 :create_venv
+if exist "%PROJECT_DIR%\.contextor_py315_cutover.guard" goto cutover_blocked
 echo [INFO] Creating virtual environment ^(.venv^)...
 
 set "PYTHON_EXE="
 
-:: 1. Check embedded WinPython / SpiralProphet path
-if exist "C:\SpiralProphet\python\WPy64-31090\python-3.10.9.amd64\python.exe" (
-    set "PYTHON_EXE=C:\SpiralProphet\python\WPy64-31090\python-3.10.9.amd64\python.exe"
-    goto :PYTHON_FOUND
+:: 1. Check the explicit CPython 3.15 installation.
+if exist "C:\Python315\python.exe" (
+    "C:\Python315\python.exe" -I -B -c "import sys; sys.exit(0 if sys.implementation.name == 'cpython' and sys.version_info[:2] == (3, 15) else 1)" >nul 2>&1
+    if not errorlevel 1 (
+        set "PYTHON_EXE=C:\Python315\python.exe"
+        goto :PYTHON_FOUND
+    )
 )
 
-:: 2. Check system PATH
-python --version >nul 2>&1
+:: 2. Accept PATH Python only after the same interpreter validation.
+python -I -B -c "import sys; sys.exit(0 if sys.implementation.name == 'cpython' and sys.version_info[:2] == (3, 15) else 1)" >nul 2>&1
 if not errorlevel 1 (
     set "PYTHON_EXE=python"
     goto :PYTHON_FOUND
-)
-
-:: 3. Scan local directories (venv, .venv, WinPython)
-for /d %%d in (venv .venv Python python WPy64*) do (
-    if exist "%%d\Scripts\python.exe" (
-        set "PYTHON_EXE=%%d\Scripts\python.exe"
-        goto :PYTHON_FOUND
-    )
-    if exist "%%d\python.exe" (
-        set "PYTHON_EXE=%%d\python.exe"
-        goto :PYTHON_FOUND
-    )
 )
 
 :PYTHON_FOUND
@@ -71,6 +64,7 @@ echo.
 
 
 :check_deps
+if exist "%PROJECT_DIR%\.contextor_py315_cutover.guard" goto cutover_blocked
 echo Checking dependencies...
 
 "%VENV_PY%" -c "import orjson, watchdog, mcp, fastmcp" >nul 2>&1
@@ -81,6 +75,7 @@ goto check_backend_autostart
 
 
 :install_deps
+if exist "%PROJECT_DIR%\.contextor_py315_cutover.guard" goto cutover_blocked
 echo [WARNING] Required dependencies are missing.
 echo Installing project requirements...
 
@@ -97,6 +92,7 @@ goto check_backend_autostart
 
 
 :check_backend_autostart
+if exist "%PROJECT_DIR%\.contextor_py315_cutover.guard" goto cutover_blocked
 echo Checking MCP backend autostart...
 
 "%VENV_PY%" -m contextor.mcp_backend_autostart status >nul 2>&1
@@ -107,6 +103,7 @@ goto check_backend
 
 
 :install_backend_autostart
+if exist "%PROJECT_DIR%\.contextor_py315_cutover.guard" goto cutover_blocked
 echo [INFO] Registering MCP backend autostart...
 
 "%VENV_PY%" -m contextor.mcp_backend_autostart install >nul 2>&1
@@ -117,6 +114,7 @@ goto check_backend
 
 
 :check_backend
+if exist "%PROJECT_DIR%\.contextor_py315_cutover.guard" goto cutover_blocked
 echo Checking MCP backend...
 
 "%VENV_PY%" -m contextor backend status >nul 2>&1
@@ -127,6 +125,7 @@ goto start_gui
 
 
 :start_backend
+if exist "%PROJECT_DIR%\.contextor_py315_cutover.guard" goto cutover_blocked
 echo [INFO] Starting MCP backend...
 
 "%VENV_PY%" -m contextor backend start >nul 2>&1
@@ -137,6 +136,7 @@ goto start_gui
 
 
 :start_gui
+if exist "%PROJECT_DIR%\.contextor_py315_cutover.guard" goto cutover_blocked
 echo.
 echo Starting Contextor GUI...
 echo.
@@ -150,6 +150,11 @@ if errorlevel 1 goto gui_failed
 exit /b 0
 
 
+:cutover_blocked
+echo CONTEXTOR_CUTOVER_ACTIVE
+exit /b 86
+
+
 :no_project_dir
 echo [ERROR] Could not enter the project directory:
 echo         %~dp0
@@ -158,8 +163,7 @@ exit /b 1
 
 
 :no_python
-echo [ERROR] Python was not found.
-echo Install Python 3.10+ and add it to your system PATH.
+echo [ERROR] CPython 3.15 was not found or did not pass validation.
 pause
 exit /b 1
 
