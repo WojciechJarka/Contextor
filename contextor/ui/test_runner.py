@@ -207,6 +207,7 @@ def run_test_suite(
         [
             "-v",
             "--tb=short",
+            "-rs",
             "-p",
             "no:cacheprovider",
             *_suite_arguments(live_only=live_only),
