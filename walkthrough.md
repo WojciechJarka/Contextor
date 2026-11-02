@@ -1,190 +1,106 @@
-# CONTEXTOR PY315-M8B — lazy import semantics discovery
+# CONTEXTOR PY315-M7B — current runtime acceptance rerun
 
 ## PREFLIGHT
 
-Contextor MCP first: sampled source, indexer, ImportRef, graph, initialization and provenance module contexts all `canonical_state=fresh`, `workspace_sync=verified`, revision 962, no advisory. HEAD `534858dfd569fb4dc27aac189a098ebc25312bd8`; worktree only pre-existing `M walkthrough.md`. Repo ID `ctx_8efc50d8`. Canonical 3.15.2, base `C:\Python315\python.exe`; production lazy mode `normal`. No production mutation.
+Current HEAD `0ce4899cb6c6dfe645d1df6df353dd2d67aa9511`, different from historical M7B baseline. Initial worktree clean. Existing `M7B_acceptance` contained prior artifacts, preserved; new isolated subdirectory `rerun_2026_11_02` used. No production source/test/dependency/interpreter mutation.
 
-## MCP_FIRST_DISCOVERY
+## PRODUCTION_RUNTIME_BASELINE
 
-Read `get_mcp_documentation` for relevant tools. Contextor module contexts are live/fresh/verified. `get_symbol_lineage` preview resolved `contextor.core.symbol_engine.indexer::read_imports` and `contextor.core.cycle_semantics.cycle_warning_projection::project_installed_cycle_warnings`, revision 962, no advisory; lineage path itself reports workspace_sync unverified by design. Exact implementation/call-chain remains incompletely traced.
+Production repo `C:\Temp\Contextor_Repo`; canonical Python 3.15.2 AMD64, sys.prefix canonical `.venv`, sys._base_executable `C:\Python315\python.exe`, pyvenv.cfg version 3.15.2. `pip check`: no broken requirements. `pip list` contained 67 installed distributions; exact 66-pin comparison was not performed. Production process snapshot in `processes.before.json`.
 
-## PY315_IMPORT_LANGUAGE_CONTRACT
+## MCP_DISCOVERY
 
-[PEP 810](https://peps.python.org/pep-0810/) and [What's New 3.15](https://docs.python.org/3.15/whatsnew/3.15.html): explicit lazy import/from-import is potentially lazy; `normal` permits explicit and `__lazy_modules__`, `all` makes eligible ordinary module imports potentially lazy, `none` forces eager. `PYTHON_LAZY_IMPORTS`/`-X lazy_imports` set startup mode; `sys.set_lazy_imports` changes it at runtime; filter can veto potentially lazy import. `__lazy_modules__` is checked at statement execution and may be computed/changed. First use reifies; failures/side effects can be delayed. Dynamic importlib remains eager. Already loaded module and indirect reification alter timing. Source alone proves AST marker, not effective laziness when global mode/filter/runtime state unknown. Package/relative/circular details only partially probed here. [Import reference](https://docs.python.org/3.15/reference/import.html), [AST](https://docs.python.org/3.15/library/ast.html), [importlib](https://docs.python.org/3.15/library/importlib.html).
+Contextor MCP documentation for get_module_context read first. All 10 specified module contexts returned canonical_state=fresh, workspace_sync=verified, revision 962, provenance=live, advisory=null. Exact source verified: process_pool_lifecycle manages process-local pools; profile_worker JSON probe schema; profile tool uses async subprocess + registry; process registry identity probe; backend control authenticated readiness; LIVE runtime/IPC ownership. This is targeted ownership discovery, not a full call-graph audit.
 
-## PRODUCTION_IMPORT_CONFIGURATION
+## CANONICAL_INTERPRETER_IDENTITY
 
-Fresh canonical subprocess reports `sys.get_lazy_imports()='normal'`; source search found no Contextor `lazy import`, `__lazy_modules__`, or `sys.set_lazy_imports`. This does not prove analyzed third-party source or process-specific filter/mode. Production processes were not modified.
+`C:\Temp\Contextor_Repo\.venv\Scripts\python.exe` reports 3.15.2, sys.prefix canonical, sys._base_executable `C:\Python315\python.exe`. Windows actual production executables were `C:\Python315\python.exe`, with separate canonical venv redirectors.
 
-## SOURCE_CAPTURE_CHAIN
+## BACKEND_IDENTITY
 
-Known chain: `core/source.py` tokenize decoding → ast.parse → `core/symbol_engine/indexer.py:634` read_imports/AdvancedImportVisitor → `core/domain/imports.py:12` ImportRef → `core/graph/resolver.py:254` resolve_internal → `core/graph/graph.py:93/111` build_graph → `core/graph/cycles.py:157` detect_cycles. Parallel AST → `cycle_semantics/provenance.py:322` extract_import_provenance → `execution_context.py:38` project_execution_context → binding_order/scenarios/initialization_model → evidence/worker claim → installed warning projection. Direct source checked at entry and selected consumers; complete publication/UI/MCP caller graph not proven.
+Authenticated `get_backend_status()` before/after: state=running, ready=True, instance `a42eccc4a6fe4a89a193fae38ba6f61c`, actual PID 2900, creation identity 134379993012170631. Redirector PID 7508 -> actual PID 2900; 127.0.0.1:8765 recorded. No competing backend observed in process snapshot.
 
-## IMPORTREF_DATA_LOSS
+## DESKTOP_IDENTITY
 
-CONFIRMED_EVIDENCE_LOSS: `AdvancedImportVisitor.visit_Import` indexer.py:264 and `visit_ImportFrom` :290 do not read `node.is_lazy`; ImportRef has module/level/names/is_from_import/is_local/type_only only. L01/L02 external probes yield same target ImportRef despite AST 0/1 and different runtime traces. Earliest observed loss is visitor conversion.
+Redirector PID 15872 -> actual PID 6172; actual executable `C:\Python315\python.exe`, command role main.py --gui; creation 2026-11-01 10:34:56.057216 +01:00. Same identity before/after.
 
-## PROVENANCE_DATA_LOSS
+## LIVE_IDENTITY
 
-CONFIRMED_EVIDENCE_LOSS: `cycle_semantics/provenance.py:322-414` ImportOccurrence records location/form/module/level/aliases/scopes/controls but no `is_lazy`. L01/L02 projected execution contexts both `MODULE_OR_CLASS_CANDIDATE`, reachability `UNKNOWN`. The execution model does not claim unconditional eager execution, so no direct false safety proof at that stage.
+Redirector PID 15296 -> actual PID 13924; parent actual Desktop PID 6172; actual executable `C:\Python315\python.exe`; creation 2026-11-01 10:34:59.724633 +01:00. Same identity before/after. A separate pre-existing LIVE pair 9540/14216 associated with an earlier test remained untouched; it is not counted as production.
 
-## GRAPH_COMPATIBILITY
+## PRODUCTION_AUTHORITY_STATE
 
-Structural dependency is lexical: frozen hard-edge graph should retain lazy import target; activation timing is separate. Current resolver/graph/SCC path consumes ImportRef and cannot distinguish activation. Direct end-to-end graph output for synthetic lazy repo was not run; hard-edge parity is source-level inference, not runtime confirmation.
+MCP module contexts returned live/fresh/verified revision 962 before and after. Backend authenticated. Current LIVE lease generation, service instance and Desktop claim were not independently decoded in this rerun; authority coherence beyond module freshness remains UNKNOWN.
 
-## EXECUTION_MODEL
+## TARGETED_TEST_SELECTION
 
-`execution_context.py:38` classifies lexical scope/control and leaves initialization reachability UNKNOWN. It does not store effective lazy mode, filter result, or first-use point. `normal` ordinary import eager; `all` ordinary import can be lazy despite AST is_lazy=0. This is configuration-dependent and must not be called safe or eager without authority.
+Inspected exact eight requested test nodes. Real pool test creates two ProcessPoolExecutor workers and asserts alive then terminated. Reusable pool tests use fake executor in pytest process. HTTP runner uses ephemeral loopback port. Profile lifecycle tests patch subprocess creation. Registry test probes its own PID. Launcher guard copies scripts to pytest tmp_path and checks exit before application work. Environment paths redirected only in pytest child to unique external state/cache/output/registry/process-registry directories; `PYTHONDONTWRITEBYTECODE=1`, basetemp external, cacheprovider disabled.
 
-## BINDING_ORDER_MODEL
+## TARGETED_PYTEST_RESULTS
 
-`binding_order.py:163` extracts lexical candidates by position. It does not model lazy first-use. This is evidence order, not execution order. Exact impact on binding diagnosis for all L-cases untested.
+Exact command: canonical Python `-m pytest -q` with the eight specified node IDs, `--tb=short -p no:cacheprovider --basetemp` external. Result: **13 passed, 2 upstream Authlib warnings, 0 fail, 0 skip** in 6.42s. Seven nodes contributed one case each; `test_guarded_launcher_exits_before_application_work` contributed six parameter cases. Node results:
 
-## INITIALIZATION_MODEL
+|Node|Result|Assertion evidence|
+|---|---|---|
+|tests/test_process_pool_lifecycle.py::test_real_process_pool_workers_are_force_terminated|PASS|Two executor processes alive, terminate count 2, both dead|
+|tests/test_process_pool_lifecycle.py::test_reusable_process_pool_preserves_generation_between_leases|PASS|Fake executor same generation reused|
+|tests/test_process_pool_lifecycle.py::test_reusable_process_pool_exception_invalidates_generation|PASS|Fake executor shutdown/invalidation|
+|tests/test_mcp_persistent_http_runner.py::test_persistent_http_server_exits_normally_and_releases_ephemeral_port|PASS|Ephemeral HTTP server exits/releases port|
+|tests/test_mcp_profile_worker_lifecycle.py::test_profile_worker_registers_and_removes_record|PASS|Mock registration/removal|
+|tests/test_mcp_profile_worker_lifecycle.py::test_profile_worker_cancellation_uses_same_cleanup_path|PASS|Mock cancellation cleanup|
+|tests/test_mcp_process_registry.py::test_probe_current_process_is_alive|PASS|Own PID identity alive|
+|tests/test_py315_launcher_migration_guard.py::test_guarded_launcher_exits_before_application_work|6 PASS|Guard exit 86, no application marker|
 
-`initialization_model.py` explicitly restricts itself to Python 3.10 flat modules; `_compile` at :44 treats ast.Import/ImportFrom as immediate steps without is_lazy. Synthetic pure models: lazy mutual no use yielded MODEL_PASS, lazy mutual from-import yielded EARLY_BINDING_HAZARD both entries, lazy early read yielded EARLY_BINDING_HAZARD. Actual isolated `cycle_lazy_from` CPython 3.15 execution completed `MAIN_COMPLETE 1` (no first use), contradicting model's predicted eager hazard for this tested order. This proves a local semantic mismatch. `scenarios.py:177,237` accepts model assessments for flat applicable SCC; evidence.py:314+ validates them. Whether this exact fixture reaches active warning needs full source-bound installation proof; do not claim warning publication confirmed.
+A second run of only the real pool node yielded 1 PASS, solely to attempt actual worker PID/image capture. Evidence files `pytest.log`, `pool-identity-result.json`.
 
-## PACKAGE_AND_NAMESPACE_IMPORTS
+## REAL_PROCESS_POOL_EVIDENCE
 
-Package model, layout and namespace source-binding have separate admission/consistency checks. `scenarios.py` chooses package model only when flat model inapplicable and package consistency passes; no lazy-aware branch confirmed. L31–L34 not executed. Namespace uncertainty remains UNKNOWN, not safe.
+The test implementation at lines 149-184 positively asserts two real ProcessPoolExecutor workers are alive and then dead; first selected run PASS and focused repeat PASS. The external WMI sampler captured pytest redirector PID 7556 and actual pytest PID 5020 (`C:\Python315\python.exe`) but did **not** capture the short-lived pool worker PIDs/images. Preexisting Desktop workers 7756/11520/6224/6684 were excluded by parent identity. Therefore `INTERPRETER_IDENTITY_NOT_PROVEN` for the two test pool workers despite lifecycle assertion PASS. No worker PID/creation/executable is invented.
 
-## EXPLICIT_LAZY_CASES_L01_L12
+## REAL_PROFILE_SUBPROCESS_PROBE
 
-Matrix rows below; L12 not executed. Source fixture and results are inspectable in lab JSON. For each executed case, AST contains target lazy flag as shown, Contextor ImportRef lacks it, and runtime stdout gives import order/first use. Initialization model reported UNKNOWN for these generic scripts because print/sys are outside restricted subset.
+Schema verified from `core/analysis/profile_worker.py`: exact seven fields `repo_path,mode,scope,presets,samples,warmup,result_view` for probe. Synthetic repo and historical summary fixture under external workspace. First child exit 1 due missing PYTHONPATH; second exit 0 but response status failed because summary fixture absent; after adding an isolated 45-byte JSON summary, final child exit 0 and JSON response schema `contextor-atomic-profile/v1`, status=ok, successful=1, failed=0, read_bytes count=1, no FULL. Final redirector PID 18124, creation `/Date(1793656597687)/`, exe canonical venv; actual child PID 12848, creation `/Date(1793656597744)/`, exe `C:\Python315\python.exe`, parent 18124. Both dead after completion. Earlier attempts PID 7532,9788,17772 also confirmed exited. `profile-probe-result.json` holds full result. Response consistency historical_unverified is expected for reports.summary and not LIVE authority evidence.
 
-```text
-CASE_ID|SOURCE_FIXTURE|INTERPRETER_MODE|AST_RESULT|RUNTIME_RESULT|CONTEXTOR_RESULT|EVIDENCE_CLASS|COVERAGE_STATUS|UNRESOLVED_QUESTION
-L01|C:\Temp\Contextor_PY315_M2_Lab\M8B_lazy_discovery\L01\main.py|normal|eager AST|exit=0; TARGET_INIT → after 7|ImportRef(module='target', level=0, names=[], is_from_import=False, is_local=False, type_only=False); model=UNKNOWN|DIRECT_RUNTIME_PROOF + CODE_PATH_PROVED|NOT_COVERED in lazy Contextor projection|full cycle/publication path untested
-L02|C:\Temp\Contextor_PY315_M2_Lab\M8B_lazy_discovery\L02\main.py|normal|Import:1|exit=0; after|ImportRef(module='target', level=0, names=[], is_from_import=False, is_local=False, type_only=False); model=UNKNOWN|DIRECT_RUNTIME_PROOF + CODE_PATH_PROVED|NOT_COVERED in lazy Contextor projection|full cycle/publication path untested
-L03|C:\Temp\Contextor_PY315_M2_Lab\M8B_lazy_discovery\L03\main.py|normal|Import:1|exit=0; TARGET_INIT → after 7|ImportRef(module='target', level=0, names=[], is_from_import=False, is_local=False, type_only=False); model=UNKNOWN|DIRECT_RUNTIME_PROOF + CODE_PATH_PROVED|NOT_COVERED in lazy Contextor projection|full cycle/publication path untested
-L04|C:\Temp\Contextor_PY315_M2_Lab\M8B_lazy_discovery\L04\main.py|normal|Import:1|exit=0; TARGET_INIT → before 7|ImportRef(module='target', level=0, names=[], is_from_import=False, is_local=False, type_only=False); model=UNKNOWN|DIRECT_RUNTIME_PROOF + CODE_PATH_PROVED|NOT_COVERED in lazy Contextor projection|full cycle/publication path untested
-L05|C:\Temp\Contextor_PY315_M2_Lab\M8B_lazy_discovery\L05\main.py|normal|ImportFrom:1|exit=0; after|ImportRef(module='target', level=0, names=['value'], is_from_import=True, is_local=False, type_only=False); model=UNKNOWN|DIRECT_RUNTIME_PROOF + CODE_PATH_PROVED|NOT_COVERED in lazy Contextor projection|full cycle/publication path untested
-L06|C:\Temp\Contextor_PY315_M2_Lab\M8B_lazy_discovery\L06\main.py|normal|ImportFrom:1|exit=0; TARGET_INIT → after 7|ImportRef(module='target', level=0, names=['value'], is_from_import=True, is_local=False, type_only=False); model=UNKNOWN|DIRECT_RUNTIME_PROOF + CODE_PATH_PROVED|NOT_COVERED in lazy Contextor projection|full cycle/publication path untested
-L07|C:\Temp\Contextor_PY315_M2_Lab\M8B_lazy_discovery\L07\main.py|normal|ImportFrom:1|exit=0; TARGET_INIT → before 7|ImportRef(module='target', level=0, names=['value'], is_from_import=True, is_local=False, type_only=False); model=UNKNOWN|DIRECT_RUNTIME_PROOF + CODE_PATH_PROVED|NOT_COVERED in lazy Contextor projection|full cycle/publication path untested
-L08|C:\Temp\Contextor_PY315_M2_Lab\M8B_lazy_discovery\L08\main.py|normal|Import:1|exit=0; OTHER_INIT → one 8 → TARGET_INIT → two 7|ImportRef(module='target', level=0, names=[], is_from_import=False, is_local=False, type_only=False); model=UNKNOWN|DIRECT_RUNTIME_PROOF + CODE_PATH_PROVED|NOT_COVERED in lazy Contextor projection|full cycle/publication path untested
-L09|C:\Temp\Contextor_PY315_M2_Lab\M8B_lazy_discovery\L09\main.py|normal|Import:1|exit=0; TARGET_INIT → alias 7|ImportRef(module='target', level=0, names=[], is_from_import=False, is_local=False, type_only=False); model=UNKNOWN|DIRECT_RUNTIME_PROOF + CODE_PATH_PROVED|NOT_COVERED in lazy Contextor projection|full cycle/publication path untested
-L10|C:\Temp\Contextor_PY315_M2_Lab\M8B_lazy_discovery\L10\main.py|normal|ImportFrom:1|exit=0; TARGET_INIT → alias 7|ImportRef(module='target', level=0, names=['value'], is_from_import=True, is_local=False, type_only=False); model=UNKNOWN|DIRECT_RUNTIME_PROOF + CODE_PATH_PROVED|NOT_COVERED in lazy Contextor projection|full cycle/publication path untested
-L11|C:\Temp\Contextor_PY315_M2_Lab\M8B_lazy_discovery\L11\main.py|normal|Import:1|exit=0; no access|ImportRef(module='target', level=0, names=[], is_from_import=False, is_local=False, type_only=False); model=UNKNOWN|DIRECT_RUNTIME_PROOF + CODE_PATH_PROVED|NOT_COVERED in lazy Contextor projection|full cycle/publication path untested
-L12|C:\Temp\Contextor_PY315_M2_Lab\M8B_lazy_discovery\L12\main.py (not created)|UNKNOWN|NOT_PROBED|NOT_PROBED|NOT_PROBED|INSUFFICIENT_EVIDENCE|NOT_COVERED|Execution/configuration and Contextor projection unresolved
-```
+## MCP_PROCESS_REGISTRY_BEFORE_AFTER
 
-## IMPLICIT_LAZY_CASES_L13_L24
+Production registry directory listing contained no record files before the tests; no newly visible record file after. Isolated test registry was separate. No stale record was deleted. Full record-content authority audit not performed.
 
-Same matrix format. L17/L21/L24 unexecuted. L14 under all avoided target initialization; L16/L18 with literal __lazy_modules__ avoided it. L19 computed set also did so at runtime but is not statically provable. L20 runtime mode change avoided it. The current AST for ordinary imports remains is_lazy=0.
+## PROCESS_COUNTS_BEFORE_AFTER
 
-```text
-L13|C:\Temp\Contextor_PY315_M2_Lab\M8B_lazy_discovery\L13\main.py|normal|eager AST|exit=0; TARGET_INIT → after|ImportRef(module='target', level=0, names=[], is_from_import=False, is_local=False, type_only=False); model=UNKNOWN|DIRECT_RUNTIME_PROOF + CODE_PATH_PROVED|NOT_COVERED in lazy Contextor projection|full cycle/publication path untested
-L14|C:\Temp\Contextor_PY315_M2_Lab\M8B_lazy_discovery\L14\main.py|all|eager AST|exit=0; after|ImportRef(module='target', level=0, names=[], is_from_import=False, is_local=False, type_only=False); model=UNKNOWN|DIRECT_RUNTIME_PROOF + CODE_PATH_PROVED|NOT_COVERED in lazy Contextor projection|full cycle/publication path untested
-L15|C:\Temp\Contextor_PY315_M2_Lab\M8B_lazy_discovery\L15\main.py|normal|Import:1|exit=0; after|ImportRef(module='target', level=0, names=[], is_from_import=False, is_local=False, type_only=False); model=UNKNOWN|DIRECT_RUNTIME_PROOF + CODE_PATH_PROVED|NOT_COVERED in lazy Contextor projection|full cycle/publication path untested
-L16|C:\Temp\Contextor_PY315_M2_Lab\M8B_lazy_discovery\L16\main.py|normal|eager AST|exit=0; after|ImportRef(module='target', level=0, names=[], is_from_import=False, is_local=False, type_only=False); model=UNKNOWN|DIRECT_RUNTIME_PROOF + CODE_PATH_PROVED|NOT_COVERED in lazy Contextor projection|full cycle/publication path untested
-L17|C:\Temp\Contextor_PY315_M2_Lab\M8B_lazy_discovery\L17\main.py (not created)|UNKNOWN|NOT_PROBED|NOT_PROBED|NOT_PROBED|INSUFFICIENT_EVIDENCE|NOT_COVERED|Execution/configuration and Contextor projection unresolved
-L18|C:\Temp\Contextor_PY315_M2_Lab\M8B_lazy_discovery\L18\main.py|normal|ImportFrom:0|exit=0; after|ImportRef(module='target', level=0, names=['value'], is_from_import=True, is_local=False, type_only=False); model=UNKNOWN|DIRECT_RUNTIME_PROOF + CODE_PATH_PROVED|NOT_COVERED in lazy Contextor projection|full cycle/publication path untested
-L19|C:\Temp\Contextor_PY315_M2_Lab\M8B_lazy_discovery\L19\main.py|normal|eager AST|exit=0; after|ImportRef(module='target', level=0, names=[], is_from_import=False, is_local=False, type_only=False); model=UNKNOWN|DIRECT_RUNTIME_PROOF + CODE_PATH_PROVED|NOT_COVERED in lazy Contextor projection|computed __lazy_modules__ not statically proven
-L20|C:\Temp\Contextor_PY315_M2_Lab\M8B_lazy_discovery\L20\main.py|normal|eager AST|exit=0; after|ImportRef(module='target', level=0, names=[], is_from_import=False, is_local=False, type_only=False); model=UNKNOWN|DIRECT_RUNTIME_PROOF + CODE_PATH_PROVED|NOT_COVERED in lazy Contextor projection|full cycle/publication path untested
-L21|C:\Temp\Contextor_PY315_M2_Lab\M8B_lazy_discovery\L21\main.py (not created)|UNKNOWN|NOT_PROBED|NOT_PROBED|NOT_PROBED|INSUFFICIENT_EVIDENCE|NOT_COVERED|Execution/configuration and Contextor projection unresolved
-L22|C:\Temp\Contextor_PY315_M2_Lab\M8B_lazy_discovery\L22\main.py|normal|eager AST|exit=0; TARGET_INIT → after|ImportRef(module='target', level=0, names=[], is_from_import=False, is_local=False, type_only=False); model=UNKNOWN|DIRECT_RUNTIME_PROOF + CODE_PATH_PROVED|NOT_COVERED in lazy Contextor projection|full cycle/publication path untested
-L23|C:\Temp\Contextor_PY315_M2_Lab\M8B_lazy_discovery\L23\main.py|normal|Import:1|exit=0; TARGET_INIT → after 7|ImportRef(module='target', level=0, names=[], is_from_import=False, is_local=False, type_only=False); model=UNKNOWN|DIRECT_RUNTIME_PROOF + CODE_PATH_PROVED|NOT_COVERED in lazy Contextor projection|full cycle/publication path untested
-L24|C:\Temp\Contextor_PY315_M2_Lab\M8B_lazy_discovery\L24\main.py (not created)|UNKNOWN|NOT_PROBED|NOT_PROBED|NOT_PROBED|INSUFFICIENT_EVIDENCE|NOT_COVERED|Execution/configuration and Contextor projection unresolved
-```
+Exact production snapshot comparison by PID + creation timestamp + executable returned no difference. Production: 3 actual + 3 redirectors; four existing Desktop-owned spawn workers. Separate old test LIVE pair: 1 actual + 1 redirector, unchanged. Final synthetic profile and pytest PIDs absent. No unexplained process growth. `processes.before.json` and `processes.after.json` external.
 
-## SYNTAX_SCOPE_CASES
+## PRODUCTION_POST_TEST_HEALTH
 
-Important DIRECT_RUNTIME_PROOF: `ast.parse` accepts several illegal lazy placements; `compile` rejects them. Thus AST-only admission can treat syntactically non-executable source as valid. Current `read_imports` uses parsed AST without compile check on this path; full project syntax diagnostics path not traced.
+Authenticated backend remained same instance/PID/creation and ready. Desktop/LIVE process pairs unchanged; canonical 3.15.2 unchanged. Three MCP module contexts fresh/live/verified revision 962, advisory null after tests. No runtime restart observed. Repo identity from baseline not independently reread in final postcheck; exact LIVE lease/claim generation not independently checked.
 
-|Form|AST parse|Compile|AST flags|
-|---|---|---|---|
-|module|VALID_AST|VALID|[["Import",1]]|
-|module_from|VALID_AST|VALID|[["ImportFrom",1]]|
-|function|VALID_AST|SYNTAX_ERROR: lazy import not allowed inside functions|[["Import",1]]|
-|async_function|VALID_AST|SYNTAX_ERROR: lazy import not allowed inside functions|[["Import",1]]|
-|class|VALID_AST|SYNTAX_ERROR: lazy import not allowed inside classes|[["Import",1]]|
-|try|VALID_AST|SYNTAX_ERROR: lazy import not allowed inside try/except blocks|[["Import",1]]|
-|except|VALID_AST|SYNTAX_ERROR: lazy import not allowed inside try/except blocks|[["Import",1]]|
-|finally|VALID_AST|SYNTAX_ERROR: lazy import not allowed inside try/except blocks|[["Import",1]]|
-|star|VALID_AST|SYNTAX_ERROR: lazy from ... import * is not allowed|[["ImportFrom",1]]|
-|future|SYNTAX_ERROR|lazy from __future__ import is not allowed|[]|
-|if|VALID_AST|VALID|[["Import",1]]|
-|for|VALID_AST|VALID|[["Import",1]]|
+## CANONICAL_FRESHNESS
 
-## CYCLE_CASES_L25_L40
+Before and after MCP contexts for process_pool_lifecycle, contextor_profile_analysis and live_state.runtime returned canonical_state=fresh, provenance=live, revision 962, advisory=null.
 
-These 16 required cases were not executed as L25-L40. Separate `cycle_lazy_from` fixture proves one narrower scenario: two lazy from-imports, no first use, actual 3.15 success but restricted model EARLY_BINDING_HAZARD. Map for this tested scenario: STRUCTURE cyclic lexical dependency (inferred from sources); EXECUTION deferred until use (runtime confirmed for tested run); INITIALIZATION no failure in tested run, static model contradictory; VERIFICATION RUNTIME_REFUTED_FOR_TESTED_SCENARIO only. Other cycle outcomes INCONCLUSIVE.
+## WORKSPACE_SYNC
 
-```text
-L25|C:\Temp\Contextor_PY315_M2_Lab\M8B_lazy_discovery\L25\main.py (not created)|UNKNOWN|NOT_PROBED|NOT_PROBED|NOT_PROBED|INSUFFICIENT_EVIDENCE|NOT_COVERED|Execution/configuration and Contextor projection unresolved
-L26|C:\Temp\Contextor_PY315_M2_Lab\M8B_lazy_discovery\L26\main.py (not created)|UNKNOWN|NOT_PROBED|NOT_PROBED|NOT_PROBED|INSUFFICIENT_EVIDENCE|NOT_COVERED|Execution/configuration and Contextor projection unresolved
-L27|C:\Temp\Contextor_PY315_M2_Lab\M8B_lazy_discovery\L27\main.py (not created)|UNKNOWN|NOT_PROBED|NOT_PROBED|NOT_PROBED|INSUFFICIENT_EVIDENCE|NOT_COVERED|Execution/configuration and Contextor projection unresolved
-L28|C:\Temp\Contextor_PY315_M2_Lab\M8B_lazy_discovery\L28\main.py (not created)|UNKNOWN|NOT_PROBED|NOT_PROBED|NOT_PROBED|INSUFFICIENT_EVIDENCE|NOT_COVERED|Execution/configuration and Contextor projection unresolved
-L29|C:\Temp\Contextor_PY315_M2_Lab\M8B_lazy_discovery\L29\main.py (not created)|UNKNOWN|NOT_PROBED|NOT_PROBED|NOT_PROBED|INSUFFICIENT_EVIDENCE|NOT_COVERED|Execution/configuration and Contextor projection unresolved
-L30|C:\Temp\Contextor_PY315_M2_Lab\M8B_lazy_discovery\L30\main.py (not created)|UNKNOWN|NOT_PROBED|NOT_PROBED|NOT_PROBED|INSUFFICIENT_EVIDENCE|NOT_COVERED|Execution/configuration and Contextor projection unresolved
-L31|C:\Temp\Contextor_PY315_M2_Lab\M8B_lazy_discovery\L31\main.py (not created)|UNKNOWN|NOT_PROBED|NOT_PROBED|NOT_PROBED|INSUFFICIENT_EVIDENCE|NOT_COVERED|Execution/configuration and Contextor projection unresolved
-L32|C:\Temp\Contextor_PY315_M2_Lab\M8B_lazy_discovery\L32\main.py (not created)|UNKNOWN|NOT_PROBED|NOT_PROBED|NOT_PROBED|INSUFFICIENT_EVIDENCE|NOT_COVERED|Execution/configuration and Contextor projection unresolved
-L33|C:\Temp\Contextor_PY315_M2_Lab\M8B_lazy_discovery\L33\main.py (not created)|UNKNOWN|NOT_PROBED|NOT_PROBED|NOT_PROBED|INSUFFICIENT_EVIDENCE|NOT_COVERED|Execution/configuration and Contextor projection unresolved
-L34|C:\Temp\Contextor_PY315_M2_Lab\M8B_lazy_discovery\L34\main.py (not created)|UNKNOWN|NOT_PROBED|NOT_PROBED|NOT_PROBED|INSUFFICIENT_EVIDENCE|NOT_COVERED|Execution/configuration and Contextor projection unresolved
-L35|C:\Temp\Contextor_PY315_M2_Lab\M8B_lazy_discovery\L35\main.py (not created)|UNKNOWN|NOT_PROBED|NOT_PROBED|NOT_PROBED|INSUFFICIENT_EVIDENCE|NOT_COVERED|Execution/configuration and Contextor projection unresolved
-L36|C:\Temp\Contextor_PY315_M2_Lab\M8B_lazy_discovery\L36\main.py (not created)|UNKNOWN|NOT_PROBED|NOT_PROBED|NOT_PROBED|INSUFFICIENT_EVIDENCE|NOT_COVERED|Execution/configuration and Contextor projection unresolved
-L37|C:\Temp\Contextor_PY315_M2_Lab\M8B_lazy_discovery\L37\main.py (not created)|UNKNOWN|NOT_PROBED|NOT_PROBED|NOT_PROBED|INSUFFICIENT_EVIDENCE|NOT_COVERED|Execution/configuration and Contextor projection unresolved
-L38|C:\Temp\Contextor_PY315_M2_Lab\M8B_lazy_discovery\L38\main.py (not created)|UNKNOWN|NOT_PROBED|NOT_PROBED|NOT_PROBED|INSUFFICIENT_EVIDENCE|NOT_COVERED|Execution/configuration and Contextor projection unresolved
-L39|C:\Temp\Contextor_PY315_M2_Lab\M8B_lazy_discovery\L39\main.py (not created)|UNKNOWN|NOT_PROBED|NOT_PROBED|NOT_PROBED|INSUFFICIENT_EVIDENCE|NOT_COVERED|Execution/configuration and Contextor projection unresolved
-L40|C:\Temp\Contextor_PY315_M2_Lab\M8B_lazy_discovery\L40\main.py (not created)|UNKNOWN|NOT_PROBED|NOT_PROBED|NOT_PROBED|INSUFFICIENT_EVIDENCE|NOT_COVERED|Execution/configuration and Contextor projection unresolved
-```
+Those three specific module contexts reported workspace_sync=verified. This does not certify unqueried files; no source/test changes were made.
 
-## POSITIVE_NEGATIVE_EVIDENCE
+## SOURCE_INTEGRITY
 
-Eager L01/L13 initialized target before after marker. Lazy L02/L05/L11/L15 did not initialize without access. L03/L04/L06/L07/L09/L10 materialized on use; L08 ordered other before target according to first use. L14/L16/L18/L19/L20 deferred via configuration. Eager L23 loaded target before later lazy binding. These are per-fixture outcomes, not universal cycle safety. Error delay, filter veto and indirect materialization remain unproven.
+HEAD `0ce4899cb6c6dfe645d1df6df353dd2d67aa9511` before/after. Worktree clean before report. No source/test/launcher/dependency edits, no restart, no production cache/state mutation observed. Old Python 3.10 backup untouched.
 
-## PY310_PARITY
+## UNEXERCISED_WORKER_TYPES
 
-M8A stdlib-only base 3.10.9 probe: explicit lazy syntax rejected, ordinary import eager, AST dump lacked is_lazy. M8B did not rerun all 3.10 scenarios. Existing interpreter coverage gate unchanged; 3.11–3.14 NOT_COVERED.
-
-## MCP_CONSUMER_MATRIX
-
-Potential tools named in task: analyze_project/layer/single_file feed analysis; get_project_architecture/module_context/file_edit_context/blast_radius/get_live_events/get_analysis_status read projections; update_file can mutate canonical state. Direct lazy-sensitive call path and exact warning field per tool are NOT_PROVED in this stage. No mutation tool invoked. Do not claim direct consumer impact from registration alone.
-
-## DESKTOP_WARNING_IMPACT
-
-`cycle_warning_projection.py:24` partitions structural paths versus verified installed partial MODEL_PASS paths; `partial_warning_eligibility.py:19` requires exact generation/state/graph/claim/authority identity. A false model HAZARD can remain an active warning if installed; local model mismatch is proven, installation for synthetic fixture is not. Desktop scan summary/presentation exact path remains untraced.
-
-## LIVE_WARNING_IMPACT
-
-`core/live_state/ipc.py:910,925,2936,2940` exposes locked warning projection/transitions. Eligibility is fail-closed on missing/foreign receipts. No LIVE mutation or warning transition was induced. Whether lazy evidence changes generation/source binding remains unresolved.
-
-## AST_FINGERPRINT_DEPENDENCIES
-
-F02 interacts: `cycle_semantics/evidence.py:563-564` hashes ast.dump with attributes; CPython 3.15 includes is_lazy=0/1. Source fingerprint follows raw bytes. Worker binding validates AST/source claim. Any F01 change to serialized evidence could affect receipts/claims; mixed-version persistence not audited. No fingerprint redesign proposed.
-
-## STATIC_PROOF_LIMITS
-
-UNKNOWN/INCONCLUSIVE required when global mode, dynamic __lazy_modules__, filter, sys.modules, first use, external access, alias mutation, import hooks or module __getattr__ cannot be established. ast.is_lazy=1 proves syntax marker, not actual deferred execution if mode none/filter veto. ast.is_lazy=0 does not prove eager under all/__lazy_modules__.
-
-## IMPLEMENTATION_SEAMS
-
-Evidence seams, not design: lexical AST capture (is_lazy lost), ImportRef and provenance (no field), graph (frozen hard-edge compatibility), execution context (scope only), binding order (lexical), restricted model admission (3.10 subset accepts lazy AST), package/namespace (unverified), claim/fingerprint (version bound), installed warning eligibility (MODEL_PASS), Desktop/MCP projections (untraced). Multiple coordinated boundaries are implicated; no one-line fix is authorized.
-
-## EXISTING_TEST_COVERAGE
-
-Exact nodes: `tests/test_cycle_semantics_namespace_cycle_parity.py::test_lazy_import_syntax_before_315`, `::test_315_lazy_import_defers_cycle`, `::test_315_eager_import_still_has_hazard` cover interpreter behavior, not Contextor projections. `tests/test_cycle_semantics_initialization_model.py::test_from_import_hazard` and `::test_unsupported_fail_closed` cover eager/restricted behavior. `tests/test_cycle_semantics_execution_context.py::test_module_and_class_import_candidates_not_certified_safe`; `tests/test_cycle_semantics_provenance.py::test_individual_statements_and_aliases`; `tests/test_cycle_semantics_cycle_warning_projection.py::test_t04_t05_t06_absent_partial_receipt_keeps_all_warnings` cover neighboring contracts. For each L01-L40, dedicated Contextor lazy end-to-end coverage NOT_COVERED; L01/L13 have partial eager baseline coverage. No test was run.
-
-## MISSING_REGRESSION_CASES
-
-At minimum: explicit lazy ImportRef/provenance retention, mode normal/all/none and __lazy_modules__ literal/dynamic/filter veto, first-use order, compile rejection after ast.parse, restricted flat model fail-closed versus lazy semantics, package/namespace/relative/reexport, source-bound claim/publication and warning eligibility, affected MCP response/desktop views. L12/L17/L21/L24/L25-L40 need direct synthetic evidence before implementation planning.
-
-## PRODUCTION_POSTCHECK
-
-Windows process identity refresh: backend PID 2900, Desktop 6172, LIVE 13924 unchanged, actual executable `C:\Python315\python.exe`; commands match canonical venv. HEAD unchanged; worktree only `M walkthrough.md`. Last sampled module context fresh. Authenticated backend/lease/generation full postcheck not repeated, so that portion is UNKNOWN. No production process created/terminated; external bounded subprocesses exited.
+Actual profile subprocess exercised and identity confirmed. Actual ProcessPoolExecutor test workers exercised with cleanup assertions, but interpreter image/creation identity not captured. Production Desktop-owned workers observed but no application task submitted. Production mutation worker, backend restart worker, LIVE start/stop, and crash/cancellation real subprocess paths NOT_EXERCISED; profile cancellation selected test was mocked.
 
 ## FILES_CHANGED
 
-Inside production repository: `walkthrough.md` only. External fixtures/probes/results under `C:\Temp\Contextor_PY315_M2_Lab\M8B_lazy_discovery`.
+`walkthrough.md` only inside production repository (this report). External artifacts under `C:\Temp\Contextor_PY315_M2_Lab\M7B_acceptance\rerun_2026_11_02`.
 
 ## FULL_DIFFS
 
-ACTUAL_DIFF=DIFFS=NONE for production source/test/docs; report's own diff excluded.
+FULL_DIFFS=NONE for production source/test/docs; walkthrough.md report diff excluded by contract.
 
 ## REMAINING_UNKNOWN
 
-L12, L17, L21, L24 and L25-L40 direct runtime/contextor outcomes; exact complete call graph to all MCP/desktop/LIVE warning surfaces; full package/namespace behavior; filter/none/environment/indirect materialization/error timing; full syntax diagnostics admission; authenticated/lease postcheck. Therefore implementation-ready gate is not met.
+Real pool worker actual PID/image/creation identity; exact 66/66 pin comparison (pip check passed, 67 installed distributions); LIVE generation/lease/claim and repository ID final independent check; complete production MCP registry content authority. These prevent full PASS. No evidence of process leak or runtime inconsistency.
 
 ## FINAL_VERDICT
 
-**DISCOVERY_PARTIAL_F01_EXACT_GAPS**. Confirmed representation loss and a tested restricted-model mismatch, with production source unchanged. Complete mechanism, consumer and 40-case coverage evidence remains outstanding. STOP.
+**PARTIAL_PY315_M7B_UNEXERCISED_WORKERS**. Mandatory targeted tests and real profile subprocess passed; production process snapshot and MCP freshness stable. Real pool worker interpreter identity was not proven and some production authority details were not independently revalidated. STOP.
