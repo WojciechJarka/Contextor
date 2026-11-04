@@ -237,6 +237,8 @@ def _compile(
             continue
 
         if isinstance(stmt, ast.Import):
+            if getattr(stmt, "is_lazy", False):
+                return None
             for alias in stmt.names:
                 if (
                     not all(part.isidentifier() for part in alias.name.split("."))
@@ -260,6 +262,8 @@ def _compile(
                 )
 
         elif isinstance(stmt, ast.ImportFrom):
+            if getattr(stmt, "is_lazy", False):
+                return None
             # CPython resolves the fromlist during IMPORT_NAME,
             # before individual IMPORT_FROM / STORE_NAME operations.
             if not stmt.names:
@@ -641,6 +645,14 @@ def evaluate_package_import_order(
         not isinstance(name, str)
         or not isinstance(tree, ast.Module)
         for name, tree in indexed_sources.items()
+    ):
+        return result("UNKNOWN")
+
+    if any(
+        getattr(node, "is_lazy", False)
+        for tree in indexed_sources.values()
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.Import, ast.ImportFrom))
     ):
         return result("UNKNOWN")
 

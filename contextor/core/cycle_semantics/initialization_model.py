@@ -45,6 +45,8 @@ def _compile(tree: ast.Module) -> tuple[ModelStep, ...] | None:
     steps: list[ModelStep] = []
     for statement in tree.body:
         if isinstance(statement, ast.Import):
+            if getattr(statement, "is_lazy", False):
+                return None
             for alias in statement.names:
                 if not _valid_name(alias.name) or (
                     alias.asname is not None and not _valid_name(alias.asname)
@@ -55,6 +57,8 @@ def _compile(tree: ast.Module) -> tuple[ModelStep, ...] | None:
                     binding=alias.asname or alias.name,
                 ))
         elif isinstance(statement, ast.ImportFrom):
+            if getattr(statement, "is_lazy", False):
+                return None
             if statement.level != 0 or not _valid_name(statement.module or ""):
                 return None
             for alias in statement.names:

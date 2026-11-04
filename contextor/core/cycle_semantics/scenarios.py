@@ -160,6 +160,18 @@ def analyze_cycle_scenarios(
             ))
             continue
 
+        if any(
+            getattr(node, "is_lazy", False)
+            for name in reachable
+            for node in ast.walk(modules[name])
+            if isinstance(node, (ast.Import, ast.ImportFrom))
+        ):
+            output.append(_component_result(
+                component, "INDETERMINATE", coverage="NONE",
+                reason="UNMODELED_EXPLICIT_LAZY_IMPORT",
+            ))
+            continue
+
         # The graph and AST must describe the exact same import targets.
         # No name-based exceptions and no guessed package resolution.
         flat_applicable = all(

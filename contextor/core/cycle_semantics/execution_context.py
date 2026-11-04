@@ -26,6 +26,7 @@ class ImportExecutionContext:
     control_kinds: tuple[str, ...]
     guard_evaluation: str
     initialization_reachability: str
+    is_lazy: bool = False
 
 
 @dataclass(frozen=True)
@@ -78,6 +79,7 @@ def project_execution_context(
                     "UNEVALUATED" if occurrence.controls else "NO_LEXICAL_CONTROL"
                 ),
                 initialization_reachability="UNKNOWN",
+                is_lazy=occurrence.is_lazy,
             )
         )
 

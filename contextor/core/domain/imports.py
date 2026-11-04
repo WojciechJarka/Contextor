@@ -25,3 +25,5 @@ class ImportRef:
     is_local: bool = False
 
     type_only: bool = False
+
+    is_lazy: bool = False

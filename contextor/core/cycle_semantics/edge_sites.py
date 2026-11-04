@@ -30,6 +30,7 @@ class LexicalEdgeSite:
     scopes: tuple[ScopeFrame, ...]
     controls: tuple[ControlFrame, ...]
     activation_scope: str
+    is_lazy: bool = False
 
 
 @dataclass(frozen=True)
@@ -312,6 +313,7 @@ def analyze_cyclic_import_sites(
                         occurrence.scopes,
                         occurrence.controls,
                     ),
+                    is_lazy=occurrence.is_lazy,
                 )
 
                 matches.setdefault(target, set()).add(site)

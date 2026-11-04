@@ -38,6 +38,7 @@ class ImportOccurrence:
     aliases: tuple[tuple[str, str | None], ...]
     scopes: tuple[ScopeFrame, ...]
     controls: tuple[ControlFrame, ...]
+    is_lazy: bool = False
 
 
 @dataclass(frozen=True)
@@ -376,6 +377,11 @@ def extract_import_provenance(
         ordered
     ):
         node, scopes, controls = record
+        is_lazy = getattr(node, "is_lazy", False)
+        if is_lazy is None:
+            is_lazy = False
+        if type(is_lazy) not in (bool, int) or is_lazy not in (0, 1):
+            raise ValueError("invalid AST import is_lazy value")
 
         occurrences.append(
             ImportOccurrence(
@@ -409,6 +415,7 @@ def extract_import_provenance(
                 ),
                 scopes=scopes,
                 controls=controls,
+                is_lazy=bool(is_lazy),
             )
         )
 

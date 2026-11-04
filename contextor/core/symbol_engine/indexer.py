@@ -78,7 +78,7 @@ SYMBOL_FACTS_SCHEMA_VERSION = 2
 REFERENCE_FACTS_SCHEMA_VERSION = 1
 COLLISION_FACTS_SCHEMA_VERSION = 1
 TEST_FACTS_SCHEMA_VERSION = 1
-IMPORT_CLASSIFICATION_SEMANTICS_VERSION = 9
+IMPORT_CLASSIFICATION_SEMANTICS_VERSION = 10
 _IMPORTABLE_BINARY_SUFFIXES = tuple(
     sorted(
         frozenset(BYTECODE_SUFFIXES)
@@ -264,6 +264,11 @@ class AdvancedImportVisitor(ast.NodeVisitor):
     def visit_Import(self, node):
 
         is_local = self._in_function_depth > 0
+        is_lazy = getattr(node, "is_lazy", False)
+        if is_lazy is None:
+            is_lazy = False
+        if type(is_lazy) not in (bool, int) or is_lazy not in (0, 1):
+            raise ValueError("invalid AST import is_lazy value")
         type_only = False
         if (
             id(node) in self._type_only_statement_ids
@@ -284,12 +289,18 @@ class AdvancedImportVisitor(ast.NodeVisitor):
                     is_from_import=False,
                     is_local=is_local,
                     type_only=type_only,
+                    is_lazy=bool(is_lazy),
                 )
             )
 
     def visit_ImportFrom(self, node):
 
         is_local = self._in_function_depth > 0
+        is_lazy = getattr(node, "is_lazy", False)
+        if is_lazy is None:
+            is_lazy = False
+        if type(is_lazy) not in (bool, int) or is_lazy not in (0, 1):
+            raise ValueError("invalid AST import is_lazy value")
 
         names = [item.name for item in node.names]
 
@@ -300,6 +311,7 @@ class AdvancedImportVisitor(ast.NodeVisitor):
                 names=names,
                 is_from_import=True,
                 is_local=is_local,
+                is_lazy=bool(is_lazy),
             )
         )
 
@@ -943,6 +955,13 @@ def _process_single_file(
             is not int
             or cached_data.get("import_classification_semantics_version")
             != IMPORT_CLASSIFICATION_SEMANTICS_VERSION
+            or type(cached_data.get("imports")) is not list
+            or any(
+                type(imp) is not dict
+                or "is_lazy" not in imp
+                or type(imp["is_lazy"]) is not bool
+                for imp in cached_data["imports"]
+            )
             or type(
                 cached_data.get(
                     "typing_guard_initializer_passive"
