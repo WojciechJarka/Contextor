@@ -1,106 +1,73 @@
-# CONTEXTOR PY315-M7B — current runtime acceptance rerun
+# CONTEXTOR PY315-M7B-R1 — runtime acceptance evidence closure
 
 ## PREFLIGHT
 
-Current HEAD `0ce4899cb6c6dfe645d1df6df353dd2d67aa9511`, different from historical M7B baseline. Initial worktree clean. Existing `M7B_acceptance` contained prior artifacts, preserved; new isolated subdirectory `rerun_2026_11_02` used. No production source/test/dependency/interpreter mutation.
-
-## PRODUCTION_RUNTIME_BASELINE
-
-Production repo `C:\Temp\Contextor_Repo`; canonical Python 3.15.2 AMD64, sys.prefix canonical `.venv`, sys._base_executable `C:\Python315\python.exe`, pyvenv.cfg version 3.15.2. `pip check`: no broken requirements. `pip list` contained 67 installed distributions; exact 66-pin comparison was not performed. Production process snapshot in `processes.before.json`.
+DIRECT_EVIDENCE: current HEAD `e766bc79e22b6d0dc56fb03d6b83b0bd408cb48a`; worktree clean before this report. Historical M7B PIDs were not reused. Fresh production identity `ctx_8efc50d8`; canonical interpreter CPython 3.15.2 AMD64, `sys.executable=C:\Temp\Contextor_Repo\.venv\Scripts\python.exe`, base `C:\Python315\python.exe`, prefix canonical. Unique external audit directory `C:\Temp\Contextor_PY315_M2_Lab\M7B_acceptance\M7B_R1_20261104_01` was created; prior acceptance artifacts preserved. No source/test/venv/launcher changes, no pytest rerun or restart.
 
 ## MCP_DISCOVERY
 
-Contextor MCP documentation for get_module_context read first. All 10 specified module contexts returned canonical_state=fresh, workspace_sync=verified, revision 962, provenance=live, advisory=null. Exact source verified: process_pool_lifecycle manages process-local pools; profile_worker JSON probe schema; profile tool uses async subprocess + registry; process registry identity probe; backend control authenticated readiness; LIVE runtime/IPC ownership. This is targeted ownership discovery, not a full call-graph audit.
+Contextor MCP documentation consulted first. Fresh module contexts for `contextor.core.analysis.process_pool_lifecycle`, `contextor.core.live_state.runtime`, `contextor.core.live_state.ipc`, `contextor.mcp_backend_control`, `contextor.mcp_backend_state`, `contextor.mcp_process_registry`: canonical_state=fresh, workspace_sync=verified, revision 962, provenance=live, advisory=null. Exact source: `process_pool_lifecycle.py:295` owns `managed_process_pool` and optionally registers workers; `runtime_lease.py:693-701,937-945,1029` defines generation/lease/desktop claim; `mcp_backend_state.py:582,619` reads backend record/claim; `mcp_process_registry.py:197,229,265,319+` defines identity probe and classification. `read_records()` can remove malformed records, so G4 used direct read-only JSON parsing instead.
 
-## CANONICAL_INTERPRETER_IDENTITY
+## G1_REAL_POOL_WORKER_IDENTITIES
 
-`C:\Temp\Contextor_Repo\.venv\Scripts\python.exe` reports 3.15.2, sys.prefix canonical, sys._base_executable `C:\Python315\python.exe`. Windows actual production executables were `C:\Python315\python.exe`, with separate canonical venv redirectors.
+**PASS.** Exact command: set child-only `PYTHONPATH=C:\Temp\Contextor_Repo;C:\Temp\Contextor_PY315_M2_Lab\M7B_acceptance\M7B_R1_20261104_01`, `PYTHONDONTWRITEBYTECODE=1`, `CONTEXTOR_MCP_PROCESS_REGISTRY=C:\Temp\Contextor_PY315_M2_Lab\M7B_acceptance\M7B_R1_20261104_01\pool-registry`; run canonical Python `C:\Temp\Contextor_PY315_M2_Lab\M7B_acceptance\M7B_R1_20261104_01\pool_probe.py`. `pool_worker.hold_worker` was importable under Windows spawn; script had `if __name__ == '__main__'` and `freeze_support()`. It used actual `managed_process_pool(ProcessPoolExecutor,max_workers=2)` and held both tasks until identity inspection. Worker 1: PID 13092, creation FILETIME 134382633081478971, Windows image `C:\Python315\python.exe`, parent PID 13088, CPython 3.15.2 AMD64, reported sys.executable canonical venv, sys._base_executable `C:\Python315\python.exe`, sys.prefix canonical. Worker 2: PID 11372, creation 134382633081598759, same image/version/venv/base/prefix, parent 13088. Both `state=alive` simultaneously. Parent chain for each: worker → actual probe PID 13088, creation 134382633068136630, image `C:\Python315\python.exe` → venv redirector PID 13184, image canonical `.venv\Scripts\python.exe` → pwsh 10444 → Codex 8460. The new probe proves these workers, not the historical M7B pytest worker PIDs. Full output in `C:\Temp\Contextor_PY315_M2_Lab\M7B_acceptance\M7B_R1_20261104_01\pool-probe-result.json`.
 
-## BACKEND_IDENTITY
+## G1_PROCESS_CLEANUP
 
-Authenticated `get_backend_status()` before/after: state=running, ready=True, instance `a42eccc4a6fe4a89a193fae38ba6f61c`, actual PID 2900, creation identity 134379993012170631. Redirector PID 7508 -> actual PID 2900; 127.0.0.1:8765 recorded. No competing backend observed in process snapshot.
+**PASS.** The external release marker was written after identity capture; both futures returned `released_normally=true`; context manager shut down executor. Identity probes after shutdown classified both exact worker PIDs DEAD, and test registry `pool-registry` contained zero JSON records. Probe actual PID 13088 and redirector 13184 were absent on subsequent Windows check. No forced termination, taskkill, or PID-only cleanup.
 
-## DESKTOP_IDENTITY
+## G2_LIVE_GENERATION
 
-Redirector PID 15872 -> actual PID 6172; actual executable `C:\Python315\python.exe`, command role main.py --gui; creation 2026-11-01 10:34:56.057216 +01:00. Same identity before/after.
+**PASS.** Direct read-only parse of production generation metadata and lease at paths derived from `RuntimeDomain.from_identity` yielded domain `rd1_4bb21e833272147f29727f8174356b437bdb3dbcba1b2d4965637b97183f8654`, generation status active, number 68, LIVE instance `8e544cd7f6544233afc93b76f75569ed`, PID 12660, creation identity 134382621995634136, endpoint fingerprint `1a6ce38fb1a4c617fcd64ef80fd34f95b00a82ff25012487759e35af143db580`. Generation and lease match each other and `matches_domain=true`. Same values before/after probe.
 
-## LIVE_IDENTITY
+## G2_LEASE_AND_OWNER_CLAIMS
 
-Redirector PID 15296 -> actual PID 13924; parent actual Desktop PID 6172; actual executable `C:\Python315\python.exe`; creation 2026-11-01 10:34:59.724633 +01:00. Same identity before/after. A separate pre-existing LIVE pair 9540/14216 associated with an earlier test remained untouched; it is not counted as production.
+**PASS.** Desktop claim matches LIVE instance/generation/PID/creation and repository/domain identity. Claimed Desktop PID 10564, creation 134382621927793896; Windows identity probe reports alive, image `C:\Python315\python.exe`, exact creation match. Backend owner claim identifies same Desktop PID/creation/image/desktop instance `62557e79a7b242d4a9e5f471de2b25da` and current backend instance `754d8e4bb23e4590a23d622eb47e0893`. Authenticated `get_backend_status()` returned running/ready before and after; backend PID 11876, creation 134382621854316052, Windows image `C:\Python315\python.exe` match. Owner tokens were neither serialized nor printed. No competing owner in current production domain metadata.
 
-## PRODUCTION_AUTHORITY_STATE
+## G2_REPOSITORY_AUTHORITY
 
-MCP module contexts returned live/fresh/verified revision 962 before and after. Backend authenticated. Current LIVE lease generation, service instance and Desktop claim were not independently decoded in this rerun; authority coherence beyond module freshness remains UNKNOWN.
+**PASS.** `read_repository_identity(C:\Temp\Contextor_Repo)` returned `ctx_8efc50d8`, exact canonical root. `RuntimeDomain.from_identity(...,mode='production')`, generation and lease domain matches; Desktop claim repo/domain IDs match. MCP contexts before/post: revision 962, canonical fresh, workspace verified, live provenance, no advisory. The endpoint fingerprint equality is proved across generation/lease; independent endpoint socket metadata was not read, but MCP authenticated readiness succeeded.
 
-## TARGETED_TEST_SELECTION
+## G3_ACCEPTED_DEPENDENCY_MANIFEST
 
-Inspected exact eight requested test nodes. Real pool test creates two ProcessPoolExecutor workers and asserts alive then terminated. Reusable pool tests use fake executor in pytest process. HTTP runner uses ephemeral loopback port. Profile lifecycle tests patch subprocess creation. Registry test probes its own PID. Launcher guard copies scripts to pytest tmp_path and checks exit before application work. Environment paths redirected only in pytest child to unique external state/cache/output/registry/process-registry directories; `PYTHONDONTWRITEBYTECODE=1`, basetemp external, cacheprovider disabled.
+**PASS.** The accepted manifest is `C:\Temp\Contextor_PY315_M2_Lab\requirements-resolved.txt`, 66 `name==version` entries. M7A-R5 migration journal `...\M7A_R5_runtime_switch\migration.journal.jsonl` records `dependency_parity=pass_66_of_66`; pip install log points to that exact manifest. Manifest SHA-256 `f242ad55febb7c732900a8b7f7fb27ffc027631b2ac33f79be851b76dc617d00`. Its direct requirements source is `requirements-direct.txt`. This is historical baseline attribution, not a newly invented lock.
 
-## TARGETED_PYTEST_RESULTS
+## G3_EXACT_PIN_COMPARISON
 
-Exact command: canonical Python `-m pytest -q` with the eight specified node IDs, `--tb=short -p no:cacheprovider --basetemp` external. Result: **13 passed, 2 upstream Authlib warnings, 0 fail, 0 skip** in 6.42s. Seven nodes contributed one case each; `test_guarded_launcher_exits_before_application_work` contributed six parameter cases. Node results:
+**PASS.** Read-only `importlib.metadata.distributions()` comparison with normalized names: required 66, installed 67, matched 66, missing 0, mismatches 0; only extra distribution `pip==26.2.2`, outside manifest scope. `python -m pip check` exit 0, `No broken requirements found.` Exact command: canonical Python `C:\Temp\Contextor_PY315_M2_Lab\M7B_acceptance\M7B_R1_20261104_01\dependency_parity.py`; result `C:\Temp\Contextor_PY315_M2_Lab\M7B_acceptance\M7B_R1_20261104_01\dependency-parity.json`. No install or reconfiguration.
 
-|Node|Result|Assertion evidence|
-|---|---|---|
-|tests/test_process_pool_lifecycle.py::test_real_process_pool_workers_are_force_terminated|PASS|Two executor processes alive, terminate count 2, both dead|
-|tests/test_process_pool_lifecycle.py::test_reusable_process_pool_preserves_generation_between_leases|PASS|Fake executor same generation reused|
-|tests/test_process_pool_lifecycle.py::test_reusable_process_pool_exception_invalidates_generation|PASS|Fake executor shutdown/invalidation|
-|tests/test_mcp_persistent_http_runner.py::test_persistent_http_server_exits_normally_and_releases_ephemeral_port|PASS|Ephemeral HTTP server exits/releases port|
-|tests/test_mcp_profile_worker_lifecycle.py::test_profile_worker_registers_and_removes_record|PASS|Mock registration/removal|
-|tests/test_mcp_profile_worker_lifecycle.py::test_profile_worker_cancellation_uses_same_cleanup_path|PASS|Mock cancellation cleanup|
-|tests/test_mcp_process_registry.py::test_probe_current_process_is_alive|PASS|Own PID identity alive|
-|tests/test_py315_launcher_migration_guard.py::test_guarded_launcher_exits_before_application_work|6 PASS|Guard exit 86, no application marker|
+## G4_REGISTRY_AUTHORITY
 
-A second run of only the real pool node yielded 1 PASS, solely to attempt actual worker PID/image capture. Evidence files `pytest.log`, `pool-identity-result.json`.
+**PASS for current registered-child state.** Active authoritative path came from authenticated backend record: `C:\Users\DafoO\AppData\Roaming\Contextor\mcp_backend\processes` (case-insensitive Windows path). Directory exists; direct `*.json` read-only enumeration returned zero records before and after. Thus no active registered child record, historical record, malformed record or record identity mismatch existed in that exact directory at observation. Empty directory alone does not prove all possible future registrations; the current backend record bound the location. Desktop-owned spawn workers, if any, are not presumed backend registered children.
 
-## REAL_PROCESS_POOL_EVIDENCE
+## G4_PROCESS_IDENTITY_COMPARISON
 
-The test implementation at lines 149-184 positively asserts two real ProcessPoolExecutor workers are alive and then dead; first selected run PASS and focused repeat PASS. The external WMI sampler captured pytest redirector PID 7556 and actual pytest PID 5020 (`C:\Python315\python.exe`) but did **not** capture the short-lived pool worker PIDs/images. Preexisting Desktop workers 7756/11520/6224/6684 were excluded by parent identity. Therefore `INTERPRETER_IDENTITY_NOT_PROVEN` for the two test pool workers despite lifecycle assertion PASS. No worker PID/creation/executable is invented.
+Backend record instance/PID/creation/image matches Windows; backend host claim matches Desktop; LIVE lease and Desktop claim match actual Windows process identities. With zero current production registry records, record-by-record child classification is vacuous and no PID was deleted or terminated. Isolated G1 worker registry was separate and empty after normal shutdown.
 
-## REAL_PROFILE_SUBPROCESS_PROBE
+## PRODUCTION_HEALTH_BEFORE_AFTER
 
-Schema verified from `core/analysis/profile_worker.py`: exact seven fields `repo_path,mode,scope,presets,samples,warmup,result_view` for probe. Synthetic repo and historical summary fixture under external workspace. First child exit 1 due missing PYTHONPATH; second exit 0 but response status failed because summary fixture absent; after adding an isolated 45-byte JSON summary, final child exit 0 and JSON response schema `contextor-atomic-profile/v1`, status=ok, successful=1, failed=0, read_bytes count=1, no FULL. Final redirector PID 18124, creation `/Date(1793656597687)/`, exe canonical venv; actual child PID 12848, creation `/Date(1793656597744)/`, exe `C:\Python315\python.exe`, parent 18124. Both dead after completion. Earlier attempts PID 7532,9788,17772 also confirmed exited. `profile-probe-result.json` holds full result. Response consistency historical_unverified is expected for reports.summary and not LIVE authority evidence.
-
-## MCP_PROCESS_REGISTRY_BEFORE_AFTER
-
-Production registry directory listing contained no record files before the tests; no newly visible record file after. Isolated test registry was separate. No stale record was deleted. Full record-content authority audit not performed.
+Before/after authority snapshots at `C:\Temp\Contextor_PY315_M2_Lab\M7B_acceptance\M7B_R1_20261104_01\authority.before.json` and `authority.after.json`: identical backend 11876, Desktop 10564, LIVE 12660 by PID, creation identity and Windows image; backend instance unchanged and authenticated/ready, LIVE generation 68 unchanged, lease/claims/domain/repo unchanged. Postprobe MCP module contexts fresh/verified/live at revision 962, advisory null. No production restart or authority replacement observed.
 
 ## PROCESS_COUNTS_BEFORE_AFTER
 
-Exact production snapshot comparison by PID + creation timestamp + executable returned no difference. Production: 3 actual + 3 redirectors; four existing Desktop-owned spawn workers. Separate old test LIVE pair: 1 actual + 1 redirector, unchanged. Final synthetic profile and pytest PIDs absent. No unexplained process growth. `processes.before.json` and `processes.after.json` external.
-
-## PRODUCTION_POST_TEST_HEALTH
-
-Authenticated backend remained same instance/PID/creation and ready. Desktop/LIVE process pairs unchanged; canonical 3.15.2 unchanged. Three MCP module contexts fresh/live/verified revision 962, advisory null after tests. No runtime restart observed. Repo identity from baseline not independently reread in final postcheck; exact LIVE lease/claim generation not independently checked.
-
-## CANONICAL_FRESHNESS
-
-Before and after MCP contexts for process_pool_lifecycle, contextor_profile_analysis and live_state.runtime returned canonical_state=fresh, provenance=live, revision 962, advisory=null.
-
-## WORKSPACE_SYNC
-
-Those three specific module contexts reported workspace_sync=verified. This does not certify unqueried files; no source/test changes were made.
-
-## SOURCE_INTEGRITY
-
-HEAD `0ce4899cb6c6dfe645d1df6df353dd2d67aa9511` before/after. Worktree clean before report. No source/test/launcher/dependency edits, no restart, no production cache/state mutation observed. Old Python 3.10 backup untouched.
+Each snapshot listed eight Python/venv processes whose command line referenced Contextor_Repo: the six stable production actual/redirector processes plus one transient external `other` pair. The external `other` pair differed between snapshots (before 8428/13788, after 7824/13896); it was outside the backend/Desktop/LIVE parent chains and absent on later query. Its owner was not established, so it is not counted as production or as a G1 leak. Exact production count remained six; G1 worker PIDs 13092/11372 and probe PID 13088/redirector 13184 exited. No unexplained production growth. Snapshot JSON contains role and process identities without command lines or tokens.
 
 ## UNEXERCISED_WORKER_TYPES
 
-Actual profile subprocess exercised and identity confirmed. Actual ProcessPoolExecutor test workers exercised with cleanup assertions, but interpreter image/creation identity not captured. Production Desktop-owned workers observed but no application task submitted. Production mutation worker, backend restart worker, LIVE start/stop, and crash/cancellation real subprocess paths NOT_EXERCISED; profile cancellation selected test was mocked.
+This task exercised only the two isolated real ProcessPoolExecutor workers. Historical M7B profile subprocess and targeted tests remain accepted evidence and were not repeated. Production Desktop workers' application tasks, mutation workers, crash/cancellation paths, backend restart and LIVE start/stop remain NOT_EXERCISED by M7B-R1; no claim of their certification.
 
 ## FILES_CHANGED
 
-`walkthrough.md` only inside production repository (this report). External artifacts under `C:\Temp\Contextor_PY315_M2_Lab\M7B_acceptance\rerun_2026_11_02`.
+`walkthrough.md` only inside production repository. External evidence files and probe sources are under `C:\Temp\Contextor_PY315_M2_Lab\M7B_acceptance\M7B_R1_20261104_01`. No source, test, launcher, dependency or configuration file changed.
 
 ## FULL_DIFFS
 
-FULL_DIFFS=NONE for production source/test/docs; walkthrough.md report diff excluded by contract.
+ACTUAL_DIFF=DIFFS=NONE for production source/test/docs/launcher/dependencies/configuration. The report's own diff is excluded under AGENTS.md.
 
 ## REMAINING_UNKNOWN
 
-Real pool worker actual PID/image/creation identity; exact 66/66 pin comparison (pip check passed, 67 installed distributions); LIVE generation/lease/claim and repository ID final independent check; complete production MCP registry content authority. These prevent full PASS. No evidence of process leak or runtime inconsistency.
+The transient external `other` Python pairs observed at different times were not attributed to a specific owner; both were outside the stable production parent chains. Their change does not affect G1-G4. No general future process-registration behavior or unexercised worker category is certified.
 
 ## FINAL_VERDICT
 
-**PARTIAL_PY315_M7B_UNEXERCISED_WORKERS**. Mandatory targeted tests and real profile subprocess passed; production process snapshot and MCP freshness stable. Real pool worker interpreter identity was not proven and some production authority details were not independently revalidated. STOP.
+**PASS_PY315_M7B_RUNTIME_ACCEPTANCE**. G1 PASS: two independently observed 3.15 workers and clean normal exit. G2 PASS: live generation, lease, owner claims, repository identity and authenticated backend coherent before/after. G3 PASS: 66/66 accepted pins. G4 PASS: authoritative active registry inspected, zero current records, no mismatch. Production identities and canonical freshness remained stable. STOP.
