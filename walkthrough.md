@@ -1,185 +1,179 @@
-# CONTEXTOR C16-B03-P1D2A
+# CONTEXTOR C16-B03-P1D2B
 
 ## PREFLIGHT
 
-Local HEAD 85721d4ce7fd65da0dbd442f6904b8d7d179b21a, matching the supplied source reference. Initial worktree clean. Contextor MCP preflight: evidence and scenarios source verified at canonical revision 1005; structural DFS path count 16; cycle_semantics stale. Exact anchors and replacement function matched local source. New test path did not exist.
+Local HEAD ee642788f095c2a824a2670a4247058b8c860a9f, matching the supplied base. Initial worktree clean. Contextor MCP preflight revision 1008: source_proof and evidence workspace_sync=verified; structural DFS path count 16; cycle_semantics=stale. Exact source anchors matched. New test path did not exist.
 
-## EXACT_CHANGE
+## EXACT_IMPLEMENTATION
 
-Applied the supplied literal implementation to contextor/core/cycle_semantics/evidence.py by direct apply_patch edits. Added tests/test_cycle_semantics_optional_child_evidence.py with the supplied content. HARD_ONLY remains default with semantic version /3. Optional evidence uses semantic version /4, source_selection=OPTIONAL_NAMED_CHILDREN, exact P1A closure identity, selected AST ImportRef replay, optional scenario evaluation and version-bound component token. The existing hard-only index-bound verifier rejects optional evidence, including a forged /3 version. No optional certification or publication was added.
+Applied the supplied import changes and appended the supplied assess_optional_scc_source_bytes implementation to contextor/core/cycle_semantics/source_proof.py. Existing assess_scc_source_bytes was not modified. Added tests/test_cycle_semantics_optional_child_byte_replay.py with the supplied content. Edits used direct apply_patch, not a shell patch script. No other source/test files were edited.
 
 ## TARGETED_TESTS
 
-The three specified modules passed: 95 passed, 0 failed. Command used CPython 3.15.2 .venv with -B -q -rs -p no:cacheprovider and external --basetemp C:\Temp\Contextor_C16_P1D2A_pytest_tmp. No full pytest.
+Command: .venv CPython 3.15.2 with -B -m pytest -q -rs -p no:cacheprovider, external --basetemp C:\Temp\Contextor_C16_P1D2B_pytest_tmp, and exactly the four requested modules. Result: 103 passed, 1 failed. No full suite.
 
-## MCP_POST_CHANGE_AUDIT
+Failure: tests/test_cycle_semantics_optional_child_byte_replay.py::test_snapshot_lexical_evidence_must_match_bytes. The supplied test calls dataclasses.replace on CycleSemanticsSnapshot with import_sites=analyze_cyclic_import_sites({}, {}). CycleSemanticsSnapshot.__post_init__ rejects that object before assess_optional_scc_source_bytes is called: ValueError("Import-site topology and cyclic cohort differ"), from contextor/core/cycle_semantics/contracts.py:394. Expected test assertion OPTIONAL_GRAPH_OR_TOPOLOGY_MISMATCH was never reached. This is DIRECT_EVIDENCE of a test fixture/constructor contract conflict, not a demonstrated failure of the new replay function. Per user instruction, no independent correction was made.
 
-At canonical revision 1008, evidence and the new test module report canonical_state=fresh, workspace_sync=verified, advisory_warning=null. Structural DFS path count remains 16. cycle_semantics=stale; current semantic SCC claims and loaded backend code adoption are unproven. No FULL, update_file, restart, dependency install or commit.
+## MCP_AUDIT
+
+At revision 1011, source_proof and new test module report canonical_state=fresh, workspace_sync=verified, advisory_warning=null. Initial source_proof query at revision 1010 was unverified due generation proof in flight; final query at revision 1011 was verified. Structural DFS path count remains 16. cycle_semantics remains stale. Indexed-source freshness does not prove loaded backend code adoption. No FULL, update_file, restart, install or commit.
 
 ## FILES_CHANGED
 
-- contextor/core/cycle_semantics/evidence.py
-- tests/test_cycle_semantics_optional_child_evidence.py
+- contextor/core/cycle_semantics/source_proof.py
+- tests/test_cycle_semantics_optional_child_byte_replay.py
 
 walkthrough.md is the report.
 
 ## FULL_DIFFS
 
 ```diff
-diff --git a/contextor/core/cycle_semantics/evidence.py b/contextor/core/cycle_semantics/evidence.py
-index e3751df..5a5a59a 100644
---- a/contextor/core/cycle_semantics/evidence.py
-+++ b/contextor/core/cycle_semantics/evidence.py
-@@ -19,13 +19,18 @@ from .contracts import CycleSemanticsSnapshot, fingerprint_hard_edges
- from .scc import analyze_import_cycle_topology
- from .initialization_model import ImportOrderAssessment, ModelEvent
- from .package_model import PackageImportAssessment, PackageModelEvent
--from .model_source_closure import compute_cycle_model_source_closures
-+from .model_source_closure import (
-+    CycleModelSourceClosure,
-+    compute_cycle_model_source_closures,
-+    compute_cycle_model_source_closures_with_optional_children,
-+)
- from .model_identity import indexed_to_logical_module, logical_to_indexed_module
- from .scenarios import (
-     CycleComponentScenarios, CycleScenarioReport, analyze_cycle_scenarios,
+diff --git a/contextor/core/cycle_semantics/source_proof.py b/contextor/core/cycle_semantics/source_proof.py
+index 36e7d1e..61eb75c 100644
+--- a/contextor/core/cycle_semantics/source_proof.py
++++ b/contextor/core/cycle_semantics/source_proof.py
+@@ -19,13 +19,24 @@ from contextor.core.source import (
+     parse_source_snapshot,
  )
  
- EVIDENCE_SEMANTIC_VERSION = "cycle-semantics-evidence/3"
-+OPTIONAL_EVIDENCE_SEMANTIC_VERSION = "cycle-semantics-evidence/4"
- _MISSING = "MISSING"
+-from .contracts import CycleSemanticsSnapshot
++from .contracts import (
++    CycleSemanticsSnapshot,
++    fingerprint_hard_edges,
++)
+ from .evidence import (
+     SourceBoundCycleEvidence,
++    OPTIONAL_EVIDENCE_SEMANTIC_VERSION,
+     assess_index_bound_scc_models,
+     build_source_bound_cycle_evidence,
++    _digest,
+     _scenario_fingerprint,
+ )
++from .edge_sites import analyze_cyclic_import_sites
++from .model_source_closure import (
++    CycleModelSourceClosure,
++    compute_cycle_model_source_closures_with_optional_children,
++)
++from .scc import analyze_import_cycle_topology
  
  
-@@ -55,10 +60,16 @@ def _component_token(
-     subgraph: tuple[tuple[str, tuple[str, ...]], ...],
-     signatures: tuple[tuple[str, str, str], ...],
-     scenario: CycleComponentScenarios,
+ _BYTE_AUTHORITY = (
+@@ -252,3 +263,272 @@ def assess_scc_source_bytes(
+             ))
+ 
+     return tuple(assessments)
++
++
++def assess_optional_scc_source_bytes(
++    hard_edges: Mapping[str, object],
++    indexed_fingerprints_by_module: Mapping[str, str],
++    snapshot: CycleSemanticsSnapshot,
++    source_evidence: SourceBoundCycleEvidence,
++    source_snapshots: Mapping[str, SourceSnapshot],
++    indexed_imports_by_module: Mapping[str, object],
 +    *,
-+    semantic_version: str = EVIDENCE_SEMANTIC_VERSION,
- ) -> str:
-     return _digest((
--        EVIDENCE_SEMANTIC_VERSION, members, subgraph, signatures,
--        scenario.model_kind, scenario.evidence_scope,
-+        semantic_version,
-+        members,
-+        subgraph,
-+        signatures,
-+        scenario.model_kind,
-+        scenario.evidence_scope,
-         _scenario_fingerprint(scenario),
-     ))
- 
-@@ -71,6 +82,7 @@ class SourceBoundCycleEvidence:
-     components: tuple[ComponentSourceEvidence, ...]
-     scenarios: CycleScenarioReport
-     authority: str = "SNAPSHOT_ONLY_NOT_LIVE_FRESHNESS"
-+    source_selection: str = "HARD_ONLY"
- 
- 
- @dataclass(frozen=True)
-@@ -142,6 +154,8 @@ def assess_index_bound_scc_models(
-         global_reason = "SCC_TOPOLOGY_MISMATCH"
-     elif source_evidence.semantic_version != EVIDENCE_SEMANTIC_VERSION:
-         global_reason = "EVIDENCE_SEMANTIC_VERSION_MISMATCH"
-+    elif source_evidence.source_selection != "HARD_ONLY":
-+        global_reason = "SOURCE_SELECTION_UNSUPPORTED_BY_HARD_ONLY_VERIFIER"
-     elif (
-         source_evidence.authority != "SNAPSHOT_ONLY_NOT_LIVE_FRESHNESS"
-         or source_evidence.scenarios.evidence_scope
-@@ -534,61 +548,186 @@ def assess_live_generation_scc_models(
- 
- 
- def build_source_bound_cycle_evidence(
--    hard_edges: Mapping[str, set[str] | frozenset[str] | list[str] | tuple[str, ...]],
-+    hard_edges: Mapping[
-+        str, set[str] | frozenset[str] | list[str] | tuple[str, ...]
-+    ],
-     parsed_sources: Mapping[str, ParsedSourceInput],
-+    *,
-+    source_selection: str = "HARD_ONLY",
-+    indexed_imports_by_module: Mapping[str, object] | None = None,
 +    package_root: str | None = None,
 +    source_closures: tuple[CycleModelSourceClosure, ...] | None = None,
- ) -> SourceBoundCycleEvidence:
--    """Bind an SCC scenario report to graph and exact source-snapshot evidence.
--
--    ParsedSourceInput is expected from parse_source_snapshot/with_fingerprint.
--    In-memory AST hashes guard against inconsistent caller-provided AST objects.
--    No disk source freshness or LIVE authority is established by this function.
--    """
-+    """Build snapshot-only evidence; never certify LIVE or publication."""
-     if not isinstance(parsed_sources, Mapping):
-         raise TypeError("parsed_sources must be a mapping")
- 
-     signatures: dict[str, tuple[str, str]] = {}
-     trees: dict[str, ast.Module] = {}
++    max_source_bytes: int = 2 * 1024 * 1024,
++    max_closure_bytes: int = 32 * 1024 * 1024,
++) -> tuple[SCCSourceByteAssessment, ...]:
++    """Recheck optional evidence from caller-supplied bytes, never LIVE."""
 +
-     for module, source in parsed_sources.items():
-         if not isinstance(module, str) or not module:
-             raise ValueError("invalid source module identity")
--        if not isinstance(source, ParsedSourceInput) or not isinstance(source.tree, ast.Module):
--            raise TypeError("sources must contain parsed ast.Module snapshots")
-+        if (
-+            not isinstance(source, ParsedSourceInput)
-+            or not isinstance(source.tree, ast.Module)
-+        ):
-+            raise TypeError(
-+                "sources must contain parsed ast.Module snapshots"
++    if not isinstance(hard_edges, Mapping):
++        raise TypeError("hard_edges must be a mapping")
++    if not isinstance(indexed_fingerprints_by_module, Mapping):
++        raise TypeError("fingerprints must be a mapping")
++    if not isinstance(snapshot, CycleSemanticsSnapshot):
++        raise TypeError("snapshot must be CycleSemanticsSnapshot")
++    if not isinstance(source_evidence, SourceBoundCycleEvidence):
++        raise TypeError("invalid source evidence")
++    if not isinstance(source_snapshots, Mapping):
++        raise TypeError("source_snapshots must be a mapping")
++
++    if (
++        type(max_source_bytes) is not int
++        or not 1 <= max_source_bytes <= 64 * 1024 * 1024
++        or type(max_closure_bytes) is not int
++        or not 1 <= max_closure_bytes <= 256 * 1024 * 1024
++    ):
++        raise ValueError("invalid source byte budget")
++
++    topology = analyze_import_cycle_topology(hard_edges)
++    structural = topology.cyclic_components
++
++    if not structural:
++        return ()
++
++    def reject(
++        reason: str,
++        state: str = "UNAVAILABLE",
++    ) -> tuple[SCCSourceByteAssessment, ...]:
++        return tuple(
++            SCCSourceByteAssessment(
++                members=component.members,
++                model_classification="INDETERMINATE",
++                bytes_state=state,
++                reason=reason,
 +            )
++            for component in structural
++        )
 +
-         raw_fingerprint = source.source_fingerprint
-         if (
-             not isinstance(raw_fingerprint, str)
-             or len(raw_fingerprint) != 64
--            or any(ch not in "0123456789abcdef" for ch in raw_fingerprint)
-+            or any(
-+                ch not in "0123456789abcdef"
-+                for ch in raw_fingerprint
-+            )
-         ):
--            raise ValueError("source_fingerprint must be a lowercase SHA-256 digest")
-+            raise ValueError(
-+                "source_fingerprint must be a lowercase SHA-256 digest"
-+            )
++    if (
++        source_evidence.source_selection != "OPTIONAL_NAMED_CHILDREN"
++        or source_evidence.semantic_version
++        != OPTIONAL_EVIDENCE_SEMANTIC_VERSION
++        or source_evidence.authority
++        != "SNAPSHOT_ONLY_NOT_LIVE_FRESHNESS"
++        or source_evidence.scenarios.evidence_scope
++        != "OPTIONAL_NAMED_CHILDREN_SCENARIO_MODEL_NOT_RUNTIME_CERTIFICATION"
++    ):
++        return reject("OPTIONAL_EVIDENCE_IDENTITY_MISMATCH")
 +
-         ast_fingerprint = hashlib.sha256(
--            ast.dump(source.tree, include_attributes=True).encode("utf-8")
-+            ast.dump(
-+                source.tree, include_attributes=True
-+            ).encode("utf-8")
-         ).hexdigest()
++    adjacency = {
++        name: tuple(sorted(set(targets)))
++        for name, targets in hard_edges.items()
++    }
++    for targets in tuple(adjacency.values()):
++        for target in targets:
++            adjacency.setdefault(target, ())
 +
-         signatures[module] = (raw_fingerprint, ast_fingerprint)
-         trees[module] = source.tree
- 
--    report = analyze_cycle_scenarios(hard_edges, trees)
-+    if source_selection == "HARD_ONLY":
-+        if (
-+            indexed_imports_by_module is not None
-+            or package_root is not None
-+            or source_closures is not None
-+        ):
-+            raise ValueError(
-+                "HARD_ONLY_OPTIONAL_INPUTS_UNSUPPORTED"
-+            )
++    graph_hash = _digest(tuple(
++        (name, adjacency[name])
++        for name in sorted(adjacency)
++    ))
 +
-+        closures = compute_cycle_model_source_closures(hard_edges)
-+        semantic_version = EVIDENCE_SEMANTIC_VERSION
-+        report = analyze_cycle_scenarios(hard_edges, trees)
++    if (
++        snapshot.graph_sha256 != fingerprint_hard_edges(hard_edges)
++        or source_evidence.graph_fingerprint != graph_hash
++        or snapshot.import_sites.topology != topology
++        or source_evidence.scenarios.topology != topology
++    ):
++        return reject("OPTIONAL_GRAPH_OR_TOPOLOGY_MISMATCH")
 +
-+    elif source_selection == "OPTIONAL_NAMED_CHILDREN":
-+        if (
-+            not isinstance(indexed_imports_by_module, Mapping)
-+            or type(source_closures) is not tuple
-+            or any(
-+                type(row) is not CycleModelSourceClosure
-+                for row in source_closures
-+            )
-+        ):
-+            raise ValueError(
-+                "OPTIONAL_COHORT_IDENTITY_MISMATCH"
-+            )
++    if (
++        snapshot.coverage_status != "FILESYSTEM_STABLE_NON_ATOMIC"
++        or snapshot.source_issues
++    ):
++        return reject("OPTIONAL_CYCLIC_SNAPSHOT_INCOMPLETE")
 +
++    cyclic_members = tuple(sorted({
++        member
++        for component in structural
++        for member in component.members
++    }))
++    observed = snapshot.observed_source_fingerprints
++
++    if (
++        snapshot.cyclic_modules != cyclic_members
++        or tuple(sorted(name for name, _ in observed)) != cyclic_members
++        or any(
++            fingerprint != indexed_fingerprints_by_module.get(name)
++            for name, fingerprint in observed
++        )
++    ):
++        return reject("OPTIONAL_CYCLIC_SOURCE_IDENTITY_MISMATCH")
++
++    try:
 +        expected = (
 +            compute_cycle_model_source_closures_with_optional_children(
 +                hard_edges,
@@ -187,346 +181,390 @@ index e3751df..5a5a59a 100644
 +                package_root=package_root,
 +            )
 +        )
-+        if source_closures != expected:
-+            raise ValueError(
-+                "OPTIONAL_COHORT_IDENTITY_MISMATCH"
++    except (AttributeError, TypeError, ValueError):
++        return reject("OPTIONAL_COHORT_UNAVAILABLE")
++
++    if (
++        type(source_closures) is not tuple
++        or source_closures != expected
++        or len(expected) != len(structural)
++        or tuple(row.members for row in expected)
++        != tuple(row.members for row in structural)
++    ):
++        return reject("OPTIONAL_COHORT_IDENTITY_MISMATCH")
++
++    selected = tuple(sorted({
++        name
++        for row in expected
++        for name in row.evidence_source_modules
++    }))
++
++    if (
++        set(indexed_fingerprints_by_module) != set(hard_edges)
++        or set(source_snapshots) != set(selected)
++    ):
++        return reject("OPTIONAL_CAPTURE_SET_MISMATCH")
++
++    parsed: dict[str, ParsedSourceInput] = {}
++    total_bytes = 0
++
++    for module in selected:
++        supplied = source_snapshots[module]
++
++        if (
++            type(supplied) is not SourceSnapshot
++            or type(supplied.raw) is not bytes
++            or type(supplied.source_fingerprint) is not str
++        ):
++            return reject("SOURCE_BYTES_UNAVAILABLE:" + module)
++
++        size = len(supplied.raw)
++        total_bytes += size
++
++        if (
++            size > max_source_bytes
++            or total_bytes > max_closure_bytes
++        ):
++            return reject(
++                "SOURCE_BYTE_BUDGET_EXCEEDED:" + module
 +            )
 +
-+        closures = expected
-+        semantic_version = OPTIONAL_EVIDENCE_SEMANTIC_VERSION
++        actual_hash = hashlib.sha256(supplied.raw).hexdigest()
 +
-+        # AST replay uses only supplied AST; read_imports receives
-+        # tree explicitly, therefore it does not read source files.
-+        from pathlib import Path
-+        from contextor.core.symbol_engine.indexer import read_imports
-+
-+        selected = sorted({
-+            module
-+            for closure in closures
-+            for module in closure.evidence_source_modules
-+        })
-+
-+        for module in selected:
-+            tree = trees.get(module)
-+            if tree is None:
-+                continue
-+
-+            extracted, error = read_imports(
-+                Path(*module.split(".")).with_suffix(".py"),
-+                tree=tree,
++        if actual_hash != supplied.source_fingerprint:
++            return reject(
++                "SOURCE_SNAPSHOT_HASH_MISMATCH:" + module,
++                "EVIDENCE_MISMATCH",
 +            )
-+            if extracted is None or error is not None:
-+                raise ValueError(
-+                    "OPTIONAL_IMPORT_REPLAY_UNAVAILABLE:" + module
-+                )
 +
-+            indexed = indexed_imports_by_module[module]
-+            if tuple(extracted) != tuple(indexed):
-+                raise ValueError(
-+                    "OPTIONAL_IMPORT_FACTS_MISMATCH:" + module
-+                )
++        if actual_hash != indexed_fingerprints_by_module[module]:
++            return reject(
++                "SOURCE_INDEX_BYTES_MISMATCH:" + module,
++                "EVIDENCE_MISMATCH",
++            )
 +
-+        report = analyze_cycle_scenarios(
++        try:
++            parsed[module] = parse_source_snapshot(
++                supplied, module
++            )
++        except SourceError:
++            return reject("SOURCE_BYTES_UNPARSABLE:" + module)
++
++    try:
++        replay_sites = analyze_cyclic_import_sites(
++            hard_edges, parsed
++        )
++    except (TypeError, ValueError, RecursionError, OverflowError):
++        return reject("OPTIONAL_LEXICAL_REPLAY_UNAVAILABLE")
++
++    if replay_sites != snapshot.import_sites:
++        return reject(
++            "OPTIONAL_LEXICAL_EVIDENCE_MISMATCH",
++            "EVIDENCE_MISMATCH",
++        )
++
++    if any(
++        site.matched_edge_count != len(site.internal_edges)
++        or site.unresolved_edge_count != 0
++        or any(
++            edge.status != "LEXICAL_CANDIDATES"
++            or not edge.sites
++            for edge in site.internal_edges
++        )
++        for site in replay_sites.components
++    ):
++        return reject("OPTIONAL_CYCLIC_IMPORT_SITES_INCOMPLETE")
++
++    try:
++        replay = build_source_bound_cycle_evidence(
 +            hard_edges,
-+            trees,
++            parsed,
 +            source_selection="OPTIONAL_NAMED_CHILDREN",
 +            indexed_imports_by_module=indexed_imports_by_module,
 +            package_root=package_root,
-+            source_closures=closures,
++            source_closures=expected,
++        )
++    except (
++        AttributeError,
++        TypeError,
++        ValueError,
++        KeyError,
++        IndexError,
++        RecursionError,
++        OverflowError,
++    ):
++        return reject("OPTIONAL_MODEL_REPLAY_UNAVAILABLE")
++
++    if (
++        replay.scenarios != source_evidence.scenarios
++        or len(replay.components) != len(source_evidence.components)
++        or replay.components != source_evidence.components
++    ):
++        return reject(
++            "OPTIONAL_MODEL_OR_TOKEN_REPLAY_MISMATCH",
++            "EVIDENCE_MISMATCH",
 +        )
 +
-+    else:
-+        raise ValueError("SOURCE_SELECTION_INVALID")
++    results: list[SCCSourceByteAssessment] = []
 +
-     adjacency: dict[str, tuple[str, ...]] = {
--        source: tuple(sorted(set(targets))) for source, targets in hard_edges.items()
-+        source: tuple(sorted(set(targets)))
-+        for source, targets in hard_edges.items()
-     }
-     for targets in tuple(adjacency.values()):
-         for target in targets:
-             adjacency.setdefault(target, ())
--    graph_items = tuple((node, adjacency[node]) for node in sorted(adjacency))
++    for component in replay.components:
++        if (
++            component.coverage != "COMPLETE_FRESH_MEMBER_ENTRIES"
++            or component.classification not in {
++                "MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS",
++                "MODEL_INTERNAL_EARLY_BINDING_HAZARD",
++            }
++        ):
++            results.append(SCCSourceByteAssessment(
++                members=component.members,
++                model_classification="INDETERMINATE",
++                bytes_state="UNAVAILABLE",
++                reason=component.reason or "OPTIONAL_MODEL_INCOMPLETE",
++            ))
++            continue
 +
-+    graph_items = tuple(
-+        (node, adjacency[node])
-+        for node in sorted(adjacency)
-+    )
-     graph_fingerprint = _digest(graph_items)
--    source_manifest = tuple((name, *signatures[name]) for name in sorted(signatures))
++        results.append(SCCSourceByteAssessment(
++            members=component.members,
++            model_classification=component.classification,
++            bytes_state="BYTE_AST_CONSISTENT_NON_ATOMIC",
++            reason=None,
++        ))
 +
-+    source_manifest = tuple(
-+        (name, *signatures[name])
-+        for name in sorted(signatures)
-+    )
- 
-     components: list[ComponentSourceEvidence] = []
--    closures = compute_cycle_model_source_closures(hard_edges)
-+
-     for component, closure_row in zip(report.components, closures):
-         closure = closure_row.evidence_source_modules
-+
-         source_signatures = tuple(
--            (module, *signatures.get(module, (_MISSING, _MISSING)))
-+            (
-+                module,
-+                *signatures.get(module, (_MISSING, _MISSING)),
-+            )
-             for module in closure
-         )
--        subgraph = tuple((node, adjacency[node]) for node in closure)
-+
-+        subgraph = tuple(
-+            (node, adjacency[node])
-+            for node in closure
-+        )
-+
-         token = _component_token(
--            component.members, subgraph, source_signatures, component,
-+            component.members,
-+            subgraph,
-+            source_signatures,
-+            component,
-+            semantic_version=semantic_version,
-         )
-+
-         components.append(ComponentSourceEvidence(
-             members=component.members,
-             reachable_modules=closure,
-@@ -601,11 +740,12 @@ def build_source_bound_cycle_evidence(
-         ))
- 
-     return SourceBoundCycleEvidence(
--        semantic_version=EVIDENCE_SEMANTIC_VERSION,
-+        semantic_version=semantic_version,
-         graph_fingerprint=graph_fingerprint,
-         source_manifest_fingerprint=_digest(source_manifest),
-         components=tuple(components),
-         scenarios=report,
-+        source_selection=source_selection,
-     )
-diff --git a/tests/test_cycle_semantics_optional_child_evidence.py b/tests/test_cycle_semantics_optional_child_evidence.py
++    return tuple(results)
+diff --git a/tests/test_cycle_semantics_optional_child_byte_replay.py b/tests/test_cycle_semantics_optional_child_byte_replay.py
 new file mode 100644
-index 0000000..e95539f
+index 0000000..801aeca
 --- /dev/null
-+++ b/tests/test_cycle_semantics_optional_child_evidence.py
-@@ -0,0 +1,212 @@
-+"""P1D2A: optional source evidence remains snapshot-only."""
++++ b/tests/test_cycle_semantics_optional_child_byte_replay.py
+@@ -0,0 +1,224 @@
++"""P1D2B: optional byte and model replay without LIVE authority."""
 +
-+import ast
 +import hashlib
 +from dataclasses import replace
 +from pathlib import Path
 +
-+import pytest
-+
-+from contextor.core.source import ParsedSourceInput
-+from contextor.core.cycle_semantics.evidence import (
-+    EVIDENCE_SEMANTIC_VERSION,
-+    OPTIONAL_EVIDENCE_SEMANTIC_VERSION,
-+    assess_index_bound_scc_models,
-+    build_source_bound_cycle_evidence,
++from contextor.core.source import SourceSnapshot
++from contextor.core.cycle_semantics.contracts import (
++    CycleSemanticsSnapshot,
++    fingerprint_hard_edges,
++)
++from contextor.core.cycle_semantics.edge_sites import (
++    analyze_cyclic_import_sites,
++)
++from contextor.core.cycle_semantics.conditional_discovery import (
++    ConditionalDiscoveryReport,
++)
++from contextor.core.cycle_semantics.source_proof import (
++    assess_optional_scc_source_bytes,
++    assess_scc_source_bytes,
 +)
 +from tests.test_cycle_semantics_optional_child_scenarios import _case
-+from tests.test_cycle_semantics_evidence import _bound
++from tests.test_cycle_semantics_optional_child_evidence import (
++    _inputs,
++    _build,
++)
 +
 +
-+def _inputs(tmp_path, case):
-+    parsed = {}
-+    source_text = {}
-+    for module, tree in case[1].items():
++def _fixture(tmp_path):
++    case = _case(tmp_path)
++    parsed, _ = _inputs(tmp_path, case)
++    graph, _, imports, root, closures = case
++    evidence = _build(case, parsed)
++
++    index = {
++        name: source.source_fingerprint
++        for name, source in parsed.items()
++    }
++    members = tuple(sorted({
++        name
++        for row in closures
++        for name in row.members
++    }))
++
++    snapshot = CycleSemanticsSnapshot(
++        graph_sha256=fingerprint_hard_edges(graph.hard_edges),
++        cyclic_modules=members,
++        observed_source_fingerprints=tuple(
++            (name, index[name]) for name in members
++        ),
++        source_issues=(),
++        coverage_status="FILESYSTEM_STABLE_NON_ATOMIC",
++        source_snapshot_binding="NOT_ATOMICALLY_VERIFIED_BY_DISCOVERY",
++        runtime_execution_status="UNKNOWN_NOT_EVALUATED",
++        import_sites=analyze_cyclic_import_sites(
++            graph.hard_edges, parsed
++        ),
++        conditional_discovery=ConditionalDiscoveryReport(
++            (), 0, (), 0, "COMPLETE",
++        ),
++    )
++
++    selected = {
++        name
++        for row in closures
++        for name in row.evidence_source_modules
++    }
++
++    source_snapshots = {}
++    for name in selected:
 +        path = (
 +            tmp_path / "repo"
-+            / Path(*module.split(".")).with_suffix(".py")
++            / Path(*name.split(".")).with_suffix(".py")
 +        )
 +        raw = path.read_bytes()
-+        parsed[module] = ParsedSourceInput(
-+            tree, hashlib.sha256(raw).hexdigest()
++        source_snapshots[name] = SourceSnapshot(
++            raw, hashlib.sha256(raw).hexdigest()
 +        )
-+        source_text[module] = raw.decode("utf-8")
-+    return parsed, source_text
 +
-+
-+def _build(case, parsed):
-+    graph, _, imports, package_root, closures = case
-+    return build_source_bound_cycle_evidence(
++    return (
 +        graph.hard_edges,
-+        parsed,
-+        source_selection="OPTIONAL_NAMED_CHILDREN",
-+        indexed_imports_by_module=imports,
-+        package_root=package_root,
++        index,
++        snapshot,
++        evidence,
++        source_snapshots,
++        imports,
++        root,
++        closures,
++    )
++
++
++def _verify(case):
++    hard, index, snap, evidence, sources, imports, root, closures = case
++    return assess_optional_scc_source_bytes(
++        hard,
++        index,
++        snap,
++        evidence,
++        sources,
++        imports,
++        package_root=root,
 +        source_closures=closures,
 +    )
 +
 +
-+def test_optional_identity_and_selected_sources(tmp_path):
-+    case = _case(tmp_path)
-+    parsed, _ = _inputs(tmp_path, case)
++def test_optional_bytes_and_model_replay(tmp_path):
++    case = _fixture(tmp_path)
++    result = _verify(case)
 +
-+    evidence = _build(case, parsed)
-+    assert evidence.semantic_version == (
-+        OPTIONAL_EVIDENCE_SEMANTIC_VERSION
++    assert len(result) == 1
++    assert result[0].bytes_state == "BYTE_AST_CONSISTENT_NON_ATOMIC"
++    assert result[0].model_classification == (
++        "MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS"
 +    )
-+    assert evidence.source_selection == "OPTIONAL_NAMED_CHILDREN"
-+    assert evidence.components[0].reachable_modules == (
-+        case[4][0].evidence_source_modules
++    assert result[0].authority == (
++        "CALLER_SUPPLIED_BYTES_NOT_ATOMICALLY_BOUND_TO_LIVE"
 +    )
-+    assert "pkg.child" in evidence.components[0].reachable_modules
-+    assert evidence.scenarios.evidence_scope == (
-+        "OPTIONAL_NAMED_CHILDREN_SCENARIO_MODEL_NOT_RUNTIME_CERTIFICATION"
-+    )
-+    assert evidence == _build(case, parsed)
++    assert result == _verify(case)
 +
 +
-+def test_optional_child_byte_identity_changes_token(tmp_path):
-+    case = _case(tmp_path)
-+    parsed, _ = _inputs(tmp_path, case)
-+    before = _build(case, parsed)
++def test_missing_selected_child_is_unavailable(tmp_path):
++    case = list(_fixture(tmp_path))
++    case[4] = dict(case[4])
++    case[4].pop("pkg.child")
 +
-+    raw = b"pass\nx = 1\n"
-+    changed = dict(parsed)
-+    changed["pkg.child"] = ParsedSourceInput(
-+        ast.parse(raw),
-+        hashlib.sha256(raw).hexdigest(),
-+    )
++    result = _verify(case)
++    assert result[0].model_classification == "INDETERMINATE"
++    assert result[0].bytes_state == "UNAVAILABLE"
++    assert result[0].reason == "OPTIONAL_CAPTURE_SET_MISMATCH"
 +
-+    after = _build(case, changed)
-+    assert (
-+        before.components[0].evidence_token
-+        != after.components[0].evidence_token
-+    )
-+    assert (
-+        before.graph_fingerprint
-+        == after.graph_fingerprint
++
++def test_changed_raw_bytes_rejected(tmp_path):
++    case = list(_fixture(tmp_path))
++    case[4] = dict(case[4])
++    original = case[4]["pkg.child"]
++    case[4]["pkg.child"] = SourceSnapshot(
++        original.raw + b"# modified\n",
++        original.source_fingerprint,
 +    )
 +
-+
-+def test_old_hard_only_version_and_default(tmp_path):
-+    case = _case(tmp_path)
-+    parsed, _ = _inputs(tmp_path, case)
-+    graph = case[0]
-+
-+    default = build_source_bound_cycle_evidence(
-+        graph.hard_edges, parsed
++    result = _verify(case)
++    assert result[0].reason == (
++        "SOURCE_SNAPSHOT_HASH_MISMATCH:pkg.child"
 +    )
-+    explicit = build_source_bound_cycle_evidence(
-+        graph.hard_edges, parsed,
-+        source_selection="HARD_ONLY",
++    assert result[0].bytes_state == "EVIDENCE_MISMATCH"
++
++
++def test_changed_index_fingerprint_rejected(tmp_path):
++    case = list(_fixture(tmp_path))
++    case[1] = dict(case[1])
++    case[1]["pkg.child"] = "0" * 64
++
++    result = _verify(case)
++    assert result[0].reason == (
++        "SOURCE_INDEX_BYTES_MISMATCH:pkg.child"
 +    )
 +
-+    assert default == explicit
-+    assert default.semantic_version == EVIDENCE_SEMANTIC_VERSION
-+    assert default.source_selection == "HARD_ONLY"
 +
-+
-+def test_invalid_cohort_rejected(tmp_path):
-+    case = _case(tmp_path)
-+    parsed, _ = _inputs(tmp_path, case)
-+    graph, _, imports, root, closures = case
-+
-+    with pytest.raises(ValueError, match="OPTIONAL_COHORT"):
-+        build_source_bound_cycle_evidence(
-+            graph.hard_edges,
-+            parsed,
-+            source_selection="OPTIONAL_NAMED_CHILDREN",
-+            indexed_imports_by_module=imports,
-+            package_root=root,
-+            source_closures=(),
-+        )
-+
-+    with pytest.raises(ValueError, match="HARD_ONLY_OPTIONAL"):
-+        build_source_bound_cycle_evidence(
-+            graph.hard_edges,
-+            parsed,
-+            indexed_imports_by_module=imports,
-+        )
-+
-+    with pytest.raises(ValueError, match="SOURCE_SELECTION_INVALID"):
-+        build_source_bound_cycle_evidence(
-+            graph.hard_edges,
-+            parsed,
-+            source_selection="UNKNOWN",
-+        )
-+
-+
-+def test_indexed_import_fact_mismatch_rejected(tmp_path):
-+    case = _case(tmp_path)
-+    parsed, _ = _inputs(tmp_path, case)
-+    graph, _, imports, root, closures = case
-+
-+    corrupted = dict(imports)
-+    corrupted["pkg.b"] = []
-+
-+    with pytest.raises(
-+        ValueError, match="OPTIONAL_IMPORT_FACTS_MISMATCH:pkg.b"
-+    ):
-+        build_source_bound_cycle_evidence(
-+            graph.hard_edges,
-+            parsed,
-+            source_selection="OPTIONAL_NAMED_CHILDREN",
-+            indexed_imports_by_module=corrupted,
-+            package_root=root,
-+            source_closures=closures,
-+        )
-+
-+
-+def test_missing_selected_source_never_proves_pass(tmp_path):
-+    case = _case(tmp_path)
-+    parsed, _ = _inputs(tmp_path, case)
-+    parsed.pop("pkg.child")
-+
-+    evidence = _build(case, parsed)
-+    assert evidence.components[0].classification == "INDETERMINATE"
-+    assert evidence.components[0].reason == "MISSING_OR_INVALID_SOURCE"
-+    assert "MISSING" in evidence.components[0].source_signatures[
-+        tuple(evidence.components[0].reachable_modules).index(
-+            "pkg.child"
-+        )
-+    ]
-+
-+
-+def test_legacy_verifier_rejects_optional_evidence(tmp_path):
-+    case = _case(tmp_path)
-+    parsed, sources = _inputs(tmp_path, case)
-+    graph = case[0]
-+
-+    evidence = _build(case, parsed)
-+    index, snapshot, _ = _bound(graph.hard_edges, sources)
-+
-+    result = assess_index_bound_scc_models(
-+        graph.hard_edges,
-+        index,
-+        snapshot,
-+        evidence,
++def test_forged_component_token_rejected(tmp_path):
++    case = list(_fixture(tmp_path))
++    evidence = case[3]
++    component = replace(
++        evidence.components[0],
++        evidence_token="0" * 64,
 +    )
++    case[3] = replace(
++        evidence, components=(component,)
++    )
++
++    result = _verify(case)
++    assert result[0].reason == (
++        "OPTIONAL_MODEL_OR_TOKEN_REPLAY_MISMATCH"
++    )
++
++
++def test_legacy_evidence_cannot_enter_optional_replay(tmp_path):
++    case = list(_fixture(tmp_path))
++    case[3] = replace(case[3], source_selection="HARD_ONLY")
++
++    result = _verify(case)
++    assert result[0].reason == (
++        "OPTIONAL_EVIDENCE_IDENTITY_MISMATCH"
++    )
++
++
++def test_snapshot_lexical_evidence_must_match_bytes(tmp_path):
++    case = list(_fixture(tmp_path))
++    case[2] = replace(
++        case[2],
++        import_sites=analyze_cyclic_import_sites(
++            {}, {},
++        ),
++    )
++
++    result = _verify(case)
++    assert result[0].reason == (
++        "OPTIONAL_GRAPH_OR_TOPOLOGY_MISMATCH"
++    )
++
++
++def test_wrong_import_facts_fail_closed(tmp_path):
++    case = list(_fixture(tmp_path))
++    case[5] = dict(case[5])
++    case[5]["pkg.b"] = []
++
++    result = _verify(case)
++    assert result[0].model_classification == "INDETERMINATE"
++    assert result[0].bytes_state != (
++        "BYTE_AST_CONSISTENT_NON_ATOMIC"
++    )
++
++
++def test_existing_byte_verifier_still_rejects_optional(tmp_path):
++    case = _fixture(tmp_path)
++    hard, index, snap, evidence, sources, _, _, _ = case
++
++    result = assess_scc_source_bytes(
++        hard, index, snap, evidence, sources,
++    )
++
 +    assert all(
-+        row.evidence_state != "DECLARED_INPUTS_CONSISTENT"
-+        for row in result
-+    )
-+    assert all(
-+        row.reason == "EVIDENCE_SEMANTIC_VERSION_MISMATCH"
-+        for row in result
-+    )
-+
-+    forged_version = replace(
-+        evidence,
-+        semantic_version=EVIDENCE_SEMANTIC_VERSION,
-+    )
-+    result = assess_index_bound_scc_models(
-+        graph.hard_edges,
-+        index,
-+        snapshot,
-+        forged_version,
-+    )
-+    assert all(
-+        row.reason
-+        == "SOURCE_SELECTION_UNSUPPORTED_BY_HARD_ONLY_VERIFIER"
++        row.bytes_state != "BYTE_AST_CONSISTENT_NON_ATOMIC"
 +        for row in result
 +    )
 ```
 
 ## FINAL_VERDICT
 
-PASS
+TEST_FAILURE
 
-P1D2A provides snapshot-only optional evidence. It does not certify optional source bytes against a new verifier or complete P1D2.
+The exact supplied implementation is present, but the required targeted test set does not pass. No optional byte-replay certification is claimed.
