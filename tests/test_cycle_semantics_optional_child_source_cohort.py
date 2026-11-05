@@ -50,7 +50,7 @@ def test_p01_no_indexed_child_preserves_original(tmp_path):
     assert graph.hard_edges
 
 
-def test_p02_to_p07_fixed_point_and_reexport_shadow(tmp_path):
+def _fixed_point_case(tmp_path):
     files = {
         "contextor/__init__.py": "pass\n",
         "contextor/ui/__init__.py": "theme = 1\n",
@@ -61,7 +61,44 @@ def test_p02_to_p07_fixed_point_and_reexport_shadow(tmp_path):
         "contextor/a.py": "import contextor.b\nfrom contextor.ui import theme\n",
         "contextor/b.py": "import contextor.a\n",
     }
-    graph, imports, original, expanded = _candidate(tmp_path, files)
+    return _candidate(tmp_path, files)
+
+
+def test_p02_optional_named_child(tmp_path):
+    _, _, original, expanded = _fixed_point_case(tmp_path)
+    assert "contextor.ui.theme" in expanded[0].evidence_source_modules
+    assert "contextor.ui.theme" not in original[0].evidence_source_modules
+
+
+def test_p03_eventual_reexport_shadow(tmp_path):
+    graph, _, _, expanded = _fixed_point_case(tmp_path)
+    assert "contextor.ui.theme" not in graph.soft_edges["contextor.a"]
+    assert "contextor.ui.theme" in expanded[0].evidence_source_modules
+
+
+def test_p04_transitive_hard_dependency(tmp_path):
+    graph, _, original, expanded = _fixed_point_case(tmp_path)
+    assert "contextor.extra" in graph.hard_edges["contextor.ui.theme"]
+    assert "contextor.extra" not in original[0].evidence_source_modules
+    assert "contextor.extra" in expanded[0].evidence_source_modules
+
+
+def test_p05_second_level_optional_child(tmp_path):
+    graph, _, _, expanded = _fixed_point_case(tmp_path)
+    assert "contextor.repo_generator.run_repo_generator" not in graph.hard_edges["contextor.extra"]
+    assert "contextor.repo_generator.run_repo_generator" in expanded[0].evidence_source_modules
+
+
+def test_p06_ancestor_initializers(tmp_path):
+    _, _, original, expanded = _fixed_point_case(tmp_path)
+    assert {"contextor.ui.__init__", "contextor.repo_generator.__init__"} <= set(
+        expanded[0].evidence_source_modules
+    )
+    assert expanded[0].implicit_initializer_modules == original[0].implicit_initializer_modules
+
+
+def test_p07_fact_order_independence(tmp_path):
+    graph, imports, original, expanded = _fixed_point_case(tmp_path)
     selected = set(expanded[0].evidence_source_modules)
     assert {"contextor.ui.theme", "contextor.extra",
             "contextor.repo_generator.run_repo_generator",
@@ -117,16 +154,71 @@ def test_n03_n04_ambiguity_and_invalid_relative(tmp_path):
             {name: rows for name, rows in imports.items() if name != "pkg"})
 
 
-def test_n05_capacity_and_n06_cycle(tmp_path):
+def _pure_capacity_graph(extra_count):
+    hard = {"pkg.__init__": set(), "pkg.a": {"pkg.b"}, "pkg.b": {"pkg.a"}}
+    hard.update({f"pkg.extra{i}": set() for i in range(extra_count)})
+    return hard, {name: [] for name in hard}
+
+
+def test_n05a_initial_hard_closure_capacity():
+    hard, imports = _pure_capacity_graph(257)
+    hard["pkg.a"].update(f"pkg.extra{i}" for i in range(257))
+    assert set(hard["pkg.a"]) <= set(hard)
+    assert set(imports) == set(hard)
+    with pytest.raises(ValueError, match="^Selected source capacity exceeded$"):
+        compute_cycle_model_source_closures_with_optional_children(hard, imports)
+
+
+def test_n05b_optional_expansion_capacity():
+    hard = {"pkg.__init__": set(), "pkg.a": {"pkg.b", "pkg.__init__"},
+            "pkg.b": {"pkg.a"}}
+    hard.update({f"pkg.child{i}": set() for i in range(257)})
+    imports = {name: [] for name in hard}
+    imports["pkg.a"] = [ImportRef(
+        module="pkg", level=0,
+        names=[f"child{i}" for i in range(257)], is_from_import=True
+    )]
+    assert len(compute_cycle_model_source_closures(hard)[0].evidence_source_modules) < 256
+    assert set(imports) == set(hard)
+    with pytest.raises(ValueError, match="^Selected source capacity exceeded$"):
+        compute_cycle_model_source_closures_with_optional_children(hard, imports)
+
+
+def test_n05c_multiple_scc_union_capacity():
+    hard = {"one.a": {"one.b"}, "one.b": {"one.a"},
+            "two.a": {"two.b"}, "two.b": {"two.a"}}
+    for prefix in ("one", "two"):
+        for i in range(128):
+            hard[f"{prefix}.extra{i}"] = set()
+            hard[f"{prefix}.a"].add(f"{prefix}.extra{i}")
+    imports = {name: [] for name in hard}
+    closures = compute_cycle_model_source_closures(hard)
+    assert len(closures) == 2
+    assert all(len(row.evidence_source_modules) <= 256 for row in closures)
+    assert len(set().union(*(set(row.evidence_source_modules) for row in closures))) > 256
+    with pytest.raises(ValueError, match="^Selected source capacity exceeded$"):
+        compute_cycle_model_source_closures_with_optional_children(hard, imports)
+
+
+def test_n05d_invalid_hard_target_control(tmp_path):
     graph, imports, _, _ = _candidate(tmp_path, BASE)
     hard = {name: set(targets) for name, targets in graph.hard_edges.items()}
-    hard["pkg.a"].update(f"extra{i}" for i in range(257))
-    all_imports = {**imports, **{f"extra{i}": [] for i in range(257)}}
-    with pytest.raises(ValueError):
-        compute_cycle_model_source_closures_with_optional_children(hard, all_imports)
+    hard["pkg.a"].add("pkg.missing")
+    with pytest.raises(ValueError, match="^Invalid hard graph targets$"):
+        compute_cycle_model_source_closures_with_optional_children(hard, imports)
+
+
+def test_n06_optional_fixed_point_cycle(tmp_path):
     files = {**BASE, "pkg/value.py": "from pkg import a\n"}
-    _, _, _, expanded = _candidate(tmp_path / "cycle", files)
-    assert {"pkg.value", "pkg.a"} <= set(expanded[0].evidence_source_modules)
+    graph, imports, _, expanded = _candidate(tmp_path, files)
+    before = {name: set(targets) for name, targets in graph.hard_edges.items()}
+    selected = set(expanded[0].evidence_source_modules)
+    assert set(expanded[0].members) <= selected
+    assert {"pkg.value", "pkg.a"} <= selected
+    assert compute_cycle_model_source_closures_with_optional_children(
+        graph.hard_edges, imports
+    ) == expanded
+    assert graph.hard_edges == before
 
 
 def test_n08_n09_n10_candidate_never_certifies_or_mutates(tmp_path):
