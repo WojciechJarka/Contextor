@@ -110,6 +110,8 @@ def plan_original_worker_reindex(
             index, hard_edges, source_selection
         )
     except (AttributeError, TypeError, ValueError) as exc:
+        if source_selection == _HARD_ONLY and str(exc) == "CLOSURE_MODULE_LIMIT":
+            return unavailable("CLOSURE_MODULE_LIMIT")
         return unavailable("SOURCE_SELECTION_INVALID:" + str(exc))
     selected = set(selected_ids)
 
