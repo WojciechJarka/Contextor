@@ -1,162 +1,353 @@
-# CONTEXTOR C16-B03-P1D2B-R2
-
-## FILES_CHANGED
-
-- contextor/core/cycle_semantics/evidence.py
-- contextor/core/cycle_semantics/source_proof.py
-- tests/test_cycle_semantics_optional_child_byte_replay.py
-
-walkthrough.md was overwritten as the report. Initial local HEAD dc5e6e3c9ad4d68f9338b5259db945dcf4f8cc1d matched the supplied base; worktree was clean.
+# CONTEXTOR C16-B03-P1D3A
 
 ## TARGETED_TESTS
 
-The four specified modules passed: 106 passed, 0 failed. CPython 3.15.2 via .venv, -B -q -rs -p no:cacheprovider, external --basetemp C:\Temp\Contextor_C16_P1D2B_R2_pytest_tmp. No full suite. Git diff --check for changed source/test files passed.
+The four specified modules passed: 103 passed, 0 failed. CPython 3.15.2 via .venv, -B -q -rs -p no:cacheprovider, external --basetemp C:\Temp\Contextor_C16_P1D3A_pytest_tmp. No full suite. Git diff --check for the changed production file passed.
+
+## FILES_CHANGED
+
+- contextor/core/cycle_semantics/generation_manifest.py
+- tests/test_cycle_semantics_optional_child_manifest.py
+
+walkthrough.md was overwritten as the report. Initial local HEAD ddb7a60d72c17a0a1df30a858fa76408dc868b4d matched the supplied base; worktree was clean. Only the supplied literal changes were applied by direct file patches.
 
 ## MCP_POST_CHANGE_AUDIT
 
-At canonical revision 1014, evidence and source_proof were canonical_state=fresh, workspace_sync=verified; the test module was temporarily out_of_sync while watcher indexing was in progress. Final test module query at revision 1016: canonical_state=fresh, workspace_sync=verified, advisory_warning=null. Structural DFS path count remains 16; cycle_semantics remains stale. Indexed source freshness does not prove loaded backend adoption. No FULL, update_file, restart, dependency install or manual commit.
+At canonical revision 1018, generation_manifest and the new test module report canonical_state=fresh, workspace_sync=verified, advisory_warning=null. The first generation_manifest query at revision 1017 was temporarily unverified while watcher indexing was in progress; the final query was verified. Structural DFS path count remains 16; cycle_semantics remains stale. Indexed source freshness does not prove loaded backend adoption. No FULL, update_file, restart, dependency install or manual commit.
 
 ## FULL_DIFFS
 
 ```diff
-diff --git a/contextor/core/cycle_semantics/evidence.py b/contextor/core/cycle_semantics/evidence.py
-index 5a5a59a..608d60e 100644
---- a/contextor/core/cycle_semantics/evidence.py
-+++ b/contextor/core/cycle_semantics/evidence.py
-@@ -697,9 +697,21 @@ def build_source_bound_cycle_evidence(
-     )
-     graph_fingerprint = _digest(graph_items)
- 
-+    if source_selection == "OPTIONAL_NAMED_CHILDREN":
-+        selected_modules = {
-+            module
-+            for closure in closures
-+            for module in closure.evidence_source_modules
-+        }
-+        manifest_names = sorted(
-+            selected_modules.intersection(signatures)
-+        )
-+    else:
-+        manifest_names = sorted(signatures)
-+
-     source_manifest = tuple(
-         (name, *signatures[name])
--        for name in sorted(signatures)
-+        for name in manifest_names
-     )
- 
-     components: list[ComponentSourceEvidence] = []
-diff --git a/contextor/core/cycle_semantics/source_proof.py b/contextor/core/cycle_semantics/source_proof.py
-index 61eb75c..dd6bae3 100644
---- a/contextor/core/cycle_semantics/source_proof.py
-+++ b/contextor/core/cycle_semantics/source_proof.py
-@@ -496,11 +496,7 @@ def assess_optional_scc_source_bytes(
-     ):
-         return reject("OPTIONAL_MODEL_REPLAY_UNAVAILABLE")
- 
--    if (
--        replay.scenarios != source_evidence.scenarios
--        or len(replay.components) != len(source_evidence.components)
--        or replay.components != source_evidence.components
--    ):
-+    if replay != source_evidence:
-         return reject(
-             "OPTIONAL_MODEL_OR_TOKEN_REPLAY_MISMATCH",
-             "EVIDENCE_MISMATCH",
-diff --git a/tests/test_cycle_semantics_optional_child_byte_replay.py b/tests/test_cycle_semantics_optional_child_byte_replay.py
-index 0b16915..dd2ea7c 100644
---- a/tests/test_cycle_semantics_optional_child_byte_replay.py
-+++ b/tests/test_cycle_semantics_optional_child_byte_replay.py
-@@ -19,15 +19,18 @@ from contextor.core.cycle_semantics.source_proof import (
-     assess_optional_scc_source_bytes,
-     assess_scc_source_bytes,
+diff --git a/contextor/core/cycle_semantics/generation_manifest.py b/contextor/core/cycle_semantics/generation_manifest.py
+index 6ce72e1..b2522e1 100644
+--- a/contextor/core/cycle_semantics/generation_manifest.py
++++ b/contextor/core/cycle_semantics/generation_manifest.py
+@@ -19,11 +19,16 @@ from .contracts import (
+     fingerprint_hard_edges,
  )
--from tests.test_cycle_semantics_optional_child_scenarios import _case
-+from tests.test_cycle_semantics_optional_child_scenarios import (
-+    FILES,
-+    _case,
+ from .evidence import SourceBoundCycleEvidence
+-from .source_proof import assess_scc_source_bytes
++from .source_proof import (
++    assess_scc_source_bytes,
++    assess_optional_scc_source_bytes,
 +)
- from tests.test_cycle_semantics_optional_child_evidence import (
-     _inputs,
-     _build,
- )
++from .model_source_closure import CycleModelSourceClosure
+ from .evidence import _scenario_fingerprint
  
  
--def _fixture(tmp_path):
--    case = _case(tmp_path)
-+def _fixture(tmp_path, *, files=None):
-+    case = _case(tmp_path, files=files)
-     parsed, _ = _inputs(tmp_path, case)
-     graph, _, imports, root, closures = case
-     evidence = _build(case, parsed)
-@@ -251,3 +254,63 @@ def test_existing_byte_verifier_still_rejects_optional(tmp_path):
-         row.bytes_state != "BYTE_AST_CONSISTENT_NON_ATOMIC"
-         for row in result
+ MANIFEST_VERSION = "cycle-source-manifest/2"
++OPTIONAL_MANIFEST_VERSION = "cycle-source-manifest/3"
+ _AUTHORITY = "PREPARED_ONLY_NOT_CANONICALLY_PUBLISHED"
+ 
+ 
+@@ -55,6 +60,7 @@ class PreparedCycleSourceManifest:
+     components: tuple[PreparedSCCSourceBinding, ...]
+     version: str = MANIFEST_VERSION
+     authority: str = _AUTHORITY
++    source_selection: str = "HARD_ONLY"
+ 
+ 
+ def prepare_cycle_source_manifest(
+@@ -66,6 +72,10 @@ def prepare_cycle_source_manifest(
+     *,
+     max_source_bytes: int = 2 * 1024 * 1024,
+     max_closure_bytes: int = 32 * 1024 * 1024,
++    source_selection: str = "HARD_ONLY",
++    indexed_imports_by_module: Mapping[str, object] | None = None,
++    package_root: str | None = None,
++    source_closures: tuple[CycleModelSourceClosure, ...] | None = None,
+ ) -> PreparedCycleSourceManifest:
+     """Prepare immutable source evidence without publication.
+ 
+@@ -75,15 +85,57 @@ def prepare_cycle_source_manifest(
+     """
+     graph_hash = fingerprint_hard_edges(hard_edges)
+ 
+-    checks = assess_scc_source_bytes(
+-        hard_edges,
+-        indexed_fingerprints_by_module,
+-        snapshot,
+-        source_evidence,
+-        source_snapshots,
+-        max_source_bytes=max_source_bytes,
+-        max_closure_bytes=max_closure_bytes,
+-    )
++    if source_selection == "HARD_ONLY":
++        if (
++            indexed_imports_by_module is not None
++            or package_root is not None
++            or source_closures is not None
++        ):
++            raise ValueError("HARD_ONLY_OPTIONAL_INPUTS_UNSUPPORTED")
++
++        manifest_version = MANIFEST_VERSION
++        checks = assess_scc_source_bytes(
++            hard_edges,
++            indexed_fingerprints_by_module,
++            snapshot,
++            source_evidence,
++            source_snapshots,
++            max_source_bytes=max_source_bytes,
++            max_closure_bytes=max_closure_bytes,
++        )
++
++    elif source_selection == "OPTIONAL_NAMED_CHILDREN":
++        if (
++            type(source_evidence) is not SourceBoundCycleEvidence
++            or not isinstance(indexed_imports_by_module, Mapping)
++            or type(source_closures) is not tuple
++            or not source_closures
++        ):
++            raise ValueError("OPTIONAL_MANIFEST_INPUT_INVALID")
++
++        manifest_version = OPTIONAL_MANIFEST_VERSION
++
++        checks = assess_optional_scc_source_bytes(
++            hard_edges,
++            indexed_fingerprints_by_module,
++            snapshot,
++            source_evidence,
++            source_snapshots,
++            indexed_imports_by_module,
++            package_root=package_root,
++            source_closures=source_closures,
++            max_source_bytes=max_source_bytes,
++            max_closure_bytes=max_closure_bytes,
++        )
++
++        if (
++            len(source_evidence.components) != len(checks)
++            or len(source_evidence.scenarios.components) != len(checks)
++        ):
++            raise ValueError("OPTIONAL_MANIFEST_COMPONENT_IDENTITY_MISMATCH")
++
++    else:
++        raise ValueError("SOURCE_SELECTION_INVALID")
+ 
+     prepared: list[PreparedSCCSourceBinding] = []
+     accepted_signatures: dict[str, tuple[str, str]] = {}
+@@ -165,18 +217,36 @@ def prepare_cycle_source_manifest(
+             (module, *accepted_signatures[module])
+             for module in sorted(accepted_signatures)
+         )
+-        manifest_hash: str | None = _digest((
+-            MANIFEST_VERSION,
+-            graph_hash,
+-            tuple((
+-                component.members,
+-                component.model_classification,
+-                component.model_kind,
+-                component.model_evidence_sha256,
+-                component.source_signatures,
+-            ) for component in prepared),
+-            ordered_sources,
+-        ))
++        if source_selection == "HARD_ONLY":
++            manifest_hash: str | None = _digest((
++                MANIFEST_VERSION,
++                graph_hash,
++                tuple((
++                    component.members,
++                    component.model_classification,
++                    component.model_kind,
++                    component.model_evidence_sha256,
++                    component.source_signatures,
++                ) for component in prepared),
++                ordered_sources,
++            ))
++        else:
++            manifest_hash = _digest((
++                OPTIONAL_MANIFEST_VERSION,
++                "OPTIONAL_NAMED_CHILDREN",
++                source_evidence.semantic_version,
++                graph_hash,
++                source_evidence.source_manifest_fingerprint,
++                tuple((
++                    component.members,
++                    component.model_classification,
++                    component.model_kind,
++                    component.model_evidence_sha256,
++                    component.source_signatures,
++                    source_evidence.components[position].evidence_token,
++                ) for position, component in enumerate(prepared)),
++                ordered_sources,
++            ))
+     else:
+         manifest_hash = None
+ 
+@@ -184,4 +254,6 @@ def prepare_cycle_source_manifest(
+         graph_sha256=graph_hash,
+         source_manifest_sha256=manifest_hash,
+         components=tuple(prepared),
++        version=manifest_version,
++        source_selection=source_selection,
      )
+diff --git a/tests/test_cycle_semantics_optional_child_manifest.py b/tests/test_cycle_semantics_optional_child_manifest.py
+new file mode 100644
+index 0000000..88215a4
+--- /dev/null
++++ b/tests/test_cycle_semantics_optional_child_manifest.py
+@@ -0,0 +1,156 @@
++"""P1D3A: optional prepared manifests are not publication claims."""
++
++from dataclasses import replace
++
++import pytest
++
++from contextor.core.cycle_semantics.generation_manifest import (
++    MANIFEST_VERSION,
++    OPTIONAL_MANIFEST_VERSION,
++    prepare_cycle_source_manifest,
++)
++from contextor.core.cycle_semantics.publication_binding import (
++    _validated_claim_digest,
++)
++from tests.test_cycle_semantics_optional_child_byte_replay import (
++    _fixture,
++)
++from tests.test_cycle_semantics_optional_child_scenarios import FILES
++from tests.test_cycle_semantics_evidence import (
++    PAIR,
++    PASS,
++    _bound,
++    _p1b_snapshots,
++)
 +
 +
-+def test_forged_global_source_manifest_fingerprint_rejected(tmp_path):
-+    case = list(_fixture(tmp_path))
-+    evidence = case[3]
-+
-+    case[3] = replace(
++def _prepare(case):
++    hard, index, snapshot, evidence, sources, imports, root, closures = case
++    return prepare_cycle_source_manifest(
++        hard,
++        index,
++        snapshot,
 +        evidence,
++        sources,
++        source_selection="OPTIONAL_NAMED_CHILDREN",
++        indexed_imports_by_module=imports,
++        package_root=root,
++        source_closures=closures,
++    )
++
++
++def test_optional_manifest_prepared_only(tmp_path):
++    case = _fixture(tmp_path)
++
++    manifest = _prepare(case)
++
++    assert manifest.version == OPTIONAL_MANIFEST_VERSION
++    assert manifest.source_selection == "OPTIONAL_NAMED_CHILDREN"
++    assert manifest.authority == "PREPARED_ONLY_NOT_CANONICALLY_PUBLISHED"
++    assert len(manifest.source_manifest_sha256) == 64
++    assert len(manifest.components) == 1
++    assert manifest.components[0].preparation_state == (
++        "PREPARED_UNPUBLISHED"
++    )
++    assert manifest.components[0].source_signatures == (
++        case[3].components[0].source_signatures
++    )
++    assert manifest == _prepare(case)
++
++
++def test_optional_child_missing_blocks_manifest(tmp_path):
++    case = list(_fixture(tmp_path))
++    case[4] = dict(case[4])
++    case[4].pop("pkg.child")
++
++    manifest = _prepare(case)
++
++    assert manifest.version == OPTIONAL_MANIFEST_VERSION
++    assert manifest.source_manifest_sha256 is None
++    assert manifest.components[0].preparation_state == "UNAVAILABLE"
++    assert manifest.components[0].model_classification == "INDETERMINATE"
++
++
++def test_forged_optional_evidence_blocks_manifest(tmp_path):
++    case = list(_fixture(tmp_path))
++    case[3] = replace(
++        case[3],
 +        source_manifest_fingerprint="0" * 64,
 +    )
 +
-+    result = _verify(case)
++    manifest = _prepare(case)
 +
-+    assert len(result) == 1
-+    assert result[0].model_classification == "INDETERMINATE"
-+    assert result[0].bytes_state == "EVIDENCE_MISMATCH"
-+    assert result[0].reason == (
-+        "OPTIONAL_MODEL_OR_TOKEN_REPLAY_MISMATCH"
-+    )
++    assert manifest.source_manifest_sha256 is None
++    assert manifest.components[0].preparation_state == "UNAVAILABLE"
 +
 +
-+def test_unrelated_source_does_not_change_optional_manifest(tmp_path):
++def test_wrong_source_cohort_blocks_manifest(tmp_path):
++    case = list(_fixture(tmp_path))
++    case[7] = ()
++
++    with pytest.raises(
++        ValueError, match="OPTIONAL_MANIFEST_INPUT_INVALID"
++    ):
++        _prepare(case)
++
++
++def test_unrelated_module_does_not_change_optional_manifest(tmp_path):
 +    first = _fixture(
 +        tmp_path / "first",
-+        files={
-+            **FILES,
-+            "pkg/unrelated.py": "value = 1\n",
-+        },
++        files={**FILES, "pkg/unrelated.py": "value=1\n"},
 +    )
-+
 +    second = _fixture(
 +        tmp_path / "second",
++        files={**FILES, "pkg/unrelated.py": "value=2\n"},
++    )
++
++    a = _prepare(first)
++    b = _prepare(second)
++
++    assert a.source_manifest_sha256 is not None
++    assert a.source_manifest_sha256 == b.source_manifest_sha256
++
++
++def test_two_independent_sccs(tmp_path):
++    case = _fixture(
++        tmp_path,
 +        files={
 +            **FILES,
-+            "pkg/unrelated.py": "value = 2\n",
++            "pkg/x.py": "import pkg.y\n",
++            "pkg/y.py": "import pkg.x\n",
 +        },
 +    )
 +
-+    assert "pkg.unrelated" in first[1]
-+    assert "pkg.unrelated" in second[1]
++    manifest = _prepare(case)
 +
-+    assert "pkg.unrelated" not in first[4]
-+    assert "pkg.unrelated" not in second[4]
++    assert len(manifest.components) == 2
++    assert all(
++        component.preparation_state == "PREPARED_UNPUBLISHED"
++        for component in manifest.components
++    )
++    assert manifest.source_manifest_sha256 is not None
 +
-+    assert _verify(first)[0].bytes_state == (
-+        "BYTE_AST_CONSISTENT_NON_ATOMIC"
-+    )
-+    assert _verify(second)[0].bytes_state == (
-+        "BYTE_AST_CONSISTENT_NON_ATOMIC"
++
++def test_hard_only_manifest_preserves_previous_version():
++    index, snapshot, evidence = _bound(PAIR, PASS)
++
++    manifest = prepare_cycle_source_manifest(
++        PAIR,
++        index,
++        snapshot,
++        evidence,
++        _p1b_snapshots(PASS),
 +    )
 +
-+    assert (
-+        first[3].source_manifest_fingerprint
-+        == second[3].source_manifest_fingerprint
-+    )
++    assert manifest.version == MANIFEST_VERSION
++    assert manifest.source_selection == "HARD_ONLY"
++    assert manifest.source_manifest_sha256 is not None
 +
-+    assert (
-+        first[3].components[0].evidence_token
-+        == second[3].components[0].evidence_token
-+    )
++
++def test_existing_publication_rejects_optional_manifest(tmp_path):
++    manifest = _prepare(_fixture(tmp_path))
++
++    with pytest.raises(
++        ValueError, match="prepared manifest is incomplete or unsupported"
++    ):
++        _validated_claim_digest(None, manifest)
 ```
 
 ## FINAL_VERDICT
 
 PASS
 
-The supplied optional source manifest integrity patch and focused tests passed. No manifest, claim or publication integration was performed.
+Optional manifests are prepared and unpublished; existing publication validation rejects them. No LIVE or claim integration was performed.
