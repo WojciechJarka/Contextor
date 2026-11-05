@@ -1,426 +1,379 @@
-# CONTEXTOR C16-B01-B03-P0
-# SAFE NAMED PACKAGE MEMBER ADMISSION / OPTIONAL CHILD SOURCE FAIL-CLOSED GATE
+# CONTEXTOR C16-B03-P1A
 
 ## PREFLIGHT
 
-- Root: C:\Temp\Contextor_Repo. HEAD before and after: 626d427aed8477f095e354abd260a050cb4840d4.
-- Initial worktree: M walkthrough.md only. It was the previous task's report and was preserved until this report replacement.
-- Contextor MCP documentation and current module contexts were read before edits. The owners were confirmed: package_graph_consistency.assess_package_graph_consistency; evidence.EVIDENCE_SEMANTIC_VERSION; tests/test_p1d3_package_cycle_integration.py canonical integration helper and tests.
-- Current interpreter: .venv\Scripts\python.exe, CPython 3.15.2. No dependency installation, production FULL, update_file, backend/Desktop/LIVE restart or commit.
-- Source drift check: exact current named package branch and semantic version /2 matched the supplied contract. All edits used the normal patch editor.
+DIRECT_EVIDENCE: HEAD 273503728aa5478864d344f21e974634d2ac1c79. CPython 3.15.2 from .venv. Initial worktree clean. P0 accepted in current baseline; its source and tests were preserved. MCP preflight: model_source_closure workspace_sync=verified, canonical revision 989, 16 fresh structural DFS paths; cycle_semantics stale.
 
 ## MCP_DISCOVERY
 
-- Before edit the two owner modules reported canonical rev 982, canonical_state=fresh, workspace_sync=verified, cycle_semantics=fresh. Canonical structural warning count was 16, model_pass_count=0.
-- package_graph_consistency inbound consumers include scenarios and the canonical integration tests; its outbound owners include model_identity and typing_guard. evidence is consumed by generation_manifest, original_worker_preparation, source_proof and other source-bound paths.
-- Existing canonical graph construction and tests supplied the hard/soft invariant: hard edge to package initializer, optional named child as soft candidate, explicit relative sibling as hard. Neither graph.py nor resolver.py was edited.
-- The existing scenarios call assess_package_graph_consistency with a mapping restricted to evidence_source_modules. This is the current B03 cohort limitation; direct callers can supply a wider source map, so the new gate checks both cohort membership and AST availability.
+CONTRACT_PROVED: model_source_closure owns the old hard-reachable SCC closure. Its consumers include evidence, original worker binding and planning. MCP symbol lineage resolved the exact function; call context is intra-module only and had zero edges, so it does not establish inter-module completeness. Source inspection confirmed ImportRef fields and canonical model_identity translation. Graph builder suppresses named-child soft edges when reexport bindings exist.
 
 ## EXACT_FILE_SCOPE
 
-Allowed and changed:
-1. contextor/core/cycle_semantics/package_graph_consistency.py — assess_package_graph_consistency named-member branch only.
-2. contextor/core/cycle_semantics/evidence.py — EVIDENCE_SEMANTIC_VERSION only, from /2 to /3.
-3. tests/test_p1d3_package_cycle_integration.py — focused canonical integration regressions and one local fixture helper.
-4. walkthrough.md — this report.
+Production: contextor/core/cycle_semantics/model_source_closure.py. New tests: tests/test_cycle_semantics_optional_child_source_cohort.py. Report: walkthrough.md. No other source/test files changed.
 
-No other source, test, docs, config, graph, package model, closure, scenario or warning-policy file changed.
+## PURE_PLANNER_IMPLEMENTATION
 
-## B01_IMPLEMENTATION
+Added compute_cycle_model_source_closures_with_optional_children(hard_edges, indexed_imports_by_module, *, package_root=None) returning CycleModelSourceClosure tuples. It only reads supplied graph/import facts, does not read source, import analyzed modules, mutate input, certify safety, or publish claims. Existing compute_cycle_model_source_closures is unchanged.
 
-- For an ast.ImportFrom whose base resolves to an indexed regular package initializer, the new ordinary named-member branch retains the initializer in expected hard targets.
-- It requires an ast.Module initializer source and checks every requested member and alias against the existing restricted model's identifier/dunder contract. Star imports remain rejected at the original earlier check.
-- For each name it asks existing logical_to_indexed_module through the checker's target() helper over the full hard-graph key domain. It adds no named child to expected hard edges.
-- The existing explicit-relative sibling branch below this new branch is unchanged in behavior; its selected existing tests pass.
-- Final expected-vs-canonical hard-edge set equality at the end of assess_package_graph_consistency is unchanged. The checker does not infer that an initializer attribute is already or eventually bound; package_model determines import-time binding behavior.
+## INPUT_DOMAIN_VALIDATION
 
-## B03_FAIL_CLOSED_GATE
+Exact graph/import module key agreement, indexed target membership, module identity, package root, ImportRef type/fields, flags and names are validated before selection. Malformed, missing, ambiguous and unsupported selected forms raise ValueError; no partial cohort is returned. Caller must supply the complete first-pass index domain; this is an input contract, not independently authenticated by the pure function.
 
-- If the indexed possible child exists, admission requires both child membership in evidence_source_modules and an ast.Module source in the supplied mapping.
-- Missing either condition returns INDETERMINATE / OPTIONAL_NAMED_CHILD_SOURCE_UNAVAILABLE before a consistency result. The check runs even when the initializer binds the same member eventually.
-- If no child is indexed, none is fabricated. The hard graph, soft graph and AST inputs are not mutated or read from disk inside the checker.
-- Test P04 confirms that passing all AST sources while supplying only the hard-only evidence cohort still fails closed; the full indexed source cohort admits the named import for diagnostic model evaluation.
-- The source cohort itself is not enlarged in P0. Full B03 resolution remains separate.
+## ABSOLUTE_RELATIVE_RESOLUTION
+
+Relative import base follows the package consistency checker's initializer/module context and level rules. Absolute base strips the supplied canonical package_root prefix. Indexed package initializer and direct module collision fails closed. Candidate child identity uses canonical logical_to_indexed_module.
+
+## OPTIONAL_CHILD_FIXED_POINT
+
+Each original SCC evidence cohort is expanded by selected named children, their hard-reachable targets and indexed ancestor initializers. Every newly selected source is rescanned for further optional children until no new source remains. Returned cohorts are sorted, deduplicated and monotonic; original members, hard closure and implicit initializer tuple are retained.
+
+## EVENTUAL_REEXPORT_SHADOWING
+
+Selection reads indexed ImportRef facts directly and does not inspect soft_edges. A test confirms graph reexport binding suppresses the soft edge while the indexed same-name child is still included.
 
 ## CANONICAL_GRAPH_INVARIANTS
 
-- Production contextor/core/graph/graph.py, resolver.py and indexer.py were untouched. No soft candidate was promoted to hard.
-- P01/P02 canonical synthetic hard graph remained pkg.__init__ -> pkg.a and pkg.a -> pkg.__init__, with no soft edges; source order alone changed the model result.
-- P04 canonical graph retained pkg.a -> pkg.__init__ hard and pkg.a -> pkg.value soft. The indexed child was not in hard-only evidence_source_modules.
-- Forging pkg.a -> pkg.value as a hard edge or deleting the mandatory pkg.a -> pkg.__init__ hard edge yielded GRAPH_SOURCE_IMPORT_MISMATCH with the full source cohort.
+The planner does not mutate hard_edges or soft_edges. It does not promote selected child edges into the canonical graph. Original closure and version constant remain unchanged. Production claim preparation remains on the original planner.
 
-## POSITIVE_REGRESSION_RESULTS
+## POSITIVE_TEST_RESULTS
 
-- P01: initializer from . import a then value = 1, with pkg.a importing value. Canonical hard graph consistency=CONSISTENT; scenario=MODEL_INTERNAL_EARLY_BINDING_HAZARD.
-- P02: value = 1 before from . import a, same hard SCC. Consistency=CONSISTENT; scenario=MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS. This is a restricted synthetic model result, not production safety.
-- P03: already bound value imported as chosen, no same-name child. Consistency=CONSISTENT; scenario=MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS.
-- P04: indexed pkg.value child in the full source cohort. Consistency=CONSISTENT with full cohort; direct package model=MODEL_PASS; fresh synthetic CPython import succeeds. Hard-only cohort is rejected by B03 before any full scenario PASS.
+P01 no child preserves original. P02 UI theme and repo generator child selected. P03/P07 eventual binding suppresses soft edge yet child selected. P04 hard dependency of optional child selected. P05 second optional child reached through that dependency. P06 indexed ancestor initializers selected. P07 fact reorder preserves result. P08 original closure equals recomputed original. Absolute package_root normalization also tested.
 
-## NEGATIVE_REGRESSION_RESULTS
+## NEGATIVE_TEST_RESULTS
 
-- N01: indexed child outside hard-only cohort -> OPTIONAL_NAMED_CHILD_SOURCE_UNAVAILABLE, including when the caller passes a full sources map but a restricted cohort tuple. Scenario remains INDETERMINATE.
-- N02: eventual value = 1 export plus indexed pkg.value outside the supplied cohort -> the same optional-child reason. The test avoids altering the pre-existing explicit-relative sibling contract.
-- N03/N04: extra hard named child and missing mandatory initializer hard edge -> GRAPH_SOURCE_IMPORT_MISMATCH with complete source cohort.
-- N05: dynamic __getattr__ initializer -> scenario INDETERMINATE, no MODEL_PASS inferred from graph admission alone.
-- N06: unsupported conditional initializer assignment -> scenario INDETERMINATE.
-- N07: star and restricted-invalid dunder alias -> UNSUPPORTED_IMPORT_FORM.
-- N08/N09: selected existing explicit sibling, reexport, fallback and forged-graph tests pass; their outcomes were not weakened.
-- N10: member absent from initializer and indexed children cannot produce MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS.
-- No false MODEL_PASS was observed in the missing optional-child scenario.
+N01 missing module rejects. N02 malformed fact rejects. N03 direct/initializer ambiguity rejects. N04 invalid relative level rejects. N05 >256 selected rejects. N06 optional cycle terminates with members retained. N07 reexport cannot hide child. N08 missing/forged input cannot yield a candidate result; the returned dataclass has no certificate or status field. N09 graph remains unchanged. N10 no MODEL_PASS or publication call/path added.
 
 ## TARGETED_PYTEST_RESULTS
 
-- Initial C16-P0 selection: 11 passed, 1 failed, 119 deselected. The failed fixture combined a literal initializer assignment with a same-name indexed child; the existing restricted explicit-relative sibling validator returned AMBIGUOUS_PACKAGE_TARGET before the new B03 branch. That fixture was corrected to use a module import while preserving eventual export and hard SCC; no production branch was weakened.
-- Corrected failing test alone: 1 passed.
-- After the explicit cohort-membership gate was added: all 12 new C16-P0 parametrized cases passed, 119 deselected.
-- Selected existing canonical reexport edges, nested initializer, initializer restrictions, forged graph, package fallback, missing member and package-layout cases: 18 passed.
-- Commands used .venv\Scripts\python.exe -B -m pytest -q -rs -p no:cacheprovider with --basetemp outside the repository under C:\Temp\Contextor_C16_P0_pytest_tmp. No full suite was run.
-- git diff --check exit=0.
+New planner tests: 7 passed. Selected existing closure, P0 and canonical graph regressions: 13 passed, 129 deselected. No full suite, backend restart, FULL, dependency install or update_file.
 
-## SOURCE_EVIDENCE_VERSION
+## LEGACY_CLOSURE_PARITY
 
-- evidence.py changes EVIDENCE_SEMANTIC_VERSION from cycle-semantics-evidence/2 to cycle-semantics-evidence/3, and nothing else.
-- The new focused test replaces a freshly built /3 SourceBoundCycleEvidence semantic_version with /2 and verifies assess_index_bound_scc_models returns EVIDENCE_SEMANTIC_VERSION_MISMATCH.
-- No manifest or publication schema version changed.
+The existing function body and MODEL_SOURCE_CLOSURE_VERSION were not changed. Direct data-structure equality asserted in P01/P08 tests.
+
+## SOURCE_COHORT_BUDGET
+
+Capacity 256 enforced on initial and expanded cohorts and union across SCCs. Over-capacity fails with ValueError, never truncates. Process, AST and byte budgets unchanged.
+
+## NEXT_STAGE_INTEGRATION_BOUNDARIES
+
+P1A is only a candidate selector. Original worker planning/binding, source proof, manifest, claims, publication, evidence semantic version and warning policy were not changed. Full B03 source-bound certification remains a later stage.
 
 ## POST_CHANGE_MCP_AUDIT
 
-- Read-only Contextor MCP module contexts for package_graph_consistency, evidence and tests.test_p1d3_package_cycle_integration: each reports canonical_revision=989, canonical_state=fresh, workspace_sync=verified, advisory_warning=null.
-- The current aggregate project architecture reports canonical_revision=989, canonical_state=fresh, workspace_sync=unverified, graph/cycles fresh, cycle_semantics=stale, 16 structural paths. The current cyclic SCC count is not exposed while cycle_semantics is stale; the previous two-SCC semantic projection is not asserted as freshly comparable.
-- This is source/index freshness, not loaded backend code adoption. MCP/runtime reload was not performed. No warning state or canonical hard edges were deliberately changed.
-
-## REMAINING_B03_SOURCE_COHORT_GAP
-
-- The current hard-reachable-plus-parent-initializer cohort still omits an indexed optional named child if that child is only a soft candidate.
-- P0 rejects those named member imports before model application; it does not add child source bytes, fingerprints or soft candidates to the cohort. Therefore T05-style fallback remains inapplicable to full SCC proof.
-- A later B03-P1 stage must bind any newly included optional source to exact source bytes and cohort identity before claiming all-entry model success. This report does not authorize an implementation or installed claim for that stage.
-
-## MANIFEST_AND_CLAIM_VERSION_IMPACT
-
-- Current MANIFEST_VERSION remains cycle-source-manifest/2 and PUBLICATION_BINDING_VERSION remains cycle-prepared-co-publication/2. partial_scc_claims checks source signature rows against the current closure.evidence_source_modules; publication_binding and generation_manifest also bind current source signatures.
-- The /3 evidence semantic version rejects old /2 evidence in the existing validation path. A future B03-P1 enlarged cohort would change source signature membership and may require an explicit installed-claim/manifest transition. That transition was not specified or performed in P0; whether an additional version bump is required remains to be established with its exact consumer contract.
-- No old receipt was relabeled, injected or published.
+DIRECT_EVIDENCE: changed module context still canonical revision 989, canonical_state=fresh, workspace_sync=out_of_sync with target modified advisory. Thus current disk source is newer than canonical FileState and indexed-source freshness is unverified; no runtime adoption claim. Architecture overlay: 16 fresh structural DFS paths, cycle_semantics=stale, model_pass_count=0. No new structural edge detected in the unchanged canonical graph; new source has not been ingested, so this is not a post-index graph proof. New test module is not yet in active module registry. No update_file or runtime restart was used.
 
 ## FILES_CHANGED
 
-- contextor/core/cycle_semantics/package_graph_consistency.py
-- contextor/core/cycle_semantics/evidence.py
-- tests/test_p1d3_package_cycle_integration.py
-- walkthrough.md (report artifact; excluded from its own diff)
+- contextor/core/cycle_semantics/model_source_closure.py
+- tests/test_cycle_semantics_optional_child_source_cohort.py
+
+walkthrough.md was overwritten as the report and is excluded from source/test diff accounting.
 
 ## FULL_DIFFS
 
-Complete actual Git diff for every task-changed production/test file follows. There are no unrelated historical production/test diffs.
-
-warning: in the working copy of 'contextor/core/cycle_semantics/evidence.py', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'contextor/core/cycle_semantics/package_graph_consistency.py', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'tests/test_p1d3_package_cycle_integration.py', LF will be replaced by CRLF the next time Git touches it
-diff --git a/contextor/core/cycle_semantics/evidence.py b/contextor/core/cycle_semantics/evidence.py
-index 1978497..e3751df 100644
---- a/contextor/core/cycle_semantics/evidence.py
-+++ b/contextor/core/cycle_semantics/evidence.py
-@@ -25,7 +25,7 @@ from .scenarios import (
-     CycleComponentScenarios, CycleScenarioReport, analyze_cycle_scenarios,
- )
+```diff
+diff --git a/contextor/core/cycle_semantics/model_source_closure.py b/contextor/core/cycle_semantics/model_source_closure.py
+index 47ad7de..e1c4269 100644
+--- a/contextor/core/cycle_semantics/model_source_closure.py
++++ b/contextor/core/cycle_semantics/model_source_closure.py
+@@ -8,6 +8,9 @@ from __future__ import annotations
+ from collections.abc import Mapping
+ from dataclasses import dataclass
  
--EVIDENCE_SEMANTIC_VERSION = "cycle-semantics-evidence/2"
-+EVIDENCE_SEMANTIC_VERSION = "cycle-semantics-evidence/3"
- _MISSING = "MISSING"
++from contextor.core.domain.imports import ImportRef
++
++from .model_identity import indexed_to_logical_module, logical_to_indexed_module
+ from .scc import analyze_import_cycle_topology
  
  
-diff --git a/contextor/core/cycle_semantics/package_graph_consistency.py b/contextor/core/cycle_semantics/package_graph_consistency.py
-index d046311..8e63ccd 100644
---- a/contextor/core/cycle_semantics/package_graph_consistency.py
-+++ b/contextor/core/cycle_semantics/package_graph_consistency.py
-@@ -326,11 +326,40 @@ def assess_package_graph_consistency(
-                 if resolved != module_id:
-                     expected.add(resolved)
-                 if resolved.endswith(".__init__"):
--                    # The named-member form may be an initializer attribute or
--                    # a child. Only explicit relative sibling imports with a
--                    # provably unbound child are covered in this phase.
-+                    # A named member may be an initializer attribute or child.
-+                    # Preserve the initializer hard edge and require indexed
-+                    # child source before admitting that bounded form.
-                     if not (node.level and node.module is None):
--                        return unknown("AMBIGUOUS_PACKAGE_TARGET")
-+                        initializer = sources.get(resolved)
-+                        if not isinstance(initializer, ast.Module):
-+                            return unknown("MISSING_REQUIRED_INITIALIZER")
-+                        for alias in node.names:
-+                            if (
-+                                not alias.name.isidentifier()
-+                                or alias.name.startswith("__")
-+                                or (
-+                                    alias.asname is not None
-+                                    and (
-+                                        not alias.asname.isidentifier()
-+                                        or alias.asname.startswith("__")
-+                                    )
-+                                )
-+                            ):
-+                                return unknown("UNSUPPORTED_IMPORT_FORM")
-+                            child = target(base + "." + alias.name)
-+                            if (
-+                                child is not None
-+                                and (
-+                                    child not in evidence_source_modules
-+                                    or not isinstance(
-+                                        sources.get(child), ast.Module
-+                                    )
-+                                )
-+                            ):
-+                                return unknown(
-+                                    "OPTIONAL_NAMED_CHILD_SOURCE_UNAVAILABLE"
-+                                )
-+                        continue
-                     initializer = sources.get(resolved)
-                     if initializer is None:
-                         return unknown("MISSING_REQUIRED_INITIALIZER")
-diff --git a/tests/test_p1d3_package_cycle_integration.py b/tests/test_p1d3_package_cycle_integration.py
-index a2ab895..fa61627 100644
---- a/tests/test_p1d3_package_cycle_integration.py
-+++ b/tests/test_p1d3_package_cycle_integration.py
-@@ -2796,3 +2796,235 @@ def test_p1d3_d2b3_official_isolated_full_receipt(
-         )
-         assert result.live_publish_status == "success"
-         assert calls == [root.resolve()]
+@@ -75,3 +78,137 @@ def compute_cycle_model_source_closures(
+             )),
+         ))
+     return tuple(rows)
 +
 +
-+def _c16_p0_canonical_sources(tmp_path, files):
-+    root = write_synthetic_repository(tmp_path / "repo", files)
-+    index, graph = _d2a_canonical_index_graph(root)
-+    trees = {
-+        module: ast.parse((root / item.path).read_text(encoding="utf-8"))
-+        for module, item in index.modules.items()
-+    }
-+    closure = compute_cycle_model_source_closures(graph.hard_edges)
-+    assert len(closure) == 1
-+    return root, graph, trees, closure[0]
-+
-+
-+@pytest.mark.parametrize(
-+    ("initializer", "classification"),
-+    [
-+        (
-+            "from . import a\nvalue = 1\n",
-+            "MODEL_INTERNAL_EARLY_BINDING_HAZARD",
-+        ),
-+        (
-+            "value = 1\nfrom . import a\n",
-+            "MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS",
-+        ),
-+    ],
-+)
-+def test_c16_p0_named_member_binding_order(
-+    tmp_path, isolated_dirs, initializer, classification,
-+):
-+    _, graph, trees, closure = _c16_p0_canonical_sources(
-+        tmp_path,
-+        {"pkg/__init__.py": initializer, "pkg/a.py": "from pkg import value\n"},
-+    )
-+    assert graph.hard_edges == {
-+        "pkg.__init__": {"pkg.a"},
-+        "pkg.a": {"pkg.__init__"},
-+    }
-+    assert graph.soft_edges == {
-+        "pkg.__init__": set(),
-+        "pkg.a": set(),
-+    }
-+    assert assess_package_graph_consistency(
-+        graph.hard_edges, trees, closure.evidence_source_modules,
-+    ).status == "CONSISTENT"
-+    scenario = analyze_cycle_scenarios(graph.hard_edges, trees).components[0]
-+    assert scenario.classification == classification
-+
-+
-+def test_c16_p0_bound_named_member_alias_has_no_child(
-+    tmp_path, isolated_dirs,
-+):
-+    _, graph, trees, closure = _c16_p0_canonical_sources(
-+        tmp_path,
-+        {
-+            "pkg/__init__.py": "value = 1\nfrom . import a\n",
-+            "pkg/a.py": "from pkg import value as chosen\n",
-+        },
-+    )
-+    assert assess_package_graph_consistency(
-+        graph.hard_edges, trees, closure.evidence_source_modules,
-+    ).status == "CONSISTENT"
-+    scenario = analyze_cycle_scenarios(graph.hard_edges, trees).components[0]
-+    assert scenario.classification == "MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS"
-+
-+
-+def test_c16_p0_indexed_child_requires_cohort_source(
-+    tmp_path, isolated_dirs,
-+):
-+    root, graph, trees, closure = _c16_p0_canonical_sources(
-+        tmp_path,
-+        {
-+            "pkg/__init__.py": "from . import a\n",
-+            "pkg/a.py": "from pkg import value\n",
-+            "pkg/value.py": "pass\n",
-+        },
-+    )
-+    assert graph.hard_edges["pkg.a"] == {"pkg.__init__"}
-+    assert graph.soft_edges["pkg.a"] == {"pkg.value"}
-+    assert "pkg.value" not in closure.evidence_source_modules
-+    closed = {
-+        module: trees[module]
-+        for module in closure.evidence_source_modules
-+    }
-+    assert assess_package_graph_consistency(
-+        graph.hard_edges, trees, tuple(sorted(trees)),
-+    ).status == "CONSISTENT"
-+    result = assess_package_graph_consistency(
-+        graph.hard_edges, trees, closure.evidence_source_modules,
-+    )
-+    assert result.status == "INDETERMINATE"
-+    assert result.reason == "OPTIONAL_NAMED_CHILD_SOURCE_UNAVAILABLE"
-+    result = assess_package_graph_consistency(
-+        graph.hard_edges, closed, closure.evidence_source_modules,
-+    )
-+    assert result.status == "INDETERMINATE"
-+    assert result.reason == "OPTIONAL_NAMED_CHILD_SOURCE_UNAVAILABLE"
-+    assert evaluate_package_import_order(trees, "pkg").outcome == "MODEL_PASS"
-+    assert run_synthetic_import(root, "pkg").returncode == 0
-+    scenario = analyze_cycle_scenarios(graph.hard_edges, trees).components[0]
-+    assert scenario.classification == "INDETERMINATE"
-+    assert scenario.reason == "OPTIONAL_NAMED_CHILD_SOURCE_UNAVAILABLE"
-+
-+
-+def test_c16_p0_eventual_export_does_not_hide_missing_child_source(
-+    tmp_path, isolated_dirs,
-+):
-+    _, graph, trees, closure = _c16_p0_canonical_sources(
-+        tmp_path,
-+        {
-+            "pkg/__init__.py": "from .a import trigger\nvalue = 1\n",
-+            "pkg/a.py": "from pkg import value\ntrigger = 1\n",
-+            "pkg/value.py": "pass\n",
-+        },
-+    )
-+    assert "pkg.value" not in closure.evidence_source_modules
-+    closed = {
-+        module: trees[module]
-+        for module in closure.evidence_source_modules
-+    }
-+    result = assess_package_graph_consistency(
-+        graph.hard_edges, closed, closure.evidence_source_modules,
-+    )
-+    assert result.status == "INDETERMINATE"
-+    assert result.reason == "OPTIONAL_NAMED_CHILD_SOURCE_UNAVAILABLE"
-+
-+
-+def test_c16_p0_named_member_rejects_forged_hard_edges(
-+    tmp_path, isolated_dirs,
-+):
-+    _, graph, trees, closure = _c16_p0_canonical_sources(
-+        tmp_path,
-+        {
-+            "pkg/__init__.py": "from . import a\n",
-+            "pkg/a.py": "from pkg import value\n",
-+            "pkg/value.py": "pass\n",
-+        },
-+    )
-+    for changed in (
-+        {"pkg.a": {"pkg.__init__", "pkg.value"}},
-+        {"pkg.a": set()},
++def compute_cycle_model_source_closures_with_optional_children(
++    hard_edges: Mapping[str, object],
++    indexed_imports_by_module: Mapping[str, object],
++    *,
++    package_root: str | None = None,
++) -> tuple[CycleModelSourceClosure, ...]:
++    """Select a bounded index-backed candidate source cohort, without certifying it."""
++    if not isinstance(hard_edges, Mapping) or not isinstance(indexed_imports_by_module, Mapping):
++        raise ValueError("Graph and import facts must be mappings")
++    if package_root is not None and (
++        type(package_root) is not str
++        or not package_root
++        or any(not part.isidentifier() for part in package_root.split("."))
 +    ):
-+        forged = {
-+            module: set(targets)
-+            for module, targets in graph.hard_edges.items()
-+        }
-+        forged.update(changed)
-+        result = assess_package_graph_consistency(
-+            forged, trees, tuple(sorted(trees)),
++        raise ValueError("Invalid package root")
++    indexed = frozenset(hard_edges)
++    if indexed != frozenset(indexed_imports_by_module):
++        raise ValueError("Indexed import facts must cover the exact hard graph domain")
++    if any(type(module) is not str or not module or
++           any(not part.isidentifier() for part in module.split(".")) for module in indexed):
++        raise ValueError("Invalid indexed module identity")
++    adjacency: dict[str, tuple[str, ...]] = {}
++    facts: dict[str, tuple[ImportRef, ...]] = {}
++    for module in sorted(indexed):
++        targets = hard_edges[module]
++        if not isinstance(targets, (set, frozenset, tuple, list)) or any(
++            type(target) is not str or target not in indexed for target in targets
++        ):
++            raise ValueError("Invalid hard graph targets")
++        adjacency[module] = tuple(sorted(set(targets)))
++        imports = indexed_imports_by_module[module]
++        if not isinstance(imports, (tuple, list)):
++            raise ValueError("Invalid indexed import facts")
++        for imp in imports:
++            if (
++                type(imp) is not ImportRef
++                or (imp.module is not None and (
++                    type(imp.module) is not str
++                    or not imp.module
++                    or any(not part.isidentifier() for part in imp.module.split("."))
++                ))
++                or type(imp.level) is not int or imp.level < 0
++                or type(imp.names) is not list
++                or any(type(name) is not str or not name or
++                       (name != "*" and not name.isidentifier()) for name in imp.names)
++                or any(type(getattr(imp, flag)) is not bool for flag in (
++                    "is_from_import", "is_local", "type_only", "is_lazy"
++                ))
++                or (imp.level == 0 and imp.module is None)
++            ):
++                raise ValueError("Invalid indexed import fact")
++        facts[module] = tuple(imports)
++
++    def ancestors(module: str) -> tuple[str, ...]:
++        parts = module.split(".")
++        if parts[-1] == "__init__":
++            parts = parts[:-1]
++        return tuple(
++            ".".join(parts[:length]) + ".__init__"
++            for length in range(1, len(parts))
++            if ".".join(parts[:length]) + ".__init__" in indexed
 +        )
-+        assert result.status == "INDETERMINATE"
-+        assert result.reason == "GRAPH_SOURCE_IMPORT_MISMATCH"
 +
++    def optional_children(module: str) -> tuple[str, ...]:
++        found: set[str] = set()
++        for imp in facts[module]:
++            if not imp.is_from_import:
++                continue
++            if imp.level:
++                logical = indexed_to_logical_module(module)
++                context = logical if module.endswith(".__init__") else logical.rpartition(".")[0]
++                parts = context.split(".") if context else []
++                if imp.level > len(parts):
++                    raise ValueError("Invalid relative import target")
++                base = ".".join(parts[:len(parts) - imp.level + 1])
++                if imp.module:
++                    base += "." + imp.module
++            else:
++                base = imp.module
++                if package_root and base and base.startswith(package_root + "."):
++                    base = base[len(package_root) + 1:]
++            if not base:
++                raise ValueError("Unresolved import base")
++            direct = base in indexed
++            initializer = base + ".__init__" in indexed
++            if direct and initializer:
++                raise ValueError("Ambiguous module and initializer identity")
++            if not initializer:
++                continue
++            for name in imp.names:
++                if name == "*":
++                    raise ValueError("Unsupported star package member import")
++                child_name = base + "." + name
++                direct = child_name in indexed
++                initializer = child_name + ".__init__" in indexed
++                if direct and initializer:
++                    raise ValueError("Ambiguous module and initializer identity")
++                child = logical_to_indexed_module(child_name, indexed)
++                if child is not None:
++                    found.add(child)
++        return tuple(sorted(found))
 +
-+@pytest.mark.parametrize(
-+    "source",
-+    [
-+        "from pkg import *\n",
-+        "from pkg import value as __hidden\n",
-+    ],
++    rows: list[CycleModelSourceClosure] = []
++    selected_all: set[str] = set()
++    for original in compute_cycle_model_source_closures(hard_edges):
++        evidence = set(original.evidence_source_modules)
++        if len(evidence) > 256:
++            raise ValueError("Selected source capacity exceeded")
++        pending = list(sorted(evidence, reverse=True))
++        while pending:
++            module = pending.pop()
++            for child in optional_children(module):
++                to_visit = [child]
++                while to_visit:
++                    item = to_visit.pop()
++                    if item in evidence:
++                        continue
++                    evidence.add(item)
++                    if len(evidence) > 256:
++                        raise ValueError("Selected source capacity exceeded")
++                    pending.append(item)
++                    to_visit.extend((*adjacency[item], *ancestors(item)))
++        selected_all.update(evidence)
++        if len(selected_all) > 256:
++            raise ValueError("Selected source capacity exceeded")
++        rows.append(CycleModelSourceClosure(
++            members=original.members,
++            hard_reachable_modules=original.hard_reachable_modules,
++            evidence_source_modules=tuple(sorted(evidence)),
++            implicit_initializer_modules=original.implicit_initializer_modules,
++        ))
++    return tuple(rows)
+diff --git a/tests/test_cycle_semantics_optional_child_source_cohort.py b/tests/test_cycle_semantics_optional_child_source_cohort.py
+new file mode 100644
+index 0000000..33d5544
+--- /dev/null
++++ b/tests/test_cycle_semantics_optional_child_source_cohort.py
+@@ -0,0 +1,138 @@
++"""Index-backed optional package-child source selection."""
++
++from __future__ import annotations
++
++import pytest
++
++from contextor.core.cycle_semantics.model_source_closure import (
++    compute_cycle_model_source_closures,
++    compute_cycle_model_source_closures_with_optional_children,
 +)
-+def test_c16_p0_unsupported_named_member_forms(
-+    tmp_path, isolated_dirs, source,
-+):
-+    _, graph, trees, closure = _c16_p0_canonical_sources(
-+        tmp_path,
-+        {
-+            "pkg/__init__.py": "from . import a\nvalue = 1\n",
-+            "pkg/a.py": source,
-+        },
-+    )
-+    result = assess_package_graph_consistency(
-+        graph.hard_edges, trees, closure.evidence_source_modules,
-+    )
-+    assert result.status == "INDETERMINATE"
-+    assert result.reason == "UNSUPPORTED_IMPORT_FORM"
++from contextor.core.domain.imports import ImportRef
++from contextor.core.graph.graph import build_graph
++from contextor.core.graph.resolver import build_trie, detect_package_root
++from contextor.core.reference.shared import materialize_reexport_facts_by_module
++from contextor.core.symbol_engine.indexer import index_repository
++from tests.cycle_semantics_lab import write_synthetic_repository
 +
 +
-+@pytest.mark.parametrize(
-+    "initializer",
-+    [
-+        "from . import a\ndef __getattr__(name):\n    return 1\n",
-+        "from . import a\nif condition:\n    value = 1\n",
-+    ],
-+)
-+def test_c16_p0_unsupported_initializer_cannot_claim_pass(
-+    tmp_path, isolated_dirs, initializer,
-+):
-+    _, graph, trees, _ = _c16_p0_canonical_sources(
-+        tmp_path,
-+        {
-+            "pkg/__init__.py": initializer,
-+            "pkg/a.py": "from pkg import value\n",
-+        },
++def _candidate(tmp_path, files):
++    root = tmp_path / "repo"
++    write_synthetic_repository(root, files)
++    index = index_repository(str(root))
++    facts = materialize_reexport_facts_by_module(
++        index.modules, index.reference_facts_by_module
 +    )
-+    scenario = analyze_cycle_scenarios(graph.hard_edges, trees).components[0]
-+    assert scenario.classification == "INDETERMINATE"
++    trie = build_trie(index.modules)
++    package_root = detect_package_root(index.modules, trie)
++    graph = build_graph(
++        index.modules, trie=trie, package_root=package_root,
++        reexport_facts_by_module=facts,
++    )
++    imports = {name: module.imports for name, module in index.modules.items()}
++    original = compute_cycle_model_source_closures(graph.hard_edges)
++    expanded = compute_cycle_model_source_closures_with_optional_children(
++        graph.hard_edges, imports, package_root=package_root
++    )
++    return graph, imports, original, expanded
 +
 +
-+def test_c16_p0_missing_member_cannot_claim_pass(tmp_path, isolated_dirs):
-+    _, graph, trees, closure = _c16_p0_canonical_sources(
-+        tmp_path,
-+        {
-+            "pkg/__init__.py": "from . import a\n",
-+            "pkg/a.py": "from pkg import missing\n",
-+        },
-+    )
-+    assert assess_package_graph_consistency(
-+        graph.hard_edges, trees, closure.evidence_source_modules,
-+    ).status == "CONSISTENT"
-+    scenario = analyze_cycle_scenarios(graph.hard_edges, trees).components[0]
-+    assert scenario.classification != "MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS"
++BASE = {
++    "pkg/__init__.py": "pass\n",
++    "pkg/a.py": "import pkg.b\nfrom pkg import value\n",
++    "pkg/b.py": "import pkg.a\n",
++}
 +
 +
-+def test_c16_p0_old_evidence_semantic_version_rejected(
-+    tmp_path, isolated_dirs,
-+):
-+    root = write_synthetic_repository(
-+        tmp_path / "repo", D2A_ACTIVE_CHAIN,
++def test_p01_no_indexed_child_preserves_original(tmp_path):
++    graph, _, original, expanded = _candidate(tmp_path, BASE)
++    assert expanded == original
++    assert graph.hard_edges
++
++
++def test_p02_to_p07_fixed_point_and_reexport_shadow(tmp_path):
++    files = {
++        "contextor/__init__.py": "pass\n",
++        "contextor/ui/__init__.py": "theme = 1\n",
++        "contextor/ui/theme.py": "import contextor.extra\n",
++        "contextor/repo_generator/__init__.py": "pass\n",
++        "contextor/repo_generator/run_repo_generator.py": "pass\n",
++        "contextor/extra.py": "from contextor.repo_generator import run_repo_generator\n",
++        "contextor/a.py": "import contextor.b\nfrom contextor.ui import theme\n",
++        "contextor/b.py": "import contextor.a\n",
++    }
++    graph, imports, original, expanded = _candidate(tmp_path, files)
++    selected = set(expanded[0].evidence_source_modules)
++    assert {"contextor.ui.theme", "contextor.extra",
++            "contextor.repo_generator.run_repo_generator",
++            "contextor.ui.__init__", "contextor.repo_generator.__init__"} <= selected
++    assert expanded[0].hard_reachable_modules == original[0].hard_reachable_modules
++    assert expanded[0].implicit_initializer_modules == original[0].implicit_initializer_modules
++    assert "contextor.ui.theme" not in graph.hard_edges["contextor.a"]
++    assert "contextor.ui.theme" not in graph.soft_edges["contextor.a"]
++    reordered = {name: list(reversed(rows)) for name, rows in imports.items()}
++    assert compute_cycle_model_source_closures_with_optional_children(
++        graph.hard_edges, reordered
++    ) == expanded
++    assert compute_cycle_model_source_closures(graph.hard_edges) == original
++
++
++def test_absolute_package_root_normalization(tmp_path):
++    files = {
++        "pkg/__init__.py": "pass\n",
++        "pkg/a.py": "import pkg.b\nfrom outer.pkg import child\n",
++        "pkg/b.py": "import pkg.a\n",
++        "pkg/child.py": "pass\n",
++    }
++    graph, imports, _, _ = _candidate(tmp_path, files)
++    expanded = compute_cycle_model_source_closures_with_optional_children(
++        graph.hard_edges, imports, package_root="outer"
 +    )
-+    _, graph, captured, _, evidence, snapshot = _d2a_source_evidence(root)
-+    assert evidence.semantic_version == "cycle-semantics-evidence/3"
-+    previous = replace(
-+        evidence, semantic_version="cycle-semantics-evidence/2",
-+    )
-+    assessment = assess_index_bound_scc_models(
-+        graph.hard_edges,
-+        captured.source_fingerprints_by_module,
-+        snapshot,
-+        previous,
-+    )
-+    assert assessment[0].reason == "EVIDENCE_SEMANTIC_VERSION_MISMATCH"
-
++    assert "pkg.child" in expanded[0].evidence_source_modules
++
++
++def test_n01_n02_domain_and_fact_validation(tmp_path):
++    graph, imports, _, _ = _candidate(tmp_path, BASE)
++    missing = dict(imports)
++    missing.pop("pkg.a")
++    with pytest.raises(ValueError):
++        compute_cycle_model_source_closures_with_optional_children(graph.hard_edges, missing)
++    malformed = dict(imports)
++    malformed["pkg.a"] = [object()]
++    with pytest.raises(ValueError):
++        compute_cycle_model_source_closures_with_optional_children(graph.hard_edges, malformed)
++
++
++def test_n03_n04_ambiguity_and_invalid_relative(tmp_path):
++    graph, imports, _, _ = _candidate(tmp_path, BASE)
++    hard = dict(graph.hard_edges)
++    hard["pkg"] = set()
++    imports["pkg"] = []
++    with pytest.raises(ValueError):
++        compute_cycle_model_source_closures_with_optional_children(hard, imports)
++    imports = dict(imports)
++    imports["pkg.a"] = [ImportRef(module=None, level=9, names=["value"], is_from_import=True)]
++    with pytest.raises(ValueError):
++        compute_cycle_model_source_closures_with_optional_children(graph.hard_edges,
++            {name: rows for name, rows in imports.items() if name != "pkg"})
++
++
++def test_n05_capacity_and_n06_cycle(tmp_path):
++    graph, imports, _, _ = _candidate(tmp_path, BASE)
++    hard = {name: set(targets) for name, targets in graph.hard_edges.items()}
++    hard["pkg.a"].update(f"extra{i}" for i in range(257))
++    all_imports = {**imports, **{f"extra{i}": [] for i in range(257)}}
++    with pytest.raises(ValueError):
++        compute_cycle_model_source_closures_with_optional_children(hard, all_imports)
++    files = {**BASE, "pkg/value.py": "from pkg import a\n"}
++    _, _, _, expanded = _candidate(tmp_path / "cycle", files)
++    assert {"pkg.value", "pkg.a"} <= set(expanded[0].evidence_source_modules)
++
++
++def test_n08_n09_n10_candidate_never_certifies_or_mutates(tmp_path):
++    graph, imports, original, expanded = _candidate(tmp_path, BASE)
++    before = {name: set(targets) for name, targets in graph.hard_edges.items()}
++    assert graph.hard_edges == before
++    assert expanded == original
++    assert all(not hasattr(row, "status") and not hasattr(row, "model_pass")
++               for row in expanded)
+```
 
 ## FINAL_VERDICT
 
-C16_B01_B03_P0_PASS
+C16_B03_P1A_PARTIAL
 
-The bounded named-member branch retains canonical hard-edge equality, detects indexed optional children missing from the evidence cohort, and leaves the existing graph/relative-sibling logic intact. Focused new and selected existing regressions pass. The mandatory MCP audit was completed; its stale cycle_semantics family and lack of loaded-code adoption are reported without implying full B03 resolution.
+Reason: implementation and focused tests pass, but the mandatory post-change audit found workspace_sync=out_of_sync for changed production source; indexed-source freshness and runtime adoption cannot be certified at this revision. No claim of full B03 resolution.
