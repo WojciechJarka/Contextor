@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import ast
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from .initialization_model import ImportOrderAssessment, evaluate_flat_import_order
 from .package_model import (
@@ -15,7 +15,11 @@ from .package_model import (
     _PackageSourceSession,
     evaluate_package_import_order,
 )
-from .model_source_closure import compute_cycle_model_source_closures
+from .model_source_closure import (
+    CycleModelSourceClosure,
+    compute_cycle_model_source_closures,
+    compute_cycle_model_source_closures_with_optional_children,
+)
 from .model_identity import indexed_to_logical_module, logical_to_indexed_module
 from .package_graph_consistency import assess_package_graph_consistency
 from .scc import CyclicImportComponent, ImportCycleTopology, analyze_import_cycle_topology
@@ -103,6 +107,11 @@ def _component_result(
 def analyze_cycle_scenarios(
     hard_edges: Mapping[str, set[str] | frozenset[str] | list[str] | tuple[str, ...]],
     modules: Mapping[str, ast.AST],
+    *,
+    source_selection: str = "HARD_ONLY",
+    indexed_imports_by_module: Mapping[str, object] | None = None,
+    package_root: str | None = None,
+    source_closures: tuple[CycleModelSourceClosure, ...] | None = None,
 ) -> CycleScenarioReport:
     """Analyze every fresh entry module of each cyclic SCC, without executing code.
 
@@ -113,13 +122,84 @@ def analyze_cycle_scenarios(
     if not isinstance(modules, Mapping):
         raise TypeError("modules must be a mapping")
 
+    if source_selection not in ("HARD_ONLY", "OPTIONAL_NAMED_CHILDREN"):
+        raise ValueError("SOURCE_SELECTION_INVALID")
+
+    if source_selection == "HARD_ONLY" and (
+        indexed_imports_by_module is not None
+        or package_root is not None
+        or source_closures is not None
+    ):
+        raise ValueError("HARD_ONLY_OPTIONAL_INPUTS_UNSUPPORTED")
+
+    def report(
+        components: tuple[CycleComponentScenarios, ...],
+    ) -> CycleScenarioReport:
+        if source_selection == "HARD_ONLY":
+            return CycleScenarioReport(topology, components)
+        return CycleScenarioReport(
+            topology=topology,
+            components=tuple(
+                replace(
+                    component,
+                    evidence_scope=(
+                        "CLOSED_REGULAR_PACKAGE_OPTIONAL_NAMED_CHILDREN_FRESH_ENTRY_MODEL"
+                        if component.model_kind == "REGULAR_PACKAGE"
+                        else "CLOSED_FLAT_MODULE_OPTIONAL_NAMED_CHILDREN_FRESH_ENTRY_MODEL"
+                    ),
+                )
+                for component in components
+            ),
+            evidence_scope=(
+                "OPTIONAL_NAMED_CHILDREN_SCENARIO_MODEL_NOT_RUNTIME_CERTIFICATION"
+            ),
+        )
+
     adjacency = {name: frozenset(targets) for name, targets in hard_edges.items()}
     for targets in tuple(adjacency.values()):
         for target in targets:
             adjacency.setdefault(target, frozenset())
 
     output: list[CycleComponentScenarios] = []
-    closures = compute_cycle_model_source_closures(hard_edges)
+    if source_selection == "HARD_ONLY":
+        closures = compute_cycle_model_source_closures(hard_edges)
+    else:
+        try:
+            if (
+                not isinstance(indexed_imports_by_module, Mapping)
+                or type(source_closures) is not tuple
+                or any(type(row) is not CycleModelSourceClosure
+                       for row in source_closures)
+            ):
+                raise ValueError("Invalid optional cohort input")
+            expected = compute_cycle_model_source_closures_with_optional_children(
+                hard_edges,
+                indexed_imports_by_module,
+                package_root=package_root,
+            )
+            if (
+                source_closures != expected
+                or len(expected) != len(topology.cyclic_components)
+                or any(
+                    row.members != component.members
+                    for row, component in zip(
+                        expected, topology.cyclic_components
+                    )
+                )
+            ):
+                raise ValueError("Optional cohort identity mismatch")
+            closures = expected
+        except (TypeError, ValueError, AttributeError):
+            return report(tuple(
+                _component_result(
+                    component,
+                    "INDETERMINATE",
+                    coverage="NONE",
+                    reason="OPTIONAL_COHORT_IDENTITY_MISMATCH",
+                )
+                for component in topology.cyclic_components
+            ))
+
     for component, source_closure in zip(topology.cyclic_components, closures):
         if len(component.members) > MAX_COMPONENT_ENTRIES:
             output.append(_component_result(
@@ -267,4 +347,4 @@ def analyze_cycle_scenarios(
             model_kind=model_kind,
         ))
 
-    return CycleScenarioReport(topology, tuple(output))
+    return report(tuple(output))
