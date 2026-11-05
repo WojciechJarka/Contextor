@@ -185,17 +185,46 @@ def test_legacy_evidence_cannot_enter_optional_replay(tmp_path):
 
 def test_snapshot_lexical_evidence_must_match_bytes(tmp_path):
     case = list(_fixture(tmp_path))
-    case[2] = replace(
-        case[2],
-        import_sites=analyze_cyclic_import_sites(
-            {}, {},
+
+    original_sites = case[2].import_sites
+    component = original_sites.components[0]
+
+    assert component.internal_edges
+    assert component.internal_edges[0].sites
+
+    forged_edge = replace(
+        component.internal_edges[0],
+        sites=(),
+    )
+
+    forged_component = replace(
+        component,
+        internal_edges=(
+            forged_edge,
+            *component.internal_edges[1:],
         ),
     )
 
-    result = _verify(case)
-    assert result[0].reason == (
-        "OPTIONAL_GRAPH_OR_TOPOLOGY_MISMATCH"
+    forged_sites = replace(
+        original_sites,
+        components=(
+            forged_component,
+            *original_sites.components[1:],
+        ),
     )
+
+    case[2] = replace(
+        case[2],
+        import_sites=forged_sites,
+    )
+
+    result = _verify(case)
+
+    assert result[0].reason == (
+        "OPTIONAL_LEXICAL_EVIDENCE_MISMATCH"
+    )
+    assert result[0].bytes_state == "EVIDENCE_MISMATCH"
+    assert result[0].model_classification == "INDETERMINATE"
 
 
 def test_wrong_import_facts_fail_closed(tmp_path):
