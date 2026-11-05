@@ -10,7 +10,7 @@ import hashlib
 from collections.abc import Mapping
 from dataclasses import dataclass
 
-from contextor.core.source import SourceSnapshot
+from contextor.core.source import SourceError, SourceSnapshot
 
 from .scc import analyze_import_cycle_topology
 from .model_source_closure import (
@@ -172,6 +172,10 @@ def assess_original_worker_cycle_closure(
 
     selected_snapshots: dict[str, SourceSnapshot] = {}
     selected_modes: dict[str, str] = {}
+    if source_selection == _OPTIONAL_NAMED_CHILDREN:
+        from contextor.core.source import parse_source_snapshot
+        from contextor.core.symbol_engine.indexer import read_imports
+
     total = 0
     for module_id in selected:
         snapshot = snapshots[module_id]
@@ -192,6 +196,19 @@ def assess_original_worker_cycle_closure(
         mode = modes[module_id]
         if type(mode) is not str or mode not in _ACCEPTED_MODES:
             return unavailable("CLOSURE_AST_MODE_INVALID:" + module_id)
+        if source_selection == _OPTIONAL_NAMED_CHILDREN:
+            from pathlib import Path
+
+            try:
+                path = Path(index.modules[module_id].absolute_path)
+                parsed = parse_source_snapshot(snapshot, path)
+                replayed, error = read_imports(path, tree=parsed.tree)
+            except (SourceError, SyntaxError, RecursionError):
+                return unavailable("CLOSURE_IMPORT_REPLAY_UNAVAILABLE:" + module_id)
+            if replayed is None or error is not None:
+                return unavailable("CLOSURE_IMPORT_REPLAY_UNAVAILABLE:" + module_id)
+            if replayed != index.modules[module_id].imports:
+                return unavailable("CLOSURE_IMPORT_FACTS_MISMATCH:" + module_id)
         selected_snapshots[module_id] = snapshot
         selected_modes[module_id] = mode
 

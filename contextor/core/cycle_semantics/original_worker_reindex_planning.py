@@ -260,6 +260,10 @@ def verify_original_worker_reindex(
         if (frozenset(discovery_selected) != plan.selected_module_ids
                 or frozenset(captured_selected) != plan.selected_module_ids):
             return unavailable("REINDEX_CLOSURE_CHANGED")
+        for module_id in sorted(plan.selected_module_ids):
+            if (discovery_index.modules[module_id].imports
+                    != captured_index.modules[module_id].imports):
+                return unavailable("REINDEX_IMPORT_FACTS_CHANGED:" + module_id)
 
     if discovery_index.skipped != captured_index.skipped:
         return unavailable("REINDEX_SKIPPED_FILES_CHANGED")

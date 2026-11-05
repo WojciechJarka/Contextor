@@ -233,3 +233,85 @@ def test_n12_verified_capture_has_no_publication_claim(tmp_path):
     assert not hasattr(result, "prepared_manifest")
     assert not hasattr(result, "model_pass")
     assert not hasattr(result, "installed_claim")
+
+
+def _replace_imports(index, module_id, imports):
+    return replace(index, modules={**index.modules, module_id: replace(
+        index.modules[module_id], imports=imports
+    )})
+
+
+@pytest.mark.parametrize("field,value", [
+    ("is_local", True),
+    ("type_only", True),
+    ("names", ["child", "helper"]),
+])
+def test_p1c0_n01_n03_captured_import_fact_replay(tmp_path, field, value):
+    case = _case(tmp_path)
+    _, first, graph, plan, second, second_graph = case
+    original = second.modules["pkg.a"].imports
+    changed = [replace(imp, **{field: value}) if imp.is_from_import else imp
+               for imp in original]
+    forged_first = _replace_imports(first, "pkg.a", changed)
+    forged_second = _replace_imports(second, "pkg.a", changed)
+    binding = assess_original_worker_cycle_closure(
+        forged_second, graph.hard_edges, source_selection=plan.source_selection
+    )
+    assert binding.reason == "CLOSURE_IMPORT_FACTS_MISMATCH:pkg.a"
+    assert _verify((None, forged_first, graph, plan, forged_second, second_graph)).reason == (
+        "REINDEX_BINDING_CLOSURE_IMPORT_FACTS_MISMATCH:pkg.a"
+    )
+
+
+def test_p1c0_n04_import_order_replay(tmp_path):
+    case = _case(tmp_path)
+    _, first, graph, plan, second, second_graph = case
+    changed = list(reversed(second.modules["pkg.a"].imports))
+    assert changed != second.modules["pkg.a"].imports
+    forged_first = _replace_imports(first, "pkg.a", changed)
+    forged_second = _replace_imports(second, "pkg.a", changed)
+    assert assess_original_worker_cycle_closure(
+        forged_second, graph.hard_edges, source_selection=plan.source_selection
+    ).reason == "CLOSURE_IMPORT_FACTS_MISMATCH:pkg.a"
+    assert _verify((None, forged_first, graph, plan, forged_second, second_graph)).reason == (
+        "REINDEX_BINDING_CLOSURE_IMPORT_FACTS_MISMATCH:pkg.a"
+    )
+
+
+def test_p1c0_n05_discovery_import_fact_parity(tmp_path):
+    case = _case(tmp_path)
+    _, first, graph, plan, second, second_graph = case
+    changed = [replace(imp, is_local=True) if imp.is_from_import else imp
+               for imp in first.modules["pkg.a"].imports]
+    forged_first = _replace_imports(first, "pkg.a", changed)
+    assert _verify((None, forged_first, graph, plan, second, second_graph)).reason == (
+        "REINDEX_IMPORT_FACTS_CHANGED:pkg.a"
+    )
+
+
+def test_p1c0_n06_unparsable_captured_bytes(tmp_path):
+    case = _case(tmp_path)
+    _, _, graph, plan, second, _ = case
+    raw = b"def =\n"
+    digest = hashlib.sha256(raw).hexdigest()
+    snapshots = dict(second.original_worker_source_snapshots)
+    snapshots["pkg.child"] = SourceSnapshot(raw, digest)
+    fingerprints = dict(second.source_fingerprints_by_module)
+    fingerprints["pkg.child"] = digest
+    forged = replace(second, original_worker_source_snapshots=snapshots,
+                     source_fingerprints_by_module=fingerprints)
+    assert assess_original_worker_cycle_closure(
+        forged, graph.hard_edges, source_selection=plan.source_selection
+    ).reason == "CLOSURE_IMPORT_REPLAY_UNAVAILABLE:pkg.child"
+
+
+def test_p1c0_n07_extractor_unavailable(tmp_path, monkeypatch):
+    case = _case(tmp_path)
+    _, _, graph, plan, second, _ = case
+    monkeypatch.setattr(
+        "contextor.core.symbol_engine.indexer.read_imports",
+        lambda path, *, tree: (None, "unavailable"),
+    )
+    assert assess_original_worker_cycle_closure(
+        second, graph.hard_edges, source_selection=plan.source_selection
+    ).reason == "CLOSURE_IMPORT_REPLAY_UNAVAILABLE:pkg.__init__"
