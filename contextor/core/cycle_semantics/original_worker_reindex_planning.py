@@ -12,13 +12,14 @@ from dataclasses import dataclass
 
 from .contracts import fingerprint_hard_edges
 from .original_worker_binding import (
+    _HARD_ONLY,
+    _OPTIONAL_NAMED_CHILDREN,
+    _select_original_worker_sources,
     assess_original_worker_cycle_closure,
 )
-from .model_source_closure import compute_cycle_model_source_closures
 from .scc import analyze_import_cycle_topology
 
 
-_MAX_SELECTED = 256
 _READY = "READY_FOR_REINDEX_NON_ATOMIC"
 _VERIFIED = "REINDEX_COHERENT_SELECTED_BYTES_NON_ATOMIC"
 
@@ -31,6 +32,7 @@ class OriginalWorkerReindexPlan:
     graph_sha256: str | None
     fingerprints: tuple[tuple[str, str], ...]
     module_paths: tuple[tuple[str, str, str], ...]
+    source_selection: str = _HARD_ONLY
 
 
 @dataclass(frozen=True)
@@ -43,6 +45,8 @@ class OriginalWorkerReindexVerification:
 def plan_original_worker_reindex(
     index: object,
     hard_edges: Mapping[str, object],
+    *,
+    source_selection: str = _HARD_ONLY,
 ) -> OriginalWorkerReindexPlan:
     """Select SCC closures for a subsequent, separate index pass.
 
@@ -62,7 +66,11 @@ def plan_original_worker_reindex(
             graph_sha256=None,
             fingerprints=(),
             module_paths=(),
+            source_selection=source_selection,
         )
+
+    if source_selection not in (_HARD_ONLY, _OPTIONAL_NAMED_CHILDREN):
+        return unavailable("SOURCE_SELECTION_INVALID")
 
     if (
         type(index.modules) is not dict
@@ -97,12 +105,13 @@ def plan_original_worker_reindex(
     if not topology.cyclic_components:
         return unavailable("NO_CYCLIC_COMPONENTS")
 
-    selected: set[str] = set()
-    for closure in compute_cycle_model_source_closures(hard_edges):
-        selected.update(closure.evidence_source_modules)
-
-        if len(selected) > _MAX_SELECTED:
-            return unavailable("CLOSURE_MODULE_LIMIT")
+    try:
+        _, selected_ids, _ = _select_original_worker_sources(
+            index, hard_edges, source_selection
+        )
+    except (AttributeError, TypeError, ValueError) as exc:
+        return unavailable("SOURCE_SELECTION_INVALID:" + str(exc))
+    selected = set(selected_ids)
 
     if any(module_id not in indexed_ids for module_id in selected):
         return unavailable("CLOSURE_MODULE_NOT_INDEXED")
@@ -137,6 +146,7 @@ def plan_original_worker_reindex(
         graph_sha256=graph_sha256,
         fingerprints=tuple(sorted(fingerprints.items())),
         module_paths=module_paths,
+        source_selection=source_selection,
     )
 
 
@@ -171,6 +181,9 @@ def verify_original_worker_reindex(
 
     if plan.status != _READY:
         return unavailable("REINDEX_PLAN_UNAVAILABLE")
+
+    if plan.source_selection not in (_HARD_ONLY, _OPTIONAL_NAMED_CHILDREN):
+        return unavailable("SOURCE_SELECTION_INVALID")
 
     if not plan.selected_module_ids:
         return unavailable("REINDEX_PLAN_EMPTY")
@@ -230,6 +243,22 @@ def verify_original_worker_reindex(
     if captured_fingerprints != plan.fingerprints:
         return unavailable("REINDEX_SOURCE_CHANGED")
 
+    if plan.source_selection == _OPTIONAL_NAMED_CHILDREN:
+        try:
+            _, discovery_selected, discovery_root = _select_original_worker_sources(
+                discovery_index, discovery_hard_edges, plan.source_selection
+            )
+            _, captured_selected, captured_root = _select_original_worker_sources(
+                captured_index, captured_hard_edges, plan.source_selection
+            )
+        except (AttributeError, TypeError, ValueError) as exc:
+            return unavailable("REINDEX_SELECTION_INVALID:" + str(exc))
+        if discovery_root != captured_root:
+            return unavailable("REINDEX_PACKAGE_ROOT_CHANGED")
+        if (frozenset(discovery_selected) != plan.selected_module_ids
+                or frozenset(captured_selected) != plan.selected_module_ids):
+            return unavailable("REINDEX_CLOSURE_CHANGED")
+
     if discovery_index.skipped != captured_index.skipped:
         return unavailable("REINDEX_SKIPPED_FILES_CHANGED")
 
@@ -249,6 +278,7 @@ def verify_original_worker_reindex(
     binding = assess_original_worker_cycle_closure(
         captured_index,
         captured_hard_edges,
+        source_selection=plan.source_selection,
     )
 
     if binding.status != (

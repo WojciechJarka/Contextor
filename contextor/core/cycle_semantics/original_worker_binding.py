@@ -13,7 +13,10 @@ from dataclasses import dataclass
 from contextor.core.source import SourceSnapshot
 
 from .scc import analyze_import_cycle_topology
-from .model_source_closure import compute_cycle_model_source_closures
+from .model_source_closure import (
+    compute_cycle_model_source_closures,
+    compute_cycle_model_source_closures_with_optional_children,
+)
 
 
 _CAPTURE_STATUS = "ALL_SELECTED_CAPTURED_NON_ATOMIC"
@@ -24,6 +27,48 @@ _ACCEPTED_MODES = frozenset({
 _MAX_MODULES = 256
 _MAX_SOURCE_BYTES = 2 * 1024 * 1024
 _MAX_TOTAL_BYTES = 32 * 1024 * 1024
+_HARD_ONLY = "HARD_ONLY"
+_OPTIONAL_NAMED_CHILDREN = "OPTIONAL_NAMED_CHILDREN"
+
+
+def _select_original_worker_sources(
+    index: object,
+    hard_edges: Mapping[str, object],
+    source_selection: str,
+) -> tuple[tuple[object, ...], tuple[str, ...], str | None]:
+    """Select indexed SCC sources without reading source bytes or changing graph edges."""
+    if source_selection == _HARD_ONLY:
+        closures = compute_cycle_model_source_closures(hard_edges)
+        package_root = None
+    elif source_selection == _OPTIONAL_NAMED_CHILDREN:
+        if (
+            type(index.modules) is not dict
+            or type(index.source_fingerprints_by_module) is not dict
+            or set(index.modules) != set(hard_edges)
+            or set(index.source_fingerprints_by_module) != set(hard_edges)
+        ):
+            raise ValueError("INDEX_DOMAIN_MISMATCH")
+        from contextor.core.graph.resolver import build_trie, detect_package_root
+
+        imports = {
+            module_id: module.imports
+            for module_id, module in index.modules.items()
+        }
+        trie = build_trie(index.modules)
+        package_root = detect_package_root(index.modules, trie)
+        closures = compute_cycle_model_source_closures_with_optional_children(
+            hard_edges, imports, package_root=package_root,
+        )
+    else:
+        raise ValueError("SOURCE_SELECTION_INVALID")
+    selected = tuple(sorted({
+        module_id
+        for closure in closures
+        for module_id in closure.evidence_source_modules
+    }))
+    if len(selected) > _MAX_MODULES:
+        raise ValueError("CLOSURE_MODULE_LIMIT")
+    return closures, selected, package_root
 
 
 @dataclass(frozen=True)
@@ -40,6 +85,8 @@ class OriginalWorkerCycleClosureBinding:
 def assess_original_worker_cycle_closure(
     index: object,
     hard_edges: Mapping[str, object],
+    *,
+    source_selection: str = _HARD_ONLY,
 ) -> OriginalWorkerCycleClosureBinding:
     """Validate that opted-in original indexer captures cover every SCC closure.
 
@@ -70,6 +117,9 @@ def assess_original_worker_cycle_closure(
             retained_raw_bytes=0,
         )
 
+    if source_selection not in (_HARD_ONLY, _OPTIONAL_NAMED_CHILDREN):
+        return unavailable("SOURCE_SELECTION_INVALID")
+
     topology = analyze_import_cycle_topology(hard_edges)
     if not topology.cyclic_components:
         return unavailable("NO_CYCLIC_COMPONENTS")
@@ -96,14 +146,22 @@ def assess_original_worker_cycle_closure(
         return unavailable("INDEX_CAPTURE_SHAPE_INVALID")
 
     required: set[str] = set()
-    closures = compute_cycle_model_source_closures(hard_edges)
+    try:
+        closures, selected, _ = _select_original_worker_sources(
+            index, hard_edges, source_selection
+        )
+    except (AttributeError, TypeError, ValueError) as exc:
+        return unavailable("SOURCE_SELECTION_INVALID:" + str(exc))
     components = tuple(closure.members for closure in closures)
     for closure in closures:
         required.update(closure.evidence_source_modules)
         if len(required) > _MAX_MODULES:
             return unavailable("CLOSURE_MODULE_LIMIT")
 
-    selected = tuple(sorted(required))
+    if source_selection == _OPTIONAL_NAMED_CHILDREN and (
+        set(snapshots) != set(selected) or set(modes) != set(selected)
+    ):
+        return unavailable("CLOSURE_CAPTURE_SET_MISMATCH")
     for module_id in selected:
         if module_id not in index.modules:
             return unavailable("CLOSURE_MODULE_NOT_INDEXED:" + module_id)
