@@ -1,83 +1,426 @@
-# CONTEXTOR PY315-COMPAT-D2B-R2 — active-code adoption gate
+# CONTEXTOR C16-B01-B03-P0
+# SAFE NAMED PACKAGE MEMBER ADMISSION / OPTIONAL CHILD SOURCE FAIL-CLOSED GATE
 
 ## PREFLIGHT
 
-DIRECT_EVIDENCE: repository root `C:\Temp\Contextor_Repo`; HEAD `5453a94a9d39c65a49da918ed07f038db7853f12` (commit time 2026-11-04 13:12:39 +01:00). Worktree was clean before this report; the prior D2B changes are now in HEAD. Canonical interpreter `C:\Temp\Contextor_Repo\.venv\Scripts\python.exe` reports CPython 3.15.2 AMD64. No pytest, source edit, restart, update_file, process termination or FULL analysis performed.
-
-## CURRENT_SOURCE_IDENTITY
-
-Current HEAD contains D2B and R1 source. On-disk last-write times for changed modules were 12:41–13:00 local (indexer 13:00); backend/Desktop/LIVE process starts were 11:36 local. Git HEAD and disk timestamps identify source chronology but do not alone prove loaded-code adoption. Repository-root identity was supplied to Contextor MCP and resolved; exact internal repository ID was not exposed by queried projections.
+- Root: C:\Temp\Contextor_Repo. HEAD before and after: 626d427aed8477f095e354abd260a050cb4840d4.
+- Initial worktree: M walkthrough.md only. It was the previous task's report and was preserved until this report replacement.
+- Contextor MCP documentation and current module contexts were read before edits. The owners were confirmed: package_graph_consistency.assess_package_graph_consistency; evidence.EVIDENCE_SEMANTIC_VERSION; tests/test_p1d3_package_cycle_integration.py canonical integration helper and tests.
+- Current interpreter: .venv\Scripts\python.exe, CPython 3.15.2. No dependency installation, production FULL, update_file, backend/Desktop/LIVE restart or commit.
+- Source drift check: exact current named package branch and semantic version /2 matched the supplied contract. All edits used the normal patch editor.
 
 ## MCP_DISCOVERY
 
-Contextor MCP queried first. `get_module_context` for `full_analysis_coordinator`, `facade`, and `analysis_jobs`: LIVE revision 980, canonical_state=fresh, workspace_sync=verified, graph/cycles fresh, **cycle_semantics=stale**, advisory null. `get_live_events(after_revision=979)` confirms latest revision 980 and current warning view fresh with 16 structural paths and 16 active warnings. This warning view is distinct from stale cycle-semantic evidence. No MCP mutation call made.
+- Before edit the two owner modules reported canonical rev 982, canonical_state=fresh, workspace_sync=verified, cycle_semantics=fresh. Canonical structural warning count was 16, model_pass_count=0.
+- package_graph_consistency inbound consumers include scenarios and the canonical integration tests; its outbound owners include model_identity and typing_guard. evidence is consumed by generation_manifest, original_worker_preparation, source_proof and other source-bound paths.
+- Existing canonical graph construction and tests supplied the hard/soft invariant: hard edge to package initializer, optional named child as soft candidate, explicit relative sibling as hard. Neither graph.py nor resolver.py was edited.
+- The existing scenarios call assess_package_graph_consistency with a mapping restricted to evidence_source_modules. This is the current B03 cohort limitation; direct callers can supply a wider source map, so the new gate checks both cohort membership and AST availability.
 
-## RUNTIME_CODE_OWNERSHIP
+## EXACT_FILE_SCOPE
 
-Read-only Windows process inventory, with command-line role classification but no secret output:
+Allowed and changed:
+1. contextor/core/cycle_semantics/package_graph_consistency.py — assess_package_graph_consistency named-member branch only.
+2. contextor/core/cycle_semantics/evidence.py — EVIDENCE_SEMANTIC_VERSION only, from /2 to /3.
+3. tests/test_p1d3_package_cycle_integration.py — focused canonical integration regressions and one local fixture helper.
+4. walkthrough.md — this report.
 
-| Role | Actual PID | Parent redirector PID | Actual executable | Start |
-|---|---:|---:|---|---|
-| MCP `-m contextor.mcp_main` | 11876 | 12384 | `C:\Python315\python.exe` | 2026-11-04 11:36:25 local |
-| Desktop GUI | 10564 | 6480 | `C:\Python315\python.exe` | 2026-11-04 11:36:32 local |
-| LIVE `-m contextor.core.live_state.runtime` | 12660 | 11660 | `C:\Python315\python.exe` | 2026-11-04 11:36:39 local |
+No other source, test, docs, config, graph, package model, closure, scenario or warning-policy file changed.
 
-Source chain: `contextor/mcp_main.py::main` imports `mcp_server`; `mcp_server.py:182` imports `contextor.core.analysis.process_pool_lifecycle`, which executes `contextor/core/__init__.py`; that package initializer imports `core/symbol_engine/indexer.py`. `mcp_server.py:234` also imports the analyze_project tool, which imports `mcp.analysis_jobs`; `analysis_jobs.py:11-12` imports `full_analysis_coordinator` and `facade` at module load. Hence the backend process necessarily loaded indexer and analysis dispatch code at startup. Facade FULL calls materialization, scenarios and cycle models through their module imports when used; exact per-process `sys.modules` contents for every listed D2B module were not inspected. Spawned ProcessPool workers may load new source independently, but parent FULL logic and cache/model ownership are not wholly delegated to fresh workers.
+## B01_IMPLEMENTATION
 
-## LOADED_CODE_ADOPTION
+- For an ast.ImportFrom whose base resolves to an indexed regular package initializer, the new ordinary named-member branch retains the initializer in expected hard targets.
+- It requires an ast.Module initializer source and checks every requested member and alias against the existing restricted model's identifier/dunder contract. Star imports remain rejected at the original earlier check.
+- For each name it asks existing logical_to_indexed_module through the checker's target() helper over the full hard-graph key domain. It adds no named child to expected hard edges.
+- The existing explicit-relative sibling branch below this new branch is unchanged in behavior; its selected existing tests pass.
+- Final expected-vs-canonical hard-edge set equality at the end of assess_package_graph_consistency is unchanged. The checker does not infer that an initializer attribute is already or eventually bound; package_model determines import-time binding behavior.
 
-CODE_PATH_PROVED: backend indexer import occurred as part of startup before D2B source edits. The backend actual process PID 11876 has remained alive. Python import caching means later `workspace_sync=verified` cannot replace its already loaded indexer module. At minimum, current indexer cache-integrity code adoption in the active backend is **not established** and its prior loaded implementation is expected to remain. Desktop and LIVE loaded-code identity for each requested module is UNKNOWN; no claim is made from timestamps alone.
+## B03_FAIL_CLOSED_GATE
 
-## RELOAD_SAFETY_GATE
+- If the indexed possible child exists, admission requires both child membership in evidence_source_modules and an ast.Module source in the supplied mapping.
+- Missing either condition returns INDETERMINATE / OPTIONAL_NAMED_CHILD_SOURCE_UNAVAILABLE before a consistency result. The check runs even when the initializer binds the same member eventually.
+- If no child is indexed, none is fabricated. The hard graph, soft graph and AST inputs are not mutated or read from disk inside the checker.
+- Test P04 confirms that passing all AST sources while supplying only the hard-only evidence cohort still fails closed; the full indexed source cohort admits the named import for diagnostic model evaluation.
+- The source cohort itself is not enlarged in P0. Full B03 resolution remains separate.
 
-**RUNTIME_RELOAD_REQUIRED.** The MCP FULL path uses `asyncio.to_thread(run)` in `contextor/mcp/analysis_jobs.py:311`, then calls `run_full_analysis_exclusive` in that same backend process. A new thread does not reload already imported Python modules. The supported owner-safe backend replacement is the Desktop `Restart Backend` operation in `contextor/ui/gui.py:951-1015`: it reads exact backend identity, calls `stop_backend`, verifies stopped state, starts a new authenticated backend, checks identity changed, and reclaims Desktop ownership. `contextor/mcp_backend_control.py:1011+` uses backend record/creation-time identity and confirms exit. This procedure was identified, **not executed**. PID-only termination and taskkill were not used.
+## CANONICAL_GRAPH_INVARIANTS
 
-## FULL_ANALYSIS_CONTRACT
+- Production contextor/core/graph/graph.py, resolver.py and indexer.py were untouched. No soft candidate was promoted to hard.
+- P01/P02 canonical synthetic hard graph remained pkg.__init__ -> pkg.a and pkg.a -> pkg.__init__, with no soft edges; source order alone changed the model result.
+- P04 canonical graph retained pkg.a -> pkg.__init__ hard and pkg.a -> pkg.value soft. The indexed child was not in hard-only evidence_source_modules.
+- Forging pkg.a -> pkg.value as a hard edge or deleting the mandatory pkg.a -> pkg.__init__ hard edge yielded GRAPH_SOURCE_IMPORT_MISMATCH with the full source cohort.
 
-`contextor/mcp/tools/analyze_project.py` submits a project job to `analysis_jobs`; `_run_analysis_worker` uses the existing backend thread, calls `run_full_analysis_exclusive(owner="mcp_analysis")`; coordinator obtains exclusive repository lease then invokes `ContextorFacade.analyze_project`. `facade.py:818-852` materializes and classifies cycle-semantic evidence; `facade.py:1488-1535` uses publication receipt logic to install committed state into LIVE and records success/pending/failure. A standalone analysis without this publication path would not meet R2.
+## POSITIVE_REGRESSION_RESULTS
 
-## FULL_EXECUTION_GATE
+- P01: initializer from . import a then value = 1, with pkg.a importing value. Canonical hard graph consistency=CONSISTENT; scenario=MODEL_INTERNAL_EARLY_BINDING_HAZARD.
+- P02: value = 1 before from . import a, same hard SCC. Consistency=CONSISTENT; scenario=MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS. This is a restricted synthetic model result, not production safety.
+- P03: already bound value imported as chosen, no same-name child. Consistency=CONSISTENT; scenario=MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS.
+- P04: indexed pkg.value child in the full source cohort. Consistency=CONSISTENT with full cohort; direct package model=MODEL_PASS; fresh synthetic CPython import succeeds. Hard-only cohort is rejected by B03 before any full scenario PASS.
 
-A. Current source execution: **FAIL/UNKNOWN** for active backend indexer, because startup import predates D2B edits and no supported fresh-code guarantee exists. C. CPython 3.15.2: confirmed. D. Exact internal repo ID: not independently confirmed. B/E/F/G: not fully certified after A failed. Per R2 fail-closed rule, **no FULL was launched**. No extra backend or LIVE authority created.
+## NEGATIVE_REGRESSION_RESULTS
 
-## FULL_EXECUTION_RESULT
+- N01: indexed child outside hard-only cohort -> OPTIONAL_NAMED_CHILD_SOURCE_UNAVAILABLE, including when the caller passes a full sources map but a restricted cohort tuple. Scenario remains INDETERMINATE.
+- N02: eventual value = 1 export plus indexed pkg.value outside the supplied cohort -> the same optional-child reason. The test avoids altering the pre-existing explicit-relative sibling contract.
+- N03/N04: extra hard named child and missing mandatory initializer hard edge -> GRAPH_SOURCE_IMPORT_MISMATCH with complete source cohort.
+- N05: dynamic __getattr__ initializer -> scenario INDETERMINATE, no MODEL_PASS inferred from graph admission alone.
+- N06: unsupported conditional initializer assignment -> scenario INDETERMINATE.
+- N07: star and restricted-invalid dunder alias -> UNSUPPORTED_IMPORT_FORM.
+- N08/N09: selected existing explicit sibling, reexport, fallback and forged-graph tests pass; their outcomes were not weakened.
+- N10: member absent from initializer and indexed children cannot produce MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS.
+- No false MODEL_PASS was observed in the missing optional-child scenario.
 
-NOT_EXECUTED — stopped before FULL at reload safety gate. FULL count in this task: 0.
+## TARGETED_PYTEST_RESULTS
 
-## LIVE_PUBLICATION_RECEIPT
+- Initial C16-P0 selection: 11 passed, 1 failed, 119 deselected. The failed fixture combined a literal initializer assignment with a same-name indexed child; the existing restricted explicit-relative sibling validator returned AMBIGUOUS_PACKAGE_TARGET before the new B03 branch. That fixture was corrected to use a module import while preserving eventual export and hard SCC; no production branch was weakened.
+- Corrected failing test alone: 1 passed.
+- After the explicit cohort-membership gate was added: all 12 new C16-P0 parametrized cases passed, 119 deselected.
+- Selected existing canonical reexport edges, nested initializer, initializer restrictions, forged graph, package fallback, missing member and package-layout cases: 18 passed.
+- Commands used .venv\Scripts\python.exe -B -m pytest -q -rs -p no:cacheprovider with --basetemp outside the repository under C:\Temp\Contextor_C16_P0_pytest_tmp. No full suite was run.
+- git diff --check exit=0.
 
-NOT_APPLICABLE — no FULL, no new publication receipt. Existing LIVE revision 980 is from watcher updates, not this task's FULL.
+## SOURCE_EVIDENCE_VERSION
 
-## CANONICAL_SEMANTIC_FRESHNESS
+- evidence.py changes EVIDENCE_SEMANTIC_VERSION from cycle-semantics-evidence/2 to cycle-semantics-evidence/3, and nothing else.
+- The new focused test replaces a freshly built /3 SourceBoundCycleEvidence semantic_version with /2 and verifies assess_index_bound_scc_models returns EVIDENCE_SEMANTIC_VERSION_MISMATCH.
+- No manifest or publication schema version changed.
 
-Preflight: canonical_state=fresh and workspace_sync=verified for queried modules; `cycle_semantics_state=stale` separately. No post-FULL readback possible. Exact current `cycle_semantics_invalidation_reason` was not exposed by read-only MCP query; source path `incremental/engine.py:975-988` and `cycle_semantics/lifecycle.py:95-153` identifies `SOURCE_CHANGED` as the expected source-update invalidation path, not a direct state-field observation.
+## POST_CHANGE_MCP_AUDIT
 
-## SOURCE_AND_GRAPH_INVARIANTS
+- Read-only Contextor MCP module contexts for package_graph_consistency, evidence and tests.test_p1d3_package_cycle_integration: each reports canonical_revision=989, canonical_state=fresh, workspace_sync=verified, advisory_warning=null.
+- The current aggregate project architecture reports canonical_revision=989, canonical_state=fresh, workspace_sync=unverified, graph/cycles fresh, cycle_semantics=stale, 16 structural paths. The current cyclic SCC count is not exposed while cycle_semantics is stale; the previous two-SCC semantic projection is not asserted as freshly comparable.
+- This is source/index freshness, not loaded backend code adoption. MCP/runtime reload was not performed. No warning state or canonical hard edges were deliberately changed.
 
-No source edit or graph mutation in R2. Existing LIVE warning projection reports 16 structural paths, matching prior baseline. No new hard dependency edge was introduced by this task. Fresh cycle-semantic source-fingerprint bindings were not regenerated.
+## REMAINING_B03_SOURCE_COHORT_GAP
 
-## WARNING_ELIGIBILITY
+- The current hard-reachable-plus-parent-initializer cohort still omits an indexed optional named child if that child is only a soft candidate.
+- P0 rejects those named member imports before model application; it does not add child source bytes, fingerprints or soft candidates to the cohort. Therefore T05-style fallback remains inapplicable to full SCC proof.
+- A later B03-P1 stage must bind any newly included optional source to exact source bytes and cohort identity before claiming all-entry model success. This report does not authorize an implementation or installed claim for that stage.
 
-Current installed warning view: 16 structural, 0 MODEL_PASS, 16 active warning paths. This is a static installed-warning partition; stale cycle-semantic family prevents new semantic acceptance. No unsupported lazy import was submitted to FULL, and no fresh model claim was generated in R2.
+## MANIFEST_AND_CLAIM_VERSION_IMPACT
 
-## PROCESS_HEALTH_BEFORE_AFTER
-
-Before and after read-only inventories showed the same actual MCP/Desktop/LIVE PIDs and parent redirectors listed above. No process was started or terminated by this task. A comprehensive orphan-worker census was not required after the early stop and was not claimed.
+- Current MANIFEST_VERSION remains cycle-source-manifest/2 and PUBLICATION_BINDING_VERSION remains cycle-prepared-co-publication/2. partial_scc_claims checks source signature rows against the current closure.evidence_source_modules; publication_binding and generation_manifest also bind current source signatures.
+- The /3 evidence semantic version rejects old /2 evidence in the existing validation path. A future B03-P1 enlarged cohort would change source signature membership and may require an explicit installed-claim/manifest transition. That transition was not specified or performed in P0; whether an additional version bump is required remains to be established with its exact consumer contract.
+- No old receipt was relabeled, injected or published.
 
 ## FILES_CHANGED
 
-`walkthrough.md` only.
+- contextor/core/cycle_semantics/package_graph_consistency.py
+- contextor/core/cycle_semantics/evidence.py
+- tests/test_p1d3_package_cycle_integration.py
+- walkthrough.md (report artifact; excluded from its own diff)
 
 ## FULL_DIFFS
 
-ACTUAL_DIFF=DIFFS=NONE for source, tests, launchers, dependencies and configuration. `walkthrough.md` is the report and excluded from source/test diff requirement.
+Complete actual Git diff for every task-changed production/test file follows. There are no unrelated historical production/test diffs.
 
-## REMAINING_UNKNOWN
+warning: in the working copy of 'contextor/core/cycle_semantics/evidence.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'contextor/core/cycle_semantics/package_graph_consistency.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'tests/test_p1d3_package_cycle_integration.py', LF will be replaced by CRLF the next time Git touches it
+diff --git a/contextor/core/cycle_semantics/evidence.py b/contextor/core/cycle_semantics/evidence.py
+index 1978497..e3751df 100644
+--- a/contextor/core/cycle_semantics/evidence.py
++++ b/contextor/core/cycle_semantics/evidence.py
+@@ -25,7 +25,7 @@ from .scenarios import (
+     CycleComponentScenarios, CycleScenarioReport, analyze_cycle_scenarios,
+ )
+ 
+-EVIDENCE_SEMANTIC_VERSION = "cycle-semantics-evidence/2"
++EVIDENCE_SEMANTIC_VERSION = "cycle-semantics-evidence/3"
+ _MISSING = "MISSING"
+ 
+ 
+diff --git a/contextor/core/cycle_semantics/package_graph_consistency.py b/contextor/core/cycle_semantics/package_graph_consistency.py
+index d046311..8e63ccd 100644
+--- a/contextor/core/cycle_semantics/package_graph_consistency.py
++++ b/contextor/core/cycle_semantics/package_graph_consistency.py
+@@ -326,11 +326,40 @@ def assess_package_graph_consistency(
+                 if resolved != module_id:
+                     expected.add(resolved)
+                 if resolved.endswith(".__init__"):
+-                    # The named-member form may be an initializer attribute or
+-                    # a child. Only explicit relative sibling imports with a
+-                    # provably unbound child are covered in this phase.
++                    # A named member may be an initializer attribute or child.
++                    # Preserve the initializer hard edge and require indexed
++                    # child source before admitting that bounded form.
+                     if not (node.level and node.module is None):
+-                        return unknown("AMBIGUOUS_PACKAGE_TARGET")
++                        initializer = sources.get(resolved)
++                        if not isinstance(initializer, ast.Module):
++                            return unknown("MISSING_REQUIRED_INITIALIZER")
++                        for alias in node.names:
++                            if (
++                                not alias.name.isidentifier()
++                                or alias.name.startswith("__")
++                                or (
++                                    alias.asname is not None
++                                    and (
++                                        not alias.asname.isidentifier()
++                                        or alias.asname.startswith("__")
++                                    )
++                                )
++                            ):
++                                return unknown("UNSUPPORTED_IMPORT_FORM")
++                            child = target(base + "." + alias.name)
++                            if (
++                                child is not None
++                                and (
++                                    child not in evidence_source_modules
++                                    or not isinstance(
++                                        sources.get(child), ast.Module
++                                    )
++                                )
++                            ):
++                                return unknown(
++                                    "OPTIONAL_NAMED_CHILD_SOURCE_UNAVAILABLE"
++                                )
++                        continue
+                     initializer = sources.get(resolved)
+                     if initializer is None:
+                         return unknown("MISSING_REQUIRED_INITIALIZER")
+diff --git a/tests/test_p1d3_package_cycle_integration.py b/tests/test_p1d3_package_cycle_integration.py
+index a2ab895..fa61627 100644
+--- a/tests/test_p1d3_package_cycle_integration.py
++++ b/tests/test_p1d3_package_cycle_integration.py
+@@ -2796,3 +2796,235 @@ def test_p1d3_d2b3_official_isolated_full_receipt(
+         )
+         assert result.live_publish_status == "success"
+         assert calls == [root.resolve()]
++
++
++def _c16_p0_canonical_sources(tmp_path, files):
++    root = write_synthetic_repository(tmp_path / "repo", files)
++    index, graph = _d2a_canonical_index_graph(root)
++    trees = {
++        module: ast.parse((root / item.path).read_text(encoding="utf-8"))
++        for module, item in index.modules.items()
++    }
++    closure = compute_cycle_model_source_closures(graph.hard_edges)
++    assert len(closure) == 1
++    return root, graph, trees, closure[0]
++
++
++@pytest.mark.parametrize(
++    ("initializer", "classification"),
++    [
++        (
++            "from . import a\nvalue = 1\n",
++            "MODEL_INTERNAL_EARLY_BINDING_HAZARD",
++        ),
++        (
++            "value = 1\nfrom . import a\n",
++            "MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS",
++        ),
++    ],
++)
++def test_c16_p0_named_member_binding_order(
++    tmp_path, isolated_dirs, initializer, classification,
++):
++    _, graph, trees, closure = _c16_p0_canonical_sources(
++        tmp_path,
++        {"pkg/__init__.py": initializer, "pkg/a.py": "from pkg import value\n"},
++    )
++    assert graph.hard_edges == {
++        "pkg.__init__": {"pkg.a"},
++        "pkg.a": {"pkg.__init__"},
++    }
++    assert graph.soft_edges == {
++        "pkg.__init__": set(),
++        "pkg.a": set(),
++    }
++    assert assess_package_graph_consistency(
++        graph.hard_edges, trees, closure.evidence_source_modules,
++    ).status == "CONSISTENT"
++    scenario = analyze_cycle_scenarios(graph.hard_edges, trees).components[0]
++    assert scenario.classification == classification
++
++
++def test_c16_p0_bound_named_member_alias_has_no_child(
++    tmp_path, isolated_dirs,
++):
++    _, graph, trees, closure = _c16_p0_canonical_sources(
++        tmp_path,
++        {
++            "pkg/__init__.py": "value = 1\nfrom . import a\n",
++            "pkg/a.py": "from pkg import value as chosen\n",
++        },
++    )
++    assert assess_package_graph_consistency(
++        graph.hard_edges, trees, closure.evidence_source_modules,
++    ).status == "CONSISTENT"
++    scenario = analyze_cycle_scenarios(graph.hard_edges, trees).components[0]
++    assert scenario.classification == "MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS"
++
++
++def test_c16_p0_indexed_child_requires_cohort_source(
++    tmp_path, isolated_dirs,
++):
++    root, graph, trees, closure = _c16_p0_canonical_sources(
++        tmp_path,
++        {
++            "pkg/__init__.py": "from . import a\n",
++            "pkg/a.py": "from pkg import value\n",
++            "pkg/value.py": "pass\n",
++        },
++    )
++    assert graph.hard_edges["pkg.a"] == {"pkg.__init__"}
++    assert graph.soft_edges["pkg.a"] == {"pkg.value"}
++    assert "pkg.value" not in closure.evidence_source_modules
++    closed = {
++        module: trees[module]
++        for module in closure.evidence_source_modules
++    }
++    assert assess_package_graph_consistency(
++        graph.hard_edges, trees, tuple(sorted(trees)),
++    ).status == "CONSISTENT"
++    result = assess_package_graph_consistency(
++        graph.hard_edges, trees, closure.evidence_source_modules,
++    )
++    assert result.status == "INDETERMINATE"
++    assert result.reason == "OPTIONAL_NAMED_CHILD_SOURCE_UNAVAILABLE"
++    result = assess_package_graph_consistency(
++        graph.hard_edges, closed, closure.evidence_source_modules,
++    )
++    assert result.status == "INDETERMINATE"
++    assert result.reason == "OPTIONAL_NAMED_CHILD_SOURCE_UNAVAILABLE"
++    assert evaluate_package_import_order(trees, "pkg").outcome == "MODEL_PASS"
++    assert run_synthetic_import(root, "pkg").returncode == 0
++    scenario = analyze_cycle_scenarios(graph.hard_edges, trees).components[0]
++    assert scenario.classification == "INDETERMINATE"
++    assert scenario.reason == "OPTIONAL_NAMED_CHILD_SOURCE_UNAVAILABLE"
++
++
++def test_c16_p0_eventual_export_does_not_hide_missing_child_source(
++    tmp_path, isolated_dirs,
++):
++    _, graph, trees, closure = _c16_p0_canonical_sources(
++        tmp_path,
++        {
++            "pkg/__init__.py": "from .a import trigger\nvalue = 1\n",
++            "pkg/a.py": "from pkg import value\ntrigger = 1\n",
++            "pkg/value.py": "pass\n",
++        },
++    )
++    assert "pkg.value" not in closure.evidence_source_modules
++    closed = {
++        module: trees[module]
++        for module in closure.evidence_source_modules
++    }
++    result = assess_package_graph_consistency(
++        graph.hard_edges, closed, closure.evidence_source_modules,
++    )
++    assert result.status == "INDETERMINATE"
++    assert result.reason == "OPTIONAL_NAMED_CHILD_SOURCE_UNAVAILABLE"
++
++
++def test_c16_p0_named_member_rejects_forged_hard_edges(
++    tmp_path, isolated_dirs,
++):
++    _, graph, trees, closure = _c16_p0_canonical_sources(
++        tmp_path,
++        {
++            "pkg/__init__.py": "from . import a\n",
++            "pkg/a.py": "from pkg import value\n",
++            "pkg/value.py": "pass\n",
++        },
++    )
++    for changed in (
++        {"pkg.a": {"pkg.__init__", "pkg.value"}},
++        {"pkg.a": set()},
++    ):
++        forged = {
++            module: set(targets)
++            for module, targets in graph.hard_edges.items()
++        }
++        forged.update(changed)
++        result = assess_package_graph_consistency(
++            forged, trees, tuple(sorted(trees)),
++        )
++        assert result.status == "INDETERMINATE"
++        assert result.reason == "GRAPH_SOURCE_IMPORT_MISMATCH"
++
++
++@pytest.mark.parametrize(
++    "source",
++    [
++        "from pkg import *\n",
++        "from pkg import value as __hidden\n",
++    ],
++)
++def test_c16_p0_unsupported_named_member_forms(
++    tmp_path, isolated_dirs, source,
++):
++    _, graph, trees, closure = _c16_p0_canonical_sources(
++        tmp_path,
++        {
++            "pkg/__init__.py": "from . import a\nvalue = 1\n",
++            "pkg/a.py": source,
++        },
++    )
++    result = assess_package_graph_consistency(
++        graph.hard_edges, trees, closure.evidence_source_modules,
++    )
++    assert result.status == "INDETERMINATE"
++    assert result.reason == "UNSUPPORTED_IMPORT_FORM"
++
++
++@pytest.mark.parametrize(
++    "initializer",
++    [
++        "from . import a\ndef __getattr__(name):\n    return 1\n",
++        "from . import a\nif condition:\n    value = 1\n",
++    ],
++)
++def test_c16_p0_unsupported_initializer_cannot_claim_pass(
++    tmp_path, isolated_dirs, initializer,
++):
++    _, graph, trees, _ = _c16_p0_canonical_sources(
++        tmp_path,
++        {
++            "pkg/__init__.py": initializer,
++            "pkg/a.py": "from pkg import value\n",
++        },
++    )
++    scenario = analyze_cycle_scenarios(graph.hard_edges, trees).components[0]
++    assert scenario.classification == "INDETERMINATE"
++
++
++def test_c16_p0_missing_member_cannot_claim_pass(tmp_path, isolated_dirs):
++    _, graph, trees, closure = _c16_p0_canonical_sources(
++        tmp_path,
++        {
++            "pkg/__init__.py": "from . import a\n",
++            "pkg/a.py": "from pkg import missing\n",
++        },
++    )
++    assert assess_package_graph_consistency(
++        graph.hard_edges, trees, closure.evidence_source_modules,
++    ).status == "CONSISTENT"
++    scenario = analyze_cycle_scenarios(graph.hard_edges, trees).components[0]
++    assert scenario.classification != "MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS"
++
++
++def test_c16_p0_old_evidence_semantic_version_rejected(
++    tmp_path, isolated_dirs,
++):
++    root = write_synthetic_repository(
++        tmp_path / "repo", D2A_ACTIVE_CHAIN,
++    )
++    _, graph, captured, _, evidence, snapshot = _d2a_source_evidence(root)
++    assert evidence.semantic_version == "cycle-semantics-evidence/3"
++    previous = replace(
++        evidence, semantic_version="cycle-semantics-evidence/2",
++    )
++    assessment = assess_index_bound_scc_models(
++        graph.hard_edges,
++        captured.source_fingerprints_by_module,
++        snapshot,
++        previous,
++    )
++    assert assessment[0].reason == "EVIDENCE_SEMANTIC_VERSION_MISMATCH"
 
-Exact loaded `sys.modules` contents in Desktop/LIVE and each analysis worker; internal repository ID; active FULL lease status; current state-field invalidation reason; fresh semantic evidence after supported backend replacement and authorized FULL; publication receipt. These are downstream gates, not grounds to bypass the reload stop.
 
 ## FINAL_VERDICT
 
-**BLOCKED_PY315_D2B_RUNTIME_RELOAD_REQUIRED**
+C16_B01_B03_P0_PASS
 
-The supported MCP FULL would run in a backend process that loaded indexer before D2B edits. Stop before FULL and before any restart.
+The bounded named-member branch retains canonical hard-edge equality, detects indexed optional children missing from the evidence cohort, and leaves the existing graph/relative-sibling logic intact. Focused new and selected existing regressions pass. The mandatory MCP audit was completed; its stale cycle_semantics family and lack of loaded-code adoption are reported without implying full B03 resolution.

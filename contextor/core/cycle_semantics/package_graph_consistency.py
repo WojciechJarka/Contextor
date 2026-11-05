@@ -326,11 +326,40 @@ def assess_package_graph_consistency(
                 if resolved != module_id:
                     expected.add(resolved)
                 if resolved.endswith(".__init__"):
-                    # The named-member form may be an initializer attribute or
-                    # a child. Only explicit relative sibling imports with a
-                    # provably unbound child are covered in this phase.
+                    # A named member may be an initializer attribute or child.
+                    # Preserve the initializer hard edge and require indexed
+                    # child source before admitting that bounded form.
                     if not (node.level and node.module is None):
-                        return unknown("AMBIGUOUS_PACKAGE_TARGET")
+                        initializer = sources.get(resolved)
+                        if not isinstance(initializer, ast.Module):
+                            return unknown("MISSING_REQUIRED_INITIALIZER")
+                        for alias in node.names:
+                            if (
+                                not alias.name.isidentifier()
+                                or alias.name.startswith("__")
+                                or (
+                                    alias.asname is not None
+                                    and (
+                                        not alias.asname.isidentifier()
+                                        or alias.asname.startswith("__")
+                                    )
+                                )
+                            ):
+                                return unknown("UNSUPPORTED_IMPORT_FORM")
+                            child = target(base + "." + alias.name)
+                            if (
+                                child is not None
+                                and (
+                                    child not in evidence_source_modules
+                                    or not isinstance(
+                                        sources.get(child), ast.Module
+                                    )
+                                )
+                            ):
+                                return unknown(
+                                    "OPTIONAL_NAMED_CHILD_SOURCE_UNAVAILABLE"
+                                )
+                        continue
                     initializer = sources.get(resolved)
                     if initializer is None:
                         return unknown("MISSING_REQUIRED_INITIALIZER")

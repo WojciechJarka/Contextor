@@ -2796,3 +2796,235 @@ def test_p1d3_d2b3_official_isolated_full_receipt(
         )
         assert result.live_publish_status == "success"
         assert calls == [root.resolve()]
+
+
+def _c16_p0_canonical_sources(tmp_path, files):
+    root = write_synthetic_repository(tmp_path / "repo", files)
+    index, graph = _d2a_canonical_index_graph(root)
+    trees = {
+        module: ast.parse((root / item.path).read_text(encoding="utf-8"))
+        for module, item in index.modules.items()
+    }
+    closure = compute_cycle_model_source_closures(graph.hard_edges)
+    assert len(closure) == 1
+    return root, graph, trees, closure[0]
+
+
+@pytest.mark.parametrize(
+    ("initializer", "classification"),
+    [
+        (
+            "from . import a\nvalue = 1\n",
+            "MODEL_INTERNAL_EARLY_BINDING_HAZARD",
+        ),
+        (
+            "value = 1\nfrom . import a\n",
+            "MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS",
+        ),
+    ],
+)
+def test_c16_p0_named_member_binding_order(
+    tmp_path, isolated_dirs, initializer, classification,
+):
+    _, graph, trees, closure = _c16_p0_canonical_sources(
+        tmp_path,
+        {"pkg/__init__.py": initializer, "pkg/a.py": "from pkg import value\n"},
+    )
+    assert graph.hard_edges == {
+        "pkg.__init__": {"pkg.a"},
+        "pkg.a": {"pkg.__init__"},
+    }
+    assert graph.soft_edges == {
+        "pkg.__init__": set(),
+        "pkg.a": set(),
+    }
+    assert assess_package_graph_consistency(
+        graph.hard_edges, trees, closure.evidence_source_modules,
+    ).status == "CONSISTENT"
+    scenario = analyze_cycle_scenarios(graph.hard_edges, trees).components[0]
+    assert scenario.classification == classification
+
+
+def test_c16_p0_bound_named_member_alias_has_no_child(
+    tmp_path, isolated_dirs,
+):
+    _, graph, trees, closure = _c16_p0_canonical_sources(
+        tmp_path,
+        {
+            "pkg/__init__.py": "value = 1\nfrom . import a\n",
+            "pkg/a.py": "from pkg import value as chosen\n",
+        },
+    )
+    assert assess_package_graph_consistency(
+        graph.hard_edges, trees, closure.evidence_source_modules,
+    ).status == "CONSISTENT"
+    scenario = analyze_cycle_scenarios(graph.hard_edges, trees).components[0]
+    assert scenario.classification == "MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS"
+
+
+def test_c16_p0_indexed_child_requires_cohort_source(
+    tmp_path, isolated_dirs,
+):
+    root, graph, trees, closure = _c16_p0_canonical_sources(
+        tmp_path,
+        {
+            "pkg/__init__.py": "from . import a\n",
+            "pkg/a.py": "from pkg import value\n",
+            "pkg/value.py": "pass\n",
+        },
+    )
+    assert graph.hard_edges["pkg.a"] == {"pkg.__init__"}
+    assert graph.soft_edges["pkg.a"] == {"pkg.value"}
+    assert "pkg.value" not in closure.evidence_source_modules
+    closed = {
+        module: trees[module]
+        for module in closure.evidence_source_modules
+    }
+    assert assess_package_graph_consistency(
+        graph.hard_edges, trees, tuple(sorted(trees)),
+    ).status == "CONSISTENT"
+    result = assess_package_graph_consistency(
+        graph.hard_edges, trees, closure.evidence_source_modules,
+    )
+    assert result.status == "INDETERMINATE"
+    assert result.reason == "OPTIONAL_NAMED_CHILD_SOURCE_UNAVAILABLE"
+    result = assess_package_graph_consistency(
+        graph.hard_edges, closed, closure.evidence_source_modules,
+    )
+    assert result.status == "INDETERMINATE"
+    assert result.reason == "OPTIONAL_NAMED_CHILD_SOURCE_UNAVAILABLE"
+    assert evaluate_package_import_order(trees, "pkg").outcome == "MODEL_PASS"
+    assert run_synthetic_import(root, "pkg").returncode == 0
+    scenario = analyze_cycle_scenarios(graph.hard_edges, trees).components[0]
+    assert scenario.classification == "INDETERMINATE"
+    assert scenario.reason == "OPTIONAL_NAMED_CHILD_SOURCE_UNAVAILABLE"
+
+
+def test_c16_p0_eventual_export_does_not_hide_missing_child_source(
+    tmp_path, isolated_dirs,
+):
+    _, graph, trees, closure = _c16_p0_canonical_sources(
+        tmp_path,
+        {
+            "pkg/__init__.py": "from .a import trigger\nvalue = 1\n",
+            "pkg/a.py": "from pkg import value\ntrigger = 1\n",
+            "pkg/value.py": "pass\n",
+        },
+    )
+    assert "pkg.value" not in closure.evidence_source_modules
+    closed = {
+        module: trees[module]
+        for module in closure.evidence_source_modules
+    }
+    result = assess_package_graph_consistency(
+        graph.hard_edges, closed, closure.evidence_source_modules,
+    )
+    assert result.status == "INDETERMINATE"
+    assert result.reason == "OPTIONAL_NAMED_CHILD_SOURCE_UNAVAILABLE"
+
+
+def test_c16_p0_named_member_rejects_forged_hard_edges(
+    tmp_path, isolated_dirs,
+):
+    _, graph, trees, closure = _c16_p0_canonical_sources(
+        tmp_path,
+        {
+            "pkg/__init__.py": "from . import a\n",
+            "pkg/a.py": "from pkg import value\n",
+            "pkg/value.py": "pass\n",
+        },
+    )
+    for changed in (
+        {"pkg.a": {"pkg.__init__", "pkg.value"}},
+        {"pkg.a": set()},
+    ):
+        forged = {
+            module: set(targets)
+            for module, targets in graph.hard_edges.items()
+        }
+        forged.update(changed)
+        result = assess_package_graph_consistency(
+            forged, trees, tuple(sorted(trees)),
+        )
+        assert result.status == "INDETERMINATE"
+        assert result.reason == "GRAPH_SOURCE_IMPORT_MISMATCH"
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "from pkg import *\n",
+        "from pkg import value as __hidden\n",
+    ],
+)
+def test_c16_p0_unsupported_named_member_forms(
+    tmp_path, isolated_dirs, source,
+):
+    _, graph, trees, closure = _c16_p0_canonical_sources(
+        tmp_path,
+        {
+            "pkg/__init__.py": "from . import a\nvalue = 1\n",
+            "pkg/a.py": source,
+        },
+    )
+    result = assess_package_graph_consistency(
+        graph.hard_edges, trees, closure.evidence_source_modules,
+    )
+    assert result.status == "INDETERMINATE"
+    assert result.reason == "UNSUPPORTED_IMPORT_FORM"
+
+
+@pytest.mark.parametrize(
+    "initializer",
+    [
+        "from . import a\ndef __getattr__(name):\n    return 1\n",
+        "from . import a\nif condition:\n    value = 1\n",
+    ],
+)
+def test_c16_p0_unsupported_initializer_cannot_claim_pass(
+    tmp_path, isolated_dirs, initializer,
+):
+    _, graph, trees, _ = _c16_p0_canonical_sources(
+        tmp_path,
+        {
+            "pkg/__init__.py": initializer,
+            "pkg/a.py": "from pkg import value\n",
+        },
+    )
+    scenario = analyze_cycle_scenarios(graph.hard_edges, trees).components[0]
+    assert scenario.classification == "INDETERMINATE"
+
+
+def test_c16_p0_missing_member_cannot_claim_pass(tmp_path, isolated_dirs):
+    _, graph, trees, closure = _c16_p0_canonical_sources(
+        tmp_path,
+        {
+            "pkg/__init__.py": "from . import a\n",
+            "pkg/a.py": "from pkg import missing\n",
+        },
+    )
+    assert assess_package_graph_consistency(
+        graph.hard_edges, trees, closure.evidence_source_modules,
+    ).status == "CONSISTENT"
+    scenario = analyze_cycle_scenarios(graph.hard_edges, trees).components[0]
+    assert scenario.classification != "MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS"
+
+
+def test_c16_p0_old_evidence_semantic_version_rejected(
+    tmp_path, isolated_dirs,
+):
+    root = write_synthetic_repository(
+        tmp_path / "repo", D2A_ACTIVE_CHAIN,
+    )
+    _, graph, captured, _, evidence, snapshot = _d2a_source_evidence(root)
+    assert evidence.semantic_version == "cycle-semantics-evidence/3"
+    previous = replace(
+        evidence, semantic_version="cycle-semantics-evidence/2",
+    )
+    assessment = assess_index_bound_scc_models(
+        graph.hard_edges,
+        captured.source_fingerprints_by_module,
+        snapshot,
+        previous,
+    )
+    assert assessment[0].reason == "EVIDENCE_SEMANTIC_VERSION_MISMATCH"
