@@ -697,9 +697,21 @@ def build_source_bound_cycle_evidence(
     )
     graph_fingerprint = _digest(graph_items)
 
+    if source_selection == "OPTIONAL_NAMED_CHILDREN":
+        selected_modules = {
+            module
+            for closure in closures
+            for module in closure.evidence_source_modules
+        }
+        manifest_names = sorted(
+            selected_modules.intersection(signatures)
+        )
+    else:
+        manifest_names = sorted(signatures)
+
     source_manifest = tuple(
         (name, *signatures[name])
-        for name in sorted(signatures)
+        for name in manifest_names
     )
 
     components: list[ComponentSourceEvidence] = []

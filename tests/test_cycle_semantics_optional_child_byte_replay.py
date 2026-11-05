@@ -19,15 +19,18 @@ from contextor.core.cycle_semantics.source_proof import (
     assess_optional_scc_source_bytes,
     assess_scc_source_bytes,
 )
-from tests.test_cycle_semantics_optional_child_scenarios import _case
+from tests.test_cycle_semantics_optional_child_scenarios import (
+    FILES,
+    _case,
+)
 from tests.test_cycle_semantics_optional_child_evidence import (
     _inputs,
     _build,
 )
 
 
-def _fixture(tmp_path):
-    case = _case(tmp_path)
+def _fixture(tmp_path, *, files=None):
+    case = _case(tmp_path, files=files)
     parsed, _ = _inputs(tmp_path, case)
     graph, _, imports, root, closures = case
     evidence = _build(case, parsed)
@@ -250,4 +253,64 @@ def test_existing_byte_verifier_still_rejects_optional(tmp_path):
     assert all(
         row.bytes_state != "BYTE_AST_CONSISTENT_NON_ATOMIC"
         for row in result
+    )
+
+
+def test_forged_global_source_manifest_fingerprint_rejected(tmp_path):
+    case = list(_fixture(tmp_path))
+    evidence = case[3]
+
+    case[3] = replace(
+        evidence,
+        source_manifest_fingerprint="0" * 64,
+    )
+
+    result = _verify(case)
+
+    assert len(result) == 1
+    assert result[0].model_classification == "INDETERMINATE"
+    assert result[0].bytes_state == "EVIDENCE_MISMATCH"
+    assert result[0].reason == (
+        "OPTIONAL_MODEL_OR_TOKEN_REPLAY_MISMATCH"
+    )
+
+
+def test_unrelated_source_does_not_change_optional_manifest(tmp_path):
+    first = _fixture(
+        tmp_path / "first",
+        files={
+            **FILES,
+            "pkg/unrelated.py": "value = 1\n",
+        },
+    )
+
+    second = _fixture(
+        tmp_path / "second",
+        files={
+            **FILES,
+            "pkg/unrelated.py": "value = 2\n",
+        },
+    )
+
+    assert "pkg.unrelated" in first[1]
+    assert "pkg.unrelated" in second[1]
+
+    assert "pkg.unrelated" not in first[4]
+    assert "pkg.unrelated" not in second[4]
+
+    assert _verify(first)[0].bytes_state == (
+        "BYTE_AST_CONSISTENT_NON_ATOMIC"
+    )
+    assert _verify(second)[0].bytes_state == (
+        "BYTE_AST_CONSISTENT_NON_ATOMIC"
+    )
+
+    assert (
+        first[3].source_manifest_fingerprint
+        == second[3].source_manifest_fingerprint
+    )
+
+    assert (
+        first[3].components[0].evidence_token
+        == second[3].components[0].evidence_token
     )

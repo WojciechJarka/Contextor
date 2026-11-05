@@ -496,11 +496,7 @@ def assess_optional_scc_source_bytes(
     ):
         return reject("OPTIONAL_MODEL_REPLAY_UNAVAILABLE")
 
-    if (
-        replay.scenarios != source_evidence.scenarios
-        or len(replay.components) != len(source_evidence.components)
-        or replay.components != source_evidence.components
-    ):
+    if replay != source_evidence:
         return reject(
             "OPTIONAL_MODEL_OR_TOKEN_REPLAY_MISMATCH",
             "EVIDENCE_MISMATCH",
