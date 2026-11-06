@@ -1,564 +1,384 @@
-# CONTEXTOR C16-B03-P1D3C
+# CONTEXTOR C16-B03-P1D3D
 
 ## FILES_CHANGED
 
-- contextor/core/cycle_semantics/partial_scc_claims.py
-- tests/test_cycle_semantics_optional_child_partial_claims.py
+- contextor/core/api/facade.py
+- tests/test_cycle_semantics_optional_child_full_preview.py
 
 ## TARGETED_TESTS
 
-DIRECT_EVIDENCE: CPython 3.15.2, five specified modules with `-B -m pytest -q -rs -p no:cacheprovider`, basetemp outside repository: 73 passed in 16.47 s. `git diff --check` passed. No full suite.
+DIRECT_EVIDENCE: CPython 3.15.2, five specified modules, `-B -m pytest -q -rs -p no:cacheprovider`, basetemp outside repository: 60 passed, 1 failed in 37.34 s. Failed: `test_optional_source_drift_fails_closed`. Actual reason `VERIFY_REINDEX_GRAPH_CHANGED`; expected `VERIFY_REINDEX_SOURCE_CHANGED`. No further code or test edits. `git diff --check` passed.
 
 ## MCP_POST_CHANGE_AUDIT
 
-DIRECT_EVIDENCE: Contextor MCP `get_module_context` returned canonical_state=fresh, workspace_sync=verified, advisory_warning=null and syntax_errors=0 for both changed modules. Production module at revision 1023; new test at revision 1024. Cycle semantics family remains stale. No FULL, update_file, backend restart, or commit.
+DIRECT_EVIDENCE: Contextor MCP module contexts for both changed modules: canonical_revision=1026, canonical_state=fresh, workspace_sync=verified, advisory_warning=null, syntax_errors=0. Cycle semantics family stale. No production FULL, update_file, restart, or commit.
 
 ## FULL_DIFFS
 
 ```diff
-diff --git a/contextor/core/cycle_semantics/partial_scc_claims.py b/contextor/core/cycle_semantics/partial_scc_claims.py
-index 13302fc..eaa4a4b 100644
---- a/contextor/core/cycle_semantics/partial_scc_claims.py
-+++ b/contextor/core/cycle_semantics/partial_scc_claims.py
-@@ -6,15 +6,20 @@ This does not authenticate source bytes, publication, or runtime safety.
- from __future__ import annotations
+diff --git a/contextor/core/api/facade.py b/contextor/core/api/facade.py
+index c394d02..bab03bc 100644
+--- a/contextor/core/api/facade.py
++++ b/contextor/core/api/facade.py
+@@ -566,6 +566,7 @@ class ContextorFacade:
+         cycle_source_preparation_preview: bool = False,
+         cycle_source_publication_opt_in: bool = False,
+         cycle_partial_source_publication_opt_in: bool = False,
++        cycle_source_selection: str = "HARD_ONLY",
+     ) -> list:
+         """
+         Analyzes full project hierarchy, builds dependency graph, evaluates
+@@ -622,6 +623,38 @@ class ContextorFacade:
+                 "cycle_source_preparation_preview=True"
+             )
  
- import re
-+from collections.abc import Mapping
- from dataclasses import dataclass
- 
- from .contracts import CycleSemanticsSnapshot, fingerprint_hard_edges
- from .generation_manifest import (
-     MANIFEST_VERSION,
-+    OPTIONAL_MANIFEST_VERSION,
-     PreparedCycleSourceManifest,
-     PreparedSCCSourceBinding,
- )
--from .model_source_closure import compute_cycle_model_source_closures
-+from .model_source_closure import (
-+    compute_cycle_model_source_closures,
-+    compute_cycle_model_source_closures_with_optional_children,
-+)
- from .original_worker_preparation import OriginalWorkerManifestPreparation
- from .scc import analyze_import_cycle_topology
- 
-@@ -34,6 +39,25 @@ class PreparedPartialSCCClaims:
-     authority: str = PARTIAL_SCC_CLAIMS_AUTHORITY
- 
- 
-+OPTIONAL_PARTIAL_SCC_CLAIMS_VERSION = (
-+    "cycle-partial-scc-preparation/2"
-+)
-+OPTIONAL_PARTIAL_SCC_CLAIMS_AUTHORITY = (
-+    "DECLARED_OPTIONAL_PREPARATIONS_NOT_COMMITTED_NOT_SOURCE_CERTIFIED"
-+)
-+
-+
-+@dataclass(frozen=True)
-+class PreparedOptionalPartialSCCClaims:
-+    graph_sha256: str
-+    components: tuple[PreparedSCCSourceBinding, ...]
-+    source_modules: tuple[str, ...]
-+    declared_manifest_sha256: str | None
-+    version: str = OPTIONAL_PARTIAL_SCC_CLAIMS_VERSION
-+    source_selection: str = "OPTIONAL_NAMED_CHILDREN"
-+    authority: str = OPTIONAL_PARTIAL_SCC_CLAIMS_AUTHORITY
-+
-+
- def validate_partial_scc_claims(
-     hard_edges,
-     snapshot,
-@@ -43,6 +67,7 @@ def validate_partial_scc_claims(
-     if (
-         type(snapshot) is not CycleSemanticsSnapshot
-         or type(preparation) is not OriginalWorkerManifestPreparation
-+        or preparation.source_selection != "HARD_ONLY"
-         or snapshot.coverage_status != "FILESYSTEM_STABLE_NON_ATOMIC"
-         or snapshot.source_issues
-     ):
-@@ -101,6 +126,7 @@ def validate_partial_scc_claims(
-                 or type(preparation.source_modules) is not tuple
-                 or preparation.source_modules != expected_source_modules
-                 or type(manifest) is not PreparedCycleSourceManifest
-+                or manifest.source_selection != "HARD_ONLY"
-                 or manifest.components != declarations
-                 or manifest.version != MANIFEST_VERSION
-                 or manifest.authority
-@@ -183,3 +209,241 @@ def validate_partial_scc_claims(
-         )
-     except (AttributeError, KeyError, TypeError, ValueError, IndexError):
-         return None
-+
-+
-+def validate_optional_partial_scc_claims(
-+    hard_edges,
-+    snapshot,
-+    preparation,
-+    indexed_imports_by_module,
-+    *,
-+    package_root=None,
-+) -> PreparedOptionalPartialSCCClaims | None:
-+    """Validate optional declarations, not original byte provenance."""
-+
-+    if (
-+        type(snapshot) is not CycleSemanticsSnapshot
-+        or type(preparation) is not OriginalWorkerManifestPreparation
-+        or preparation.source_selection != "OPTIONAL_NAMED_CHILDREN"
-+        or not isinstance(indexed_imports_by_module, Mapping)
-+        or snapshot.coverage_status != "FILESYSTEM_STABLE_NON_ATOMIC"
-+        or snapshot.source_issues
-+    ):
-+        return None
-+
-+    try:
-+        graph_sha256 = fingerprint_hard_edges(hard_edges)
-+        topology = analyze_import_cycle_topology(hard_edges)
-+        structural = topology.cyclic_components
-+
-+        closures = (
-+            compute_cycle_model_source_closures_with_optional_children(
-+                hard_edges,
-+                indexed_imports_by_module,
-+                package_root=package_root,
++        if (
++            type(cycle_source_selection) is not str
++            or cycle_source_selection not in {
++                "HARD_ONLY",
++                "OPTIONAL_NAMED_CHILDREN",
++            }
++        ):
++            raise ValueError(
++                "cycle_source_selection must be "
++                "HARD_ONLY or OPTIONAL_NAMED_CHILDREN"
 +            )
-+        )
-+
-+        selected = tuple(sorted({
-+            module
-+            for closure in closures
-+            for module in closure.evidence_source_modules
-+        }))
-+
-+        cyclic_members = tuple(sorted(
-+            member
-+            for component in structural
-+            for member in component.members
-+        ))
-+
-+        observed_rows = snapshot.observed_source_fingerprints
 +
 +        if (
-+            not structural
-+            or graph_sha256 != snapshot.graph_sha256
-+            or snapshot.import_sites.topology != topology
-+            or snapshot.cyclic_modules != cyclic_members
-+            or type(observed_rows) is not tuple
-+            or tuple(row[0] for row in observed_rows)
-+            != cyclic_members
-+            or len(closures) != len(structural)
-+            or tuple(row.members for row in closures)
-+            != tuple(component.members for component in structural)
++            cycle_source_selection == "OPTIONAL_NAMED_CHILDREN"
++            and not cycle_source_preparation_preview
 +        ):
-+            return None
-+
-+        observed = dict(observed_rows)
-+
-+        if any(
-+            type(value) is not str
-+            or _SHA256_PATTERN.fullmatch(value) is None
-+            for value in observed.values()
-+        ):
-+            return None
-+
-+        declarations = preparation.component_preparations
++            raise ValueError(
++                "OPTIONAL_NAMED_CHILDREN requires "
++                "cycle_source_preparation_preview=True"
++            )
 +
 +        if (
-+            type(declarations) is not tuple
-+            or len(declarations) != len(structural)
-+            or any(
-+                type(row) is not PreparedSCCSourceBinding
-+                for row in declarations
++            cycle_source_selection == "OPTIONAL_NAMED_CHILDREN"
++            and (
++                cycle_source_publication_opt_in
++                or cycle_partial_source_publication_opt_in
 +            )
-+            or tuple(row.members for row in declarations)
-+            != tuple(component.members for component in structural)
 +        ):
-+            return None
++            raise ValueError(
++                "OPTIONAL_NAMED_CHILDREN publication unsupported"
++            )
 +
-+        manifest_hash = None
-+
-+        if preparation.status == "PREPARED_UNPUBLISHED_NON_ATOMIC":
-+            manifest = preparation.manifest
-+
-+            if (
-+                preparation.reason is not None
-+                or type(preparation.source_modules) is not tuple
-+                or preparation.source_modules != selected
-+                or type(manifest) is not PreparedCycleSourceManifest
-+                or manifest.source_selection != "OPTIONAL_NAMED_CHILDREN"
-+                or manifest.version != OPTIONAL_MANIFEST_VERSION
-+                or manifest.authority
-+                != "PREPARED_ONLY_NOT_CANONICALLY_PUBLISHED"
-+                or manifest.graph_sha256 != graph_sha256
-+                or manifest.components != declarations
-+                or type(manifest.source_manifest_sha256) is not str
-+                or _SHA256_PATTERN.fullmatch(
-+                    manifest.source_manifest_sha256
-+                ) is None
-+                or any(
-+                    row.preparation_state != "PREPARED_UNPUBLISHED"
-+                    for row in declarations
-+                )
-+            ):
-+                return None
-+
-+            manifest_hash = manifest.source_manifest_sha256
-+
-+        elif preparation.status == "UNAVAILABLE":
-+            if (
-+                preparation.reason != "P1C0_SOURCE_EVIDENCE_UNAVAILABLE"
-+                or preparation.manifest is not None
-+                or preparation.source_modules != ()
-+                or not any(
-+                    row.preparation_state == "UNAVAILABLE"
-+                    for row in declarations
-+                )
-+            ):
-+                return None
-+
-+        else:
-+            return None
-+
-+        shared_signatures: dict[str, tuple[str, str]] = {}
-+
-+        for structural_row, closure, item in zip(
-+            structural, closures, declarations
-+        ):
-+            if (
-+                item.members != structural_row.members
-+                or closure.members != structural_row.members
-+            ):
-+                return None
-+
-+            if item.preparation_state == "PREPARED_UNPUBLISHED":
-+                if (
-+                    item.reason is not None
-+                    or item.model_classification not in {
-+                        "MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS",
-+                        "MODEL_INTERNAL_EARLY_BINDING_HAZARD",
-+                    }
-+                    or item.model_kind not in {
-+                        "FLAT_MODULE", "REGULAR_PACKAGE"
-+                    }
-+                    or type(item.model_evidence_sha256) is not str
-+                    or _SHA256_PATTERN.fullmatch(
-+                        item.model_evidence_sha256
-+                    ) is None
-+                    or type(item.source_signatures) is not tuple
-+                ):
-+                    return None
-+
-+                rows = item.source_signatures
-+
-+                if (
-+                    tuple(
-+                        row[0]
-+                        for row in rows
-+                        if type(row) is tuple and len(row) == 3
-+                    ) != closure.evidence_source_modules
-+                    or len(rows) != len(
-+                        closure.evidence_source_modules
-+                    )
-+                ):
-+                    return None
-+
-+                for row in rows:
-+                    if type(row) is not tuple or len(row) != 3:
-+                        return None
-+
-+                    module, raw_hash, ast_hash = row
-+
-+                    if any(
-+                        type(value) is not str
-+                        or _SHA256_PATTERN.fullmatch(value) is None
-+                        for value in (raw_hash, ast_hash)
-+                    ):
-+                        return None
-+
-+                    if (
-+                        module in observed
-+                        and observed[module] != raw_hash
-+                    ):
-+                        return None
-+
-+                    signature = (raw_hash, ast_hash)
-+
-+                    if (
-+                        module in shared_signatures
-+                        and shared_signatures[module] != signature
-+                    ):
-+                        return None
-+
-+                    shared_signatures[module] = signature
-+
-+            elif item.preparation_state == "UNAVAILABLE":
-+                if (
-+                    item.model_classification != "INDETERMINATE"
-+                    or type(item.model_kind) is not str
-+                    or item.model_kind not in {
-+                        "FLAT_MODULE", "REGULAR_PACKAGE"
-+                    }
-+                    or type(item.reason) is not str
-+                    or not item.reason
-+                    or item.source_signatures != ()
-+                    or item.model_evidence_sha256 is not None
-+                ):
-+                    return None
-+            else:
-+                return None
-+
-+        return PreparedOptionalPartialSCCClaims(
-+            graph_sha256=graph_sha256,
-+            components=declarations,
-+            source_modules=(
-+                selected
-+                if manifest_hash is not None
-+                else ()
-+            ),
-+            declared_manifest_sha256=manifest_hash,
-+        )
-+
-+    except (
-+        AttributeError,
-+        KeyError,
-+        TypeError,
-+        ValueError,
-+        IndexError,
-+        RecursionError,
-+    ):
-+        return None
+         cycle_source_preparation = None
+ 
+         def emit_stage_end(stage: str, started: float) -> None:
+@@ -902,6 +935,7 @@ class ContextorFacade:
+                     reason=reason,
+                     manifest=None,
+                     source_modules=(),
++                    source_selection=cycle_source_selection,
+                 )
+ 
+             if (
+@@ -924,6 +958,7 @@ class ContextorFacade:
+                     plan = plan_original_worker_reindex(
+                         index,
+                         graph.hard_edges,
++                        source_selection=cycle_source_selection,
+                     )
+ 
+                     if plan.status != "READY_FOR_REINDEX_NON_ATOMIC":
+@@ -991,6 +1026,7 @@ class ContextorFacade:
+                                     captured_index,
+                                     captured_graph.hard_edges,
+                                     cycle_semantics,
++                                    source_selection=cycle_source_selection,
+                                 )
+                             )
+ 
+@@ -1401,6 +1437,7 @@ class ContextorFacade:
+             if (
+                 cycle_source_publication_opt_in
+                 and cycle_source_preparation is not None
++                and cycle_source_preparation.source_selection == "HARD_ONLY"
+                 and cycle_source_preparation.status
+                 == "PREPARED_UNPUBLISHED_NON_ATOMIC"
+                 and cycle_source_preparation.reason is None
+@@ -1436,6 +1473,7 @@ class ContextorFacade:
+             if (
+                 cycle_partial_source_publication_opt_in
+                 and cycle_source_preparation is not None
++                and cycle_source_preparation.source_selection == "HARD_ONLY"
+                 and state.cycle_semantics is cycle_semantics
+                 and state.cycle_semantics_state == "fresh"
+                 and state.cycles_state == "fresh"
 
-diff --git a/tests/test_cycle_semantics_optional_child_partial_claims.py b/tests/test_cycle_semantics_optional_child_partial_claims.py
+diff --git a/tests/test_cycle_semantics_optional_child_full_preview.py b/tests/test_cycle_semantics_optional_child_full_preview.py
 new file mode 100644
-index 0000000..66b883b
+index 0000000..0c86154
 --- /dev/null
-+++ b/tests/test_cycle_semantics_optional_child_partial_claims.py
-@@ -0,0 +1,224 @@
-+"""P1D3C: optional SCC declarations have no publication authority."""
++++ b/tests/test_cycle_semantics_optional_child_full_preview.py
+@@ -0,0 +1,263 @@
++"""P1D3D: official optional FULL preview is unpublished."""
 +
 +from dataclasses import replace
 +
 +import pytest
 +
++import contextor.core.api.facade as facade_module
++
++from contextor.core.api.facade import ContextorFacade
 +from contextor.core.cycle_semantics.generation_manifest import (
-+    MANIFEST_VERSION,
++    OPTIONAL_MANIFEST_VERSION,
 +)
-+from contextor.core.cycle_semantics.original_worker_binding import (
-+    _select_original_worker_sources,
-+)
-+from contextor.core.cycle_semantics.partial_scc_claims import (
-+    OPTIONAL_PARTIAL_SCC_CLAIMS_VERSION,
-+    OPTIONAL_PARTIAL_SCC_CLAIMS_AUTHORITY,
-+    PreparedOptionalPartialSCCClaims,
-+    validate_optional_partial_scc_claims,
-+    validate_partial_scc_claims,
-+)
-+from tests.test_cycle_semantics_optional_child_worker_manifest import (
-+    _pipeline,
-+    _prepare,
-+)
++from tests.cycle_semantics_lab import write_synthetic_repository
 +from tests.test_cycle_semantics_optional_child_worker_capture import (
 +    FILES,
++)
++from tests.test_original_worker_full_receipt_optin import (
++    _persisted,
 +)
 +
 +
 +@pytest.fixture(autouse=True)
-+def _inline_worker(monkeypatch, isolated_dirs):
++def _inline_worker(monkeypatch):
 +    monkeypatch.setenv("CONTEXTOR_DISABLE_PROCESS_POOL", "1")
 +
 +
-+def _case(tmp_path, *, files=None):
-+    pipeline = _pipeline(tmp_path, files=files)
-+    index, hard_edges, snapshot, _ = pipeline
-+    preparation = _prepare(pipeline)
-+
-+    _, _, package_root = _select_original_worker_sources(
-+        index,
-+        hard_edges,
-+        "OPTIONAL_NAMED_CHILDREN",
-+    )
-+
-+    imports = {
-+        name: module.imports
-+        for name, module in index.modules.items()
-+    }
-+
-+    return hard_edges, snapshot, preparation, imports, package_root
-+
-+
-+def _check(case):
-+    return validate_optional_partial_scc_claims(
-+        case[0],
-+        case[1],
-+        case[2],
-+        case[3],
-+        package_root=case[4],
++def _repo(tmp_path, files=None):
++    return write_synthetic_repository(
++        tmp_path / "repo",
++        FILES if files is None else files,
 +    )
 +
 +
-+def test_optional_declarations_are_not_published(tmp_path):
-+    case = _case(tmp_path)
-+    result = _check(case)
-+
-+    assert type(result) is PreparedOptionalPartialSCCClaims
-+    assert result.version == OPTIONAL_PARTIAL_SCC_CLAIMS_VERSION
-+    assert result.authority == OPTIONAL_PARTIAL_SCC_CLAIMS_AUTHORITY
-+    assert result.source_selection == "OPTIONAL_NAMED_CHILDREN"
-+    assert "pkg.child" in result.source_modules
-+    assert result.declared_manifest_sha256 == (
-+        case[2].manifest.source_manifest_sha256
++def _run(root, **kwargs):
++    errors, result = ContextorFacade.analyze_project(
++        str(root), **kwargs
 +    )
-+    assert result.components == case[2].component_preparations
-+    assert all(
-+        item.preparation_state == "PREPARED_UNPUBLISHED"
-+        for item in result.components
-+    )
-+    assert result == _check(case)
-+
-+
-+def test_legacy_validator_rejects_optional_preparation(tmp_path):
-+    case = _case(tmp_path)
-+
-+    assert validate_partial_scc_claims(
-+        case[0], case[1], case[2]
-+    ) is None
-+
-+    forged = replace(
-+        case[2],
-+        manifest=replace(
-+            case[2].manifest,
-+            version=MANIFEST_VERSION,
-+        ),
-+    )
-+
-+    assert validate_partial_scc_claims(
-+        case[0], case[1], forged
-+    ) is None
-+
-+
-+def test_wrong_source_selection_rejected(tmp_path):
-+    case = list(_case(tmp_path))
-+    case[2] = replace(case[2], source_selection="HARD_ONLY")
-+    assert _check(case) is None
-+
-+
-+def test_wrong_manifest_version_or_mode_rejected(tmp_path):
-+    case = list(_case(tmp_path))
-+    original = case[2].manifest
-+
-+    case[2] = replace(
-+        case[2],
-+        manifest=replace(
-+            original,
-+            version=MANIFEST_VERSION,
-+        ),
-+    )
-+    assert _check(case) is None
-+
-+    case[2] = replace(
-+        case[2],
-+        manifest=replace(
-+            original,
-+            source_selection="HARD_ONLY",
-+        ),
-+    )
-+    assert _check(case) is None
-+
-+
-+def test_missing_optional_child_source_rejected(tmp_path):
-+    case = list(_case(tmp_path))
-+
-+    case[2] = replace(
-+        case[2],
-+        source_modules=tuple(
-+            name
-+            for name in case[2].source_modules
-+            if name != "pkg.child"
-+        ),
-+    )
-+
-+    assert _check(case) is None
-+
-+
-+def test_missing_optional_child_signature_rejected(tmp_path):
-+    case = list(_case(tmp_path))
-+    preparation = case[2]
-+    component = preparation.manifest.components[0]
-+
-+    changed_component = replace(
-+        component,
-+        source_signatures=tuple(
-+            row
-+            for row in component.source_signatures
-+            if row[0] != "pkg.child"
-+        ),
-+    )
-+
-+    changed_manifest = replace(
-+        preparation.manifest,
-+        components=(changed_component,),
-+    )
-+
-+    case[2] = replace(
-+        preparation,
-+        manifest=changed_manifest,
-+        component_preparations=changed_manifest.components,
-+    )
-+
-+    assert _check(case) is None
-+
-+
-+def test_changed_import_facts_invalidate_closure(tmp_path):
-+    case = list(_case(tmp_path))
-+    case[3] = dict(case[3])
-+    case[3]["pkg.a"] = []
-+
-+    assert _check(case) is None
-+
-+
-+def test_changed_graph_identity_rejected(tmp_path):
-+    case = list(_case(tmp_path))
-+    case[1] = replace(
-+        case[1],
-+        graph_sha256="0" * 64,
-+    )
-+
-+    assert _check(case) is None
-+
-+
-+def test_two_independent_sccs_preserved(tmp_path):
-+    case = _case(
-+        tmp_path,
-+        files={
-+            **FILES,
-+            "pkg/x.py": "import pkg.y\n",
-+            "pkg/y.py": "import pkg.x\n",
-+        },
-+    )
-+
-+    result = _check(case)
-+
++    assert isinstance(errors, list)
 +    assert result is not None
-+    assert len(result.components) == 2
-+    assert tuple(
-+        item.members for item in result.components
-+    ) == tuple(
-+        item.members for item in case[2].component_preparations
++    return result
++
++
++def test_optional_full_preview_original_worker_manifest(
++    tmp_path, isolated_dirs, monkeypatch,
++):
++    root = _repo(tmp_path)
++    original = facade_module.index_repository
++    selections = []
++
++    def tracked(*args, **kwargs):
++        selections.append(
++            kwargs.get("source_capture_module_ids")
++        )
++        return original(*args, **kwargs)
++
++    monkeypatch.setattr(
++        facade_module, "index_repository", tracked
++    )
++
++    result = _run(
++        root,
++        cycle_source_preparation_preview=True,
++        cycle_source_selection="OPTIONAL_NAMED_CHILDREN",
++    )
++
++    preview = result.cycle_source_preparation_preview
++
++    assert preview.status == "PREPARED_UNPUBLISHED_NON_ATOMIC"
++    assert preview.reason is None
++    assert preview.source_selection == "OPTIONAL_NAMED_CHILDREN"
++    assert preview.manifest is not None
++    assert preview.manifest.version == OPTIONAL_MANIFEST_VERSION
++    assert preview.manifest.source_selection == (
++        "OPTIONAL_NAMED_CHILDREN"
++    )
++    assert "pkg.child" in preview.source_modules
++    assert selections == [
++        None,
++        frozenset(preview.source_modules),
++    ]
++
++    state, metadata = _persisted(root)
++
++    assert metadata.revision >= 1
++    assert "pkg.child" not in (
++        state.dependency_graph.hard_edges["pkg.a"]
++    )
++    assert state.cycle_source_publication is None
++    assert state.cycle_partial_source_publication is None
++    assert not hasattr(
++        state, "cycle_source_preparation_preview"
 +    )
 +
 +
-+def test_incomplete_or_forged_manifest_hash_rejected(tmp_path):
-+    case = list(_case(tmp_path))
-+    case[2] = replace(
-+        case[2],
-+        manifest=replace(
-+            case[2].manifest,
-+            source_manifest_sha256=None,
-+        ),
++@pytest.mark.parametrize(
++    "value",
++    [None, 0, True, "INVALID", []],
++)
++def test_invalid_source_selection_precedes_index(
++    tmp_path, isolated_dirs, monkeypatch, value,
++):
++    root = _repo(tmp_path)
++
++    def forbidden(*args, **kwargs):
++        raise AssertionError("index must not start")
++
++    monkeypatch.setattr(
++        facade_module, "index_repository", forbidden
 +    )
 +
-+    assert _check(case) is None
++    with pytest.raises(
++        ValueError, match="cycle_source_selection"
++    ):
++        ContextorFacade.analyze_project(
++            str(root),
++            cycle_source_preparation_preview=True,
++            cycle_source_selection=value,
++        )
++
++
++def test_optional_mode_requires_preview(
++    tmp_path, isolated_dirs, monkeypatch,
++):
++    root = _repo(tmp_path)
++
++    def forbidden(*args, **kwargs):
++        raise AssertionError("index must not start")
++
++    monkeypatch.setattr(
++        facade_module, "index_repository", forbidden
++    )
++
++    with pytest.raises(
++        ValueError, match="requires.*preview"
++    ):
++        ContextorFacade.analyze_project(
++            str(root),
++            cycle_source_selection="OPTIONAL_NAMED_CHILDREN",
++        )
++
++
++@pytest.mark.parametrize(
++    "publication_arg",
++    [
++        "cycle_source_publication_opt_in",
++        "cycle_partial_source_publication_opt_in",
++    ],
++)
++def test_optional_publication_rejected_before_index(
++    tmp_path, isolated_dirs, monkeypatch, publication_arg,
++):
++    root = _repo(tmp_path)
++
++    def forbidden(*args, **kwargs):
++        raise AssertionError("index must not start")
++
++    monkeypatch.setattr(
++        facade_module, "index_repository", forbidden
++    )
++
++    with pytest.raises(
++        ValueError, match="publication unsupported"
++    ):
++        ContextorFacade.analyze_project(
++            str(root),
++            cycle_source_preparation_preview=True,
++            cycle_source_selection="OPTIONAL_NAMED_CHILDREN",
++            **{publication_arg: True},
++        )
++
++
++def test_optional_no_cycles_skips_second_index(
++    tmp_path, isolated_dirs, monkeypatch,
++):
++    files = {
++        **FILES,
++        "pkg/b.py": "value = 1\n",
++    }
++    root = _repo(tmp_path, files)
++    original = facade_module.index_repository
++    selections = []
++
++    def tracked(*args, **kwargs):
++        selections.append(
++            kwargs.get("source_capture_module_ids")
++        )
++        return original(*args, **kwargs)
++
++    monkeypatch.setattr(
++        facade_module, "index_repository", tracked
++    )
++
++    result = _run(
++        root,
++        cycle_source_preparation_preview=True,
++        cycle_source_selection="OPTIONAL_NAMED_CHILDREN",
++    )
++
++    preview = result.cycle_source_preparation_preview
++
++    assert preview.status == "UNAVAILABLE"
++    assert preview.reason == "PLAN_NO_CYCLIC_COMPONENTS"
++    assert preview.manifest is None
++    assert preview.source_selection == "OPTIONAL_NAMED_CHILDREN"
++    assert selections == [None]
++
++
++def test_optional_source_drift_fails_closed(
++    tmp_path, isolated_dirs, monkeypatch,
++):
++    root = _repo(tmp_path)
++    original = facade_module.index_repository
++
++    def drifted(*args, **kwargs):
++        if kwargs.get("source_capture_module_ids") is not None:
++            (root / "pkg" / "child.py").write_bytes(
++                b"changed = True\n"
++            )
++        return original(*args, **kwargs)
++
++    monkeypatch.setattr(
++        facade_module, "index_repository", drifted
++    )
++
++    result = _run(
++        root,
++        cycle_source_preparation_preview=True,
++        cycle_source_selection="OPTIONAL_NAMED_CHILDREN",
++    )
++
++    preview = result.cycle_source_preparation_preview
++
++    assert preview.status == "UNAVAILABLE"
++    assert preview.reason == "VERIFY_REINDEX_SOURCE_CHANGED"
++    assert preview.manifest is None
++    assert preview.source_selection == "OPTIONAL_NAMED_CHILDREN"
++
++    state, _ = _persisted(root)
++    assert state.cycle_source_publication is None
++    assert state.cycle_partial_source_publication is None
++
++
++def test_legacy_default_source_selection_unchanged(
++    tmp_path, isolated_dirs,
++):
++    root = _repo(tmp_path)
++
++    result = _run(
++        root,
++        cycle_source_preparation_preview=True,
++    )
++
++    preview = result.cycle_source_preparation_preview
++
++    assert preview.source_selection == "HARD_ONLY"
++    assert (
++        preview.manifest is None
++        or preview.manifest.source_selection == "HARD_ONLY"
++    )
++
++    state, _ = _persisted(root)
++    assert state.cycle_source_publication is None
++    assert state.cycle_partial_source_publication is None
 ```
 
 ## FINAL_VERDICT
 
-PASS
+TEST_FAILURE

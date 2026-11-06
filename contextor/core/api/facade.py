@@ -566,6 +566,7 @@ class ContextorFacade:
         cycle_source_preparation_preview: bool = False,
         cycle_source_publication_opt_in: bool = False,
         cycle_partial_source_publication_opt_in: bool = False,
+        cycle_source_selection: str = "HARD_ONLY",
     ) -> list:
         """
         Analyzes full project hierarchy, builds dependency graph, evaluates
@@ -620,6 +621,38 @@ class ContextorFacade:
             raise ValueError(
                 "cycle_partial_source_publication_opt_in requires "
                 "cycle_source_preparation_preview=True"
+            )
+
+        if (
+            type(cycle_source_selection) is not str
+            or cycle_source_selection not in {
+                "HARD_ONLY",
+                "OPTIONAL_NAMED_CHILDREN",
+            }
+        ):
+            raise ValueError(
+                "cycle_source_selection must be "
+                "HARD_ONLY or OPTIONAL_NAMED_CHILDREN"
+            )
+
+        if (
+            cycle_source_selection == "OPTIONAL_NAMED_CHILDREN"
+            and not cycle_source_preparation_preview
+        ):
+            raise ValueError(
+                "OPTIONAL_NAMED_CHILDREN requires "
+                "cycle_source_preparation_preview=True"
+            )
+
+        if (
+            cycle_source_selection == "OPTIONAL_NAMED_CHILDREN"
+            and (
+                cycle_source_publication_opt_in
+                or cycle_partial_source_publication_opt_in
+            )
+        ):
+            raise ValueError(
+                "OPTIONAL_NAMED_CHILDREN publication unsupported"
             )
 
         cycle_source_preparation = None
@@ -902,6 +935,7 @@ class ContextorFacade:
                     reason=reason,
                     manifest=None,
                     source_modules=(),
+                    source_selection=cycle_source_selection,
                 )
 
             if (
@@ -924,6 +958,7 @@ class ContextorFacade:
                     plan = plan_original_worker_reindex(
                         index,
                         graph.hard_edges,
+                        source_selection=cycle_source_selection,
                     )
 
                     if plan.status != "READY_FOR_REINDEX_NON_ATOMIC":
@@ -991,6 +1026,7 @@ class ContextorFacade:
                                     captured_index,
                                     captured_graph.hard_edges,
                                     cycle_semantics,
+                                    source_selection=cycle_source_selection,
                                 )
                             )
 
@@ -1401,6 +1437,7 @@ class ContextorFacade:
             if (
                 cycle_source_publication_opt_in
                 and cycle_source_preparation is not None
+                and cycle_source_preparation.source_selection == "HARD_ONLY"
                 and cycle_source_preparation.status
                 == "PREPARED_UNPUBLISHED_NON_ATOMIC"
                 and cycle_source_preparation.reason is None
@@ -1436,6 +1473,7 @@ class ContextorFacade:
             if (
                 cycle_partial_source_publication_opt_in
                 and cycle_source_preparation is not None
+                and cycle_source_preparation.source_selection == "HARD_ONLY"
                 and state.cycle_semantics is cycle_semantics
                 and state.cycle_semantics_state == "fresh"
                 and state.cycles_state == "fresh"
