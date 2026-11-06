@@ -177,6 +177,32 @@ def test_modified_component_source_signature_rejected(tmp_path):
     assert not verify_prepared_optional_manifest_digest(changed)
 
 
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("model_classification", []),
+        ("model_kind", {}),
+    ],
+)
+def test_unhashable_component_model_fields_fail_closed(
+    tmp_path, field, value,
+):
+    manifest = _prepare(_fixture(tmp_path))
+    component = manifest.components[0]
+
+    malformed = replace(
+        manifest,
+        components=(
+            replace(component, **{field: value}),
+        ),
+    )
+
+    assert (
+        verify_prepared_optional_manifest_digest(malformed)
+        is False
+    )
+
+
 def test_missing_optional_child_blocks_complete_digest(tmp_path):
     case = list(_fixture(tmp_path))
     case[4] = dict(case[4])

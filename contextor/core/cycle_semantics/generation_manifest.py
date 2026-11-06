@@ -340,10 +340,12 @@ def verify_prepared_optional_manifest_digest(
             or component.members != tuple(sorted(set(component.members)))
             or component.preparation_state != "PREPARED_UNPUBLISHED"
             or component.reason is not None
+            or type(component.model_classification) is not str
             or component.model_classification not in {
                 "MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS",
                 "MODEL_INTERNAL_EARLY_BINDING_HAZARD",
             }
+            or type(component.model_kind) is not str
             or component.model_kind not in {
                 "FLAT_MODULE",
                 "REGULAR_PACKAGE",
