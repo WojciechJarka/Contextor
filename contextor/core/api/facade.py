@@ -1510,6 +1510,26 @@ class ContextorFacade:
                 file_state_payload=file_state_payload,
                 **store_manifest_kwargs,
             )
+            if (
+                cycle_source_selection == "OPTIONAL_NAMED_CHILDREN"
+                and cycle_source_preparation_preview
+                and cycle_source_preparation is not None
+                and meta is not None
+                and analysis_result is not None
+            ):
+                from contextor.core.cycle_semantics.optional_generation_anchor import (
+                    make_optional_prepared_generation_anchor,
+                )
+
+                optional_anchor = make_optional_prepared_generation_anchor(
+                    cycle_source_preparation,
+                    meta,
+                )
+
+                if optional_anchor is not None:
+                    analysis_result.cycle_source_preparation_generation_anchor = (
+                        optional_anchor
+                    )
             emit_stage_component_end(
                 "persistence",
                 "snapshot_save",
