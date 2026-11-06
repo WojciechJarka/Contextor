@@ -88,15 +88,40 @@ def test_identical_sources_distinct_full_generations(
     first_manifest = (
         first.cycle_source_preparation_preview.manifest
     )
+    _, first_metadata = _persisted(root)
 
     second = _optional(root)
     second_anchor = second.cycle_source_preparation_generation_anchor
     second_manifest = (
         second.cycle_source_preparation_preview.manifest
     )
+    _, second_metadata = _persisted(root)
+
+    assert (
+        first_anchor.revision,
+        first_anchor.state_id,
+        first_anchor.repo_id,
+        first_anchor.root_path,
+    ) == (
+        first_metadata.revision,
+        first_metadata.state_id,
+        first_metadata.repo_id,
+        first_metadata.root_path,
+    )
+
+    assert (
+        second_anchor.revision,
+        second_anchor.state_id,
+        second_anchor.repo_id,
+        second_anchor.root_path,
+    ) == (
+        second_metadata.revision,
+        second_metadata.state_id,
+        second_metadata.repo_id,
+        second_metadata.root_path,
+    )
 
     assert second_anchor.revision > first_anchor.revision
-    assert second_anchor.state_id == first_anchor.state_id
     assert second_anchor.repo_id == first_anchor.repo_id
     assert second_anchor.root_path == first_anchor.root_path
 
@@ -108,6 +133,7 @@ def test_identical_sources_distinct_full_generations(
         first_anchor.source_manifest_sha256
         == second_anchor.source_manifest_sha256
     )
+
     assert first_anchor != second_anchor
 
 
