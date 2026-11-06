@@ -117,6 +117,7 @@ def invalidate_cycle_semantics(
     # its old publication receipt into a new generation.
     state.cycle_source_publication = None
     state.cycle_partial_source_publication = None
+    state.cycle_optional_source_publication = None
 
     evidence = getattr(
         state,

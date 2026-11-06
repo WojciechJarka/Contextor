@@ -139,12 +139,14 @@ class RepositoryAnalysisState:
     # which the instance attribute is absent.
     cycle_source_publication: ClassVar[Any] = None
     cycle_partial_source_publication: ClassVar[Any] = None
+    cycle_optional_source_publication: ClassVar[Any] = None
 
     def __post_init__(self) -> None:
         # Persisted as an ordinary instance __dict__ attribute,
         # not as a dataclass field.
         self.cycle_source_publication = None
         self.cycle_partial_source_publication = None
+        self.cycle_optional_source_publication = None
 
     def clone_for_update(self) -> "RepositoryAnalysisState":
         """
@@ -166,6 +168,7 @@ class RepositoryAnalysisState:
         # It cannot inherit a receipt from the old generation.
         candidate.cycle_source_publication = None
         candidate.cycle_partial_source_publication = None
+        candidate.cycle_optional_source_publication = None
 
         for state_field in fields(self):
             value = getattr(
@@ -537,6 +540,7 @@ def save_engine_state(
     file_state_payload: dict[str, Any] | None = None,
     prepared_cycle_manifest: Any = None,
     prepared_partial_scc_preparation: Any = None,
+    prepared_optional_scc_preparation: Any = None,
 ):
     """Persist canonical state; optionally forward prepared SCC claims.
 
@@ -566,6 +570,11 @@ def save_engine_state(
         if prepared_partial_scc_preparation is not None:
             save_kwargs["prepared_partial_scc_preparation"] = (
                 prepared_partial_scc_preparation
+            )
+
+        if prepared_optional_scc_preparation is not None:
+            save_kwargs["prepared_optional_scc_preparation"] = (
+                prepared_optional_scc_preparation
             )
 
         return save_snapshot(
