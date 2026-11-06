@@ -175,19 +175,27 @@ def test_modified_canonical_graph_rejected(
 ):
     case = list(_case(tmp_path))
     changed = copy(case[2])
-    changed_graph = copy(changed.dependency_graph)
-    changed_graph.hard_edges = {
+
+    original_graph = changed.dependency_graph
+
+    changed_edges = {
         name: set(targets)
-        for name, targets in changed_graph.hard_edges.items()
+        for name, targets in original_graph.hard_edges.items()
     }
-    changed_graph.hard_edges["pkg.a"].add("pkg.helper")
-    changed.dependency_graph = changed_graph
+    changed_edges["pkg.a"].add("pkg.helper")
+
+    changed.dependency_graph = replace(
+        original_graph,
+        hard_edges=changed_edges,
+    )
     case[2] = changed
 
     result = _assess(case)
 
     assert result.status == "UNAVAILABLE"
-    assert result.reason == "OPTIONAL_DECLARATIONS_GENERATION_MISMATCH"
+    assert result.reason == (
+        "OPTIONAL_DECLARATIONS_GENERATION_MISMATCH"
+    )
 
 
 def test_changed_canonical_import_facts_rejected(
