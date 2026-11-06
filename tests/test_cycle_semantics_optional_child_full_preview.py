@@ -214,7 +214,7 @@ def test_optional_source_drift_fails_closed(
     def drifted(*args, **kwargs):
         if kwargs.get("source_capture_module_ids") is not None:
             (root / "pkg" / "child.py").write_bytes(
-                b"changed = True\n"
+                b"import pkg.helper\n# source drift\n"
             )
         return original(*args, **kwargs)
 
@@ -232,6 +232,41 @@ def test_optional_source_drift_fails_closed(
 
     assert preview.status == "UNAVAILABLE"
     assert preview.reason == "VERIFY_REINDEX_SOURCE_CHANGED"
+    assert preview.manifest is None
+    assert preview.source_selection == "OPTIONAL_NAMED_CHILDREN"
+
+    state, _ = _persisted(root)
+    assert state.cycle_source_publication is None
+    assert state.cycle_partial_source_publication is None
+
+
+def test_optional_import_graph_drift_fails_closed(
+    tmp_path, isolated_dirs, monkeypatch,
+):
+    root = _repo(tmp_path)
+    original = facade_module.index_repository
+
+    def drifted(*args, **kwargs):
+        if kwargs.get("source_capture_module_ids") is not None:
+            (root / "pkg" / "child.py").write_bytes(
+                b"changed = True\n"
+            )
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(
+        facade_module, "index_repository", drifted
+    )
+
+    result = _run(
+        root,
+        cycle_source_preparation_preview=True,
+        cycle_source_selection="OPTIONAL_NAMED_CHILDREN",
+    )
+
+    preview = result.cycle_source_preparation_preview
+
+    assert preview.status == "UNAVAILABLE"
+    assert preview.reason == "VERIFY_REINDEX_GRAPH_CHANGED"
     assert preview.manifest is None
     assert preview.source_selection == "OPTIONAL_NAMED_CHILDREN"
 
