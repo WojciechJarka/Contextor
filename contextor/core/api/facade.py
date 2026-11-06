@@ -567,6 +567,7 @@ class ContextorFacade:
         cycle_source_publication_opt_in: bool = False,
         cycle_partial_source_publication_opt_in: bool = False,
         cycle_source_selection: str = "HARD_ONLY",
+        cycle_optional_source_publication_opt_in: bool = False,
     ) -> list:
         """
         Analyzes full project hierarchy, builds dependency graph, evaluates
@@ -653,6 +654,29 @@ class ContextorFacade:
         ):
             raise ValueError(
                 "OPTIONAL_NAMED_CHILDREN publication unsupported"
+            )
+
+        if type(cycle_optional_source_publication_opt_in) is not bool:
+            raise ValueError(
+                "cycle_optional_source_publication_opt_in must be bool"
+            )
+
+        if (
+            cycle_optional_source_publication_opt_in
+            and not cycle_source_preparation_preview
+        ):
+            raise ValueError(
+                "cycle_optional_source_publication_opt_in requires "
+                "cycle_source_preparation_preview=True"
+            )
+
+        if (
+            cycle_optional_source_publication_opt_in
+            and cycle_source_selection != "OPTIONAL_NAMED_CHILDREN"
+        ):
+            raise ValueError(
+                "cycle_optional_source_publication_opt_in requires "
+                "cycle_source_selection=OPTIONAL_NAMED_CHILDREN"
             )
 
         cycle_source_preparation = None
@@ -1496,6 +1520,74 @@ class ContextorFacade:
                 if partial_claims is not None:
                     store_manifest_kwargs[
                         "prepared_partial_scc_preparation"
+                    ] = cycle_source_preparation
+
+            if (
+                cycle_optional_source_publication_opt_in
+                and cycle_source_selection == "OPTIONAL_NAMED_CHILDREN"
+                and cycle_source_preparation is not None
+                and cycle_source_preparation.source_selection
+                == "OPTIONAL_NAMED_CHILDREN"
+                and cycle_source_preparation.status
+                == "PREPARED_UNPUBLISHED_NON_ATOMIC"
+                and cycle_source_preparation.reason is None
+                and cycle_source_preparation.manifest is not None
+                and state.cycle_semantics is cycle_semantics
+                and state.cycle_semantics_state == "fresh"
+                and state.cycles_state == "fresh"
+                and state.cycle_semantics.coverage_status
+                == "FILESYSTEM_STABLE_NON_ATOMIC"
+                and not state.cycle_semantics.source_issues
+                and getattr(state, "resync_required", False) is False
+                and state.dependency_graph is graph
+                and set(state.modules) == set(index.modules)
+                and set(state.modules) == set(graph.hard_edges)
+            ):
+                from contextor.core.cycle_semantics.partial_scc_claims import (
+                    PreparedOptionalPartialSCCClaims,
+                    validate_optional_partial_scc_claims,
+                )
+
+                try:
+                    indexed_imports = {
+                        module_id: module.imports
+                        for module_id, module in state.modules.items()
+                    }
+
+                    optional_claims = validate_optional_partial_scc_claims(
+                        state.dependency_graph.hard_edges,
+                        state.cycle_semantics,
+                        cycle_source_preparation,
+                        indexed_imports,
+                        package_root=state.package_root or None,
+                    )
+                except (
+                    AttributeError,
+                    KeyError,
+                    TypeError,
+                    ValueError,
+                    IndexError,
+                    RecursionError,
+                    OverflowError,
+                ):
+                    optional_claims = None
+
+                if (
+                    type(optional_claims)
+                    is PreparedOptionalPartialSCCClaims
+                    and optional_claims.declared_manifest_sha256
+                    is not None
+                    and optional_claims.declared_manifest_sha256
+                    == cycle_source_preparation.manifest.source_manifest_sha256
+                    and optional_claims.graph_sha256
+                    == cycle_source_preparation.manifest.graph_sha256
+                    and optional_claims.components
+                    == cycle_source_preparation.component_preparations
+                    and optional_claims.source_modules
+                    == cycle_source_preparation.source_modules
+                ):
+                    store_manifest_kwargs[
+                        "prepared_optional_scc_preparation"
                     ] = cycle_source_preparation
 
             component_started = time.monotonic()
