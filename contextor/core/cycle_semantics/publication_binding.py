@@ -61,6 +61,8 @@ def _validated_claim_digest(
         manifest.version != (
             _LEGACY_MANIFEST_VERSION if legacy else MANIFEST_VERSION
         )
+        or manifest.source_selection != "HARD_ONLY"
+        or manifest.optional_witness is not None
         or manifest.authority
         != "PREPARED_ONLY_NOT_CANONICALLY_PUBLISHED"
         or not isinstance(manifest.source_manifest_sha256, str)

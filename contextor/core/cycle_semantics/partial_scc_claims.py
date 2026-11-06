@@ -15,6 +15,7 @@ from .generation_manifest import (
     OPTIONAL_MANIFEST_VERSION,
     PreparedCycleSourceManifest,
     PreparedSCCSourceBinding,
+    verify_prepared_optional_manifest_digest,
 )
 from .model_source_closure import (
     compute_cycle_model_source_closures,
@@ -129,6 +130,7 @@ def validate_partial_scc_claims(
                 or manifest.source_selection != "HARD_ONLY"
                 or manifest.components != declarations
                 or manifest.version != MANIFEST_VERSION
+                or manifest.optional_witness is not None
                 or manifest.authority
                 != "PREPARED_ONLY_NOT_CANONICALLY_PUBLISHED"
                 or manifest.graph_sha256 != snapshot.graph_sha256
@@ -307,6 +309,7 @@ def validate_optional_partial_scc_claims(
                 or type(manifest) is not PreparedCycleSourceManifest
                 or manifest.source_selection != "OPTIONAL_NAMED_CHILDREN"
                 or manifest.version != OPTIONAL_MANIFEST_VERSION
+                or not verify_prepared_optional_manifest_digest(manifest)
                 or manifest.authority
                 != "PREPARED_ONLY_NOT_CANONICALLY_PUBLISHED"
                 or manifest.graph_sha256 != graph_sha256
