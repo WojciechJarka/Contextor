@@ -128,6 +128,34 @@ def test_default_mode_never_promotes_optional_evidence(tmp_path):
 def test_missing_optional_worker_capture_blocks_preparation(tmp_path):
     case = list(_pipeline(tmp_path))
     index = case[0]
+
+    snapshots = dict(index.original_worker_source_snapshots)
+    modes = dict(index.original_worker_ast_modes)
+
+    snapshots.pop("pkg.child")
+    modes.pop("pkg.child")
+
+    case[0] = replace(
+        index,
+        original_worker_source_snapshots=snapshots,
+        original_worker_ast_modes=modes,
+    )
+
+    result = _prepare(case)
+
+    assert result.status == "UNAVAILABLE"
+    assert result.reason == (
+        "BINDING_CLOSURE_CAPTURE_SET_MISMATCH"
+    )
+    assert result.manifest is None
+    assert result.component_preparations == ()
+    assert result.source_selection == "OPTIONAL_NAMED_CHILDREN"
+
+
+def test_optional_worker_capture_ast_mode_domain_mismatch(tmp_path):
+    case = list(_pipeline(tmp_path))
+    index = case[0]
+
     snapshots = dict(index.original_worker_source_snapshots)
     snapshots.pop("pkg.child")
 
@@ -140,10 +168,11 @@ def test_missing_optional_worker_capture_blocks_preparation(tmp_path):
 
     assert result.status == "UNAVAILABLE"
     assert result.reason == (
-        "BINDING_CLOSURE_CAPTURE_SET_MISMATCH"
+        "BINDING_INDEX_CAPTURE_SHAPE_INVALID"
     )
     assert result.manifest is None
     assert result.component_preparations == ()
+    assert result.source_modules == ()
     assert result.source_selection == "OPTIONAL_NAMED_CHILDREN"
 
 
