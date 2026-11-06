@@ -2441,6 +2441,76 @@ class CanonicalLiveServer:
                     activity_epoch=self._activity_epoch,
                 )
 
+            if operation == "verify_installed_optional_scc_generation":
+                required_fields = {
+                    "operation",
+                    "expected_revision",
+                    "expected_state_id",
+                    "expected_repo_id",
+                    "expected_root_path",
+                    "expected_graph_sha256",
+                    "expected_source_manifest_sha256",
+                    "expected_claims_sha256",
+                    "expected_service_instance_id",
+                    "expected_process_start_identity",
+                }
+
+                if set(request) != required_fields:
+                    return {
+                        "status": "unavailable",
+                        "reason": "INVALID_GENERATION_CHECK_PAYLOAD",
+                        "revision": self._revision,
+                    }
+
+                if (
+                    self._stop.is_set()
+                    or self._pending_recovery_certificate is not None
+                    or self._recovery_release_degraded
+                ):
+                    return {
+                        "status": "unavailable",
+                        "reason": "LIVE_OWNER_NOT_READY",
+                        "revision": self._revision,
+                    }
+
+                from contextor.core.cycle_semantics.live_installed_optional_claims import (
+                    assess_live_installed_optional_claims,
+                )
+
+                return assess_live_installed_optional_claims(
+                    self._state,
+                    canonical_revision=self._revision,
+                    authority_identity=self._authority_identity,
+                    activity_epoch=self._activity_epoch,
+                    expected_revision=request.get(
+                        "expected_revision"
+                    ),
+                    expected_state_id=request.get(
+                        "expected_state_id"
+                    ),
+                    expected_repo_id=request.get(
+                        "expected_repo_id"
+                    ),
+                    expected_root_path=request.get(
+                        "expected_root_path"
+                    ),
+                    expected_graph_sha256=request.get(
+                        "expected_graph_sha256"
+                    ),
+                    expected_source_manifest_sha256=request.get(
+                        "expected_source_manifest_sha256"
+                    ),
+                    expected_claims_sha256=request.get(
+                        "expected_claims_sha256"
+                    ),
+                    expected_service_instance_id=request.get(
+                        "expected_service_instance_id"
+                    ),
+                    expected_process_start_identity=request.get(
+                        "expected_process_start_identity"
+                    ),
+                )
+
             if operation == "verify_installed_partial_scc_generation":
                 required_fields = {
                     "operation",
@@ -2962,6 +3032,38 @@ class LiveStateClient:
             expected_claims_sha256=expected_claims_sha256,
             expected_service_instance_id=self.endpoint.service_instance_id,
             expected_process_start_identity=self.endpoint.process_start_identity,
+        )
+
+    def verify_installed_optional_scc_generation(
+        self,
+        *,
+        expected_revision: int,
+        expected_state_id: str,
+        expected_repo_id: str,
+        expected_root_path: str,
+        expected_graph_sha256: str,
+        expected_source_manifest_sha256: str,
+        expected_claims_sha256: str,
+    ) -> dict[str, Any]:
+        """Verify installed optional SCC receipt under owner lock."""
+
+        return self.request(
+            "verify_installed_optional_scc_generation",
+            expected_revision=expected_revision,
+            expected_state_id=expected_state_id,
+            expected_repo_id=expected_repo_id,
+            expected_root_path=expected_root_path,
+            expected_graph_sha256=expected_graph_sha256,
+            expected_source_manifest_sha256=(
+                expected_source_manifest_sha256
+            ),
+            expected_claims_sha256=expected_claims_sha256,
+            expected_service_instance_id=(
+                self.endpoint.service_instance_id
+            ),
+            expected_process_start_identity=(
+                self.endpoint.process_start_identity
+            ),
         )
 
     def desktop_claim_status(self) -> dict[str, Any]:
