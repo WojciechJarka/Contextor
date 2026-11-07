@@ -243,3 +243,95 @@ def test_g18_p2_p1_deterministic_scope_records():
 
     assert first == second
     assert first.external_scope_records == second.external_scope_records
+
+
+def test_g18_p2_p2_repeated_target_alias_identity():
+    result = _check(
+        "import os as first, os as second\n"
+    )
+
+    assert result.status == "INDETERMINATE"
+    assert result.reason == "EXTERNAL_IMPORT_EXECUTION_UNMODELED"
+
+    records = result.external_scope_records
+    assert len(records) == 2
+    assert {row.site_ordinal for row in records} == {0}
+    assert [row.alias_ordinal for row in records] == [0, 1]
+    assert [row.local_binding for row in records] == [
+        "first", "second"
+    ]
+    assert [row.target for row in records] == ["os", "os"]
+
+
+def test_g18_p2_p2_from_member_identity():
+    result = _check(
+        "from collections import Counter as C, deque\n"
+    )
+
+    records = result.external_scope_records
+    assert len(records) == 1
+    assert records[0].site_ordinal == 0
+    assert records[0].alias_ordinal is None
+    assert records[0].local_binding is None
+    assert records[0].from_members == (
+        ("Counter", "C"),
+        ("deque", "deque"),
+    )
+
+
+def test_g18_p2_p2_lexical_not_ast_walk_order():
+    result = _check(
+        "def deferred():\n"
+        "    import os\n"
+        "import json\n"
+    )
+
+    ordered = sorted(
+        result.external_scope_records,
+        key=lambda row: row.site_ordinal,
+    )
+
+    assert [
+        (row.target, row.site_ordinal)
+        for row in ordered
+    ] == [
+        ("os", 0),
+        ("json", 1),
+    ]
+
+
+def test_g18_p2_p2_same_line_separate_sites():
+    result = _check(
+        "import pathlib; import pathlib\n"
+    )
+
+    records = result.external_scope_records
+    assert len(records) == 2
+    assert {row.site_ordinal for row in records} == {0, 1}
+    assert len({row.column for row in records}) == 2
+
+
+def test_g18_p2_p2_legacy_projection_unchanged():
+    result = _check(
+        "import os as first, os as second\n"
+        "from collections import Counter, deque\n"
+    )
+
+    projected = tuple(sorted(
+        (row.importer, row.line, row.form, row.target)
+        for row in result.external_scope_records
+    ))
+
+    assert projected == tuple(sorted(
+        result.unmodeled_external_imports
+    ))
+
+
+def test_g18_p2_p2_unknown_stays_fail_closed():
+    result = _check(
+        "import os\n"
+        "import pkg.missing\n"
+    )
+
+    assert result.reason == "MISSING_INDEXED_TARGET"
+    assert result.external_scope_records == ()

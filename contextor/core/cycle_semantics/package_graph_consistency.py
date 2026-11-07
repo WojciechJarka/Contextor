@@ -24,6 +24,10 @@ class ExternalImportScopeRecord:
     target: str
     primary_scope: str
     ancestry_flags: tuple[str, ...]
+    site_ordinal: int
+    alias_ordinal: int | None = None
+    local_binding: str | None = None
+    from_members: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -39,7 +43,7 @@ class PackageGraphConsistency:
 
 def _external_import_scope_index(
     tree: ast.Module,
-) -> dict[int, tuple[str, tuple[str, ...]]]:
+) -> dict[int, tuple[str, tuple[str, ...], int]]:
     """Classify lexical import locations, never execution safety."""
     parents: dict[int, ast.AST | None] = {id(tree): None}
 
@@ -52,11 +56,21 @@ def _external_import_scope_index(
     loop_types = (ast.For, ast.AsyncFor, ast.While)
     with_types = (ast.With, ast.AsyncWith)
 
-    result: dict[int, tuple[str, tuple[str, ...]]] = {}
+    result: dict[int, tuple[str, tuple[str, ...], int]] = {}
 
-    for node in ast.walk(tree):
-        if not isinstance(node, (ast.Import, ast.ImportFrom)):
-            continue
+    import_nodes = sorted(
+        (
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, (ast.Import, ast.ImportFrom))
+        ),
+        key=lambda node: (
+            node.lineno,
+            node.col_offset,
+        ),
+    )
+
+    for site_ordinal, node in enumerate(import_nodes):
 
         ancestors: list[ast.AST] = []
         parent = parents.get(id(node))
@@ -123,7 +137,11 @@ def _external_import_scope_index(
         if any(isinstance(item, ast.Match) for item in ancestors):
             flags.append("MATCH")
 
-        result[id(node)] = (primary, tuple(flags))
+        result[id(node)] = (
+            primary,
+            tuple(flags),
+            site_ordinal,
+        )
 
     return result
 
@@ -429,7 +447,7 @@ def assess_package_graph_consistency(
                 continue
 
             if isinstance(node, ast.Import):
-                for alias in node.names:
+                for alias_ordinal, alias in enumerate(node.names):
                     if not all(part.isidentifier() for part in alias.name.split(".")):
                         return unknown("UNSUPPORTED_IMPORT_FORM")
                     resolved = target(alias.name)
@@ -446,16 +464,21 @@ def assess_package_graph_consistency(
                         unmodeled_external_imports.append(
                             (module_id, node.lineno, "import", alias.name)
                         )
-                        primary, flags = scope_index[id(node)]
+                        primary, flags, site_ordinal = scope_index[id(node)]
                         external_scopes.append(
                             ExternalImportScopeRecord(
-                                module_id,
-                                node.lineno,
-                                node.col_offset,
-                                "import",
-                                alias.name,
-                                primary,
-                                flags,
+                                importer=module_id,
+                                line=node.lineno,
+                                column=node.col_offset,
+                                form="import",
+                                target=alias.name,
+                                primary_scope=primary,
+                                ancestry_flags=flags,
+                                site_ordinal=site_ordinal,
+                                alias_ordinal=alias_ordinal,
+                                local_binding=(
+                                    alias.asname or alias.name.split(".")[0]
+                                ),
                             )
                         )
                         continue
@@ -511,16 +534,24 @@ def assess_package_graph_consistency(
                     unmodeled_external_imports.append(
                         (module_id, node.lineno, "from", base)
                     )
-                    primary, flags = scope_index[id(node)]
+                    primary, flags, site_ordinal = scope_index[id(node)]
                     external_scopes.append(
                         ExternalImportScopeRecord(
-                            module_id,
-                            node.lineno,
-                            node.col_offset,
-                            "from",
-                            base,
-                            primary,
-                            flags,
+                            importer=module_id,
+                            line=node.lineno,
+                            column=node.col_offset,
+                            form="from",
+                            target=base,
+                            primary_scope=primary,
+                            ancestry_flags=flags,
+                            site_ordinal=site_ordinal,
+                            from_members=tuple(
+                                (
+                                    alias.name,
+                                    alias.asname or alias.name,
+                                )
+                                for alias in node.names
+                            ),
                         )
                     )
                     continue
@@ -614,6 +645,12 @@ def assess_package_graph_consistency(
                 row.column,
                 row.primary_scope,
                 row.ancestry_flags,
+                row.site_ordinal,
+                (
+                    row.alias_ordinal
+                    if row.alias_ordinal is not None
+                    else -1
+                ),
             ),
         )
     )
