@@ -1,89 +1,479 @@
-# CONTEXTOR C16-B03-P1D3G16-R1 — COMPLETE PRODUCTION AST FAILURE CENSUS
+# CONTEXTOR C16-B03-P1D3G17 — EXACT ASYNC DEFINITION AND MODULE NAME ALIAS PATCH
 
-## PREFLIGHT
+## IMPLEMENTATION
 
-DIRECT_EVIDENCE — Contextor MCP first, current module contexts for `package_model.py`, `package_layout.py`, `typing_guard.py`, and `model_source_closure.py`: canonical revision 1078, canonical_state fresh, workspace_sync verified, syntax errors 0, structural DFS cycles 16, active_warning_count 16, model_pass_count 0, cycle_semantics stale. Read-only canonical snapshot/metadata: revision 1078, state_id `20261106_195021`, repo_id `ctx_8efc50d8`, root `C:\Temp\Contextor_Repo`. Git HEAD `4e1633139d655a73b49683b21b154def26126597` is a separate identity and was not equated to LIVE revision. G14 and G15 source edits are present in `package_model.py`; existing source/test worktree modifications were preserved. Current relevant code: `_safe_passive_function_definition` at `package_model.py:63`, `_safe_passive_class_definition` :141, `_pure_literal_expression` :221, `_safe_annassign` :319, `_compile` :337, Assign :558, AnnAssign :599, ClassDef :605, FunctionDef :668; `build_package_layout` at `package_layout.py:54`; `recognize_typing_guard` at `typing_guard.py:36`; optional closure builder at `model_source_closure.py:83`.
+FILES_CHANGED: `contextor/core/cycle_semantics/package_model.py`; `tests/test_cycle_semantics_package_model_async_alias.py` (new). HEAD at preflight: `54f8d505088a14c52c6d350a194b048f73511b2f`. Contextor MCP first confirmed current G14/G15 code and verified source at canonical revision 1078. Applied the exact requested changes: shared passive guard for FunctionDef/AsyncFunctionDef, passive async class method, opaque module async definition, module-only Name ALIAS compilation/execution, and ALIAS in package-child shadowing guard. No other production file was edited. The supplied new test content was added without changing expectations.
 
-## PRODUCTION_INVENTORY
+## ASYNC_DEFINITION_CONTRACT
 
-DIRECT_EVIDENCE — Filesystem rule: `contextor/**/*.py` (including every `__init__.py` and any `test_*.py` if present), plus root `main.py`; exclude tests/, virtual environments, caches, build/dist, temporary/generated copies, and dependencies by physical location. Actual count **307** = 306 under contextor/ + `main.py`, matching the user-confirmed number. Each path matched a canonical `Module.absolute_path` and unique module_id; no production file was omitted for its name. Canonical snapshot has 623 modules and hard_edges domain 623, of which 307 are production and 316 are indexed `tests/` modules. No production module is absent from hard_edges. Thus production filesystem inventory, canonical FileState/index domain and SCC source closure are distinct sets.
+`async def` now emits `DEFINE_OPAQUE_FUNCTION`; its body is not compiled into function_body or executed. Existing invocation of an opaque function remains UNKNOWN. Decorators, nonliteral defaults, annotation-mode restrictions and type parameters retain the existing guard. Passive async class methods use the same guard. The new test `test_async_body_is_not_executed` reaches MODEL_PASS, but its assertion forbids every `START_IMPORT`, including the ordinary imports of `pkg` and `pkg.child` performed to load the entry module. Actual operations: `START_IMPORT, READY, START_IMPORT, DEFINE_OPAQUE_FUNCTION, READY, BIND_CHILD`; there is no import of `missing_external_xyz` from the deferred async body. The exact assertion conflicts with the existing IMPORT event contract.
 
-## CANONICAL_SOURCE_BINDING
+## NAME_ALIAS_CONTRACT
 
-DIRECT_EVIDENCE — Referenced FileState JSON has 623 records and `_meta` revision 1078/state_id `20261106_195021`. All 307 production files were readable, parsed, and had current byte SHA-256 equal to their FileState entry. Source-bound 307; SOURCE_UNBOUND 0; SOURCE_UNAVAILABLE 0. For each module the diagnostic used its repo-relative path, canonical module_id, SHA-256, FileState binding, hard_edges membership and both closure-membership flags. Therefore raw and source-bound compilation counts coincide. No analyzed source is presented as canonical evidence without its fingerprint match.
+ALIAS is compiled only for a module Assign with an ast.Name value, after pure literal handling and before ATTR. Execution checks membership in the current module namespace, so an existing binding whose represented value is None is accepted; a missing source remains UNKNOWN. ALIAS copies the represented identity without invoking a function or reading real objects. No class-local or AnnAssign alias was added.
 
-## SCC_CLOSURE_IDENTITIES
+## PACKAGE_CHILD_SHADOWING
 
-DIRECT_EVIDENCE — Rebuilt `compute_cycle_model_source_closures_with_optional_children` from current canonical hard_edges and `Module.imports`. A=SCC1 closure: 44 cyclic members, 201 selected modules. B=SCC2 closure: 9 members, 221 selected modules. C=A∪B: 221 unique modules; A⊆B by verified module IDs. D=ALL_PRODUCTION−C: 86 modules. C∩D=∅. Every selected module is production and FileState-bound. The 201 and 221 counts were never added as unique sources.
+The existing writes_child guard now includes `ALIAS` alongside `BIND`, retaining the subsequent import-presence condition unchanged. The supplied `test_package_child_alias_shadowing_unknown` passes. No package-child shadowing safety rule was weakened.
 
-## ALL_PRODUCTION_COMPILATION_COVERAGE
+## TARGETED_TESTS
 
-Diagnostic calls to current `_compile` with `annotation_semantics="DEFERRED"` and `recognize_typing_guard` over the indexed production domain; no analyzed code executed. Prefix recompilation of original AST statement references located each first rejection without AST mutation. This is restricted compiler coverage only, never MODEL_PASS. Groups use their own indexed group domain for typing-guard recognition; the reported counts partition consistently.
+CPython 3.15.2, `PYTHONDONTWRITEBYTECODE=1`, `-B -m pytest -q -rs -p no:cacheprovider`, external `--basetemp C:\Temp\Contextor_G17_pytest_tmp`. Exactly the five requested modules were run: async_alias, literals, annotations315, package_model, optional_child_scenarios. Result: **217 passed, 2 failed in 31.46s**. No full suite. The two failures are contract conflicts under the mandated literal implementation and unchanged test expectations:
 
-| Group | Total | Bound | Unbound | Unavailable | Supported | Unsupported | Supported % |
-|---|---:|---:|---:|---:|---:|---:|---:|
-| ALL_PRODUCTION | 307 | 307 | 0 | 0 | 147 | 160 | 47.88% |
-| SCC1_CLOSURE | 201 | 201 | 0 | 0 | 90 | 111 | 44.78% |
-| SCC2_CLOSURE | 221 | 221 | 0 | 0 | 103 | 118 | 46.61% |
-| SCC_UNION | 221 | 221 | 0 | 0 | 103 | 118 | 46.61% |
-| OUTSIDE_BOTH | 86 | 86 | 0 | 0 | 44 | 42 | 51.16% |
+1. `tests/test_cycle_semantics_package_model_async_alias.py:46`, `test_async_body_is_not_executed`: requires `START_IMPORT` absent from all events, while loading the entry package/module necessarily emits `START_IMPORT` twice. The async body import was not executed.
+2. `tests/test_cycle_semantics_package_model.py:1216`, `test_b0g4c5_definition_effects_updated_contract`: its legacy sample `async def f():\n    import pkg.child` expects `UNKNOWN`. The mandated G17 passive async definition correctly yields `MODEL_PASS` without executing the body. The old expectation directly contradicts G17 section 3.
 
-First-rejection breakdown for ALL_PRODUCTION: ClassDef 86, Assign 60, AnnAssign 3, If 1, FunctionDef 3, AsyncFunctionDef 4, Expr 3; total 160. The 147 supported modules are source-bound, but this does not establish package execution or runtime safety.
+Per the task's conflict rule, neither test expectation nor production behavior was independently redesigned or changed after these failures.
 
-## SCC1_COMPILATION_COVERAGE
+## NEGATIVE_REGRESSIONS
 
-90 supported / 111 unsupported of 201, matching G15 baseline. First rejection: ClassDef 69, Assign 37, AnnAssign 2, If 1, FunctionDef 2. Source-bound 201/201. Representative ClassDef: `contextor/core/analysis/full_analysis_lease.py:28` decorated dataclass; `contextor/core/analysis/function_analysis.py:11` dynamic base. Representative Assign: `contextor/core/analysis/export_analysis.py:112` Name value; `contextor/core/analysis/lineage_extraction.py:81` call to frozenset. Both are refused by the actual restricted guards, not judged erroneous Python.
+Other supplied negative cases passed: decorators, eager default effects, unknown target annotation mode, unbound/builtin/dunder alias sources, aliased invocation, early-binding hazard, child shadowing, external import and namespace layout. The two failures above prevent a PASS despite these passing cases.
 
-## SCC2_COMPILATION_COVERAGE
+## ALL_PRODUCTION_COVERAGE
 
-103 supported / 118 unsupported of 221, matching G15 baseline. First rejection: ClassDef 72, Assign 41, AnnAssign 2, If 1, FunctionDef 2. Source-bound 221/221. The SCC union is identical to this closure by exact module IDs and therefore has the same counts.
+Read-only G17 `_compile` census at canonical revision 1080, state_id `20261106_195021`, with explicit `annotation_semantics="DEFERRED"`. Actual production inventory: 307 files (`contextor/**/*.py` plus `main.py`). All 307 current source byte SHA-256 values matched the referenced FileState; 0 unbound or unavailable. G16-R1 baseline **147/307** supported; G17 **154 supported / 153 unsupported**, net +7. First rejected statement types: ClassDef 86, Assign 56, AnnAssign 3, If 1, FunctionDef 3, AsyncFunctionDef 1, Expr 3. Seven production modules contain top-level AsyncFunctionDef; seven contain top-level Assign(Name). Three newly supported modules with async definitions are `contextor.mcp.tools.analyze_layer`, `contextor.mcp.tools.analyze_project`, `contextor.mcp.tools.analyze_single_file`. Four newly supported Name-alias-containing modules are `contextor.core.analysis.export_analysis`, `contextor.core.api.public_api`, `contextor.core.graph.cycles`, `contextor.core.reference.__init__`. These named contributors were observed as supported under G17; the +7 total aligns with 3+4. This is compiler coverage only, not a project MODEL_PASS.
 
-## SCC_UNION_COVERAGE
+## SCC1_COVERAGE
 
-221 source-bound; 103 supported, 118 unsupported; 46.61%. First rejections ClassDef 72, Assign 41, AnnAssign 2, If 1, FunctionDef 2. This is a set union, not 201+221. `recognize_typing_guard` used the exact selected module domain in this group.
+Closure 201 modules, all FileState-bound. G16-R1 baseline 90/201; G17 **94 supported / 107 unsupported**, net +4. First rejection ClassDef 69, Assign 33, AnnAssign 2, If 1, FunctionDef 2. No supported SCC1 module had a top-level async definition in this diagnostic; four supported modules had Name aliases.
+
+## SCC2_COVERAGE
+
+Closure 221 modules, all FileState-bound. G16-R1 baseline 103/221; G17 **107 supported / 114 unsupported**, net +4. First rejection ClassDef 72, Assign 37, AnnAssign 2, If 1, FunctionDef 2. This closure equals the SCC union by module identity; four supported modules had Name aliases.
 
 ## OUTSIDE_SCC_COVERAGE
 
-86 source-bound; 44 supported, 42 unsupported; 51.16%. First rejections Assign 19, ClassDef 14, AsyncFunctionDef 4, AnnAssign 1, FunctionDef 1, Expr 3. Examples: `contextor/cli.py:20` reserved `__version__` Assign; `contextor/core/canonical_state_query/contract.py:18` BinOp value; `contextor/mcp/tools/analyze_layer.py:7` AsyncFunctionDef; `contextor/mcp_server.py:170` call expression with an unsupported argument/attribute shape; `main.py:20` module-level call. These are static model limits, not claims about whether the real code executes safely.
+Outside both closures: 86 modules, all FileState-bound. G16-R1 baseline 44/86; G17 **47 supported / 39 unsupported**, net +3. First rejection Assign 19, ClassDef 14, AnnAssign 1, AsyncFunctionDef 1, FunctionDef 1, Expr 3. The three supported async-definition modules noted above are outside the closures.
 
-## CLASSDEF_FAILURE_MATRIX
+## REMAINING_BLOCKERS
 
-DIRECT_EVIDENCE — Among 86 modules whose *first* rejected statement is ClassDef, independent reason occurrences can overlap within a class. Guard: `_safe_passive_class_definition` (`package_model.py:141-218`); method guard `_safe_passive_function_definition` (:63-138). Counts: class decorators **59** (e.g. `contextor/core/analysis/full_analysis_lease.py:28`; no dataclass decorator is assumed passive), bases **20** (e.g. `contextor/core/analysis/function_analysis.py:11`), invalid class-body AnnAssign **35** (e.g. `contextor/core/analysis/incremental/engine.py:119` within class at :100), invalid method definitions **15** (e.g. `contextor/core/analysis/refresh_planner.py:81` within class at :70), invalid class-body Assign **2** (e.g. `contextor/core/graph/resolver.py:48`). Invalid class name, dunder class name, class keywords/metaclass, class type parameters were not observed as independent reasons among these first-rejected classes. Body statement inventory in these 86 classes: AnnAssign 415, FunctionDef 128, Expr 26, Assign 21; no direct body import, AsyncFunctionDef or Other statement was observed in this subset. Among the 15 rejected methods, **14** had decorators and **1** had a nonliteral default (`contextor/core/reporting_engine/persistent_registry.py:529`). Annotation syntax appeared in 13 rejected methods, but under explicit DEFERRED it is not itself the refusing condition. Seven had defaults of any kind; only the one nonliteral default is a confirmed default refusal. Class body executes at definition; method bodies remain deferred. This matrix does not infer execution of deferred method bodies.
+Both real SCCs still encounter namespace/external execution uncertainty and other AST limits; this read-only census did not call production FULL, bypass layout/graph gates, or create a receipt. Snapshot at revision 1080 had no optional /3 receipt. The two targeted regression conflicts above are the exact blocker. No test was modified to force PASS.
 
-## ASSIGN_FAILURE_MATRIX
+## MCP_POST_CHANGE_AUDIT
 
-DIRECT_EVIDENCE — Among 60 first-rejected Assign modules, the current `_compile` Assign guard (`package_model.py:558-597`) rejects 1 reserved name (`contextor/cli.py:20`, `__version__`) and 59 values that are neither `_pure_literal_expression` nor the supported simple ATTR form. No multi-target, non-Name target, invalid identifier, or failed special `__all__` shape occurred as the *first* Assign refusal in this production set. Value AST categories: Call 29, Subscript 13, BinOp 11, Name 4, ContainerWithUnsupportedChild 2, Attribute 0, Comprehension 0, Other 0, plus the one Constant under disallowed special name. Examples (at most five): `contextor/core/analysis/export_analysis.py:112` Name; `contextor/core/analysis/lineage_extraction.py:81` Call; `contextor/core/analysis/lineage_extraction_bindings.py:17` Subscript; `contextor/core/canonical_state_query/contract.py:18` BinOp; `contextor/cli.py:20` special name. The 59 value cases fail the exact `_pure_literal_expression`/ATTR branch. A syntactic Call is evidence of an unsupported form, not proof that its effects are harmless or actually executed on every import path.
-
-## OTHER_STATEMENT_FAILURES
-
-All remaining 14 first refusals, with exact rejecting code path:
-
-| Type | Count | Locations and condition |
-|---|---:|---|
-| AnnAssign | 3 | `contextor/core/analysis/lineage_extraction_contracts.py:17`; `contextor/core/graph/incremental.py:56`; `contextor/mcp/tools/contextor_fact_lineage.py:27`. Each value is not a pure literal under `_safe_annassign` (`package_model.py:319-334`); DEFERRED is already supplied. |
-| If | 1 | `contextor/core/cycle_semantics/contracts.py:21`, TYPE_CHECKING branch not accepted by the current whole-module recognizer/selected-condition gate (`package_model.py:492-556`; `typing_guard.py:36-257`). This does not imply the guarded body runs at import. |
-| FunctionDef | 3 | `contextor/core/domain/module.py:17` decorator; `contextor/core/reporting_layer/artifact_usage_report.py:408` nonliteral default; `contextor/mcp/tools/describe_canonical_state.py:10` nonliteral default. `_safe_passive_function_definition` (`package_model.py:63-138`) rejects definition-time effects; function bodies remain deferred. |
-| AsyncFunctionDef | 4 | `contextor/mcp/tools/analyze_layer.py:7`, `analyze_project.py:7`, `analyze_single_file.py:7`, `contextor_profile_analysis.py:21`; unmatched top-level statement reaches `_compile` final fallback (`package_model.py:760-763`). |
-| Expr | 3 | `contextor/mcp_server.py:170`, `contextor/mcp_worker.py:12`, `main.py:20`; call shape fails the narrow zero-argument direct-name Expr rule (`package_model.py:749-759`). |
-
-The 14 cases are 3+1+3+4+3. Nested class-body execution and deferred function bodies were separately classified in the ClassDef matrix; unsupported conditional effects remain UNKNOWN.
-
-## CROSS_GROUP_CONSISTENCY
-
-DIRECT_EVIDENCE — A⊆ALL_PRODUCTION and B⊆ALL_PRODUCTION; A⊆B; C=A∪B=221; D=ALL_PRODUCTION−C=86; C∩D=∅; 221+86=307. Supported counts also partition: 103+44=147; unsupported: 118+42=160. Indexed hard_edges has 316 IDs outside production, all from `tests/`, e.g. `tests.analysis.test_cache_manager_content_hash` and `tests.analysis.test_lineage_cache_codec`. There are 0 production IDs outside hard_edges. Snapshot hard-edge SHA-256 before/after read-only census: `1c75f969783051dffde00dcb3d65c68c1f93f5a65f2e141de0db42884e016afa`; unchanged. Metadata revision remained 1078; no optional /3 receipt appeared.
-
-## REMAINING_MODEL_LIMITS
-
-This is static `_compile` coverage, not `evaluate_package_import_order` or `analyze_cycle_scenarios` acceptance. It does not bypass namespace, external import, package layout, target interpreter, or source-binding gates. G13/G15 real SCCs still have namespace and opaque external execution uncertainty; no new MODEL_PASS is derived. The current cycle_semantics snapshot is stale despite fresh source/index/graph. No warning suppression or production LIVE publication was performed.
-
-## MCP_POST_DISCOVERY_AUDIT
-
-Read-only Contextor MCP after census: canonical revision 1078, canonical_state fresh, workspace_sync verified for package_model, syntax errors 0, structural DFS cycles 16 (fresh), active_warning_count 16, model_pass_count 0, cycle_semantics stale, advisory_warning null. No production/full analysis, pytest, restart, update_file, source/test edit, manual commit or LIVE publication.
+Read-only Contextor MCP for production and new test modules at canonical revision 1080: `canonical_state=fresh`, `workspace_sync=verified`, advisory_warning null, syntax errors 0, structural DFS cycles 16 (fresh), active_warning_count 16, model_pass_count 0, `cycle_semantics=stale`. No production FULL, restart, update_file, warning suppression edit or manual commit.
 
 ## FULL_DIFFS
 
-FILES_CHANGED: `walkthrough.md` only for this task. FULL_DIFFS=NONE for code/tests/docs. Pre-existing uncommitted G14/G15 source/test changes were preserved and are not claimed as G16-R1 edits. This report is excluded from its own diff.
+Complete actual source and new-test diffs follow. `walkthrough.md` is excluded from its own diff.
+
+```diff
+diff --git a/contextor/core/cycle_semantics/package_model.py b/contextor/core/cycle_semantics/package_model.py
+index 33b9cab..eb7b592 100644
+--- a/contextor/core/cycle_semantics/package_model.py
++++ b/contextor/core/cycle_semantics/package_model.py
+@@ -61,7 +61,7 @@ class _PackageSourceSession:
+ 
+ 
+ def _safe_passive_function_definition(
+-    statement: ast.FunctionDef,
++    statement: ast.FunctionDef | ast.AsyncFunctionDef,
+     *,
+     allow_dunder: bool = False,
+     annotation_semantics: str | None = None,
+@@ -204,7 +204,10 @@ def _safe_passive_class_definition(
+             continue
+ 
+         if (
+-            isinstance(body_statement, ast.FunctionDef)
++            isinstance(
++                body_statement,
++                (ast.FunctionDef, ast.AsyncFunctionDef),
++            )
+             and _safe_passive_function_definition(
+                 body_statement,
+                 allow_dunder=True,
+@@ -580,6 +583,21 @@ def _compile(
+             if _pure_literal_expression(value):
+                 steps.append(_Step("BIND", binding=name))
+ 
++            elif isinstance(value, ast.Name):
++                if (
++                    not value.id.isidentifier()
++                    or value.id.startswith("__")
++                ):
++                    return None
++
++                steps.append(
++                    _Step(
++                        "ALIAS",
++                        target=value.id,
++                        binding=name,
++                    )
++                )
++
+             elif (
+                 isinstance(value, ast.Attribute)
+                 and isinstance(value.value, ast.Name)
+@@ -746,6 +764,20 @@ def _compile(
+                     )
+                 )
+ 
++        elif isinstance(stmt, ast.AsyncFunctionDef):
++            if not _safe_passive_function_definition(
++                stmt,
++                annotation_semantics=annotation_semantics,
++            ):
++                return None
++
++            steps.append(
++                _Step(
++                    "DEFINE_OPAQUE_FUNCTION",
++                    binding=stmt.name,
++                )
++            )
++
+         elif isinstance(stmt, ast.Expr):
+             expression = stmt.value
+ 
+@@ -1018,7 +1050,7 @@ def evaluate_package_import_order(
+         writes_child = any(
+             step.binding in children
+             and (
+-                step.op == "BIND"
++                step.op in {"BIND", "ALIAS"}
+                 or (step.op == "FROM" and step.target != package)
+             )
+             for step in programs[package]
+@@ -1428,6 +1460,31 @@ def evaluate_package_import_order(
+                 )
+             )
+ 
++        elif step.op == "ALIAS":
++            if (
++                not step.target
++                or not step.binding
++                or step.target not in namespaces[module]
++            ):
++                return result(
++                    "UNKNOWN",
++                    module,
++                    step.target,
++                )
++
++            namespaces[module][step.binding] = (
++                namespaces[module][step.target]
++            )
++
++            events.append(
++                PackageModelEvent(
++                    module,
++                    "ALIAS",
++                    target=step.target,
++                    symbol=step.binding,
++                )
++            )
++
+         elif step.op == "ATTR":
+             reference = namespaces[module].get(step.target)
+ 
+diff --git a/tests/test_cycle_semantics_package_model_async_alias.py b/tests/test_cycle_semantics_package_model_async_alias.py
+new file mode 100644
+index 0000000..5d0dbcf
+--- /dev/null
++++ b/tests/test_cycle_semantics_package_model_async_alias.py
+@@ -0,0 +1,299 @@
++import ast
++
++import pytest
++
++from contextor.core.cycle_semantics.package_model import (
++    evaluate_package_import_order,
++)
++
++
++def _model(
++    child: str,
++    *,
++    initializer: str = "pass",
++    entry: str = "pkg.child",
++    annotation_semantics=None,
++):
++    return evaluate_package_import_order(
++        {
++            "pkg.__init__": ast.parse(initializer),
++            "pkg.child": ast.parse(child),
++        },
++        entry,
++        annotation_semantics=annotation_semantics,
++    )
++
++
++def _operations(result):
++    return [event.operation for event in result.events]
++
++
++def test_plain_async_definition_passes():
++    result = _model(
++        "async def worker():\n"
++        "    pass\n"
++    )
++    assert result.outcome == "MODEL_PASS"
++    assert "DEFINE_OPAQUE_FUNCTION" in _operations(result)
++
++
++def test_async_body_is_not_executed():
++    result = _model(
++        "async def worker():\n"
++        "    import missing_external_xyz\n"
++    )
++    assert result.outcome == "MODEL_PASS"
++    assert "START_IMPORT" not in _operations(result)
++
++
++def test_annotated_async_definition_deferred():
++    result = _model(
++        "async def worker(x: Missing) -> Missing:\n"
++        "    pass\n",
++        annotation_semantics="DEFERRED",
++    )
++    assert result.outcome == "MODEL_PASS"
++
++
++def test_annotated_async_unknown_version():
++    result = _model(
++        "async def worker(x: Missing):\n"
++        "    pass\n"
++    )
++    assert result.outcome == "UNKNOWN"
++
++
++def test_annotated_async_eager():
++    result = _model(
++        "async def worker(x: side_effect()):\n"
++        "    pass\n",
++        annotation_semantics="STOCK_EAGER",
++    )
++    assert result.outcome == "UNKNOWN"
++
++
++@pytest.mark.parametrize(
++    "source",
++    [
++        "@decorator\nasync def worker():\n    pass",
++        "async def worker(x=side_effect()):\n    pass",
++        "@side_effect()\nasync def worker():\n    pass",
++    ],
++)
++def test_async_eager_definition_effects_unknown(source):
++    assert _model(source).outcome == "UNKNOWN"
++
++
++def test_async_invocation_unknown():
++    result = _model(
++        "async def worker():\n"
++        "    pass\n"
++        "worker()\n"
++    )
++    assert result.outcome == "UNKNOWN"
++
++
++def test_passive_async_class_method():
++    result = _model(
++        "class C:\n"
++        "    async def method(self):\n"
++        "        import missing_external_xyz\n"
++    )
++    assert result.outcome == "MODEL_PASS"
++    assert "DEFINE_PASSIVE_CLASS" in _operations(result)
++
++
++def test_decorated_async_class_method_unknown():
++    result = _model(
++        "class C:\n"
++        "    @staticmethod\n"
++        "    async def method():\n"
++        "        pass\n"
++    )
++    assert result.outcome == "UNKNOWN"
++
++
++def test_simple_module_alias():
++    result = _model(
++        "original = [1, 2]\n"
++        "copied = original\n"
++    )
++    assert result.outcome == "MODEL_PASS"
++    assert any(
++        event.operation == "ALIAS"
++        and event.target == "original"
++        and event.symbol == "copied"
++        for event in result.events
++    )
++
++
++def test_chained_alias():
++    result = _model(
++        "a = 1\n"
++        "b = a\n"
++        "c = b\n"
++    )
++    assert result.outcome == "MODEL_PASS"
++    assert _operations(result).count("ALIAS") == 2
++
++
++def test_bound_self_alias():
++    result = _model(
++        "a = 1\n"
++        "a = a\n"
++    )
++    assert result.outcome == "MODEL_PASS"
++
++
++def test_unbound_self_alias_unknown():
++    assert _model("a = a").outcome == "UNKNOWN"
++
++
++def test_unbound_source_unknown():
++    assert _model("copied = missing").outcome == "UNKNOWN"
++
++
++def test_builtin_not_assumed_bound():
++    assert _model("copied = len").outcome == "UNKNOWN"
++
++
++def test_special_source_not_assumed():
++    assert _model("copied = __name__").outcome == "UNKNOWN"
++
++
++def test_alias_from_imported_name():
++    result = _model(
++        "from pkg import value\n"
++        "copied = value\n",
++        initializer="value = 7",
++    )
++    assert result.outcome == "MODEL_PASS"
++    assert "FROM" in _operations(result)
++    assert "ALIAS" in _operations(result)
++
++
++def test_alias_export_from_child():
++    result = _model(
++        "original = 7\n"
++        "copied = original\n",
++        initializer="from pkg.child import copied",
++        entry="pkg",
++    )
++    assert result.outcome == "MODEL_PASS"
++
++
++def test_alias_before_binding_unknown():
++    result = _model(
++        "copied = original\n"
++        "original = 1\n"
++    )
++    assert result.outcome == "UNKNOWN"
++
++
++def test_alias_preserves_early_binding_hazard():
++    result = _model(
++        "from pkg import late\n"
++        "copied = late\n",
++        initializer=(
++            "import pkg.child\n"
++            "late = 1\n"
++        ),
++        entry="pkg",
++    )
++    assert result.outcome == "EARLY_BINDING_HAZARD"
++    assert result.target_module == "pkg"
++    assert result.symbol == "late"
++
++
++def test_package_child_alias_shadowing_unknown():
++    result = _model(
++        "pass",
++        initializer=(
++            "value = 1\n"
++            "child = value\n"
++            "import pkg.child\n"
++        ),
++        entry="pkg",
++    )
++    assert result.outcome == "UNKNOWN"
++
++
++def test_alias_of_function_is_bound():
++    result = _model(
++        "def f():\n"
++        "    pass\n"
++        "other = f\n"
++    )
++    assert result.outcome == "MODEL_PASS"
++    assert "ALIAS" in _operations(result)
++
++
++def test_aliased_function_call_not_invented():
++    result = _model(
++        "def f():\n"
++        "    pass\n"
++        "other = f\n"
++        "other()\n"
++    )
++    assert result.outcome == "UNKNOWN"
++
++
++def test_class_body_name_alias_still_unknown():
++    result = _model(
++        "x = 1\n"
++        "class C:\n"
++        "    copied = x\n"
++    )
++    assert result.outcome == "UNKNOWN"
++
++
++def test_external_import_still_unknown():
++    result = _model(
++        "import missing_external_xyz\n"
++        "copy = missing_external_xyz\n"
++    )
++    assert result.outcome == "UNKNOWN"
++
++
++def test_namespace_layout_still_unknown():
++    result = evaluate_package_import_order(
++        {
++            "pkg.child": ast.parse(
++                "value = 1\n"
++                "copy = value\n"
++            )
++        },
++        "pkg.child",
++    )
++    assert result.outcome == "UNKNOWN"
++
++
++def test_determinism_and_ast_immutability():
++    sources = {
++        "pkg.__init__": ast.parse("pass"),
++        "pkg.child": ast.parse(
++            "async def worker():\n"
++            "    pass\n"
++            "value = [1, 2]\n"
++            "copied = value\n"
++        ),
++    }
++
++    before = {
++        name: ast.dump(tree)
++        for name, tree in sources.items()
++    }
++
++    first = evaluate_package_import_order(
++        sources, "pkg.child"
++    )
++    second = evaluate_package_import_order(
++        sources, "pkg.child"
++    )
++
++    assert first == second
++    assert first.outcome == "MODEL_PASS"
++    assert before == {
++        name: ast.dump(tree)
++        for name, tree in sources.items()
++    }
+```
 
 ## FINAL_VERDICT
 
-DISCOVERY_COMPLETE — 307 production modules were inventoried and FileState-bound, both SCC closures and all five group counts are consistent, and all 160 first `_compile` refusals were categorized without changing production LIVE.
+BLOCKED — 217 targeted tests pass and 2 conflict with the mandated G17 contract. The exact assertion and legacy expectation are documented above; no redesign or test edits were made.

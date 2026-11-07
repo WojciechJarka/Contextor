@@ -61,7 +61,7 @@ class _PackageSourceSession:
 
 
 def _safe_passive_function_definition(
-    statement: ast.FunctionDef,
+    statement: ast.FunctionDef | ast.AsyncFunctionDef,
     *,
     allow_dunder: bool = False,
     annotation_semantics: str | None = None,
@@ -204,7 +204,10 @@ def _safe_passive_class_definition(
             continue
 
         if (
-            isinstance(body_statement, ast.FunctionDef)
+            isinstance(
+                body_statement,
+                (ast.FunctionDef, ast.AsyncFunctionDef),
+            )
             and _safe_passive_function_definition(
                 body_statement,
                 allow_dunder=True,
@@ -580,6 +583,21 @@ def _compile(
             if _pure_literal_expression(value):
                 steps.append(_Step("BIND", binding=name))
 
+            elif isinstance(value, ast.Name):
+                if (
+                    not value.id.isidentifier()
+                    or value.id.startswith("__")
+                ):
+                    return None
+
+                steps.append(
+                    _Step(
+                        "ALIAS",
+                        target=value.id,
+                        binding=name,
+                    )
+                )
+
             elif (
                 isinstance(value, ast.Attribute)
                 and isinstance(value.value, ast.Name)
@@ -745,6 +763,20 @@ def _compile(
                         binding=stmt.name,
                     )
                 )
+
+        elif isinstance(stmt, ast.AsyncFunctionDef):
+            if not _safe_passive_function_definition(
+                stmt,
+                annotation_semantics=annotation_semantics,
+            ):
+                return None
+
+            steps.append(
+                _Step(
+                    "DEFINE_OPAQUE_FUNCTION",
+                    binding=stmt.name,
+                )
+            )
 
         elif isinstance(stmt, ast.Expr):
             expression = stmt.value
@@ -1018,7 +1050,7 @@ def evaluate_package_import_order(
         writes_child = any(
             step.binding in children
             and (
-                step.op == "BIND"
+                step.op in {"BIND", "ALIAS"}
                 or (step.op == "FROM" and step.target != package)
             )
             for step in programs[package]
@@ -1424,6 +1456,31 @@ def evaluate_package_import_order(
                 PackageModelEvent(
                     module,
                     "CLASS_LOCAL_BIND" if step.class_local else "BIND",
+                    symbol=step.binding,
+                )
+            )
+
+        elif step.op == "ALIAS":
+            if (
+                not step.target
+                or not step.binding
+                or step.target not in namespaces[module]
+            ):
+                return result(
+                    "UNKNOWN",
+                    module,
+                    step.target,
+                )
+
+            namespaces[module][step.binding] = (
+                namespaces[module][step.target]
+            )
+
+            events.append(
+                PackageModelEvent(
+                    module,
+                    "ALIAS",
+                    target=step.target,
                     symbol=step.binding,
                 )
             )
