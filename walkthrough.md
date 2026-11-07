@@ -1,43 +1,48 @@
-# C16-B03-P1D3G18-P2-P2
+# C16-B03-P1D3G18-P2-P3
 
 ## HEAD_BEFORE/AFTER
 
-`8fd5f39b7fe3b297366ed1f7a05c6b31d6fe4aee` before and after. Initial worktree was clean. No commit or push.
+`394858f0205237205adc2d728ecc9362d13f113d` before and after. Worktree was clean before implementation. No Git mutation.
 
 ## FILES_CHANGED
 
 - `contextor/core/cycle_semantics/package_graph_consistency.py`
+- `contextor/core/cycle_semantics/scenarios.py`
 - `tests/test_cycle_semantics_package_graph_external_boundary.py`
 
-`walkthrough.md` was overwritten as the required report.
+`walkthrough.md` was overwritten as the report.
 
 ## CPYTHON_IDENTITY
 
-Repository `.venv\Scripts\python.exe`: CPython 3.15.2.
+Repository `.venv\Scripts\python.exe` is CPython 3.15.2. No interpreter switch.
+
+## EXACT_IMPLEMENTATION
+
+DIRECT_EVIDENCE: Appended `external_execution_gate` with default `NOT_ESTABLISHED`. The existing final external INDETERMINATE result now marks all-records deferred lexical placement as `LEXICALLY_DEFERRED_ONLY`, and other external placement as `OPAQUE_EXECUTION_POSSIBLE`. Namespace, CONSISTENT and early-failure results retain the default. The scenario gate admits only the exact source/graph-proved, full-cohort, no-namespace, all-deferred external case to the unchanged restricted evaluator. No evaluator, aggregation, graph or warning policy was edited. Appended the supplied scenario helper and eleven exact tests.
 
 ## TARGETED_TEST_RESULTS
 
-Exact three requested modules: **48 passed in 7.74s**, exit code 0. `git diff --check` exited 0.
+The five specified modules: **179 passed in 32.68s**, exit code 0. `git diff --check` exited 0.
 
-## IMPORT_IDENTITY_CONTRACT
+## SYNTHETIC_SCENARIO_RESULTS
 
-DIRECT_EVIDENCE: `ExternalImportScopeRecord` now appends `site_ordinal`, `alias_ordinal`, `local_binding`, and ordered `from_members`. Site ordinals derive from import AST nodes sorted by `(lineno, col_offset)`. Each external `ast.Import` alias gets its alias index and actual local binding. Each external `ast.ImportFrom` remains one module-load record with all requested member bindings in source order. Existing lexical scope and legacy external tuple meanings are unchanged. This is source-site identity evidence only; it gives no execution or resolver authority.
+CONTRACT_PROVED by the passing supplied assertions: an uncalled deferred external import can reach `MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS` through the existing evaluator; explicit calls, async invocation, decorators and dynamic defaults remain UNKNOWN/INDETERMINATE; eager external imports remain blocked with coverage NONE; internal graph mismatch retains empty early evidence. Lexical deferral alone is not a safety certificate.
 
-## SCC_REPLAY
+## REAL_SCC_REPLAY
 
-DIRECT_EVIDENCE: Read-only replay of revision 1088 using current AST, indexed graph, optional source closures and updated classifier. SCC1: 44 members, 201 selected modules, 605 legacy external records, 605 scope records, 605 distinct statement sites, 227 distinct `ast.Import` alias identities, 4 namespace records. SCC2: 9 members, 221 selected modules, 723 legacy external records, 723 scope records, 723 distinct statement sites, 308 distinct `ast.Import` alias identities, 4 namespace records. Every record's site ordinal, line, column, alias/member identity and binding matched its source AST: 0 identity errors. Legacy projection had 0 missing and 0 extra records in both SCCs. Both classifier and `analyze_cycle_scenarios` retained `INDETERMINATE / NAMESPACE_IMPORT_RESOLUTION_UNMODELED`; scenario coverage `NONE`. SCC cohorts overlap.
+DIRECT_EVIDENCE: Read-only revision 1091 replay. Canonical production inventory 307 modules. SCC1: 44 members, closure 201, 605 external records and 605 scope records; primary lexical scopes MODULE_BODY 555, FUNCTION_BODY 24, METHOD_BODY 26. SCC2: 9 members, closure 221, 723 external and 723 scope records; MODULE_BODY 647, FUNCTION_BODY 32, METHOD_BODY 44. Both retain four namespace records, `external_execution_gate=NOT_ESTABLISHED`, consistency `INDETERMINATE / NAMESPACE_IMPORT_RESOLUTION_UNMODELED`, scenario classification INDETERMINATE, coverage NONE, and zero entry assessments. The namespace branch remains independently blocking. Structural DFS cycles remain 16.
 
 ## SOURCE_BINDING
 
-DIRECT_EVIDENCE: Snapshot metadata and metadata-selected FileState JSON agreed on revision 1088 and state_id `20261106_195021`. Current SHA-256 matched FileState for all 221 selected source files in the union; 0 missing or mismatched. An initial replay aborted on a generation consistency assertion while the writer advanced revision; no unbound result was used. The subsequent complete replay was bound to revision 1088.
+DIRECT_EVIDENCE: Snapshot and metadata-selected FileState agreed on revision 1091, state_id `20261106_195021`. Current SHA-256 matched FileState for all 221 selected files in the union of the two closures; zero missing or mismatched. SCC cohorts overlap.
 
 ## MCP_POST_CHANGE_AUDIT
 
-DIRECT_EVIDENCE: Contextor MCP returned canonical revision 1088, `canonical_state=fresh`, `workspace_sync=verified`, no advisory warning, syntax errors 0, structural DFS cycles 16, active warning count 16, model_pass_count 0, and `cycle_semantics=stale` for both modified modules. No production FULL or runtime restart occurred. MCP does not prove that the active backend process adopted the changed classifier; local replay used the current repository interpreter.
+DIRECT_EVIDENCE: Contextor MCP returned canonical revision 1091, canonical_state fresh, workspace_sync verified for all three modified modules, advisory warning null, syntax errors 0, structural DFS cycles 16, active warning count 16, model_pass_count 0, and cycle_semantics stale. No production FULL, update_file or restart was performed.
 
 ## REMAINING_UNKNOWN_GATES
 
-Namespace resolution and external import execution remain unmodeled. No MODEL_PASS or optional /3 receipt was claimed. Active runtime code adoption was not certified.
+Real SCC namespace resolution and external import execution remain unmodeled. The current LIVE runtime code adoption of changed source was not certified; the read-only replay invoked current source under the repository Python. No optional /3 receipt or runtime safety claim was made.
 
 ## FULL_DIFFS
 
@@ -45,255 +50,298 @@ Complete actual Git diff follows.
 
 ```diff
 diff --git a/contextor/core/cycle_semantics/package_graph_consistency.py b/contextor/core/cycle_semantics/package_graph_consistency.py
-index d0a2601..5c4e23c 100644
+index 5c4e23c..1d58427 100644
 --- a/contextor/core/cycle_semantics/package_graph_consistency.py
 +++ b/contextor/core/cycle_semantics/package_graph_consistency.py
-@@ -24,6 +24,10 @@ class ExternalImportScopeRecord:
-     target: str
-     primary_scope: str
-     ancestry_flags: tuple[str, ...]
-+    site_ordinal: int
-+    alias_ordinal: int | None = None
-+    local_binding: str | None = None
-+    from_members: tuple[tuple[str, str], ...] = ()
+@@ -39,6 +39,7 @@ class PackageGraphConsistency:
+     internal_graph_state: str = "NOT_PROVED"
+     checked_source_modules: tuple[str, ...] = ()
+     external_scope_records: tuple[ExternalImportScopeRecord, ...] = ()
++    external_execution_gate: str = "NOT_ESTABLISHED"
  
- 
- @dataclass(frozen=True)
-@@ -39,7 +43,7 @@ class PackageGraphConsistency:
  
  def _external_import_scope_index(
-     tree: ast.Module,
--) -> dict[int, tuple[str, tuple[str, ...]]]:
-+) -> dict[int, tuple[str, tuple[str, ...], int]]:
-     """Classify lexical import locations, never execution safety."""
-     parents: dict[int, ast.AST | None] = {id(tree): None}
- 
-@@ -52,11 +56,21 @@ def _external_import_scope_index(
-     loop_types = (ast.For, ast.AsyncFor, ast.While)
-     with_types = (ast.With, ast.AsyncWith)
- 
--    result: dict[int, tuple[str, tuple[str, ...]]] = {}
-+    result: dict[int, tuple[str, tuple[str, ...], int]] = {}
-+
-+    import_nodes = sorted(
-+        (
-+            node
-+            for node in ast.walk(tree)
-+            if isinstance(node, (ast.Import, ast.ImportFrom))
-+        ),
-+        key=lambda node: (
-+            node.lineno,
-+            node.col_offset,
-+        ),
-+    )
- 
--    for node in ast.walk(tree):
--        if not isinstance(node, (ast.Import, ast.ImportFrom)):
--            continue
-+    for site_ordinal, node in enumerate(import_nodes):
- 
-         ancestors: list[ast.AST] = []
-         parent = parents.get(id(node))
-@@ -123,7 +137,11 @@ def _external_import_scope_index(
-         if any(isinstance(item, ast.Match) for item in ancestors):
-             flags.append("MATCH")
- 
--        result[id(node)] = (primary, tuple(flags))
-+        result[id(node)] = (
-+            primary,
-+            tuple(flags),
-+            site_ordinal,
-+        )
- 
-     return result
- 
-@@ -429,7 +447,7 @@ def assess_package_graph_consistency(
-                 continue
- 
-             if isinstance(node, ast.Import):
--                for alias in node.names:
-+                for alias_ordinal, alias in enumerate(node.names):
-                     if not all(part.isidentifier() for part in alias.name.split(".")):
-                         return unknown("UNSUPPORTED_IMPORT_FORM")
-                     resolved = target(alias.name)
-@@ -446,16 +464,21 @@ def assess_package_graph_consistency(
-                         unmodeled_external_imports.append(
-                             (module_id, node.lineno, "import", alias.name)
-                         )
--                        primary, flags = scope_index[id(node)]
-+                        primary, flags, site_ordinal = scope_index[id(node)]
-                         external_scopes.append(
-                             ExternalImportScopeRecord(
--                                module_id,
--                                node.lineno,
--                                node.col_offset,
--                                "import",
--                                alias.name,
--                                primary,
--                                flags,
-+                                importer=module_id,
-+                                line=node.lineno,
-+                                column=node.col_offset,
-+                                form="import",
-+                                target=alias.name,
-+                                primary_scope=primary,
-+                                ancestry_flags=flags,
-+                                site_ordinal=site_ordinal,
-+                                alias_ordinal=alias_ordinal,
-+                                local_binding=(
-+                                    alias.asname or alias.name.split(".")[0]
-+                                ),
-                             )
-                         )
-                         continue
-@@ -511,16 +534,24 @@ def assess_package_graph_consistency(
-                     unmodeled_external_imports.append(
-                         (module_id, node.lineno, "from", base)
-                     )
--                    primary, flags = scope_index[id(node)]
-+                    primary, flags, site_ordinal = scope_index[id(node)]
-                     external_scopes.append(
-                         ExternalImportScopeRecord(
--                            module_id,
--                            node.lineno,
--                            node.col_offset,
--                            "from",
--                            base,
--                            primary,
--                            flags,
-+                            importer=module_id,
-+                            line=node.lineno,
-+                            column=node.col_offset,
-+                            form="from",
-+                            target=base,
-+                            primary_scope=primary,
-+                            ancestry_flags=flags,
-+                            site_ordinal=site_ordinal,
-+                            from_members=tuple(
-+                                (
-+                                    alias.name,
-+                                    alias.asname or alias.name,
-+                                )
-+                                for alias in node.names
-+                            ),
-                         )
-                     )
-                     continue
-@@ -614,6 +645,12 @@ def assess_package_graph_consistency(
-                 row.column,
-                 row.primary_scope,
-                 row.ancestry_flags,
-+                row.site_ordinal,
-+                (
-+                    row.alias_ordinal
-+                    if row.alias_ordinal is not None
-+                    else -1
-+                ),
-             ),
+@@ -655,6 +656,20 @@ def assess_package_graph_consistency(
          )
      )
+ 
++    external_effects_deferred_only = (
++        bool(unmodeled_external_imports)
++        and len(ordered_external_scopes)
++        == len(unmodeled_external_imports)
++        and all(
++            row.primary_scope in {
++                "FUNCTION_BODY",
++                "ASYNC_FUNCTION_BODY",
++                "METHOD_BODY",
++            }
++            for row in ordered_external_scopes
++        )
++    )
++
+     checked_source_modules = tuple(sorted(evidence_source_modules))
+     internal_graph_state = "INDEXED_AST_GRAPH_MATCH_FOR_SELECTED_SOURCES"
+     if unmodeled_namespace_parents:
+@@ -675,6 +690,11 @@ def assess_package_graph_consistency(
+             internal_graph_state=internal_graph_state,
+             checked_source_modules=checked_source_modules,
+             external_scope_records=ordered_external_scopes,
++            external_execution_gate=(
++                "LEXICALLY_DEFERRED_ONLY"
++                if external_effects_deferred_only
++                else "OPAQUE_EXECUTION_POSSIBLE"
++            ),
+         )
+     return PackageGraphConsistency(
+         "CONSISTENT",
+diff --git a/contextor/core/cycle_semantics/scenarios.py b/contextor/core/cycle_semantics/scenarios.py
+index 6f46286..86abc32 100644
+--- a/contextor/core/cycle_semantics/scenarios.py
++++ b/contextor/core/cycle_semantics/scenarios.py
+@@ -279,7 +279,35 @@ def analyze_cycle_scenarios(
+             consistency = assess_package_graph_consistency(
+                 hard_edges, sources, source_closure.evidence_source_modules,
+             )
+-            if consistency.status != "CONSISTENT":
++            deferred_external_only = (
++                consistency.status == "INDETERMINATE"
++                and consistency.reason
++                == "EXTERNAL_IMPORT_EXECUTION_UNMODELED"
++                and consistency.internal_graph_state
++                == "INDEXED_AST_GRAPH_MATCH_FOR_SELECTED_SOURCES"
++                and consistency.checked_source_modules
++                == tuple(sorted(
++                    source_closure.evidence_source_modules
++                ))
++                and consistency.external_execution_gate
++                == "LEXICALLY_DEFERRED_ONLY"
++                and bool(consistency.unmodeled_external_imports)
++                and not consistency.unmodeled_namespace_parents
++                and len(consistency.external_scope_records)
++                == len(consistency.unmodeled_external_imports)
++                and all(
++                    row.primary_scope in {
++                        "FUNCTION_BODY",
++                        "ASYNC_FUNCTION_BODY",
++                        "METHOD_BODY",
++                    }
++                    for row in consistency.external_scope_records
++                )
++            )
++            if (
++                consistency.status != "CONSISTENT"
++                and not deferred_external_only
++            ):
+                 output.append(_component_result(
+                     component, "INDETERMINATE", coverage="NONE",
+                     reason=consistency.reason,
 diff --git a/tests/test_cycle_semantics_package_graph_external_boundary.py b/tests/test_cycle_semantics_package_graph_external_boundary.py
-index 3863fc7..089dbf8 100644
+index 089dbf8..87e0b03 100644
 --- a/tests/test_cycle_semantics_package_graph_external_boundary.py
 +++ b/tests/test_cycle_semantics_package_graph_external_boundary.py
-@@ -243,3 +243,95 @@ def test_g18_p2_p1_deterministic_scope_records():
+@@ -335,3 +335,200 @@ def test_g18_p2_p2_unknown_stays_fail_closed():
  
-     assert first == second
-     assert first.external_scope_records == second.external_scope_records
+     assert result.reason == "MISSING_INDEXED_TARGET"
+     assert result.external_scope_records == ()
 +
 +
-+def test_g18_p2_p2_repeated_target_alias_identity():
++def _g18_p2_p3_scenario(a_source, b_source="import pkg.a\n"):
++    graph = {
++        "pkg.__init__": set(),
++        "pkg.a": {"pkg.b"},
++        "pkg.b": {"pkg.a"},
++    }
++
++    trees = {
++        "pkg.__init__": ast.parse("pass\n"),
++        "pkg.a": ast.parse(a_source),
++        "pkg.b": ast.parse(b_source),
++    }
++
++    imports = {}
++
++    for module_id, tree in trees.items():
++        extracted, error = read_imports(
++            Path(*module_id.split(".")).with_suffix(".py"),
++            tree=tree,
++        )
++        assert error is None
++        imports[module_id] = extracted
++
++    closures = compute_cycle_model_source_closures_with_optional_children(
++        graph, imports
++    )
++
++    report = analyze_cycle_scenarios(
++        graph,
++        trees,
++        source_selection="OPTIONAL_NAMED_CHILDREN",
++        indexed_imports_by_module=imports,
++        source_closures=closures,
++    )
++
++    assert len(report.components) == 1
++    return report.components[0]
++
++
++def test_g18_p2_p3_deferred_gate_preserves_indeterminate():
 +    result = _check(
-+        "import os as first, os as second\n"
++        "def unused():\n"
++        "    import os\n"
 +    )
 +
 +    assert result.status == "INDETERMINATE"
 +    assert result.reason == "EXTERNAL_IMPORT_EXECUTION_UNMODELED"
-+
-+    records = result.external_scope_records
-+    assert len(records) == 2
-+    assert {row.site_ordinal for row in records} == {0}
-+    assert [row.alias_ordinal for row in records] == [0, 1]
-+    assert [row.local_binding for row in records] == [
-+        "first", "second"
-+    ]
-+    assert [row.target for row in records] == ["os", "os"]
-+
-+
-+def test_g18_p2_p2_from_member_identity():
-+    result = _check(
-+        "from collections import Counter as C, deque\n"
++    assert result.external_execution_gate == (
++        "LEXICALLY_DEFERRED_ONLY"
 +    )
-+
-+    records = result.external_scope_records
-+    assert len(records) == 1
-+    assert records[0].site_ordinal == 0
-+    assert records[0].alias_ordinal is None
-+    assert records[0].local_binding is None
-+    assert records[0].from_members == (
-+        ("Counter", "C"),
-+        ("deque", "deque"),
-+    )
++    assert len(result.unmodeled_external_imports) == 1
 +
 +
-+def test_g18_p2_p2_lexical_not_ast_walk_order():
-+    result = _check(
-+        "def deferred():\n"
-+        "    import os\n"
-+        "import json\n"
-+    )
-+
-+    ordered = sorted(
-+        result.external_scope_records,
-+        key=lambda row: row.site_ordinal,
-+    )
-+
-+    assert [
-+        (row.target, row.site_ordinal)
-+        for row in ordered
-+    ] == [
-+        ("os", 0),
-+        ("json", 1),
-+    ]
-+
-+
-+def test_g18_p2_p2_same_line_separate_sites():
-+    result = _check(
-+        "import pathlib; import pathlib\n"
-+    )
-+
-+    records = result.external_scope_records
-+    assert len(records) == 2
-+    assert {row.site_ordinal for row in records} == {0, 1}
-+    assert len({row.column for row in records}) == 2
-+
-+
-+def test_g18_p2_p2_legacy_projection_unchanged():
-+    result = _check(
-+        "import os as first, os as second\n"
-+        "from collections import Counter, deque\n"
-+    )
-+
-+    projected = tuple(sorted(
-+        (row.importer, row.line, row.form, row.target)
-+        for row in result.external_scope_records
-+    ))
-+
-+    assert projected == tuple(sorted(
-+        result.unmodeled_external_imports
-+    ))
-+
-+
-+def test_g18_p2_p2_unknown_stays_fail_closed():
++def test_g18_p2_p3_eager_gate_stays_blocking():
 +    result = _check(
 +        "import os\n"
++        "def unused():\n"
++        "    import json\n"
++    )
++
++    assert result.external_execution_gate == (
++        "OPAQUE_EXECUTION_POSSIBLE"
++    )
++    assert result.reason == "EXTERNAL_IMPORT_EXECUTION_UNMODELED"
++
++
++def test_g18_p2_p3_uncalled_external_function_model_pass():
++    component = _g18_p2_p3_scenario(
++        "import pkg.b\n"
++        "def unused():\n"
++        "    import os\n"
++    )
++
++    assert component.classification == (
++        "MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS"
++    )
++    assert component.coverage == "COMPLETE_FRESH_MEMBER_ENTRIES"
++    assert all(
++        assessment.outcome == "MODEL_PASS"
++        for assessment in component.entry_assessments
++    )
++
++
++def test_g18_p2_p3_called_external_function_unknown():
++    component = _g18_p2_p3_scenario(
++        "def load():\n"
++        "    import os\n"
++        "load()\n"
++        "import pkg.b\n"
++    )
++
++    assert component.classification == "INDETERMINATE"
++    assert component.coverage != "NONE"
++    assert any(
++        assessment.outcome == "UNKNOWN"
++        for assessment in component.entry_assessments
++    )
++
++
++def test_g18_p2_p3_async_body_deferred():
++    component = _g18_p2_p3_scenario(
++        "import pkg.b\n"
++        "async def worker():\n"
++        "    import os\n"
++    )
++
++    assert component.classification == (
++        "MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS"
++    )
++
++
++def test_g18_p2_p3_async_invocation_not_assumed_safe():
++    component = _g18_p2_p3_scenario(
++        "import pkg.b\n"
++        "async def worker():\n"
++        "    import os\n"
++        "worker()\n"
++    )
++
++    assert component.classification == "INDETERMINATE"
++    assert any(
++        assessment.outcome == "UNKNOWN"
++        for assessment in component.entry_assessments
++    )
++
++
++def test_g18_p2_p3_decorated_function_unknown():
++    component = _g18_p2_p3_scenario(
++        "import pkg.b\n"
++        "@decorator\n"
++        "def unused():\n"
++        "    import os\n"
++    )
++
++    assert component.classification == "INDETERMINATE"
++    assert any(
++        assessment.outcome == "UNKNOWN"
++        for assessment in component.entry_assessments
++    )
++
++
++def test_g18_p2_p3_dynamic_default_unknown():
++    component = _g18_p2_p3_scenario(
++        "import pkg.b\n"
++        "def unused(x=side_effect()):\n"
++        "    import os\n"
++    )
++
++    assert component.classification == "INDETERMINATE"
++    assert any(
++        assessment.outcome == "UNKNOWN"
++        for assessment in component.entry_assessments
++    )
++
++
++def test_g18_p2_p3_eager_external_scenario_still_blocked():
++    component = _g18_p2_p3_scenario(
++        "import os\n"
++        "import pkg.b\n"
++    )
++
++    assert component.classification == "INDETERMINATE"
++    assert component.coverage == "NONE"
++    assert component.reason == (
++        "EXTERNAL_IMPORT_EXECUTION_UNMODELED"
++    )
++    assert component.entry_assessments == ()
++
++
++def test_g18_p2_p3_internal_graph_mismatch_stays_blocked():
++    result = _check(
++        "def unused():\n"
++        "    import os\n"
 +        "import pkg.missing\n"
 +    )
 +
 +    assert result.reason == "MISSING_INDEXED_TARGET"
++    assert result.external_execution_gate == "NOT_ESTABLISHED"
 +    assert result.external_scope_records == ()
++
++
++def test_g18_p2_p3_source_evidence_deterministic():
++    source = (
++        "def worker():\n"
++        "    import os\n"
++        "    from collections import deque\n"
++    )
++
++    first = _check(source)
++    second = _check(source)
++
++    assert first == second
++    assert first.external_execution_gate == (
++        "LEXICALLY_DEFERRED_ONLY"
++    )
 ```
 
 ## FINAL_VERDICT
 
-PASS — literal identity hardening, 48 targeted tests passed, both FileState-bound SCC replays preserved fail-closed status and 16 structural cycles.
+PASS — exact implementation, 179 targeted tests passed, FileState-bound replay preserved both real SCC namespace gates and 16 structural cycles.

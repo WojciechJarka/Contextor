@@ -335,3 +335,200 @@ def test_g18_p2_p2_unknown_stays_fail_closed():
 
     assert result.reason == "MISSING_INDEXED_TARGET"
     assert result.external_scope_records == ()
+
+
+def _g18_p2_p3_scenario(a_source, b_source="import pkg.a\n"):
+    graph = {
+        "pkg.__init__": set(),
+        "pkg.a": {"pkg.b"},
+        "pkg.b": {"pkg.a"},
+    }
+
+    trees = {
+        "pkg.__init__": ast.parse("pass\n"),
+        "pkg.a": ast.parse(a_source),
+        "pkg.b": ast.parse(b_source),
+    }
+
+    imports = {}
+
+    for module_id, tree in trees.items():
+        extracted, error = read_imports(
+            Path(*module_id.split(".")).with_suffix(".py"),
+            tree=tree,
+        )
+        assert error is None
+        imports[module_id] = extracted
+
+    closures = compute_cycle_model_source_closures_with_optional_children(
+        graph, imports
+    )
+
+    report = analyze_cycle_scenarios(
+        graph,
+        trees,
+        source_selection="OPTIONAL_NAMED_CHILDREN",
+        indexed_imports_by_module=imports,
+        source_closures=closures,
+    )
+
+    assert len(report.components) == 1
+    return report.components[0]
+
+
+def test_g18_p2_p3_deferred_gate_preserves_indeterminate():
+    result = _check(
+        "def unused():\n"
+        "    import os\n"
+    )
+
+    assert result.status == "INDETERMINATE"
+    assert result.reason == "EXTERNAL_IMPORT_EXECUTION_UNMODELED"
+    assert result.external_execution_gate == (
+        "LEXICALLY_DEFERRED_ONLY"
+    )
+    assert len(result.unmodeled_external_imports) == 1
+
+
+def test_g18_p2_p3_eager_gate_stays_blocking():
+    result = _check(
+        "import os\n"
+        "def unused():\n"
+        "    import json\n"
+    )
+
+    assert result.external_execution_gate == (
+        "OPAQUE_EXECUTION_POSSIBLE"
+    )
+    assert result.reason == "EXTERNAL_IMPORT_EXECUTION_UNMODELED"
+
+
+def test_g18_p2_p3_uncalled_external_function_model_pass():
+    component = _g18_p2_p3_scenario(
+        "import pkg.b\n"
+        "def unused():\n"
+        "    import os\n"
+    )
+
+    assert component.classification == (
+        "MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS"
+    )
+    assert component.coverage == "COMPLETE_FRESH_MEMBER_ENTRIES"
+    assert all(
+        assessment.outcome == "MODEL_PASS"
+        for assessment in component.entry_assessments
+    )
+
+
+def test_g18_p2_p3_called_external_function_unknown():
+    component = _g18_p2_p3_scenario(
+        "def load():\n"
+        "    import os\n"
+        "load()\n"
+        "import pkg.b\n"
+    )
+
+    assert component.classification == "INDETERMINATE"
+    assert component.coverage != "NONE"
+    assert any(
+        assessment.outcome == "UNKNOWN"
+        for assessment in component.entry_assessments
+    )
+
+
+def test_g18_p2_p3_async_body_deferred():
+    component = _g18_p2_p3_scenario(
+        "import pkg.b\n"
+        "async def worker():\n"
+        "    import os\n"
+    )
+
+    assert component.classification == (
+        "MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS"
+    )
+
+
+def test_g18_p2_p3_async_invocation_not_assumed_safe():
+    component = _g18_p2_p3_scenario(
+        "import pkg.b\n"
+        "async def worker():\n"
+        "    import os\n"
+        "worker()\n"
+    )
+
+    assert component.classification == "INDETERMINATE"
+    assert any(
+        assessment.outcome == "UNKNOWN"
+        for assessment in component.entry_assessments
+    )
+
+
+def test_g18_p2_p3_decorated_function_unknown():
+    component = _g18_p2_p3_scenario(
+        "import pkg.b\n"
+        "@decorator\n"
+        "def unused():\n"
+        "    import os\n"
+    )
+
+    assert component.classification == "INDETERMINATE"
+    assert any(
+        assessment.outcome == "UNKNOWN"
+        for assessment in component.entry_assessments
+    )
+
+
+def test_g18_p2_p3_dynamic_default_unknown():
+    component = _g18_p2_p3_scenario(
+        "import pkg.b\n"
+        "def unused(x=side_effect()):\n"
+        "    import os\n"
+    )
+
+    assert component.classification == "INDETERMINATE"
+    assert any(
+        assessment.outcome == "UNKNOWN"
+        for assessment in component.entry_assessments
+    )
+
+
+def test_g18_p2_p3_eager_external_scenario_still_blocked():
+    component = _g18_p2_p3_scenario(
+        "import os\n"
+        "import pkg.b\n"
+    )
+
+    assert component.classification == "INDETERMINATE"
+    assert component.coverage == "NONE"
+    assert component.reason == (
+        "EXTERNAL_IMPORT_EXECUTION_UNMODELED"
+    )
+    assert component.entry_assessments == ()
+
+
+def test_g18_p2_p3_internal_graph_mismatch_stays_blocked():
+    result = _check(
+        "def unused():\n"
+        "    import os\n"
+        "import pkg.missing\n"
+    )
+
+    assert result.reason == "MISSING_INDEXED_TARGET"
+    assert result.external_execution_gate == "NOT_ESTABLISHED"
+    assert result.external_scope_records == ()
+
+
+def test_g18_p2_p3_source_evidence_deterministic():
+    source = (
+        "def worker():\n"
+        "    import os\n"
+        "    from collections import deque\n"
+    )
+
+    first = _check(source)
+    second = _check(source)
+
+    assert first == second
+    assert first.external_execution_gate == (
+        "LEXICALLY_DEFERRED_ONLY"
+    )

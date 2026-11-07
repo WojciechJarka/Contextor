@@ -279,7 +279,35 @@ def analyze_cycle_scenarios(
             consistency = assess_package_graph_consistency(
                 hard_edges, sources, source_closure.evidence_source_modules,
             )
-            if consistency.status != "CONSISTENT":
+            deferred_external_only = (
+                consistency.status == "INDETERMINATE"
+                and consistency.reason
+                == "EXTERNAL_IMPORT_EXECUTION_UNMODELED"
+                and consistency.internal_graph_state
+                == "INDEXED_AST_GRAPH_MATCH_FOR_SELECTED_SOURCES"
+                and consistency.checked_source_modules
+                == tuple(sorted(
+                    source_closure.evidence_source_modules
+                ))
+                and consistency.external_execution_gate
+                == "LEXICALLY_DEFERRED_ONLY"
+                and bool(consistency.unmodeled_external_imports)
+                and not consistency.unmodeled_namespace_parents
+                and len(consistency.external_scope_records)
+                == len(consistency.unmodeled_external_imports)
+                and all(
+                    row.primary_scope in {
+                        "FUNCTION_BODY",
+                        "ASYNC_FUNCTION_BODY",
+                        "METHOD_BODY",
+                    }
+                    for row in consistency.external_scope_records
+                )
+            )
+            if (
+                consistency.status != "CONSISTENT"
+                and not deferred_external_only
+            ):
                 output.append(_component_result(
                     component, "INDETERMINATE", coverage="NONE",
                     reason=consistency.reason,
