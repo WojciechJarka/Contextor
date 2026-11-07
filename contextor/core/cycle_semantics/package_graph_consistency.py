@@ -670,6 +670,16 @@ def assess_package_graph_consistency(
         )
     )
 
+    external_gate = (
+        "NOT_ESTABLISHED"
+        if not unmodeled_external_imports
+        else (
+            "LEXICALLY_DEFERRED_ONLY"
+            if external_effects_deferred_only
+            else "OPAQUE_EXECUTION_POSSIBLE"
+        )
+    )
+
     checked_source_modules = tuple(sorted(evidence_source_modules))
     internal_graph_state = "INDEXED_AST_GRAPH_MATCH_FOR_SELECTED_SOURCES"
     if unmodeled_namespace_parents:
@@ -681,6 +691,7 @@ def assess_package_graph_consistency(
             internal_graph_state,
             checked_source_modules,
             external_scope_records=ordered_external_scopes,
+            external_execution_gate=external_gate,
         )
     if unmodeled_external_imports:
         return PackageGraphConsistency(
@@ -690,11 +701,7 @@ def assess_package_graph_consistency(
             internal_graph_state=internal_graph_state,
             checked_source_modules=checked_source_modules,
             external_scope_records=ordered_external_scopes,
-            external_execution_gate=(
-                "LEXICALLY_DEFERRED_ONLY"
-                if external_effects_deferred_only
-                else "OPAQUE_EXECUTION_POSSIBLE"
-            ),
+            external_execution_gate=external_gate,
         )
     return PackageGraphConsistency(
         "CONSISTENT",

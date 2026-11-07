@@ -265,3 +265,171 @@ def test_optional_namespace_scc_never_model_passes():
     assert component.classification == "INDETERMINATE"
     assert component.coverage == "NONE"
     assert component.reason == "NAMESPACE_IMPORT_RESOLUTION_UNMODELED"
+
+
+def test_g18_p2_p4_namespace_only_gate():
+    graph, sources = _base()
+
+    result = _check(graph, sources)
+
+    assert result.status == "INDETERMINATE"
+    assert result.reason == (
+        "NAMESPACE_IMPORT_RESOLUTION_UNMODELED"
+    )
+    assert result.external_execution_gate == (
+        "NOT_ESTABLISHED"
+    )
+    assert result.unmodeled_external_imports == ()
+
+
+def test_g18_p2_p4_namespace_and_eager_external():
+    graph, sources = _base(
+        "import os\n"
+        "import pkg.ns.b\n"
+    )
+
+    result = _check(graph, sources)
+
+    assert result.status == "INDETERMINATE"
+    assert result.reason == (
+        "NAMESPACE_IMPORT_RESOLUTION_UNMODELED"
+    )
+    assert result.external_execution_gate == (
+        "OPAQUE_EXECUTION_POSSIBLE"
+    )
+    assert len(result.unmodeled_namespace_parents) == 1
+    assert len(result.unmodeled_external_imports) == 1
+    assert len(result.external_scope_records) == 1
+    assert result.external_scope_records[0].primary_scope == (
+        "MODULE_BODY"
+    )
+
+
+def test_g18_p2_p4_namespace_and_deferred_external():
+    graph, sources = _base(
+        "def unused():\n"
+        "    import os\n"
+        "import pkg.ns.b\n"
+    )
+
+    result = _check(graph, sources)
+
+    assert result.status == "INDETERMINATE"
+    assert result.reason == (
+        "NAMESPACE_IMPORT_RESOLUTION_UNMODELED"
+    )
+    assert result.external_execution_gate == (
+        "LEXICALLY_DEFERRED_ONLY"
+    )
+    assert len(result.unmodeled_namespace_parents) == 1
+    assert len(result.unmodeled_external_imports) == 1
+    assert result.external_scope_records[0].primary_scope == (
+        "FUNCTION_BODY"
+    )
+
+
+def test_g18_p2_p4_namespace_and_mixed_external():
+    graph, sources = _base(
+        "def unused():\n"
+        "    import os\n"
+        "import json\n"
+        "import pkg.ns.b\n"
+    )
+
+    result = _check(graph, sources)
+
+    assert result.reason == (
+        "NAMESPACE_IMPORT_RESOLUTION_UNMODELED"
+    )
+    assert result.external_execution_gate == (
+        "OPAQUE_EXECUTION_POSSIBLE"
+    )
+    assert len(result.unmodeled_external_imports) == 2
+    assert len(result.external_scope_records) == 2
+
+
+def test_g18_p2_p4_mismatch_rejects_partial_gates():
+    graph, sources = _base(
+        "import os\n"
+        "import pkg.ns.b\n"
+    )
+
+    graph["pkg.a"] = set()
+
+    result = _check(graph, sources)
+
+    assert result.status == "INDETERMINATE"
+    assert result.reason == "GRAPH_SOURCE_IMPORT_MISMATCH"
+    assert result.external_execution_gate == (
+        "NOT_ESTABLISHED"
+    )
+    assert result.external_scope_records == ()
+    assert result.unmodeled_external_imports == ()
+    assert result.unmodeled_namespace_parents == ()
+
+
+def test_g18_p2_p4_namespace_gate_determinism():
+    graph, sources = _base(
+        "def unused():\n"
+        "    import os\n"
+        "import json\n"
+        "import pkg.ns.b\n"
+    )
+
+    first = _check(graph, sources)
+    second = _check(graph, sources, tuple(reversed(sources)))
+
+    assert first == second
+
+
+def test_g18_p2_p4_namespace_scc_remains_blocked():
+    graph = {
+        "pkg.__init__": set(),
+        "pkg.ns.a": {"pkg.ns.b"},
+        "pkg.ns.b": {"pkg.ns.a"},
+    }
+
+    trees = {
+        "pkg.__init__": ast.parse("pass\n"),
+        "pkg.ns.a": ast.parse(
+            "def unused():\n"
+            "    import os\n"
+            "import pkg.ns.b\n"
+        ),
+        "pkg.ns.b": ast.parse(
+            "import pkg.ns.a\n"
+        ),
+    }
+
+    imports = {}
+
+    for module_id, tree in trees.items():
+        extracted, error = read_imports(
+            Path(*module_id.split(".")).with_suffix(".py"),
+            tree=tree,
+        )
+        assert error is None
+        imports[module_id] = extracted
+
+    closures = compute_cycle_model_source_closures_with_optional_children(
+        graph, imports
+    )
+
+    report = analyze_cycle_scenarios(
+        graph,
+        trees,
+        source_selection="OPTIONAL_NAMED_CHILDREN",
+        indexed_imports_by_module=imports,
+        source_closures=closures,
+    )
+
+    assert len(report.components) == 1
+
+    component = report.components[0]
+
+    assert component.classification == "INDETERMINATE"
+    assert component.coverage == "NONE"
+    assert component.reason == (
+        "NAMESPACE_IMPORT_RESOLUTION_UNMODELED"
+    )
+    assert component.entry_assessments == ()
