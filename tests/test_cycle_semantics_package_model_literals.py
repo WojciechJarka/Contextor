@@ -277,3 +277,189 @@ def test_compile_accepts_all_literal_assignment():
         "__all__ = ['alpha', 'beta']"
     )
     assert _compile(tree, "pkg.child", False) is not None
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "x = 16 * 1024",
+        "x = 1 + 2 * 3",
+        "x = (5 + 3) * (9 - 2)",
+        "x = -4 * 3 + 2",
+        "x = 3 * (1 - 2)",
+        "x = [1 + 2, 4 * 8]",
+        "x = {'size': 4 * 8}",
+        "x = {1 + 2: 'value'}",
+        "x = 0 * 100",
+        "x = 9223372036854775808 - 1",
+    ],
+)
+def test_g18_p1_bounded_integer_arithmetic_pass(source):
+    result = _model(source)
+    assert result.outcome == "MODEL_PASS"
+    assert any(
+        event.operation == "BIND"
+        for event in result.events
+    )
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "x = True + 1",
+        "x = 1 + True",
+        "x = 1.0 + 2",
+        "x = 'a' + 'b'",
+        "x = 1 + missing",
+        "x = 1 + side_effect()",
+        "x = 1 / 0",
+        "x = 2 ** 8",
+        "x = 1 << 2",
+        "x = 2 // 1",
+        "x = 1 & 2",
+        "x = 1 * [1]",
+        "x = 18446744073709551615 + 1",
+        "x = 9223372036854775808 * 2",
+    ],
+)
+def test_g18_p1_unsupported_arithmetic_unknown(source):
+    assert _model(source).outcome == "UNKNOWN"
+
+
+def test_g18_p1_arithmetic_class_local_binding():
+    result = _model(
+        "class C:\n"
+        "    x = 16 * 1024\n"
+    )
+    assert result.outcome == "MODEL_PASS"
+    assert any(
+        event.operation == "CLASS_LOCAL_BIND"
+        and event.symbol == "x"
+        for event in result.events
+    )
+
+
+def test_g18_p1_arithmetic_deferred_annassign():
+    result = _model(
+        "x: Later = 16 * 1024",
+        mode="DEFERRED",
+    )
+    assert result.outcome == "MODEL_PASS"
+
+
+def test_g18_p1_version_literal_binding():
+    result = _model(
+        "__version__ = '1.0.4'"
+    )
+    assert result.outcome == "MODEL_PASS"
+    assert any(
+        event.operation == "BIND"
+        and event.symbol == "__version__"
+        for event in result.events
+    )
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "__version__ = 1",
+        "__version__ = build_version()",
+        "__version__ = '1' + '.0'",
+        "__version__ = other",
+        "__path__ = ['other']",
+        "__getattr__ = something",
+        "__annotations__ = {}",
+        "class C:\n    __version__ = '1.0'",
+    ],
+)
+def test_g18_p1_reserved_binding_restrictions(source):
+    assert _model(source).outcome == "UNKNOWN"
+
+
+def test_g18_p1_version_binding_preserves_order():
+    result = _model(
+        "__version__ = '1.0.4'\n"
+        "from pkg import value\n",
+        initializer="value = 7",
+    )
+    assert result.outcome == "MODEL_PASS"
+
+    operations = [
+        event.operation
+        for event in result.events
+        if event.module == "pkg.child"
+    ]
+    assert operations.index("BIND") < operations.index("FROM")
+
+
+def test_g18_p1_arithmetic_early_binding_hazard():
+    result = _model(
+        "from pkg import late",
+        initializer=(
+            "import pkg.child\n"
+            "late = 16 * 1024\n"
+        ),
+        entry="pkg",
+    )
+    assert result.outcome == "EARLY_BINDING_HAZARD"
+    assert result.target_module == "pkg"
+    assert result.symbol == "late"
+
+
+def test_g18_p1_arithmetic_binding_before_import():
+    result = _model(
+        "from pkg import late",
+        initializer=(
+            "late = 16 * 1024\n"
+            "import pkg.child\n"
+        ),
+        entry="pkg",
+    )
+    assert result.outcome == "MODEL_PASS"
+
+
+def test_g18_p1_external_import_still_unknown():
+    assert _model(
+        "x = 16 * 1024\n"
+        "import missing_external_xyz"
+    ).outcome == "UNKNOWN"
+
+
+def test_g18_p1_namespace_layout_still_unknown():
+    result = evaluate_package_import_order(
+        {
+            "pkg.child": ast.parse(
+                "x = 16 * 1024"
+            )
+        },
+        "pkg.child",
+    )
+    assert result.outcome == "UNKNOWN"
+
+
+def test_g18_p1_arithmetic_ast_immutability():
+    sources = {
+        "pkg.__init__": ast.parse("pass"),
+        "pkg.child": ast.parse(
+            "x = (5 + 3) * (9 - 2)"
+        ),
+    }
+
+    before = {
+        key: ast.dump(tree)
+        for key, tree in sources.items()
+    }
+
+    first = evaluate_package_import_order(
+        sources, "pkg.child"
+    )
+    second = evaluate_package_import_order(
+        sources, "pkg.child"
+    )
+
+    assert first == second
+    assert first.outcome == "MODEL_PASS"
+    assert before == {
+        key: ast.dump(tree)
+        for key, tree in sources.items()
+    }
