@@ -64,6 +64,7 @@ def _safe_passive_function_definition(
     statement: ast.FunctionDef,
     *,
     allow_dunder: bool = False,
+    annotation_semantics: str | None = None,
 ) -> bool:
     """A definition whose creation has no unknown evaluations.
 
@@ -77,7 +78,9 @@ def _safe_passive_function_definition(
             and not allow_dunder
         )
         or statement.decorator_list
-        or statement.returns is not None
+        or (statement.returns is not None and annotation_semantics not in {
+            "DEFERRED", "STRINGIFIED",
+        })
         or statement.type_comment is not None
         or getattr(statement, "type_params", ())
     ):
@@ -101,9 +104,8 @@ def _safe_passive_function_definition(
         )
     )
 
-    if any(
-        parameter.annotation is not None
-        for parameter in parameters
+    if annotation_semantics not in {"DEFERRED", "STRINGIFIED"} and any(
+        parameter.annotation is not None for parameter in parameters
     ):
         return False
 
@@ -138,6 +140,8 @@ def _safe_passive_function_definition(
 
 def _safe_passive_class_definition(
     statement: ast.ClassDef,
+    *,
+    annotation_semantics: str | None = None,
 ) -> bool:
     """Validate a class whose body has no unknown effects.
 
@@ -167,6 +171,27 @@ def _safe_passive_class_definition(
         if isinstance(body_statement, (ast.Import, ast.ImportFrom)):
             continue
 
+        if isinstance(body_statement, ast.AnnAssign) and _safe_annassign(
+            body_statement, annotation_semantics,
+        ):
+            continue
+
+        if isinstance(body_statement, ast.Assign):
+            if (
+                len(body_statement.targets) != 1
+                or not isinstance(
+                    body_statement.targets[0], ast.Name
+                )
+                or not body_statement.targets[0].id.isidentifier()
+                or body_statement.targets[0].id.startswith("__")
+                or not _pure_literal_expression(
+                    body_statement.value
+                )
+            ):
+                return False
+
+            continue
+
         if (
             index == 0
             and isinstance(body_statement, ast.Expr)
@@ -183,6 +208,7 @@ def _safe_passive_class_definition(
             and _safe_passive_function_definition(
                 body_statement,
                 allow_dunder=True,
+                annotation_semantics=annotation_semantics,
             )
         ):
             continue
@@ -192,12 +218,129 @@ def _safe_passive_class_definition(
     return True
 
 
+def _pure_literal_expression(expr: ast.AST) -> bool:
+    pending: list[tuple[ast.AST, int, bool]] = [
+        (expr, 0, False)
+    ]
+    visited = 0
+
+    while pending:
+        node, depth, hashable_required = pending.pop()
+        visited += 1
+
+        if visited > 256 or depth > 16:
+            return False
+
+        if type(node) is ast.Constant:
+            if type(node.value) not in {
+                type(None), bool, int, float,
+                complex, str, bytes,
+            }:
+                return False
+            continue
+
+        if type(node) is ast.UnaryOp:
+            if (
+                type(node.op) not in (ast.UAdd, ast.USub)
+                or type(node.operand) is not ast.Constant
+                or type(node.operand.value)
+                not in (int, float, complex)
+            ):
+                return False
+
+            pending.append(
+                (node.operand, depth + 1, hashable_required)
+            )
+            continue
+
+        if type(node) is ast.Tuple:
+            pending.extend(
+                (item, depth + 1, hashable_required)
+                for item in reversed(node.elts)
+            )
+            continue
+
+        if type(node) is ast.List:
+            if hashable_required:
+                return False
+
+            pending.extend(
+                (item, depth + 1, False)
+                for item in reversed(node.elts)
+            )
+            continue
+
+        if type(node) is ast.Set:
+            if hashable_required:
+                return False
+
+            pending.extend(
+                (item, depth + 1, True)
+                for item in reversed(node.elts)
+            )
+            continue
+
+        if type(node) is ast.Dict:
+            if (
+                hashable_required
+                or len(node.keys) != len(node.values)
+                or any(key is None for key in node.keys)
+            ):
+                return False
+
+            for key, value in reversed(
+                list(zip(node.keys, node.values))
+            ):
+                pending.append(
+                    (value, depth + 1, False)
+                )
+                pending.append(
+                    (key, depth + 1, True)
+                )
+            continue
+
+        return False
+
+    return True
+
+
+def _pure_all_assignment(value: ast.AST) -> bool:
+    return (
+        type(value) in (ast.List, ast.Tuple)
+        and _pure_literal_expression(value)
+        and all(
+            type(item) is ast.Constant
+            and type(item.value) is str
+            for item in value.elts
+        )
+    )
+
+
+def _safe_annassign(
+    statement: ast.AnnAssign,
+    annotation_semantics: str | None,
+) -> bool:
+    if (
+        annotation_semantics not in {"DEFERRED", "STRINGIFIED"}
+        or not isinstance(statement.target, ast.Name)
+        or statement.simple != 1
+        or not statement.target.id.isidentifier()
+        or statement.target.id.startswith("__")
+    ):
+        return False
+    return (
+        statement.value is None
+        or _pure_literal_expression(statement.value)
+    )
+
+
 def _compile(
     tree: ast.Module,
     logical: str,
     package: bool,
     _depth: int = 0,
     typing_guard: RecognizedTypingGuard | None = None,
+    annotation_semantics: str | None = None,
 ) -> tuple[_Step, ...] | None:
     steps: list[_Step] = []
 
@@ -404,6 +547,7 @@ def _compile(
                 logical,
                 package,
                 _depth=_depth + 1,
+                annotation_semantics=annotation_semantics,
             )
 
             if selected_steps is None:
@@ -419,23 +563,21 @@ def _compile(
                 return None
 
             name = stmt.targets[0].id
-            if name.startswith("__"):
+
+            if not name.isidentifier():
                 return None
 
             value = stmt.value
 
-            if (
-                isinstance(value, ast.Constant)
-                and type(value.value) in (
-                    type(None),
-                    bool,
-                    int,
-                    float,
-                    complex,
-                    str,
-                    bytes,
-                )
-            ):
+            if name.startswith("__"):
+                if not (
+                    _depth == 0
+                    and name == "__all__"
+                    and _pure_all_assignment(value)
+                ):
+                    return None
+
+            if _pure_literal_expression(value):
                 steps.append(_Step("BIND", binding=name))
 
             elif (
@@ -454,15 +596,38 @@ def _compile(
             else:
                 return None
 
+        elif isinstance(stmt, ast.AnnAssign):
+            if not _safe_annassign(stmt, annotation_semantics):
+                return None
+            if stmt.value is not None:
+                steps.append(_Step("BIND", binding=stmt.target.id))
+
         elif isinstance(stmt, ast.ClassDef):
-            if not _safe_passive_class_definition(stmt):
+            if not _safe_passive_class_definition(
+                stmt, annotation_semantics=annotation_semantics,
+            ):
                 return None
 
             for body_statement in stmt.body:
-                if not isinstance(
-                    body_statement,
-                    (ast.Import, ast.ImportFrom),
-                ):
+                if isinstance(body_statement, ast.Assign):
+                    steps.append(
+                        _Step(
+                            "BIND",
+                            binding=body_statement.targets[0].id,
+                            class_local=True,
+                        )
+                    )
+                    continue
+
+                if not isinstance(body_statement, (ast.Import, ast.ImportFrom)):
+                    if (
+                        isinstance(body_statement, ast.AnnAssign)
+                        and body_statement.value is not None
+                    ):
+                        steps.append(_Step(
+                            "BIND", binding=body_statement.target.id,
+                            class_local=True,
+                        ))
                     continue
 
                 fragment = ast.Module(
@@ -501,7 +666,9 @@ def _compile(
             )
 
         elif isinstance(stmt, ast.FunctionDef):
-            if not _safe_passive_function_definition(stmt):
+            if not _safe_passive_function_definition(
+                stmt, annotation_semantics=annotation_semantics,
+            ):
                 return None
 
             args = stmt.args
@@ -612,6 +779,7 @@ def evaluate_package_import_order(
     entry_module: str,
     *,
     _session: _PackageSourceSession | None = None,
+    annotation_semantics: str | None = None,
 ) -> PackageImportAssessment:
     """Simulate a restricted closed regular-package source set.
 
@@ -638,6 +806,9 @@ def evaluate_package_import_order(
     if (
         not isinstance(indexed_sources, Mapping)
         or not isinstance(entry_module, str)
+        or annotation_semantics not in {
+            None, "STOCK_EAGER", "STRINGIFIED", "DEFERRED",
+        }
     ):
         return result("UNKNOWN")
 
@@ -778,12 +949,21 @@ def evaluate_package_import_order(
             return result("UNKNOWN", name)
 
         indexed_id = nodes[name].indexed_module_ids[0]
+        has_future_annotations = any(
+            isinstance(statement, ast.ImportFrom)
+            and statement.module == "__future__"
+            and any(alias.name == "annotations" for alias in statement.names)
+            for statement in tree.body
+        )
+        if annotation_semantics == "STRINGIFIED" and not has_future_annotations:
+            return result("UNKNOWN", name)
         typing_guard = recognize_typing_guard(
             indexed_sources[indexed_id],
             frozenset(indexed_sources),
         )
         if (
             _session is not None
+            and annotation_semantics is None
             and name in _session.compiled_steps
         ):
             program = _session.compiled_steps[name]
@@ -793,8 +973,16 @@ def evaluate_package_import_order(
                 name,
                 name in packages,
                 typing_guard=typing_guard,
+                annotation_semantics=(
+                    "STRINGIFIED" if has_future_annotations
+                    else annotation_semantics
+                ),
             )
-            if program is not None and _session is not None:
+            if (
+                program is not None
+                and _session is not None
+                and annotation_semantics is None
+            ):
                 _session.compiled_steps[name] = program
 
         if program is None:
@@ -1229,12 +1417,13 @@ def evaluate_package_import_order(
             )
 
         elif step.op == "BIND":
-            namespaces[module][step.binding] = None
+            if not step.class_local:
+                namespaces[module][step.binding] = None
 
             events.append(
                 PackageModelEvent(
                     module,
-                    "BIND",
+                    "CLASS_LOCAL_BIND" if step.class_local else "BIND",
                     symbol=step.binding,
                 )
             )

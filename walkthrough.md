@@ -1,285 +1,89 @@
-# CONTEXTOR C16-B03-P1D3G12
+# CONTEXTOR C16-B03-P1D3G16-R1 — COMPLETE PRODUCTION AST FAILURE CENSUS
 
-## IMPLEMENTATION
+## PREFLIGHT
 
-FILES_CHANGED: `contextor/core/cycle_semantics/package_graph_consistency.py`, `tests/test_cycle_semantics_package_graph_proof_boundary.py`. HEAD before change: `da8ee7732ba766ab3d0da0c4a7dee35b0fd92110`.
+DIRECT_EVIDENCE — Contextor MCP first, current module contexts for `package_model.py`, `package_layout.py`, `typing_guard.py`, and `model_source_closure.py`: canonical revision 1078, canonical_state fresh, workspace_sync verified, syntax errors 0, structural DFS cycles 16, active_warning_count 16, model_pass_count 0, cycle_semantics stale. Read-only canonical snapshot/metadata: revision 1078, state_id `20261106_195021`, repo_id `ctx_8efc50d8`, root `C:\Temp\Contextor_Repo`. Git HEAD `4e1633139d655a73b49683b21b154def26126597` is a separate identity and was not equated to LIVE revision. G14 and G15 source edits are present in `package_model.py`; existing source/test worktree modifications were preserved. Current relevant code: `_safe_passive_function_definition` at `package_model.py:63`, `_safe_passive_class_definition` :141, `_pure_literal_expression` :221, `_safe_annassign` :319, `_compile` :337, Assign :558, AnnAssign :599, ClassDef :605, FunctionDef :668; `build_package_layout` at `package_layout.py:54`; `recognize_typing_guard` at `typing_guard.py:36`; optional closure builder at `model_source_closure.py:83`.
 
-Added `internal_graph_state` (default `NOT_PROVED`) and `checked_source_modules` (default empty). The full graph proof is set only after all selected source modules pass the expected/hard_edges comparison. Earlier returns retain defaults. Existing status, reason, namespace/external diagnostics, and error precedence remain unchanged. Added focused proof-boundary tests.
+## PRODUCTION_INVENTORY
 
-## TARGETED_TESTS
+DIRECT_EVIDENCE — Filesystem rule: `contextor/**/*.py` (including every `__init__.py` and any `test_*.py` if present), plus root `main.py`; exclude tests/, virtual environments, caches, build/dist, temporary/generated copies, and dependencies by physical location. Actual count **307** = 306 under contextor/ + `main.py`, matching the user-confirmed number. Each path matched a canonical `Module.absolute_path` and unique module_id; no production file was omitted for its name. Canonical snapshot has 623 modules and hard_edges domain 623, of which 307 are production and 316 are indexed `tests/` modules. No production module is absent from hard_edges. Thus production filesystem inventory, canonical FileState/index domain and SCC source closure are distinct sets.
 
-Python 3.15.2, `-B -m pytest -q -rs -p no:cacheprovider`, external `--basetemp C:\Temp\Contextor_G12_pytest_tmp`, `PYTHONDONTWRITEBYTECODE=1`. Exactly the four requested modules were run: proof boundary, namespace boundary, external boundary, optional child scenarios. Result: **50 passed in 6.27s**, exit 0. No full suite.
+## CANONICAL_SOURCE_BINDING
 
-## SCC1_REPLAY
+DIRECT_EVIDENCE — Referenced FileState JSON has 623 records and `_meta` revision 1078/state_id `20261106_195021`. All 307 production files were readable, parsed, and had current byte SHA-256 equal to their FileState entry. Source-bound 307; SOURCE_UNBOUND 0; SOURCE_UNAVAILABLE 0. For each module the diagnostic used its repo-relative path, canonical module_id, SHA-256, FileState binding, hard_edges membership and both closure-membership flags. Therefore raw and source-bound compilation counts coincide. No analyzed source is presented as canonical evidence without its fingerprint match.
 
-DIRECT_EVIDENCE: canonical revision 1071, state_id `20261106_195021`; current FileState metadata matches. Of 221 selected files across both closures, 0 SHA-256 mismatches. SCC1: 44 members, 201 evidence source modules. Graph status `INDETERMINATE`, reason `NAMESPACE_IMPORT_RESOLUTION_UNMODELED`; `internal_graph_state=INDEXED_AST_GRAPH_MATCH_FOR_SELECTED_SOURCES`; checked modules exactly equal the 201 selected modules in sorted order. Namespace records: 4; opaque external records: 605. Scenario classification `INDETERMINATE`, coverage `NONE`, same reason, 0 entry assessments.
+## SCC_CLOSURE_IDENTITIES
 
-## SCC2_REPLAY
+DIRECT_EVIDENCE — Rebuilt `compute_cycle_model_source_closures_with_optional_children` from current canonical hard_edges and `Module.imports`. A=SCC1 closure: 44 cyclic members, 201 selected modules. B=SCC2 closure: 9 members, 221 selected modules. C=A∪B: 221 unique modules; A⊆B by verified module IDs. D=ALL_PRODUCTION−C: 86 modules. C∩D=∅. Every selected module is production and FileState-bound. The 201 and 221 counts were never added as unique sources.
 
-DIRECT_EVIDENCE: same revision and FileState binding. SCC2: 9 members, 221 evidence source modules. Graph status `INDETERMINATE`, reason `NAMESPACE_IMPORT_RESOLUTION_UNMODELED`; `internal_graph_state=INDEXED_AST_GRAPH_MATCH_FOR_SELECTED_SOURCES`; checked modules exactly equal the 221 selected modules in sorted order. Namespace records: 4; opaque external records: 723. Scenario classification `INDETERMINATE`, coverage `NONE`, same reason, 0 entry assessments. Snapshot has no `cycle_optional_source_publication` receipt. Metadata revision was 1071 before and after replay.
+## ALL_PRODUCTION_COMPILATION_COVERAGE
 
-## PROOF_SCOPE
+Diagnostic calls to current `_compile` with `annotation_semantics="DEFERRED"` and `recognize_typing_guard` over the indexed production domain; no analyzed code executed. Prefix recompilation of original AST statement references located each first rejection without AST mutation. This is restricted compiler coverage only, never MODEL_PASS. Groups use their own indexed group domain for typing-guard recognition; the reported counts partition consistently.
 
-CODE_PATH_PROVED: the positive field asserts agreement between provided AST imports and indexed hard edges for the selected source cohort after all module comparisons. It does not establish LIVE source authenticity, runtime finder selection, initializer safety, external import availability, or MODEL_PASS. Both real SCCs remain fail-closed. The separately checked FileState SHA-256 match binds this replay to current canonical source fingerprints; retained `cycle_semantics` freshness is stale and is not represented as fresh semantic certification.
+| Group | Total | Bound | Unbound | Unavailable | Supported | Unsupported | Supported % |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| ALL_PRODUCTION | 307 | 307 | 0 | 0 | 147 | 160 | 47.88% |
+| SCC1_CLOSURE | 201 | 201 | 0 | 0 | 90 | 111 | 44.78% |
+| SCC2_CLOSURE | 221 | 221 | 0 | 0 | 103 | 118 | 46.61% |
+| SCC_UNION | 221 | 221 | 0 | 0 | 103 | 118 | 46.61% |
+| OUTSIDE_BOTH | 86 | 86 | 0 | 0 | 44 | 42 | 51.16% |
 
-## MCP_POST_CHANGE_AUDIT
+First-rejection breakdown for ALL_PRODUCTION: ClassDef 86, Assign 60, AnnAssign 3, If 1, FunctionDef 3, AsyncFunctionDef 4, Expr 3; total 160. The 147 supported modules are source-bound, but this does not establish package execution or runtime safety.
 
-DIRECT_EVIDENCE: read-only Contextor MCP `get_module_context` for production and new test modules at canonical revision 1071: `canonical_state=fresh`, `workspace_sync=verified`, no advisory warning, syntax errors 0, structural DFS cycles 16 (fresh), active warning count 16, model pass count 0. `cycle_semantics=stale`. No production FULL, backend restart, `update_file`, warning suppression edit, or commit.
+## SCC1_COMPILATION_COVERAGE
+
+90 supported / 111 unsupported of 201, matching G15 baseline. First rejection: ClassDef 69, Assign 37, AnnAssign 2, If 1, FunctionDef 2. Source-bound 201/201. Representative ClassDef: `contextor/core/analysis/full_analysis_lease.py:28` decorated dataclass; `contextor/core/analysis/function_analysis.py:11` dynamic base. Representative Assign: `contextor/core/analysis/export_analysis.py:112` Name value; `contextor/core/analysis/lineage_extraction.py:81` call to frozenset. Both are refused by the actual restricted guards, not judged erroneous Python.
+
+## SCC2_COMPILATION_COVERAGE
+
+103 supported / 118 unsupported of 221, matching G15 baseline. First rejection: ClassDef 72, Assign 41, AnnAssign 2, If 1, FunctionDef 2. Source-bound 221/221. The SCC union is identical to this closure by exact module IDs and therefore has the same counts.
+
+## SCC_UNION_COVERAGE
+
+221 source-bound; 103 supported, 118 unsupported; 46.61%. First rejections ClassDef 72, Assign 41, AnnAssign 2, If 1, FunctionDef 2. This is a set union, not 201+221. `recognize_typing_guard` used the exact selected module domain in this group.
+
+## OUTSIDE_SCC_COVERAGE
+
+86 source-bound; 44 supported, 42 unsupported; 51.16%. First rejections Assign 19, ClassDef 14, AsyncFunctionDef 4, AnnAssign 1, FunctionDef 1, Expr 3. Examples: `contextor/cli.py:20` reserved `__version__` Assign; `contextor/core/canonical_state_query/contract.py:18` BinOp value; `contextor/mcp/tools/analyze_layer.py:7` AsyncFunctionDef; `contextor/mcp_server.py:170` call expression with an unsupported argument/attribute shape; `main.py:20` module-level call. These are static model limits, not claims about whether the real code executes safely.
+
+## CLASSDEF_FAILURE_MATRIX
+
+DIRECT_EVIDENCE — Among 86 modules whose *first* rejected statement is ClassDef, independent reason occurrences can overlap within a class. Guard: `_safe_passive_class_definition` (`package_model.py:141-218`); method guard `_safe_passive_function_definition` (:63-138). Counts: class decorators **59** (e.g. `contextor/core/analysis/full_analysis_lease.py:28`; no dataclass decorator is assumed passive), bases **20** (e.g. `contextor/core/analysis/function_analysis.py:11`), invalid class-body AnnAssign **35** (e.g. `contextor/core/analysis/incremental/engine.py:119` within class at :100), invalid method definitions **15** (e.g. `contextor/core/analysis/refresh_planner.py:81` within class at :70), invalid class-body Assign **2** (e.g. `contextor/core/graph/resolver.py:48`). Invalid class name, dunder class name, class keywords/metaclass, class type parameters were not observed as independent reasons among these first-rejected classes. Body statement inventory in these 86 classes: AnnAssign 415, FunctionDef 128, Expr 26, Assign 21; no direct body import, AsyncFunctionDef or Other statement was observed in this subset. Among the 15 rejected methods, **14** had decorators and **1** had a nonliteral default (`contextor/core/reporting_engine/persistent_registry.py:529`). Annotation syntax appeared in 13 rejected methods, but under explicit DEFERRED it is not itself the refusing condition. Seven had defaults of any kind; only the one nonliteral default is a confirmed default refusal. Class body executes at definition; method bodies remain deferred. This matrix does not infer execution of deferred method bodies.
+
+## ASSIGN_FAILURE_MATRIX
+
+DIRECT_EVIDENCE — Among 60 first-rejected Assign modules, the current `_compile` Assign guard (`package_model.py:558-597`) rejects 1 reserved name (`contextor/cli.py:20`, `__version__`) and 59 values that are neither `_pure_literal_expression` nor the supported simple ATTR form. No multi-target, non-Name target, invalid identifier, or failed special `__all__` shape occurred as the *first* Assign refusal in this production set. Value AST categories: Call 29, Subscript 13, BinOp 11, Name 4, ContainerWithUnsupportedChild 2, Attribute 0, Comprehension 0, Other 0, plus the one Constant under disallowed special name. Examples (at most five): `contextor/core/analysis/export_analysis.py:112` Name; `contextor/core/analysis/lineage_extraction.py:81` Call; `contextor/core/analysis/lineage_extraction_bindings.py:17` Subscript; `contextor/core/canonical_state_query/contract.py:18` BinOp; `contextor/cli.py:20` special name. The 59 value cases fail the exact `_pure_literal_expression`/ATTR branch. A syntactic Call is evidence of an unsupported form, not proof that its effects are harmless or actually executed on every import path.
+
+## OTHER_STATEMENT_FAILURES
+
+All remaining 14 first refusals, with exact rejecting code path:
+
+| Type | Count | Locations and condition |
+|---|---:|---|
+| AnnAssign | 3 | `contextor/core/analysis/lineage_extraction_contracts.py:17`; `contextor/core/graph/incremental.py:56`; `contextor/mcp/tools/contextor_fact_lineage.py:27`. Each value is not a pure literal under `_safe_annassign` (`package_model.py:319-334`); DEFERRED is already supplied. |
+| If | 1 | `contextor/core/cycle_semantics/contracts.py:21`, TYPE_CHECKING branch not accepted by the current whole-module recognizer/selected-condition gate (`package_model.py:492-556`; `typing_guard.py:36-257`). This does not imply the guarded body runs at import. |
+| FunctionDef | 3 | `contextor/core/domain/module.py:17` decorator; `contextor/core/reporting_layer/artifact_usage_report.py:408` nonliteral default; `contextor/mcp/tools/describe_canonical_state.py:10` nonliteral default. `_safe_passive_function_definition` (`package_model.py:63-138`) rejects definition-time effects; function bodies remain deferred. |
+| AsyncFunctionDef | 4 | `contextor/mcp/tools/analyze_layer.py:7`, `analyze_project.py:7`, `analyze_single_file.py:7`, `contextor_profile_analysis.py:21`; unmatched top-level statement reaches `_compile` final fallback (`package_model.py:760-763`). |
+| Expr | 3 | `contextor/mcp_server.py:170`, `contextor/mcp_worker.py:12`, `main.py:20`; call shape fails the narrow zero-argument direct-name Expr rule (`package_model.py:749-759`). |
+
+The 14 cases are 3+1+3+4+3. Nested class-body execution and deferred function bodies were separately classified in the ClassDef matrix; unsupported conditional effects remain UNKNOWN.
+
+## CROSS_GROUP_CONSISTENCY
+
+DIRECT_EVIDENCE — A⊆ALL_PRODUCTION and B⊆ALL_PRODUCTION; A⊆B; C=A∪B=221; D=ALL_PRODUCTION−C=86; C∩D=∅; 221+86=307. Supported counts also partition: 103+44=147; unsupported: 118+42=160. Indexed hard_edges has 316 IDs outside production, all from `tests/`, e.g. `tests.analysis.test_cache_manager_content_hash` and `tests.analysis.test_lineage_cache_codec`. There are 0 production IDs outside hard_edges. Snapshot hard-edge SHA-256 before/after read-only census: `1c75f969783051dffde00dcb3d65c68c1f93f5a65f2e141de0db42884e016afa`; unchanged. Metadata revision remained 1078; no optional /3 receipt appeared.
+
+## REMAINING_MODEL_LIMITS
+
+This is static `_compile` coverage, not `evaluate_package_import_order` or `analyze_cycle_scenarios` acceptance. It does not bypass namespace, external import, package layout, target interpreter, or source-binding gates. G13/G15 real SCCs still have namespace and opaque external execution uncertainty; no new MODEL_PASS is derived. The current cycle_semantics snapshot is stale despite fresh source/index/graph. No warning suppression or production LIVE publication was performed.
+
+## MCP_POST_DISCOVERY_AUDIT
+
+Read-only Contextor MCP after census: canonical revision 1078, canonical_state fresh, workspace_sync verified for package_model, syntax errors 0, structural DFS cycles 16 (fresh), active_warning_count 16, model_pass_count 0, cycle_semantics stale, advisory_warning null. No production/full analysis, pytest, restart, update_file, source/test edit, manual commit or LIVE publication.
 
 ## FULL_DIFFS
 
-Complete actual source/test diffs follow. `walkthrough.md` is excluded from its own diff.
-
-```diff
-diff --git a/contextor/core/cycle_semantics/package_graph_consistency.py b/contextor/core/cycle_semantics/package_graph_consistency.py
-index 1bb649f..4e1d4de 100644
---- a/contextor/core/cycle_semantics/package_graph_consistency.py
-+++ b/contextor/core/cycle_semantics/package_graph_consistency.py
-@@ -21,6 +21,8 @@ class PackageGraphConsistency:
-     reason: str | None
-     unmodeled_external_imports: tuple[tuple[str, int, str, str], ...] = ()
-     unmodeled_namespace_parents: tuple[tuple[str, int, str, str], ...] = ()
-+    internal_graph_state: str = "NOT_PROVED"
-+    checked_source_modules: tuple[str, ...] = ()
- 
- 
- def assess_package_graph_consistency(
-@@ -469,17 +471,28 @@ def assess_package_graph_consistency(
-         if expected != set(hard_edges[module_id]):
-             return unknown("GRAPH_SOURCE_IMPORT_MISMATCH")
- 
-+    checked_source_modules = tuple(sorted(evidence_source_modules))
-+    internal_graph_state = "INDEXED_AST_GRAPH_MATCH_FOR_SELECTED_SOURCES"
-     if unmodeled_namespace_parents:
-         return PackageGraphConsistency(
-             "INDETERMINATE",
-             "NAMESPACE_IMPORT_RESOLUTION_UNMODELED",
-             tuple(sorted(unmodeled_external_imports)),
-             tuple(sorted(unmodeled_namespace_parents)),
-+            internal_graph_state,
-+            checked_source_modules,
-         )
-     if unmodeled_external_imports:
-         return PackageGraphConsistency(
-             "INDETERMINATE",
-             "EXTERNAL_IMPORT_EXECUTION_UNMODELED",
-             tuple(sorted(unmodeled_external_imports)),
-+            internal_graph_state=internal_graph_state,
-+            checked_source_modules=checked_source_modules,
-         )
--    return PackageGraphConsistency("CONSISTENT", None)
-+    return PackageGraphConsistency(
-+        "CONSISTENT",
-+        None,
-+        internal_graph_state=internal_graph_state,
-+        checked_source_modules=checked_source_modules,
-+    )
-diff --git a/tests/test_cycle_semantics_package_graph_proof_boundary.py b/tests/test_cycle_semantics_package_graph_proof_boundary.py
-new file mode 100644
-index 0000000..1f34801
---- /dev/null
-+++ b/tests/test_cycle_semantics_package_graph_proof_boundary.py
-@@ -0,0 +1,198 @@
-+"""Internal graph proof is separate from import execution uncertainty."""
-+
-+import ast
-+from pathlib import Path
-+
-+import pytest
-+
-+from contextor.core.cycle_semantics.model_source_closure import (
-+    compute_cycle_model_source_closures_with_optional_children,
-+)
-+from contextor.core.cycle_semantics.package_graph_consistency import (
-+    assess_package_graph_consistency,
-+)
-+from contextor.core.cycle_semantics.scenarios import analyze_cycle_scenarios
-+from contextor.core.symbol_engine.indexer import read_imports
-+
-+
-+PROVED = "INDEXED_AST_GRAPH_MATCH_FOR_SELECTED_SOURCES"
-+
-+
-+def _case(source, *, namespace=False, edge=True):
-+    target = "pkg.ns.b" if namespace else "pkg.b"
-+    graph = {
-+        "pkg.__init__": set(),
-+        "pkg.a": {target} if edge else set(),
-+        target: set(),
-+    }
-+    trees = {
-+        "pkg.__init__": ast.parse("pass\n"),
-+        "pkg.a": ast.parse(source),
-+        target: ast.parse("pass\n"),
-+    }
-+    return graph, trees
-+
-+
-+def _assess(graph, trees, order=None):
-+    return assess_package_graph_consistency(
-+        graph,
-+        trees,
-+        tuple(trees) if order is None else order,
-+    )
-+
-+
-+def _not_proved(result, reason):
-+    assert result.status == "INDETERMINATE"
-+    assert result.reason == reason
-+    assert result.internal_graph_state == "NOT_PROVED"
-+    assert result.checked_source_modules == ()
-+
-+
-+def test_closed_internal_graph_has_bounded_proof():
-+    graph, trees = _case("import pkg.b\n")
-+    result = _assess(graph, trees)
-+    assert result.status == "CONSISTENT"
-+    assert result.reason is None
-+    assert result.internal_graph_state == PROVED
-+    assert result.checked_source_modules == tuple(sorted(trees))
-+    assert result.unmodeled_external_imports == ()
-+    assert result.unmodeled_namespace_parents == ()
-+
-+
-+def test_external_uncertainty_preserves_internal_graph_proof():
-+    graph, trees = _case("import os\nimport pkg.b\n")
-+    result = _assess(graph, trees)
-+    assert result.status == "INDETERMINATE"
-+    assert result.reason == "EXTERNAL_IMPORT_EXECUTION_UNMODELED"
-+    assert result.internal_graph_state == PROVED
-+    assert result.checked_source_modules == tuple(sorted(trees))
-+    assert result.unmodeled_external_imports == (
-+        ("pkg.a", 1, "import", "os"),
-+    )
-+
-+
-+def test_namespace_uncertainty_preserves_internal_graph_proof():
-+    graph, trees = _case("import pkg.ns.b\n", namespace=True)
-+    result = _assess(graph, trees)
-+    assert result.reason == "NAMESPACE_IMPORT_RESOLUTION_UNMODELED"
-+    assert result.internal_graph_state == PROVED
-+    assert result.checked_source_modules == tuple(sorted(trees))
-+    assert result.unmodeled_namespace_parents == (
-+        ("pkg.a", 1, "pkg.ns.b", "pkg.ns"),
-+    )
-+
-+
-+def test_combined_uncertainty_preserves_both_diagnostics_and_proof():
-+    graph, trees = _case(
-+        "import os\nimport pkg.ns.b\n", namespace=True
-+    )
-+    result = _assess(graph, trees)
-+    assert result.reason == "NAMESPACE_IMPORT_RESOLUTION_UNMODELED"
-+    assert result.internal_graph_state == PROVED
-+    assert result.checked_source_modules == tuple(sorted(trees))
-+    assert result.unmodeled_external_imports == (
-+        ("pkg.a", 1, "import", "os"),
-+    )
-+    assert result.unmodeled_namespace_parents == (
-+        ("pkg.a", 2, "pkg.ns.b", "pkg.ns"),
-+    )
-+
-+
-+@pytest.mark.parametrize(
-+    "source,namespace",
-+    [
-+        ("import os\nimport pkg.b\n", False),
-+        ("import pkg.ns.b\n", True),
-+    ],
-+)
-+def test_graph_mismatch_never_exposes_partial_proof(source, namespace):
-+    graph, trees = _case(source, namespace=namespace, edge=False)
-+    _not_proved(
-+        _assess(graph, trees),
-+        "GRAPH_SOURCE_IMPORT_MISMATCH",
-+    )
-+
-+
-+def test_missing_indexed_target_has_no_proof():
-+    graph, trees = _case("import pkg.missing\n", edge=False)
-+    _not_proved(_assess(graph, trees), "MISSING_INDEXED_TARGET")
-+
-+
-+def test_missing_indexed_initializer_ast_has_no_proof():
-+    graph, trees = _case("import pkg.ns\n", namespace=True, edge=False)
-+    graph["pkg.ns.__init__"] = set()
-+    _not_proved(_assess(graph, trees), "MISSING_REQUIRED_INITIALIZER")
-+
-+
-+def test_unsupported_import_form_has_no_proof():
-+    graph, trees = _case("from pkg import *\n", edge=False)
-+    _not_proved(_assess(graph, trees), "UNSUPPORTED_IMPORT_FORM")
-+
-+
-+def test_ambiguous_module_package_collision_has_no_proof():
-+    graph, trees = _case("import pkg.ns\n", namespace=True, edge=False)
-+    graph["pkg.ns"] = set()
-+    trees["pkg.ns"] = ast.parse("pass\n")
-+    _not_proved(_assess(graph, trees), "AMBIGUOUS_PACKAGE_TARGET")
-+
-+
-+def test_proof_is_deterministic_and_inputs_are_unchanged():
-+    graph, trees = _case(
-+        "import os\nimport pkg.ns.b\n", namespace=True
-+    )
-+    graph_before = {name: set(targets) for name, targets in graph.items()}
-+    trees_before = dict(trees)
-+    first = _assess(graph, trees, tuple(trees))
-+    second = _assess(graph, trees, tuple(reversed(trees)))
-+    assert first == second
-+    assert first.checked_source_modules == tuple(sorted(trees))
-+    assert graph == graph_before
-+    assert trees == trees_before
-+    assert all(trees[name] is tree for name, tree in trees_before.items())
-+
-+
-+@pytest.mark.parametrize("namespace", [False, True])
-+def test_optional_scc_remains_indeterminate(namespace):
-+    target = "pkg.ns.b" if namespace else "pkg.b"
-+    source = (
-+        "import pkg.ns.b\nimport os\n"
-+        if namespace
-+        else "import pkg.b\nimport os\n"
-+    )
-+    graph = {
-+        "pkg.__init__": set(),
-+        "pkg.a": {target},
-+        target: {"pkg.a"},
-+    }
-+    trees = {
-+        "pkg.__init__": ast.parse("pass\n"),
-+        "pkg.a": ast.parse(source),
-+        target: ast.parse("import pkg.a\n"),
-+    }
-+    imports = {}
-+    for name, tree in trees.items():
-+        extracted, error = read_imports(
-+            Path(*name.split(".")).with_suffix(".py"),
-+            tree=tree,
-+        )
-+        assert error is None
-+        imports[name] = extracted
-+    closures = compute_cycle_model_source_closures_with_optional_children(
-+        graph, imports
-+    )
-+    report = analyze_cycle_scenarios(
-+        graph,
-+        trees,
-+        source_selection="OPTIONAL_NAMED_CHILDREN",
-+        indexed_imports_by_module=imports,
-+        source_closures=closures,
-+    )
-+    component = report.components[0]
-+    assert component.classification == "INDETERMINATE"
-+    assert component.coverage == "NONE"
-+    assert component.entry_assessments == ()
-+    assert component.reason == (
-+        "NAMESPACE_IMPORT_RESOLUTION_UNMODELED"
-+        if namespace
-+        else "EXTERNAL_IMPORT_EXECUTION_UNMODELED"
-+    )
-```
+FILES_CHANGED: `walkthrough.md` only for this task. FULL_DIFFS=NONE for code/tests/docs. Pre-existing uncommitted G14/G15 source/test changes were preserved and are not claimed as G16-R1 edits. This report is excluded from its own diff.
 
 ## FINAL_VERDICT
 
-PASS — full indexed AST/graph proof is explicit and bounded; execution uncertainty remains INDETERMINATE; 50 targeted tests pass; both FileState-bound SCC replays preserve 4 namespace candidates and 16 structural cycles.
+DISCOVERY_COMPLETE — 307 production modules were inventoried and FileState-bound, both SCC closures and all five group counts are consistent, and all 160 first `_compile` refusals were categorized without changing production LIVE.
