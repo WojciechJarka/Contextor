@@ -11,6 +11,10 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 
 from contextor.core.cycle_semantics.package_layout import build_package_layout
+from contextor.core.cycle_semantics.namespace_path_model import (
+    SearchPortion,
+    resolve_namespace_path,
+)
 from contextor.core.cycle_semantics.typing_guard import (
     RecognizedTypingGuard,
     matches_typing_guard,
@@ -1634,3 +1638,253 @@ def evaluate_package_import_order(
         frames[-1] = (module, index + 1)
 
     return result("MODEL_PASS")
+
+
+@dataclass(frozen=True)
+class ConditionalNamespaceModelAssessment:
+    entry_module: str
+    outcome: str
+    reason: str | None
+    model_assessment: PackageImportAssessment | None
+    namespace_parents: tuple[str, ...]
+    authority: str = (
+        "CONDITIONAL_ORDERED_INVENTORY_AND_AST_"
+        "NOT_RUNTIME_OR_LIVE_PROOF"
+    )
+
+
+def evaluate_conditional_namespace_import_order(
+    indexed_sources: Mapping[str, ast.AST],
+    entry_module: str,
+    portions: tuple[SearchPortion, ...],
+) -> ConditionalNamespaceModelAssessment:
+    """Evaluate a supplied closed PEP 420 inventory conditionally.
+
+    This assumes standard finder behavior for the supplied ordered
+    inventory. It does not authenticate actual runtime import state,
+    sys.path, sys.modules, custom finders, external portions,
+    source bytes or canonical LIVE freshness.
+
+    Namespace parents are represented by an empty initialization
+    program only within this private conditional evaluation.
+    No synthetic source is written or indexed.
+
+    The result is never eligible for MODEL_PASS warning suppression.
+    """
+
+    def reject(
+        reason: str,
+        parents: tuple[str, ...] = (),
+    ) -> ConditionalNamespaceModelAssessment:
+        return ConditionalNamespaceModelAssessment(
+            entry_module=entry_module,
+            outcome="UNKNOWN",
+            reason=reason,
+            model_assessment=None,
+            namespace_parents=parents,
+        )
+
+    if (
+        not isinstance(indexed_sources, Mapping)
+        or type(entry_module) is not str
+        or not entry_module
+        or type(portions) is not tuple
+        or not portions
+        or any(
+            type(portion) is not SearchPortion
+            or type(portion.files) is not frozenset
+            or any(
+                type(filename) is not str
+                for filename in portion.files
+            )
+            for portion in portions
+        )
+    ):
+        return reject("INVALID_CONDITIONAL_INPUT")
+
+    if (
+        not indexed_sources
+        or len(indexed_sources) > 256
+        or any(
+            type(module_id) is not str
+            or not isinstance(tree, ast.Module)
+            for module_id, tree in indexed_sources.items()
+        )
+    ):
+        return reject("INVALID_CONDITIONAL_SOURCE_COHORT")
+
+    try:
+        layout = build_package_layout(indexed_sources)
+    except (TypeError, ValueError):
+        return reject("INVALID_CONDITIONAL_LAYOUT")
+
+    nodes = {
+        node.name: node
+        for node in layout.nodes
+    }
+
+    namespace_parents = tuple(sorted(
+        node.name
+        for node in layout.nodes
+        if node.kind == "NAMESPACE_CANDIDATE"
+    ))
+
+    if not namespace_parents:
+        return reject("NO_NAMESPACE_PARENT")
+
+    if any(
+        node.kind not in {
+            "REGULAR_PACKAGE",
+            "MODULE_FILE",
+            "NAMESPACE_CANDIDATE",
+        }
+        for node in layout.nodes
+    ):
+        return reject(
+            "AMBIGUOUS_CONDITIONAL_LAYOUT",
+            namespace_parents,
+        )
+
+    expected_files = tuple(sorted(
+        module_id.replace(".", "/") + ".py"
+        for module_id in indexed_sources
+    ))
+
+    inventory_files = tuple(sorted(
+        filename
+        for portion in portions
+        for filename in portion.files
+        if filename.endswith(".py")
+    ))
+
+    if inventory_files != expected_files:
+        return reject(
+            "INVENTORY_SOURCE_DOMAIN_MISMATCH",
+            namespace_parents,
+        )
+
+    for node in layout.nodes:
+        resolution = resolve_namespace_path(
+            portions,
+            node.name,
+            standard_finder_assumed=True,
+        )
+
+        if resolution.status != "CONDITIONAL":
+            return reject(
+                "CONDITIONAL_PATH_UNRESOLVED:" + node.name,
+                namespace_parents,
+            )
+
+        if node.kind == "NAMESPACE_CANDIDATE":
+            if (
+                resolution.kind != "NAMESPACE_PACKAGE"
+                or resolution.source is not None
+                or not resolution.portions
+            ):
+                return reject(
+                    "NAMESPACE_PATH_KIND_MISMATCH:" + node.name,
+                    namespace_parents,
+                )
+            continue
+
+        if (
+            len(node.indexed_module_ids) != 1
+            or resolution.kind != node.kind
+        ):
+            return reject(
+                "CONDITIONAL_SOURCE_KIND_MISMATCH:" + node.name,
+                namespace_parents,
+            )
+
+        expected_path = (
+            node.indexed_module_ids[0].replace(".", "/")
+            + ".py"
+        )
+
+        selected_candidates = {
+            portion.root_id + ":" + expected_path
+            for portion in portions
+            if expected_path in portion.files
+        }
+
+        if resolution.source not in selected_candidates:
+            return reject(
+                "CONDITIONAL_SOURCE_PATH_MISMATCH:" + node.name,
+                namespace_parents,
+            )
+
+    # An implicit namespace has no executable __init__.py.
+    # Do not let a synthetic model-only initializer become
+    # an explicitly importable source module.
+    synthetic_ids = {
+        name + ".__init__"
+        for name in namespace_parents
+    }
+
+    for tree in indexed_sources.values():
+        for statement in ast.walk(tree):
+            if isinstance(statement, ast.Import):
+                if any(
+                    alias.name in synthetic_ids
+                    for alias in statement.names
+                ):
+                    return reject(
+                        "SYNTHETIC_INITIALIZER_REFERENCE",
+                        namespace_parents,
+                    )
+
+            elif isinstance(statement, ast.ImportFrom):
+                if (
+                    statement.level == 0
+                    and statement.module in namespace_parents
+                    and any(
+                        alias.name == "__init__"
+                        for alias in statement.names
+                    )
+                ):
+                    return reject(
+                        "SYNTHETIC_INITIALIZER_REFERENCE",
+                        namespace_parents,
+                    )
+
+    augmented = dict(indexed_sources)
+
+    for parent in namespace_parents:
+        augmented[parent + ".__init__"] = ast.Module(
+            body=[],
+            type_ignores=[],
+        )
+
+    # Reuse the existing import-order simulator.
+    # Its internal observations remain model-relative.
+    # Never change or promote its execution outcomes.
+    model = evaluate_package_import_order(
+        augmented,
+        entry_module,
+    )
+
+    conditional_outcomes = {
+        "MODEL_PASS": "CONDITIONAL_MODEL_PASS",
+        "EARLY_BINDING_HAZARD":
+            "CONDITIONAL_EARLY_BINDING_HAZARD",
+        "MISSING_EXPORT": "CONDITIONAL_MISSING_EXPORT",
+        "MISSING_ATTRIBUTE": "CONDITIONAL_MISSING_ATTRIBUTE",
+    }
+
+    outcome = conditional_outcomes.get(
+        model.outcome,
+        "UNKNOWN",
+    )
+
+    return ConditionalNamespaceModelAssessment(
+        entry_module=entry_module,
+        outcome=outcome,
+        reason=(
+            None
+            if outcome != "UNKNOWN"
+            else "RESTRICTED_MODEL_UNKNOWN"
+        ),
+        model_assessment=model,
+        namespace_parents=namespace_parents,
+    )

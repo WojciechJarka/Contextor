@@ -2,8 +2,14 @@
 
 from __future__ import annotations
 
+import ast
+
 from dataclasses import asdict
 
+from contextor.core.cycle_semantics.package_model import (
+    evaluate_conditional_namespace_import_order,
+    evaluate_package_import_order,
+)
 from contextor.core.cycle_semantics.namespace_path_model import (
     SearchPortion,
     resolve_namespace_path,
@@ -244,3 +250,348 @@ def test_t11_deterministic_and_not_runtime_certified():
         "CONDITIONAL_ORDERED_PATH_INVENTORY_NOT_RUNTIME_PROOF"
     )
     assert first.status == "CONDITIONAL"
+
+
+def _g18_p2_p5_sources(*, hazard=False):
+    return {
+        "pkg.__init__": ast.parse("pass\n"),
+        "pkg.ns.a": ast.parse(
+            (
+                "import pkg.ns.b\n"
+                "value = 1\n"
+            )
+            if hazard else (
+                "value = 1\n"
+                "import pkg.ns.b\n"
+            )
+        ),
+        "pkg.ns.b": ast.parse(
+            "from pkg.ns.a import value\n"
+        ),
+    }
+
+
+def _g18_p2_p5_portions():
+    return (
+        SearchPortion(
+            "root",
+            frozenset({
+                "pkg/__init__.py",
+                "pkg/ns/a.py",
+                "pkg/ns/b.py",
+            }),
+        ),
+    )
+
+
+def test_g18_p2_p5_default_namespace_remains_unknown():
+    sources = _g18_p2_p5_sources()
+
+    result = evaluate_package_import_order(
+        sources,
+        "pkg.ns.a",
+    )
+
+    assert result.outcome == "UNKNOWN"
+
+
+def test_g18_p2_p5_conditional_safe_order():
+    sources = _g18_p2_p5_sources()
+
+    result = evaluate_conditional_namespace_import_order(
+        sources,
+        "pkg.ns.a",
+        _g18_p2_p5_portions(),
+    )
+
+    assert result.outcome == "CONDITIONAL_MODEL_PASS"
+    assert result.reason is None
+    assert result.model_assessment is not None
+    assert result.model_assessment.outcome == "MODEL_PASS"
+    assert result.namespace_parents == ("pkg.ns",)
+    assert result.authority == (
+        "CONDITIONAL_ORDERED_INVENTORY_AND_AST_"
+        "NOT_RUNTIME_OR_LIVE_PROOF"
+    )
+
+
+def test_g18_p2_p5_conditional_early_binding_hazard():
+    sources = _g18_p2_p5_sources(hazard=True)
+
+    result = evaluate_conditional_namespace_import_order(
+        sources,
+        "pkg.ns.a",
+        _g18_p2_p5_portions(),
+    )
+
+    assert result.outcome == (
+        "CONDITIONAL_EARLY_BINDING_HAZARD"
+    )
+    assert result.model_assessment is not None
+    assert result.model_assessment.outcome == (
+        "EARLY_BINDING_HAZARD"
+    )
+    assert result.model_assessment.target_module == (
+        "pkg.ns.a"
+    )
+    assert result.model_assessment.symbol == "value"
+
+
+def test_g18_p2_p5_other_entry_can_pass():
+    sources = _g18_p2_p5_sources(hazard=True)
+
+    result = evaluate_conditional_namespace_import_order(
+        sources,
+        "pkg.ns.b",
+        _g18_p2_p5_portions(),
+    )
+
+    assert result.outcome == "CONDITIONAL_MODEL_PASS"
+
+
+def test_g18_p2_p5_two_namespace_portions():
+    sources = {
+        "ns.a": ast.parse(
+            "value = 1\n"
+            "import ns.b\n"
+        ),
+        "ns.b": ast.parse(
+            "from ns.a import value\n"
+        ),
+    }
+
+    portions = (
+        SearchPortion(
+            "first",
+            frozenset({"ns/a.py"}),
+        ),
+        SearchPortion(
+            "second",
+            frozenset({"ns/b.py"}),
+        ),
+    )
+
+    result = evaluate_conditional_namespace_import_order(
+        sources,
+        "ns.a",
+        portions,
+    )
+
+    assert result.outcome == "CONDITIONAL_MODEL_PASS"
+    assert result.namespace_parents == ("ns",)
+
+
+def test_g18_p2_p5_unlisted_shadowing_source_unknown():
+    sources = {
+        "ns.a": ast.parse(
+            "value = 1\n"
+            "import ns.b\n"
+        ),
+        "ns.b": ast.parse(
+            "from ns.a import value\n"
+        ),
+    }
+
+    portions = (
+        SearchPortion(
+            "namespace",
+            frozenset({
+                "ns/a.py",
+                "ns/b.py",
+            }),
+        ),
+        SearchPortion(
+            "shadow",
+            frozenset({
+                "ns/__init__.py",
+            }),
+        ),
+    )
+
+    result = evaluate_conditional_namespace_import_order(
+        sources,
+        "ns.a",
+        portions,
+    )
+
+    assert result.outcome == "UNKNOWN"
+    assert result.reason == (
+        "INVENTORY_SOURCE_DOMAIN_MISMATCH"
+    )
+
+
+def test_g18_p2_p5_alternative_loader_unknown():
+    sources = {
+        "ns.a": ast.parse(
+            "value = 1\n"
+            "import ns.b\n"
+        ),
+        "ns.b": ast.parse(
+            "from ns.a import value\n"
+        ),
+    }
+
+    portions = (
+        SearchPortion(
+            "root",
+            frozenset({
+                "ns/a.py",
+                "ns/b.py",
+                "ns/a.cp315-win_amd64.pyd",
+            }),
+        ),
+    )
+
+    result = evaluate_conditional_namespace_import_order(
+        sources,
+        "ns.a",
+        portions,
+    )
+
+    assert result.outcome == "UNKNOWN"
+    assert result.reason == (
+        "CONDITIONAL_PATH_UNRESOLVED:ns.a"
+    )
+
+
+def test_g18_p2_p5_missing_source_unknown():
+    sources = _g18_p2_p5_sources()
+
+    portions = (
+        SearchPortion(
+            "root",
+            frozenset({
+                "pkg/__init__.py",
+                "pkg/ns/a.py",
+            }),
+        ),
+    )
+
+    result = evaluate_conditional_namespace_import_order(
+        sources,
+        "pkg.ns.a",
+        portions,
+    )
+
+    assert result.outcome == "UNKNOWN"
+    assert result.reason == (
+        "INVENTORY_SOURCE_DOMAIN_MISMATCH"
+    )
+
+
+def test_g18_p2_p5_no_namespace_parent_unknown():
+    sources = {
+        "pkg.__init__": ast.parse("pass\n"),
+        "pkg.a": ast.parse("value = 1\n"),
+    }
+
+    portions = (
+        SearchPortion(
+            "root",
+            frozenset({
+                "pkg/__init__.py",
+                "pkg/a.py",
+            }),
+        ),
+    )
+
+    result = evaluate_conditional_namespace_import_order(
+        sources,
+        "pkg.a",
+        portions,
+    )
+
+    assert result.outcome == "UNKNOWN"
+    assert result.reason == "NO_NAMESPACE_PARENT"
+
+
+def test_g18_p2_p5_explicit_synthetic_initializer_rejected():
+    sources = {
+        "ns.a": ast.parse(
+            "import ns.__init__\n"
+        ),
+    }
+
+    portions = (
+        SearchPortion(
+            "root",
+            frozenset({"ns/a.py"}),
+        ),
+    )
+
+    result = evaluate_conditional_namespace_import_order(
+        sources,
+        "ns.a",
+        portions,
+    )
+
+    assert result.outcome == "UNKNOWN"
+    assert result.reason == (
+        "SYNTHETIC_INITIALIZER_REFERENCE"
+    )
+
+
+def test_g18_p2_p5_external_execution_still_unknown():
+    sources = {
+        "ns.a": ast.parse(
+            "import os\n"
+            "import ns.b\n"
+        ),
+        "ns.b": ast.parse(
+            "import ns.a\n"
+        ),
+    }
+
+    portions = (
+        SearchPortion(
+            "root",
+            frozenset({
+                "ns/a.py",
+                "ns/b.py",
+            }),
+        ),
+    )
+
+    result = evaluate_conditional_namespace_import_order(
+        sources,
+        "ns.a",
+        portions,
+    )
+
+    assert result.outcome == "UNKNOWN"
+    assert result.reason == "RESTRICTED_MODEL_UNKNOWN"
+
+
+def test_g18_p2_p5_deterministic_and_ast_immutable():
+    sources = _g18_p2_p5_sources()
+
+    before = {
+        name: ast.dump(
+            tree,
+            include_attributes=True,
+        )
+        for name, tree in sources.items()
+    }
+
+    first = evaluate_conditional_namespace_import_order(
+        sources,
+        "pkg.ns.a",
+        _g18_p2_p5_portions(),
+    )
+
+    second = evaluate_conditional_namespace_import_order(
+        sources,
+        "pkg.ns.a",
+        _g18_p2_p5_portions(),
+    )
+
+    assert first == second
+    assert first.outcome == "CONDITIONAL_MODEL_PASS"
+
+    assert before == {
+        name: ast.dump(
+            tree,
+            include_attributes=True,
+        )
+        for name, tree in sources.items()
+    }
