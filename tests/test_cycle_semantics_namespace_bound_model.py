@@ -146,6 +146,90 @@ def test_p6_finder_assumption_is_required():
     assert result.conditional_assessment is None
 
 
+def _p9_source_bound_annotated_case():
+    roots, bindings, hashes, snapshots = _case()
+
+    snapshots["pkg.ns.a"] = _snapshot(
+        "class Holder:\n"
+        "    def method(self, x: Later) -> Later:\n"
+        "        pass\n"
+        "value = 1\n"
+        "import pkg.ns.b\n"
+    )
+
+    hashes["pkg.ns.a"] = (
+        snapshots["pkg.ns.a"].source_fingerprint
+    )
+
+    return roots, bindings, hashes, snapshots
+
+
+def test_p9_source_bound_default_stays_unknown():
+    result = _evaluate(
+        _p9_source_bound_annotated_case(),
+    )
+
+    assert result.outcome == "UNKNOWN"
+    assert result.reason == "RESTRICTED_MODEL_UNKNOWN"
+
+
+def test_p9_source_bound_deferred_cpython315():
+    result = evaluate_source_bound_conditional_namespace_import_order(
+        *_p9_source_bound_annotated_case(),
+        "pkg.ns.a",
+        standard_finder_assumed=True,
+        target_python_version=(3, 15),
+    )
+
+    assert result.outcome == "CONDITIONAL_MODEL_PASS"
+    assert result.reason is None
+    assert result.source_evidence_sha256 is not None
+    assert result.conditional_assessment is not None
+    assert (
+        result.conditional_assessment.target_python_version
+        == (3, 15)
+    )
+    assert result.authority == (
+        "SOURCE_BOUND_CALLER_SUPPLIED_INVENTORY_"
+        "NOT_RUNTIME_OR_LIVE_PROOF"
+    )
+
+
+def test_p9_source_bound_deferred_still_checks_hash():
+    roots, bindings, hashes, snapshots = (
+        _p9_source_bound_annotated_case()
+    )
+
+    hashes["pkg.ns.a"] = "0" * 64
+
+    result = evaluate_source_bound_conditional_namespace_import_order(
+        roots,
+        bindings,
+        hashes,
+        snapshots,
+        "pkg.ns.a",
+        standard_finder_assumed=True,
+        target_python_version=(3, 15),
+    )
+
+    assert result.outcome == "UNKNOWN"
+    assert result.reason == "SOURCE_FINGERPRINT_MISMATCH"
+    assert result.source_evidence_sha256 is None
+
+
+def test_p9_source_bound_bad_interpreter_rejected():
+    result = evaluate_source_bound_conditional_namespace_import_order(
+        *_p9_source_bound_annotated_case(),
+        "pkg.ns.a",
+        standard_finder_assumed=True,
+        target_python_version=(3, 14),
+    )
+
+    assert result.outcome == "UNKNOWN"
+    assert result.reason == "TARGET_INTERPRETER_UNVERIFIED"
+    assert result.source_evidence_sha256 is None
+
+
 def test_p6_changed_bytes_fail_closed():
     roots, bindings, hashes, snapshots = _case()
     snapshots["pkg.ns.a"] = _snapshot(

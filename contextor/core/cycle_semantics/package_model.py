@@ -7,6 +7,7 @@ Never executes analyzed code or certifies general runtime safety.
 from __future__ import annotations
 
 import ast
+import sys
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 
@@ -1651,6 +1652,55 @@ class ConditionalNamespaceModelAssessment:
         "CONDITIONAL_ORDERED_INVENTORY_AND_AST_"
         "NOT_RUNTIME_OR_LIVE_PROOF"
     )
+    target_python_version: tuple[int, int] | None = None
+
+
+def _conditional_annotation_mode_for_target(
+    target_python_version: tuple[int, int] | None,
+) -> tuple[str | None, str | None]:
+    """Select documented CPython annotation semantics.
+
+    The explicit target version must match the interpreter
+    executing this restricted model. This does not prove the
+    interpreter used by an analyzed application.
+    """
+
+    if target_python_version is None:
+        return None, None
+
+    if (
+        type(target_python_version) is not tuple
+        or len(target_python_version) != 2
+        or any(
+            type(part) is not int
+            for part in target_python_version
+        )
+    ):
+        return None, "INVALID_TARGET_PYTHON_VERSION"
+
+    if target_python_version not in {
+        (3, 10),
+        (3, 11),
+        (3, 12),
+        (3, 13),
+        (3, 14),
+        (3, 15),
+    }:
+        return None, "UNSUPPORTED_TARGET_PYTHON_VERSION"
+
+    if (
+        sys.implementation.name != "cpython"
+        or target_python_version != (
+            sys.version_info.major,
+            sys.version_info.minor,
+        )
+    ):
+        return None, "TARGET_INTERPRETER_UNVERIFIED"
+
+    if target_python_version >= (3, 14):
+        return "DEFERRED", None
+
+    return "STOCK_EAGER", None
 
 
 def _conditional_reachable_source_cohort(
@@ -1800,6 +1850,8 @@ def evaluate_conditional_namespace_import_order(
     indexed_sources: Mapping[str, ast.AST],
     entry_module: str,
     portions: tuple[SearchPortion, ...],
+    *,
+    target_python_version: tuple[int, int] | None = None,
 ) -> ConditionalNamespaceModelAssessment:
     """Evaluate a supplied closed PEP 420 inventory conditionally.
 
@@ -1815,6 +1867,12 @@ def evaluate_conditional_namespace_import_order(
     The result is never eligible for MODEL_PASS warning suppression.
     """
 
+    annotation_mode, version_error = (
+        _conditional_annotation_mode_for_target(
+            target_python_version
+        )
+    )
+
     def reject(
         reason: str,
         parents: tuple[str, ...] = (),
@@ -1825,7 +1883,15 @@ def evaluate_conditional_namespace_import_order(
             reason=reason,
             model_assessment=None,
             namespace_parents=parents,
+            target_python_version=(
+                target_python_version
+                if version_error is None
+                else None
+            ),
         )
+
+    if version_error is not None:
+        return reject(version_error)
 
     if (
         not isinstance(indexed_sources, Mapping)
@@ -2035,6 +2101,7 @@ def evaluate_conditional_namespace_import_order(
     model = evaluate_package_import_order(
         augmented,
         entry_module,
+        annotation_semantics=annotation_mode,
     )
 
     conditional_outcomes = {
@@ -2060,4 +2127,5 @@ def evaluate_conditional_namespace_import_order(
         ),
         model_assessment=model,
         namespace_parents=namespace_parents,
+        target_python_version=target_python_version,
     )

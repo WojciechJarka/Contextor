@@ -420,6 +420,157 @@ def test_g18_p2_p5_unlisted_shadowing_source_unknown():
     )
 
 
+def _p9_annotation_sources(code):
+    return {"ns.a": ast.parse(code)}
+
+
+def _p9_annotation_portions():
+    return (
+        SearchPortion(
+            "root",
+            frozenset({"ns/a.py"}),
+        ),
+    )
+
+
+def test_p9_default_annotation_version_stays_unknown():
+    sources = _p9_annotation_sources(
+        "class Holder:\n"
+        "    def method(self, value: Later) -> Later:\n"
+        "        pass\n"
+    )
+
+    result = evaluate_conditional_namespace_import_order(
+        sources,
+        "ns.a",
+        _p9_annotation_portions(),
+    )
+
+    assert result.outcome == "UNKNOWN"
+    assert result.reason == "RESTRICTED_MODEL_UNKNOWN"
+    assert result.target_python_version is None
+
+
+def test_p9_cpython315_deferred_method_annotations():
+    sources = _p9_annotation_sources(
+        "class Holder:\n"
+        "    def method(self, value: side_effect())"
+        " -> Later:\n"
+        "        pass\n"
+    )
+
+    result = evaluate_conditional_namespace_import_order(
+        sources,
+        "ns.a",
+        _p9_annotation_portions(),
+        target_python_version=(3, 15),
+    )
+
+    assert result.outcome == "CONDITIONAL_MODEL_PASS"
+    assert result.reason is None
+    assert result.target_python_version == (3, 15)
+    assert result.model_assessment is not None
+    assert result.model_assessment.outcome == "MODEL_PASS"
+    assert result.authority == (
+        "CONDITIONAL_ORDERED_INVENTORY_AND_AST_"
+        "NOT_RUNTIME_OR_LIVE_PROOF"
+    )
+
+
+def test_p9_target_interpreter_mismatch_fails_closed():
+    sources = _p9_annotation_sources("pass\n")
+
+    result = evaluate_conditional_namespace_import_order(
+        sources,
+        "ns.a",
+        _p9_annotation_portions(),
+        target_python_version=(3, 14),
+    )
+
+    assert result.outcome == "UNKNOWN"
+    assert result.reason == "TARGET_INTERPRETER_UNVERIFIED"
+    assert result.model_assessment is None
+
+
+def test_p9_invalid_target_version_fails_closed():
+    sources = _p9_annotation_sources("pass\n")
+
+    for version in ((True, 15), "3.15", (3,), (3, 16)):
+        result = evaluate_conditional_namespace_import_order(
+            sources,
+            "ns.a",
+            _p9_annotation_portions(),
+            target_python_version=version,
+        )
+
+        assert result.outcome == "UNKNOWN"
+        assert result.model_assessment is None
+        assert result.reason in {
+            "INVALID_TARGET_PYTHON_VERSION",
+            "UNSUPPORTED_TARGET_PYTHON_VERSION",
+        }
+
+
+def test_p9_dynamic_default_remains_unknown():
+    sources = _p9_annotation_sources(
+        "class Holder:\n"
+        "    def method(self, value: Later"
+        " = side_effect()):\n"
+        "        pass\n"
+    )
+
+    result = evaluate_conditional_namespace_import_order(
+        sources,
+        "ns.a",
+        _p9_annotation_portions(),
+        target_python_version=(3, 15),
+    )
+
+    assert result.outcome == "UNKNOWN"
+    assert result.reason == "RESTRICTED_MODEL_UNKNOWN"
+
+
+def test_p9_annotation_introspection_remains_unknown():
+    sources = _p9_annotation_sources(
+        "def method(value: side_effect()):\n"
+        "    pass\n"
+        "print(method.__annotations__)\n"
+    )
+
+    result = evaluate_conditional_namespace_import_order(
+        sources,
+        "ns.a",
+        _p9_annotation_portions(),
+        target_python_version=(3, 15),
+    )
+
+    assert result.outcome == "UNKNOWN"
+    assert result.reason == "RESTRICTED_MODEL_UNKNOWN"
+
+
+def test_p9_external_import_still_unknown():
+    sources = _p9_annotation_sources(
+        "import missing_external_xyz\n"
+        "class Holder:\n"
+        "    def method(self, x: Later):\n"
+        "        pass\n"
+    )
+
+    result = evaluate_conditional_namespace_import_order(
+        sources,
+        "ns.a",
+        _p9_annotation_portions(),
+        target_python_version=(3, 15),
+    )
+
+    assert result.outcome == "UNKNOWN"
+    assert result.reason == "RESTRICTED_MODEL_UNKNOWN"
+    assert result.model_assessment is not None
+    assert result.model_assessment.target_module == (
+        "missing_external_xyz"
+    )
+
+
 def test_g18_p2_p5_alternative_loader_unknown():
     sources = {
         "ns.a": ast.parse(

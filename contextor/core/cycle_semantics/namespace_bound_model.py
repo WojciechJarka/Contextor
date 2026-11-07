@@ -27,6 +27,7 @@ from .namespace_source_binding import (
 )
 from .package_model import (
     ConditionalNamespaceModelAssessment,
+    _conditional_annotation_mode_for_target,
     evaluate_conditional_namespace_import_order,
 )
 
@@ -54,6 +55,7 @@ def evaluate_source_bound_conditional_namespace_import_order(
     entry_module: str,
     *,
     standard_finder_assumed: bool = False,
+    target_python_version: tuple[int, int] | None = None,
 ) -> SourceBoundConditionalNamespaceAssessment:
     """Parse indexed byte snapshots and conditionally evaluate PEP 420.
 
@@ -87,6 +89,15 @@ def evaluate_source_bound_conditional_namespace_import_order(
         or type(standard_finder_assumed) is not bool
     ):
         return reject("INVALID_ENTRY_OR_FINDER_POLICY")
+
+    _, version_error = (
+        _conditional_annotation_mode_for_target(
+            target_python_version
+        )
+    )
+
+    if version_error is not None:
+        return reject(version_error)
 
     bound = bind_indexed_namespace_resolution(
         roots,
@@ -179,6 +190,7 @@ def evaluate_source_bound_conditional_namespace_import_order(
         parsed_sources,
         entry_module,
         roots,
+        target_python_version=target_python_version,
     )
 
     # Never convert CONDITIONAL_MODEL_PASS into MODEL_PASS.

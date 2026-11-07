@@ -1,557 +1,498 @@
-# C16-B03-P1D3G18-P2-P8
+# C16-B03-P1D3G18-P2-P9 — interpreter-bound deferred annotation semantics
 
 ## HEAD_BEFORE_AFTER
 
-`240be3cf793c6b5fb68d1e243292e4fc04b98c2d` before and after. Initial worktree clean. No commit or push.
+- Before and after: `3abd30b0c216c654d78147b7eada80900731bff5`. No commit or push.
+- Before: only prior `walkthrough.md` modification. After: four task source/test files and this report modified.
 
 ## FILES_CHANGED
 
 - `contextor/core/cycle_semantics/package_model.py`
+- `contextor/core/cycle_semantics/namespace_bound_model.py`
 - `tests/test_cycle_semantics_namespace_path_model.py`
 - `tests/test_cycle_semantics_namespace_bound_model.py`
-
-`walkthrough.md` was overwritten as the report.
+- `walkthrough.md` (report, excluded from its own FULL_DIFFS)
 
 ## CPYTHON_IDENTITY
 
-Active repository `.venv\Scripts\python.exe`: CPython 3.15.2. No interpreter switch.
+- DIRECT_EVIDENCE: repository `.venv\Scripts\python.exe -B -V` is Python 3.15.2. No interpreter switch.
 
-## FULL_INVENTORY_VS_REACHABLE_COHORT
+## D9_ROOT_CAUSE
 
-DIRECT_EVIDENCE: The new helper runs only after full indexed AST layout validation, full supplied `.py` inventory equality, conditional path checks and synthetic-initializer reference rejection. On canonical revision 1105, all 308 physical production `.py` sources were indexed and FileState-bound. The full source binder returned `SOURCE_BOUND_CONDITIONAL` with digest for `contextor.core.api.facade`. The conservative cohort selected 202 physical ASTs for the restricted evaluator; it excluded unrelated `contextor.__main__` and included `contextor.core.analysis.cache_manager`. The source-bound wrapper remained `UNKNOWN / RESTRICTED_MODEL_UNKNOWN`, with nested model UNKNOWN at `contextor.core.analysis.cache_manager` and zero model events. This is a measured diagnostic result, not safety or runtime import-selection proof.
+- CONTRACT_PROVED: absent explicit target, the restricted model passes `annotation_semantics=None`. `cache_manager.py:33-38` has a class with annotated `__init__`; `_safe_passive_function_definition` rejects parameter annotations under that mode, so `_compile` refuses the class. The P9 opt-in changes only the conditional evaluator's chosen annotation mode.
 
-## CONSERVATIVE_CLOSURE_CONTRACT
+## PEP649_VERSION_ASSUMPTION_CONTRACT
 
-DIRECT_EVIDENCE: Added the specified `_conditional_reachable_source_cohort` and substituted its selected mapping only at the original restricted-evaluator invocation. The helper follows all lexical `ast.Import` and `ast.ImportFrom` nodes, including deferred and guarded bodies, adds possible named children and indexed regular parent initializers, and adds model-only empty namespace initializers only where needed. It can over-include physical sources. The original package evaluator, full inventory/path validation, source byte binding, graph, warning policy and authority strings were not edited. No selected source was treated as necessarily executed.
+- Implementation: the requested helper accepts only exact tuples for CPython 3.10-3.15 matching the executing interpreter. It returns DEFERRED for 3.14+, STOCK_EAGER for older supported versions, and explicit errors for invalid, unsupported or mismatched versions. None retains the old behavior.
+- The selected version is a caller-declared, host-validated conditional model assumption. It is not evidence of an analyzed application's interpreter or its actual imports, finder state or LIVE adoption.
+
+## DEFAULT_VS_EXPLICIT_315_MODEL
+
+- DIRECT_EVIDENCE: with the current 308-source FileState-bound inventory, default call returns UNKNOWN / RESTRICTED_MODEL_UNKNOWN at `contextor.core.analysis.cache_manager`, zero model events. Explicit (3,15) returns UNKNOWN / RESTRICTED_MODEL_UNKNOWN at `contextor.core.analysis.full_analysis_lease`, zero model events.
+- DIRECT_EVIDENCE: `cache_manager` `_compile` is False with default semantics and True with DEFERRED. Next model target `full_analysis_lease.py:27-28` has `@dataclass(frozen=True, slots=True)` before `class FullAnalysisLease`; its decorated class is rejected by the existing passive-class guard. This is a model limitation, not a demonstrated runtime failure.
 
 ## TARGETED_TEST_RESULTS
 
-Five specified modules: **186 passed in 26.27s**, exit code 0. `git diff --check` exited 0.
+- Exact six-module command from task, CPython 3.15.2: **301 passed in 31.07s**, zero failures. No full suite.
+- `git diff --check`: exit 0. Git emitted only line-ending conversion notices.
 
 ## NEGATIVE_SAFETY_TESTS
 
-CONTRACT_PROVED by passing supplied assertions: unsupported direct import, absolute and relative named child, and regular parent initializer remain UNKNOWN; the earlier conditional hazard remains detected; omitted inventory remains `INVENTORY_SOURCE_DOMAIN_MISMATCH`; a source outside the model cohort remains bound and a forged hash for it remains `SOURCE_FINGERPRINT_MISMATCH`. Unreachable unsupported sources can be excluded from the restricted simulation only after full inventory validation. No unqualified MODEL_PASS was returned by the conditional/source-bound interfaces.
+- Passing P9 cases cover default UNKNOWN, mismatched and malformed interpreter versions, dynamic default UNKNOWN, annotation introspection UNKNOWN, external import UNKNOWN, source fingerprint mismatch and source-bound bad interpreter. Existing negative assertions in the six targeted modules passed.
 
-## REAL_REPOSITORY_REPLAY
+## FULL_SOURCE_BOUND_REPLAY
 
-DIRECT_EVIDENCE: Snapshot revision 1105, state_id `20261106_195021`, repo_id `ctx_8efc50d8`; 308 physical/indexed production modules and 626 total indexed modules including tests. Full-production source binding succeeds. SCC1: 44 members, 202 optional selected sources, 607 external records, four namespace records, external gate `OPAQUE_EXECUTION_POSSIBLE`. SCC2: 9 members, 222 sources, 725 external records, four namespace records, same gate. Both actual SCC scenario checks remain `INDETERMINATE / NAMESPACE_IMPORT_RESOLUTION_UNMODELED`, coverage NONE, zero entry assessments. Separate source-bound conditional calls for the two cohorts (202 and 222 sources) both bound with digest and returned `UNKNOWN / RESTRICTED_MODEL_UNKNOWN` at `contextor.core.analysis.cache_manager`. No real SCC MODEL_PASS was promoted. Structural DFS cycles remain 16.
+- DIRECT_EVIDENCE: metadata-selected FileState was revision 1107/state_id `20261106_195021` during facade replay; 308 production source bytes matched its SHA-256 values, zero mismatches. No Git restoration was required. Selected model cohort: 202 ASTs. Bound digest for both calls: `6ca1f598aef59e2760bcadb4fac2ba2dbf4bbb180f63de5ab46625cd161b815d`.
+- Default and explicit outcomes are above. Both preserve outer authority `SOURCE_BOUND_CALLER_SUPPLIED_INVENTORY_NOT_RUNTIME_OR_LIVE_PROOF` and inner authority `CONDITIONAL_ORDERED_INVENTORY_AND_AST_NOT_RUNTIME_OR_LIVE_PROOF`.
+- Canonical revision advanced under the active watcher during this task. Each replay verified all input bytes against the metadata-selected FileState of its own observed revision. The SCC2 replay later used revision 1109 with a fresh all-source hash check. No mixed-generation inputs were accepted.
 
-## SOURCE_BINDING
+## REAL_SCC_GATES
 
-DIRECT_EVIDENCE: Metadata-selected FileState and snapshot agreed on revision 1105/state_id `20261106_195021`. Current SHA-256 matched FileState for all 308 production files and all 222 files in the SCC union; zero mismatch. The binder still validates all supplied bytes before the reachable cohort is formed. No analyzed repository source was executed; AST was parsed and model functions were invoked only.
+- DIRECT_EVIDENCE: SCC1/facade entry remains UNKNOWN at `full_analysis_lease` under explicit 3.15. SCC2 entry `contextor.ui.gui`, with 308 FileState-matching production sources at revision 1109, remains UNKNOWN / RESTRICTED_MODEL_UNKNOWN at `full_analysis_lease`, zero model events.
+- MCP: 16 structural DFS cycles, 16 active warnings, model_pass_count=0, cycle_semantics=stale. No MODEL_PASS promotion, /3 receipt or warning suppression.
 
 ## MCP_POST_CHANGE_AUDIT
 
-DIRECT_EVIDENCE: Contextor MCP for all three changed modules returned revision 1105, canonical_state fresh, workspace_sync verified, advisory warning null, syntax errors 0, structural DFS cycles 16, active warnings 16, model_pass_count 0 and cycle_semantics stale. No FULL, update_file or restart occurred.
+- Contextor MCP module contexts for both production modules and both changed test modules: canonical revision 1109, canonical_state=fresh, workspace_sync=verified, advisory_warning=null, module/graph/cycles fresh, cycle_semantics stale, syntax_errors=0, structural DFS cycles=16, active_warning_count=16, model_pass_count=0. Provenance LIVE. Read-only metadata at revision 1109 confirms state_id `20261106_195021`, repo_id `ctx_8efc50d8` and root `C:\Temp\Contextor_Repo`. MCP reports source freshness of the changed files; it does not establish that an already-running process loaded the changed Python code.
+- Current disk SHA-256: `package_model.py` `709bbae668a5a2f9a11dbabf491e14ca28f9c5f854fa8e37dc4154b430c17b4d`; `namespace_bound_model.py` `5952eec55fe7eecfb3047826aff38e76531707d4b89af4dd53adc6c1796bcf27`.
 
-## REMAINING_UNKNOWN_GATES
+## RESTART_DECISION
 
-The supplied inventory and source binding do not certify actual runtime `sys.path`, `sys.meta_path`, `sys.modules`, loaders or LIVE generation. The restricted model still returns UNKNOWN at `cache_manager` for the real full-production and SCC cohorts. Actual SCC namespace/external execution uncertainty and stale cycle semantics remain. Runtime adoption of modified source was not certified; local replay used current repository source. No warning suppression or /3 receipt was claimed.
+- No restart was performed. The opt-in evaluator is not exposed directly by MCP, and fresh-process replay loaded the changed code. Adoption by the already-running Desktop/backend/LIVE process remains unverified. Later integration requires separate process identity, interpreter, GUI ownership and LIVE authority verification after controlled restart.
+
+## REMAINING_UNKNOWN
+
+- Actual analyzed application interpreter, `sys.path`, `sys.meta_path`, `sys.modules`, external execution effects, and active-process code adoption remain unknown. The canonical cycle-semantics family remains stale. No production FULL or update_file was performed.
 
 ## FULL_DIFFS
 
-Complete actual Git diff of all three production/test changes follows.
+Complete actual diffs of the four production/test files follow. The report's own diff is excluded.
 
 ```diff
+diff --git a/contextor/core/cycle_semantics/namespace_bound_model.py b/contextor/core/cycle_semantics/namespace_bound_model.py
+index 20a4882..59d3b46 100644
+--- a/contextor/core/cycle_semantics/namespace_bound_model.py
++++ b/contextor/core/cycle_semantics/namespace_bound_model.py
+@@ -27,6 +27,7 @@ from .namespace_source_binding import (
+ )
+ from .package_model import (
+     ConditionalNamespaceModelAssessment,
++    _conditional_annotation_mode_for_target,
+     evaluate_conditional_namespace_import_order,
+ )
+ 
+@@ -54,6 +55,7 @@ def evaluate_source_bound_conditional_namespace_import_order(
+     entry_module: str,
+     *,
+     standard_finder_assumed: bool = False,
++    target_python_version: tuple[int, int] | None = None,
+ ) -> SourceBoundConditionalNamespaceAssessment:
+     """Parse indexed byte snapshots and conditionally evaluate PEP 420.
+ 
+@@ -88,6 +90,15 @@ def evaluate_source_bound_conditional_namespace_import_order(
+     ):
+         return reject("INVALID_ENTRY_OR_FINDER_POLICY")
+ 
++    _, version_error = (
++        _conditional_annotation_mode_for_target(
++            target_python_version
++        )
++    )
++
++    if version_error is not None:
++        return reject(version_error)
++
+     bound = bind_indexed_namespace_resolution(
+         roots,
+         bindings,
+@@ -179,6 +190,7 @@ def evaluate_source_bound_conditional_namespace_import_order(
+         parsed_sources,
+         entry_module,
+         roots,
++        target_python_version=target_python_version,
+     )
+ 
+     # Never convert CONDITIONAL_MODEL_PASS into MODEL_PASS.
 diff --git a/contextor/core/cycle_semantics/package_model.py b/contextor/core/cycle_semantics/package_model.py
-index dad4f7c..3fea17e 100644
+index 3fea17e..eb5cb5a 100644
 --- a/contextor/core/cycle_semantics/package_model.py
 +++ b/contextor/core/cycle_semantics/package_model.py
-@@ -1653,6 +1653,149 @@ class ConditionalNamespaceModelAssessment:
-     )
+@@ -7,6 +7,7 @@ Never executes analyzed code or certifies general runtime safety.
+ from __future__ import annotations
  
+ import ast
++import sys
+ from collections.abc import Mapping
+ from dataclasses import dataclass, field, replace
  
-+def _conditional_reachable_source_cohort(
-+    indexed_sources: Mapping[str, ast.AST],
-+    entry_module: str,
-+    namespace_parents: tuple[str, ...],
-+) -> dict[str, ast.AST] | None:
-+    """Over-approximate physical sources possibly loaded by an entry.
-+
-+    Examine every lexical import, including imports in deferred
-+    or guarded scopes. Include regular parent initializers and
-+    optional from-import child modules.
-+
-+    This may include sources never executed. It must never
-+    infer execution safety from an omitted source.
-+
-+    The caller must validate the FULL source inventory and
-+    namespace path layout before invoking this function.
-+    """
-+
-+    physical_by_logical: dict[str, str] = {}
-+
-+    for indexed_id in indexed_sources:
-+        logical = (
-+            indexed_id.removesuffix(".__init__")
-+            if indexed_id.endswith(".__init__")
-+            else indexed_id
-+        )
-+
-+        if logical in physical_by_logical:
-+            return None
-+
-+        physical_by_logical[logical] = indexed_id
-+
-+    known_namespaces = frozenset(namespace_parents)
-+
-+    if (
-+        entry_module not in physical_by_logical
-+        and entry_module not in known_namespaces
-+    ):
-+        return None
-+
-+    pending = [entry_module]
-+    visited: set[str] = set()
-+    selected: dict[str, ast.AST] = {}
-+
-+    while pending:
-+        logical = pending.pop()
-+
-+        if logical in visited:
-+            continue
-+
-+        visited.add(logical)
-+
-+        parts = logical.split(".")
-+
-+        for length in range(1, len(parts)):
-+            parent = ".".join(parts[:length])
-+
-+            if parent in physical_by_logical:
-+                pending.append(parent)
-+
-+        indexed_id = physical_by_logical.get(logical)
-+
-+        if indexed_id is None:
-+            continue
-+
-+        tree = indexed_sources[indexed_id]
-+        selected[indexed_id] = tree
-+
-+        is_package = indexed_id.endswith(".__init__")
-+
-+        for node in ast.walk(tree):
-+            if isinstance(node, ast.Import):
-+                for alias in node.names:
-+                    requested = alias.name
-+
-+                    if (
-+                        requested in physical_by_logical
-+                        or requested in known_namespaces
-+                    ):
-+                        pending.append(requested)
-+
-+            elif isinstance(node, ast.ImportFrom):
-+                if node.level == 0:
-+                    base = node.module
-+                else:
-+                    context = (
-+                        logical.split(".")
-+                        if is_package
-+                        else logical.split(".")[:-1]
-+                    )
-+
-+                    climb = node.level - 1
-+
-+                    if (
-+                        not context
-+                        or climb >= len(context)
-+                    ):
-+                        continue
-+
-+                    components = context[
-+                        :len(context) - climb
-+                    ]
-+
-+                    if node.module:
-+                        components.extend(
-+                            node.module.split(".")
-+                        )
-+
-+                    base = ".".join(components)
-+
-+                if (
-+                    not base
-+                    or not all(
-+                        part.isidentifier()
-+                        for part in base.split(".")
-+                    )
-+                ):
-+                    continue
-+
-+                if (
-+                    base in physical_by_logical
-+                    or base in known_namespaces
-+                ):
-+                    pending.append(base)
-+
-+                for alias in node.names:
-+                    if (
-+                        alias.name == "*"
-+                        or not alias.name.isidentifier()
-+                    ):
-+                        continue
-+
-+                    child = base + "." + alias.name
-+
-+                    if (
-+                        child in physical_by_logical
-+                        or child in known_namespaces
-+                    ):
-+                        pending.append(child)
-+
-+    return selected
-+
-+
- def evaluate_conditional_namespace_import_order(
-     indexed_sources: Mapping[str, ast.AST],
-     entry_module: str,
-@@ -1847,14 +1990,45 @@ def evaluate_conditional_namespace_import_order(
-                         namespace_parents,
-                     )
- 
--    augmented = dict(indexed_sources)
-+    selected = _conditional_reachable_source_cohort(
-+        indexed_sources,
-+        entry_module,
-+        namespace_parents,
-+    )
- 
--    for parent in namespace_parents:
--        augmented[parent + ".__init__"] = ast.Module(
--            body=[],
--            type_ignores=[],
-+    if selected is None:
-+        return reject(
-+            "CONDITIONAL_SOURCE_COHORT_UNRESOLVED",
-+            namespace_parents,
-+        )
-+
-+    augmented = dict(selected)
-+
-+    needed_names: set[str] = {entry_module}
-+
-+    for indexed_id in selected:
-+        logical = (
-+            indexed_id.removesuffix(".__init__")
-+            if indexed_id.endswith(".__init__")
-+            else indexed_id
-         )
- 
-+        parts = logical.split(".")
-+
-+        for length in range(1, len(parts) + 1):
-+            needed_names.add(
-+                ".".join(parts[:length])
-+            )
-+
-+    for parent in namespace_parents:
-+        if parent in needed_names:
-+            augmented[parent + ".__init__"] = (
-+                ast.Module(
-+                    body=[],
-+                    type_ignores=[],
-+                )
-+            )
-+
-     # Reuse the existing import-order simulator.
-     # Its internal observations remain model-relative.
-     # Never change or promote its execution outcomes.
-diff --git a/tests/test_cycle_semantics_namespace_bound_model.py b/tests/test_cycle_semantics_namespace_bound_model.py
-index 0326078..c67ff9b 100644
---- a/tests/test_cycle_semantics_namespace_bound_model.py
-+++ b/tests/test_cycle_semantics_namespace_bound_model.py
-@@ -371,3 +371,67 @@ def test_p7_source_bound_308_module_cohort():
-         "SOURCE_BOUND_CALLER_SUPPLIED_INVENTORY_"
+@@ -1651,6 +1652,55 @@ class ConditionalNamespaceModelAssessment:
+         "CONDITIONAL_ORDERED_INVENTORY_AND_AST_"
          "NOT_RUNTIME_OR_LIVE_PROOF"
      )
++    target_python_version: tuple[int, int] | None = None
 +
 +
-+def test_p8_unreachable_module_still_source_bound():
++def _conditional_annotation_mode_for_target(
++    target_python_version: tuple[int, int] | None,
++) -> tuple[str | None, str | None]:
++    """Select documented CPython annotation semantics.
++
++    The explicit target version must match the interpreter
++    executing this restricted model. This does not prove the
++    interpreter used by an analyzed application.
++    """
++
++    if target_python_version is None:
++        return None, None
++
++    if (
++        type(target_python_version) is not tuple
++        or len(target_python_version) != 2
++        or any(
++            type(part) is not int
++            for part in target_python_version
++        )
++    ):
++        return None, "INVALID_TARGET_PYTHON_VERSION"
++
++    if target_python_version not in {
++        (3, 10),
++        (3, 11),
++        (3, 12),
++        (3, 13),
++        (3, 14),
++        (3, 15),
++    }:
++        return None, "UNSUPPORTED_TARGET_PYTHON_VERSION"
++
++    if (
++        sys.implementation.name != "cpython"
++        or target_python_version != (
++            sys.version_info.major,
++            sys.version_info.minor,
++        )
++    ):
++        return None, "TARGET_INTERPRETER_UNVERIFIED"
++
++    if target_python_version >= (3, 14):
++        return "DEFERRED", None
++
++    return "STOCK_EAGER", None
+ 
+ 
+ def _conditional_reachable_source_cohort(
+@@ -1800,6 +1850,8 @@ def evaluate_conditional_namespace_import_order(
+     indexed_sources: Mapping[str, ast.AST],
+     entry_module: str,
+     portions: tuple[SearchPortion, ...],
++    *,
++    target_python_version: tuple[int, int] | None = None,
+ ) -> ConditionalNamespaceModelAssessment:
+     """Evaluate a supplied closed PEP 420 inventory conditionally.
+ 
+@@ -1815,6 +1867,12 @@ def evaluate_conditional_namespace_import_order(
+     The result is never eligible for MODEL_PASS warning suppression.
+     """
+ 
++    annotation_mode, version_error = (
++        _conditional_annotation_mode_for_target(
++            target_python_version
++        )
++    )
++
+     def reject(
+         reason: str,
+         parents: tuple[str, ...] = (),
+@@ -1825,8 +1883,16 @@ def evaluate_conditional_namespace_import_order(
+             reason=reason,
+             model_assessment=None,
+             namespace_parents=parents,
++            target_python_version=(
++                target_python_version
++                if version_error is None
++                else None
++            ),
+         )
+ 
++    if version_error is not None:
++        return reject(version_error)
++
+     if (
+         not isinstance(indexed_sources, Mapping)
+         or type(entry_module) is not str
+@@ -2035,6 +2101,7 @@ def evaluate_conditional_namespace_import_order(
+     model = evaluate_package_import_order(
+         augmented,
+         entry_module,
++        annotation_semantics=annotation_mode,
+     )
+ 
+     conditional_outcomes = {
+@@ -2060,4 +2127,5 @@ def evaluate_conditional_namespace_import_order(
+         ),
+         model_assessment=model,
+         namespace_parents=namespace_parents,
++        target_python_version=target_python_version,
+     )
+diff --git a/tests/test_cycle_semantics_namespace_bound_model.py b/tests/test_cycle_semantics_namespace_bound_model.py
+index c67ff9b..05fa83b 100644
+--- a/tests/test_cycle_semantics_namespace_bound_model.py
++++ b/tests/test_cycle_semantics_namespace_bound_model.py
+@@ -146,6 +146,90 @@ def test_p6_finder_assumption_is_required():
+     assert result.conditional_assessment is None
+ 
+ 
++def _p9_source_bound_annotated_case():
 +    roots, bindings, hashes, snapshots = _case()
 +
-+    extra = "pkg.ns.unused"
-+    path = "pkg/ns/unused.py"
-+
-+    roots = (
-+        SearchPortion(
-+            "root",
-+            roots[0].files | frozenset({path}),
-+        ),
++    snapshots["pkg.ns.a"] = _snapshot(
++        "class Holder:\n"
++        "    def method(self, x: Later) -> Later:\n"
++        "        pass\n"
++        "value = 1\n"
++        "import pkg.ns.b\n"
 +    )
 +
-+    bindings = bindings + (
-+        IndexedSourcePath(extra, "root", path),
++    hashes["pkg.ns.a"] = (
++        snapshots["pkg.ns.a"].source_fingerprint
 +    )
 +
-+    raw = b"raise RuntimeError('unused')\n"
-+    digest = hashlib.sha256(raw).hexdigest()
++    return roots, bindings, hashes, snapshots
 +
-+    snapshots[extra] = SourceSnapshot(raw, digest)
-+    hashes[extra] = digest
 +
++def test_p9_source_bound_default_stays_unknown():
 +    result = _evaluate(
-+        (roots, bindings, hashes, snapshots),
++        _p9_source_bound_annotated_case(),
++    )
++
++    assert result.outcome == "UNKNOWN"
++    assert result.reason == "RESTRICTED_MODEL_UNKNOWN"
++
++
++def test_p9_source_bound_deferred_cpython315():
++    result = evaluate_source_bound_conditional_namespace_import_order(
++        *_p9_source_bound_annotated_case(),
++        "pkg.ns.a",
++        standard_finder_assumed=True,
++        target_python_version=(3, 15),
 +    )
 +
 +    assert result.outcome == "CONDITIONAL_MODEL_PASS"
++    assert result.reason is None
 +    assert result.source_evidence_sha256 is not None
-+
-+
-+def test_p8_unreachable_module_bad_hash_still_rejected():
-+    roots, bindings, hashes, snapshots = _case()
-+
-+    extra = "pkg.ns.unused"
-+    path = "pkg/ns/unused.py"
-+
-+    roots = (
-+        SearchPortion(
-+            "root",
-+            roots[0].files | frozenset({path}),
-+        ),
++    assert result.conditional_assessment is not None
++    assert (
++        result.conditional_assessment.target_python_version
++        == (3, 15)
++    )
++    assert result.authority == (
++        "SOURCE_BOUND_CALLER_SUPPLIED_INVENTORY_"
++        "NOT_RUNTIME_OR_LIVE_PROOF"
 +    )
 +
-+    bindings = bindings + (
-+        IndexedSourcePath(extra, "root", path),
++
++def test_p9_source_bound_deferred_still_checks_hash():
++    roots, bindings, hashes, snapshots = (
++        _p9_source_bound_annotated_case()
 +    )
 +
-+    raw = b"raise RuntimeError('unused')\n"
-+    digest = hashlib.sha256(raw).hexdigest()
++    hashes["pkg.ns.a"] = "0" * 64
 +
-+    snapshots[extra] = SourceSnapshot(raw, digest)
-+    hashes[extra] = "0" * 64
-+
-+    result = _evaluate(
-+        (roots, bindings, hashes, snapshots),
++    result = evaluate_source_bound_conditional_namespace_import_order(
++        roots,
++        bindings,
++        hashes,
++        snapshots,
++        "pkg.ns.a",
++        standard_finder_assumed=True,
++        target_python_version=(3, 15),
 +    )
 +
 +    assert result.outcome == "UNKNOWN"
 +    assert result.reason == "SOURCE_FINGERPRINT_MISMATCH"
 +    assert result.source_evidence_sha256 is None
-+    assert result.conditional_assessment is None
++
++
++def test_p9_source_bound_bad_interpreter_rejected():
++    result = evaluate_source_bound_conditional_namespace_import_order(
++        *_p9_source_bound_annotated_case(),
++        "pkg.ns.a",
++        standard_finder_assumed=True,
++        target_python_version=(3, 14),
++    )
++
++    assert result.outcome == "UNKNOWN"
++    assert result.reason == "TARGET_INTERPRETER_UNVERIFIED"
++    assert result.source_evidence_sha256 is None
++
++
+ def test_p6_changed_bytes_fail_closed():
+     roots, bindings, hashes, snapshots = _case()
+     snapshots["pkg.ns.a"] = _snapshot(
 diff --git a/tests/test_cycle_semantics_namespace_path_model.py b/tests/test_cycle_semantics_namespace_path_model.py
-index d955939..c7cfdf0 100644
+index c7cfdf0..8c2efc8 100644
 --- a/tests/test_cycle_semantics_namespace_path_model.py
 +++ b/tests/test_cycle_semantics_namespace_path_model.py
-@@ -629,3 +629,215 @@ def test_g18_p2_p7_conditional_model_accepts_308_sources():
-         "CONDITIONAL_ORDERED_INVENTORY_AND_AST_"
-         "NOT_RUNTIME_OR_LIVE_PROOF"
+@@ -420,6 +420,157 @@ def test_g18_p2_p5_unlisted_shadowing_source_unknown():
      )
+ 
+ 
++def _p9_annotation_sources(code):
++    return {"ns.a": ast.parse(code)}
 +
 +
-+def test_g18_p2_p8_unreachable_unsupported_module():
-+    sources = {
-+        "ns.a": ast.parse("pass\n"),
-+        "ns.unused": ast.parse(
-+            "raise RuntimeError('unused')\n"
-+        ),
-+    }
-+
-+    portions = (
++def _p9_annotation_portions():
++    return (
 +        SearchPortion(
 +            "root",
-+            frozenset({
-+                "ns/a.py",
-+                "ns/unused.py",
-+            }),
++            frozenset({"ns/a.py"}),
 +        ),
++    )
++
++
++def test_p9_default_annotation_version_stays_unknown():
++    sources = _p9_annotation_sources(
++        "class Holder:\n"
++        "    def method(self, value: Later) -> Later:\n"
++        "        pass\n"
 +    )
 +
 +    result = evaluate_conditional_namespace_import_order(
 +        sources,
 +        "ns.a",
-+        portions,
++        _p9_annotation_portions(),
++    )
++
++    assert result.outcome == "UNKNOWN"
++    assert result.reason == "RESTRICTED_MODEL_UNKNOWN"
++    assert result.target_python_version is None
++
++
++def test_p9_cpython315_deferred_method_annotations():
++    sources = _p9_annotation_sources(
++        "class Holder:\n"
++        "    def method(self, value: side_effect())"
++        " -> Later:\n"
++        "        pass\n"
++    )
++
++    result = evaluate_conditional_namespace_import_order(
++        sources,
++        "ns.a",
++        _p9_annotation_portions(),
++        target_python_version=(3, 15),
 +    )
 +
 +    assert result.outcome == "CONDITIONAL_MODEL_PASS"
 +    assert result.reason is None
++    assert result.target_python_version == (3, 15)
++    assert result.model_assessment is not None
++    assert result.model_assessment.outcome == "MODEL_PASS"
++    assert result.authority == (
++        "CONDITIONAL_ORDERED_INVENTORY_AND_AST_"
++        "NOT_RUNTIME_OR_LIVE_PROOF"
++    )
 +
 +
-+def test_g18_p2_p8_direct_imported_unsupported_blocks():
-+    sources = {
-+        "ns.a": ast.parse("import ns.bad\n"),
-+        "ns.bad": ast.parse(
-+            "raise RuntimeError('bad')\n"
-+        ),
-+    }
++def test_p9_target_interpreter_mismatch_fails_closed():
++    sources = _p9_annotation_sources("pass\n")
 +
-+    portions = (
-+        SearchPortion(
-+            "root",
-+            frozenset({
-+                "ns/a.py",
-+                "ns/bad.py",
-+            }),
-+        ),
++    result = evaluate_conditional_namespace_import_order(
++        sources,
++        "ns.a",
++        _p9_annotation_portions(),
++        target_python_version=(3, 14),
++    )
++
++    assert result.outcome == "UNKNOWN"
++    assert result.reason == "TARGET_INTERPRETER_UNVERIFIED"
++    assert result.model_assessment is None
++
++
++def test_p9_invalid_target_version_fails_closed():
++    sources = _p9_annotation_sources("pass\n")
++
++    for version in ((True, 15), "3.15", (3,), (3, 16)):
++        result = evaluate_conditional_namespace_import_order(
++            sources,
++            "ns.a",
++            _p9_annotation_portions(),
++            target_python_version=version,
++        )
++
++        assert result.outcome == "UNKNOWN"
++        assert result.model_assessment is None
++        assert result.reason in {
++            "INVALID_TARGET_PYTHON_VERSION",
++            "UNSUPPORTED_TARGET_PYTHON_VERSION",
++        }
++
++
++def test_p9_dynamic_default_remains_unknown():
++    sources = _p9_annotation_sources(
++        "class Holder:\n"
++        "    def method(self, value: Later"
++        " = side_effect()):\n"
++        "        pass\n"
 +    )
 +
 +    result = evaluate_conditional_namespace_import_order(
 +        sources,
 +        "ns.a",
-+        portions,
++        _p9_annotation_portions(),
++        target_python_version=(3, 15),
++    )
++
++    assert result.outcome == "UNKNOWN"
++    assert result.reason == "RESTRICTED_MODEL_UNKNOWN"
++
++
++def test_p9_annotation_introspection_remains_unknown():
++    sources = _p9_annotation_sources(
++        "def method(value: side_effect()):\n"
++        "    pass\n"
++        "print(method.__annotations__)\n"
++    )
++
++    result = evaluate_conditional_namespace_import_order(
++        sources,
++        "ns.a",
++        _p9_annotation_portions(),
++        target_python_version=(3, 15),
++    )
++
++    assert result.outcome == "UNKNOWN"
++    assert result.reason == "RESTRICTED_MODEL_UNKNOWN"
++
++
++def test_p9_external_import_still_unknown():
++    sources = _p9_annotation_sources(
++        "import missing_external_xyz\n"
++        "class Holder:\n"
++        "    def method(self, x: Later):\n"
++        "        pass\n"
++    )
++
++    result = evaluate_conditional_namespace_import_order(
++        sources,
++        "ns.a",
++        _p9_annotation_portions(),
++        target_python_version=(3, 15),
 +    )
 +
 +    assert result.outcome == "UNKNOWN"
 +    assert result.reason == "RESTRICTED_MODEL_UNKNOWN"
 +    assert result.model_assessment is not None
-+    assert result.model_assessment.target_module == "ns.bad"
-+
-+
-+def test_g18_p2_p8_from_child_not_omitted():
-+    sources = {
-+        "ns.a": ast.parse("from ns import bad\n"),
-+        "ns.bad": ast.parse(
-+            "raise RuntimeError('bad')\n"
-+        ),
-+    }
-+
-+    portions = (
-+        SearchPortion(
-+            "root",
-+            frozenset({
-+                "ns/a.py",
-+                "ns/bad.py",
-+            }),
-+        ),
++    assert result.model_assessment.target_module == (
++        "missing_external_xyz"
 +    )
 +
-+    result = evaluate_conditional_namespace_import_order(
-+        sources,
-+        "ns.a",
-+        portions,
-+    )
 +
-+    assert result.outcome == "UNKNOWN"
-+    assert result.model_assessment is not None
-+    assert result.model_assessment.target_module == "ns.bad"
-+
-+
-+def test_g18_p2_p8_relative_from_child_not_omitted():
-+    sources = {
-+        "ns.a": ast.parse("from . import bad\n"),
-+        "ns.bad": ast.parse(
-+            "raise RuntimeError('bad')\n"
-+        ),
-+    }
-+
-+    portions = (
-+        SearchPortion(
-+            "root",
-+            frozenset({
-+                "ns/a.py",
-+                "ns/bad.py",
-+            }),
-+        ),
-+    )
-+
-+    result = evaluate_conditional_namespace_import_order(
-+        sources,
-+        "ns.a",
-+        portions,
-+    )
-+
-+    assert result.outcome == "UNKNOWN"
-+    assert result.model_assessment is not None
-+    assert result.model_assessment.target_module == "ns.bad"
-+
-+
-+def test_g18_p2_p8_parent_initializer_not_omitted():
-+    sources = {
-+        "pkg.__init__": ast.parse(
-+            "raise RuntimeError('initializer')\n"
-+        ),
-+        "pkg.ns.a": ast.parse("pass\n"),
-+    }
-+
-+    portions = (
-+        SearchPortion(
-+            "root",
-+            frozenset({
-+                "pkg/__init__.py",
-+                "pkg/ns/a.py",
-+            }),
-+        ),
-+    )
-+
-+    result = evaluate_conditional_namespace_import_order(
-+        sources,
-+        "pkg.ns.a",
-+        portions,
-+    )
-+
-+    assert result.outcome == "UNKNOWN"
-+    assert result.model_assessment is not None
-+    assert result.model_assessment.target_module == "pkg"
-+
-+
-+def test_g18_p2_p8_unrelated_two_portion_source():
-+    sources = {
-+        "ns.a": ast.parse("pass\n"),
-+        "ns.unused": ast.parse(
-+            "raise RuntimeError('unused')\n"
-+        ),
-+    }
-+
-+    portions = (
-+        SearchPortion(
-+            "first",
-+            frozenset({"ns/a.py"}),
-+        ),
-+        SearchPortion(
-+            "second",
-+            frozenset({"ns/unused.py"}),
-+        ),
-+    )
-+
-+    result = evaluate_conditional_namespace_import_order(
-+        sources,
-+        "ns.a",
-+        portions,
-+    )
-+
-+    assert result.outcome == "CONDITIONAL_MODEL_PASS"
-+
-+
-+def test_g18_p2_p8_existing_hazard_still_detected():
-+    result = evaluate_conditional_namespace_import_order(
-+        _g18_p2_p5_sources(hazard=True),
-+        "pkg.ns.a",
-+        _g18_p2_p5_portions(),
-+    )
-+
-+    assert result.outcome == (
-+        "CONDITIONAL_EARLY_BINDING_HAZARD"
-+    )
-+    assert result.model_assessment is not None
-+    assert result.model_assessment.symbol == "value"
-+
-+
-+def test_g18_p2_p8_no_full_inventory_shortcut():
-+    sources = {
-+        "ns.a": ast.parse("pass\n"),
-+        "ns.unused": ast.parse("pass\n"),
-+    }
-+
-+    portions = (
-+        SearchPortion(
-+            "root",
-+            frozenset({"ns/a.py"}),
-+        ),
-+    )
-+
-+    result = evaluate_conditional_namespace_import_order(
-+        sources,
-+        "ns.a",
-+        portions,
-+    )
-+
-+    assert result.outcome == "UNKNOWN"
-+    assert result.reason == (
-+        "INVENTORY_SOURCE_DOMAIN_MISMATCH"
-+    )
+ def test_g18_p2_p5_alternative_loader_unknown():
+     sources = {
+         "ns.a": ast.parse(
 ```
 
 ## FINAL_VERDICT
 
-PASS — exact conservative cohort change, 186 targeted tests passed, full 308-source binding preserved, real SCCs remain INDETERMINATE and structural cycles remain 16.
+PASS. Exact four-file implementation and test scope completed; all 301 targeted tests pass; both real SCC model replays remain UNKNOWN; 16 structural cycles and 16 active warnings remain; no runtime adoption is claimed.
