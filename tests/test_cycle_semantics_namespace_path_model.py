@@ -629,3 +629,215 @@ def test_g18_p2_p7_conditional_model_accepts_308_sources():
         "CONDITIONAL_ORDERED_INVENTORY_AND_AST_"
         "NOT_RUNTIME_OR_LIVE_PROOF"
     )
+
+
+def test_g18_p2_p8_unreachable_unsupported_module():
+    sources = {
+        "ns.a": ast.parse("pass\n"),
+        "ns.unused": ast.parse(
+            "raise RuntimeError('unused')\n"
+        ),
+    }
+
+    portions = (
+        SearchPortion(
+            "root",
+            frozenset({
+                "ns/a.py",
+                "ns/unused.py",
+            }),
+        ),
+    )
+
+    result = evaluate_conditional_namespace_import_order(
+        sources,
+        "ns.a",
+        portions,
+    )
+
+    assert result.outcome == "CONDITIONAL_MODEL_PASS"
+    assert result.reason is None
+
+
+def test_g18_p2_p8_direct_imported_unsupported_blocks():
+    sources = {
+        "ns.a": ast.parse("import ns.bad\n"),
+        "ns.bad": ast.parse(
+            "raise RuntimeError('bad')\n"
+        ),
+    }
+
+    portions = (
+        SearchPortion(
+            "root",
+            frozenset({
+                "ns/a.py",
+                "ns/bad.py",
+            }),
+        ),
+    )
+
+    result = evaluate_conditional_namespace_import_order(
+        sources,
+        "ns.a",
+        portions,
+    )
+
+    assert result.outcome == "UNKNOWN"
+    assert result.reason == "RESTRICTED_MODEL_UNKNOWN"
+    assert result.model_assessment is not None
+    assert result.model_assessment.target_module == "ns.bad"
+
+
+def test_g18_p2_p8_from_child_not_omitted():
+    sources = {
+        "ns.a": ast.parse("from ns import bad\n"),
+        "ns.bad": ast.parse(
+            "raise RuntimeError('bad')\n"
+        ),
+    }
+
+    portions = (
+        SearchPortion(
+            "root",
+            frozenset({
+                "ns/a.py",
+                "ns/bad.py",
+            }),
+        ),
+    )
+
+    result = evaluate_conditional_namespace_import_order(
+        sources,
+        "ns.a",
+        portions,
+    )
+
+    assert result.outcome == "UNKNOWN"
+    assert result.model_assessment is not None
+    assert result.model_assessment.target_module == "ns.bad"
+
+
+def test_g18_p2_p8_relative_from_child_not_omitted():
+    sources = {
+        "ns.a": ast.parse("from . import bad\n"),
+        "ns.bad": ast.parse(
+            "raise RuntimeError('bad')\n"
+        ),
+    }
+
+    portions = (
+        SearchPortion(
+            "root",
+            frozenset({
+                "ns/a.py",
+                "ns/bad.py",
+            }),
+        ),
+    )
+
+    result = evaluate_conditional_namespace_import_order(
+        sources,
+        "ns.a",
+        portions,
+    )
+
+    assert result.outcome == "UNKNOWN"
+    assert result.model_assessment is not None
+    assert result.model_assessment.target_module == "ns.bad"
+
+
+def test_g18_p2_p8_parent_initializer_not_omitted():
+    sources = {
+        "pkg.__init__": ast.parse(
+            "raise RuntimeError('initializer')\n"
+        ),
+        "pkg.ns.a": ast.parse("pass\n"),
+    }
+
+    portions = (
+        SearchPortion(
+            "root",
+            frozenset({
+                "pkg/__init__.py",
+                "pkg/ns/a.py",
+            }),
+        ),
+    )
+
+    result = evaluate_conditional_namespace_import_order(
+        sources,
+        "pkg.ns.a",
+        portions,
+    )
+
+    assert result.outcome == "UNKNOWN"
+    assert result.model_assessment is not None
+    assert result.model_assessment.target_module == "pkg"
+
+
+def test_g18_p2_p8_unrelated_two_portion_source():
+    sources = {
+        "ns.a": ast.parse("pass\n"),
+        "ns.unused": ast.parse(
+            "raise RuntimeError('unused')\n"
+        ),
+    }
+
+    portions = (
+        SearchPortion(
+            "first",
+            frozenset({"ns/a.py"}),
+        ),
+        SearchPortion(
+            "second",
+            frozenset({"ns/unused.py"}),
+        ),
+    )
+
+    result = evaluate_conditional_namespace_import_order(
+        sources,
+        "ns.a",
+        portions,
+    )
+
+    assert result.outcome == "CONDITIONAL_MODEL_PASS"
+
+
+def test_g18_p2_p8_existing_hazard_still_detected():
+    result = evaluate_conditional_namespace_import_order(
+        _g18_p2_p5_sources(hazard=True),
+        "pkg.ns.a",
+        _g18_p2_p5_portions(),
+    )
+
+    assert result.outcome == (
+        "CONDITIONAL_EARLY_BINDING_HAZARD"
+    )
+    assert result.model_assessment is not None
+    assert result.model_assessment.symbol == "value"
+
+
+def test_g18_p2_p8_no_full_inventory_shortcut():
+    sources = {
+        "ns.a": ast.parse("pass\n"),
+        "ns.unused": ast.parse("pass\n"),
+    }
+
+    portions = (
+        SearchPortion(
+            "root",
+            frozenset({"ns/a.py"}),
+        ),
+    )
+
+    result = evaluate_conditional_namespace_import_order(
+        sources,
+        "ns.a",
+        portions,
+    )
+
+    assert result.outcome == "UNKNOWN"
+    assert result.reason == (
+        "INVENTORY_SOURCE_DOMAIN_MISMATCH"
+    )

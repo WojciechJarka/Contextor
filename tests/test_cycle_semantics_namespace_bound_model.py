@@ -371,3 +371,67 @@ def test_p7_source_bound_308_module_cohort():
         "SOURCE_BOUND_CALLER_SUPPLIED_INVENTORY_"
         "NOT_RUNTIME_OR_LIVE_PROOF"
     )
+
+
+def test_p8_unreachable_module_still_source_bound():
+    roots, bindings, hashes, snapshots = _case()
+
+    extra = "pkg.ns.unused"
+    path = "pkg/ns/unused.py"
+
+    roots = (
+        SearchPortion(
+            "root",
+            roots[0].files | frozenset({path}),
+        ),
+    )
+
+    bindings = bindings + (
+        IndexedSourcePath(extra, "root", path),
+    )
+
+    raw = b"raise RuntimeError('unused')\n"
+    digest = hashlib.sha256(raw).hexdigest()
+
+    snapshots[extra] = SourceSnapshot(raw, digest)
+    hashes[extra] = digest
+
+    result = _evaluate(
+        (roots, bindings, hashes, snapshots),
+    )
+
+    assert result.outcome == "CONDITIONAL_MODEL_PASS"
+    assert result.source_evidence_sha256 is not None
+
+
+def test_p8_unreachable_module_bad_hash_still_rejected():
+    roots, bindings, hashes, snapshots = _case()
+
+    extra = "pkg.ns.unused"
+    path = "pkg/ns/unused.py"
+
+    roots = (
+        SearchPortion(
+            "root",
+            roots[0].files | frozenset({path}),
+        ),
+    )
+
+    bindings = bindings + (
+        IndexedSourcePath(extra, "root", path),
+    )
+
+    raw = b"raise RuntimeError('unused')\n"
+    digest = hashlib.sha256(raw).hexdigest()
+
+    snapshots[extra] = SourceSnapshot(raw, digest)
+    hashes[extra] = "0" * 64
+
+    result = _evaluate(
+        (roots, bindings, hashes, snapshots),
+    )
+
+    assert result.outcome == "UNKNOWN"
+    assert result.reason == "SOURCE_FINGERPRINT_MISMATCH"
+    assert result.source_evidence_sha256 is None
+    assert result.conditional_assessment is None

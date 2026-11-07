@@ -1653,6 +1653,149 @@ class ConditionalNamespaceModelAssessment:
     )
 
 
+def _conditional_reachable_source_cohort(
+    indexed_sources: Mapping[str, ast.AST],
+    entry_module: str,
+    namespace_parents: tuple[str, ...],
+) -> dict[str, ast.AST] | None:
+    """Over-approximate physical sources possibly loaded by an entry.
+
+    Examine every lexical import, including imports in deferred
+    or guarded scopes. Include regular parent initializers and
+    optional from-import child modules.
+
+    This may include sources never executed. It must never
+    infer execution safety from an omitted source.
+
+    The caller must validate the FULL source inventory and
+    namespace path layout before invoking this function.
+    """
+
+    physical_by_logical: dict[str, str] = {}
+
+    for indexed_id in indexed_sources:
+        logical = (
+            indexed_id.removesuffix(".__init__")
+            if indexed_id.endswith(".__init__")
+            else indexed_id
+        )
+
+        if logical in physical_by_logical:
+            return None
+
+        physical_by_logical[logical] = indexed_id
+
+    known_namespaces = frozenset(namespace_parents)
+
+    if (
+        entry_module not in physical_by_logical
+        and entry_module not in known_namespaces
+    ):
+        return None
+
+    pending = [entry_module]
+    visited: set[str] = set()
+    selected: dict[str, ast.AST] = {}
+
+    while pending:
+        logical = pending.pop()
+
+        if logical in visited:
+            continue
+
+        visited.add(logical)
+
+        parts = logical.split(".")
+
+        for length in range(1, len(parts)):
+            parent = ".".join(parts[:length])
+
+            if parent in physical_by_logical:
+                pending.append(parent)
+
+        indexed_id = physical_by_logical.get(logical)
+
+        if indexed_id is None:
+            continue
+
+        tree = indexed_sources[indexed_id]
+        selected[indexed_id] = tree
+
+        is_package = indexed_id.endswith(".__init__")
+
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    requested = alias.name
+
+                    if (
+                        requested in physical_by_logical
+                        or requested in known_namespaces
+                    ):
+                        pending.append(requested)
+
+            elif isinstance(node, ast.ImportFrom):
+                if node.level == 0:
+                    base = node.module
+                else:
+                    context = (
+                        logical.split(".")
+                        if is_package
+                        else logical.split(".")[:-1]
+                    )
+
+                    climb = node.level - 1
+
+                    if (
+                        not context
+                        or climb >= len(context)
+                    ):
+                        continue
+
+                    components = context[
+                        :len(context) - climb
+                    ]
+
+                    if node.module:
+                        components.extend(
+                            node.module.split(".")
+                        )
+
+                    base = ".".join(components)
+
+                if (
+                    not base
+                    or not all(
+                        part.isidentifier()
+                        for part in base.split(".")
+                    )
+                ):
+                    continue
+
+                if (
+                    base in physical_by_logical
+                    or base in known_namespaces
+                ):
+                    pending.append(base)
+
+                for alias in node.names:
+                    if (
+                        alias.name == "*"
+                        or not alias.name.isidentifier()
+                    ):
+                        continue
+
+                    child = base + "." + alias.name
+
+                    if (
+                        child in physical_by_logical
+                        or child in known_namespaces
+                    ):
+                        pending.append(child)
+
+    return selected
+
+
 def evaluate_conditional_namespace_import_order(
     indexed_sources: Mapping[str, ast.AST],
     entry_module: str,
@@ -1847,13 +1990,44 @@ def evaluate_conditional_namespace_import_order(
                         namespace_parents,
                     )
 
-    augmented = dict(indexed_sources)
+    selected = _conditional_reachable_source_cohort(
+        indexed_sources,
+        entry_module,
+        namespace_parents,
+    )
+
+    if selected is None:
+        return reject(
+            "CONDITIONAL_SOURCE_COHORT_UNRESOLVED",
+            namespace_parents,
+        )
+
+    augmented = dict(selected)
+
+    needed_names: set[str] = {entry_module}
+
+    for indexed_id in selected:
+        logical = (
+            indexed_id.removesuffix(".__init__")
+            if indexed_id.endswith(".__init__")
+            else indexed_id
+        )
+
+        parts = logical.split(".")
+
+        for length in range(1, len(parts) + 1):
+            needed_names.add(
+                ".".join(parts[:length])
+            )
 
     for parent in namespace_parents:
-        augmented[parent + ".__init__"] = ast.Module(
-            body=[],
-            type_ignores=[],
-        )
+        if parent in needed_names:
+            augmented[parent + ".__init__"] = (
+                ast.Module(
+                    body=[],
+                    type_ignores=[],
+                )
+            )
 
     # Reuse the existing import-order simulator.
     # Its internal observations remain model-relative.
