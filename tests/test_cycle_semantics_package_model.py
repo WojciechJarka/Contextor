@@ -1199,7 +1199,7 @@ def test_b0g4c5_definition_effects_updated_contract():
         ),
         (
             "async def f():\n    import pkg.child",
-            "UNKNOWN",
+            "MODEL_PASS",
         ),
         (
             "def f():\n    return 1",

@@ -43,7 +43,11 @@ def test_async_body_is_not_executed():
         "    import missing_external_xyz\n"
     )
     assert result.outcome == "MODEL_PASS"
-    assert "START_IMPORT" not in _operations(result)
+    assert "DEFINE_OPAQUE_FUNCTION" in _operations(result)
+    assert not any(
+        event.target == "missing_external_xyz"
+        for event in result.events
+    )
 
 
 def test_annotated_async_definition_deferred():
