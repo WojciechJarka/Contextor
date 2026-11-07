@@ -16,6 +16,17 @@ from .typing_guard import (
 
 
 @dataclass(frozen=True)
+class ExternalImportScopeRecord:
+    importer: str
+    line: int
+    column: int
+    form: str
+    target: str
+    primary_scope: str
+    ancestry_flags: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class PackageGraphConsistency:
     status: str
     reason: str | None
@@ -23,6 +34,98 @@ class PackageGraphConsistency:
     unmodeled_namespace_parents: tuple[tuple[str, int, str, str], ...] = ()
     internal_graph_state: str = "NOT_PROVED"
     checked_source_modules: tuple[str, ...] = ()
+    external_scope_records: tuple[ExternalImportScopeRecord, ...] = ()
+
+
+def _external_import_scope_index(
+    tree: ast.Module,
+) -> dict[int, tuple[str, tuple[str, ...]]]:
+    """Classify lexical import locations, never execution safety."""
+    parents: dict[int, ast.AST | None] = {id(tree): None}
+
+    for parent in ast.walk(tree):
+        for child in ast.iter_child_nodes(parent):
+            parents[id(child)] = parent
+
+    function_types = (ast.FunctionDef, ast.AsyncFunctionDef)
+    try_types = (ast.Try, getattr(ast, "TryStar", ast.Try))
+    loop_types = (ast.For, ast.AsyncFor, ast.While)
+    with_types = (ast.With, ast.AsyncWith)
+
+    result: dict[int, tuple[str, tuple[str, ...]]] = {}
+
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.Import, ast.ImportFrom)):
+            continue
+
+        ancestors: list[ast.AST] = []
+        parent = parents.get(id(node))
+
+        while parent is not None:
+            ancestors.append(parent)
+            parent = parents.get(id(parent))
+
+        ancestors.reverse()
+
+        definitions = [
+            item for item in ancestors
+            if isinstance(item, (*function_types, ast.ClassDef))
+        ]
+
+        function_positions = [
+            index for index, item in enumerate(definitions)
+            if isinstance(item, function_types)
+        ]
+
+        if function_positions:
+            position = function_positions[-1]
+            function = definitions[position]
+
+            if (
+                position > 0
+                and isinstance(definitions[position - 1], ast.ClassDef)
+            ):
+                primary = "METHOD_BODY"
+            elif isinstance(function, ast.AsyncFunctionDef):
+                primary = "ASYNC_FUNCTION_BODY"
+            else:
+                primary = "FUNCTION_BODY"
+
+        elif any(
+            isinstance(item, ast.ClassDef)
+            for item in definitions
+        ):
+            primary = "CLASS_BODY"
+
+        else:
+            primary = "MODULE_BODY"
+
+        flags: list[str] = []
+
+        if any(isinstance(item, ast.If) for item in ancestors):
+            flags.append("IF")
+
+        if any(isinstance(item, try_types) for item in ancestors):
+            flags.append("TRY")
+
+        if any(
+            isinstance(item, ast.ExceptHandler)
+            for item in ancestors
+        ):
+            flags.append("EXCEPT_HANDLER")
+
+        if any(isinstance(item, loop_types) for item in ancestors):
+            flags.append("LOOP")
+
+        if any(isinstance(item, with_types) for item in ancestors):
+            flags.append("WITH")
+
+        if any(isinstance(item, ast.Match) for item in ancestors):
+            flags.append("MATCH")
+
+        result[id(node)] = (primary, tuple(flags))
+
+    return result
 
 
 def assess_package_graph_consistency(
@@ -40,6 +143,7 @@ def assess_package_graph_consistency(
     indexed_roots = frozenset(name.split(".", 1)[0] for name in indexed)
     unmodeled_external_imports: list[tuple[str, int, str, str]] = []
     unmodeled_namespace_parents: list[tuple[str, int, str, str]] = []
+    external_scopes: list[ExternalImportScopeRecord] = []
     if any(name not in indexed or not isinstance(sources.get(name), ast.Module)
            for name in evidence_source_modules):
         return unknown("MISSING_INDEXED_TARGET")
@@ -313,6 +417,10 @@ def assess_package_graph_consistency(
         if not parents_proved:
             type_only_ids = frozenset()
 
+        scope_index = _external_import_scope_index(
+            sources[module_id]
+        )
+
         for node in ast.walk(sources[module_id]):
             if (
                 typing_guard is not None
@@ -337,6 +445,18 @@ def assess_package_graph_consistency(
                             continue
                         unmodeled_external_imports.append(
                             (module_id, node.lineno, "import", alias.name)
+                        )
+                        primary, flags = scope_index[id(node)]
+                        external_scopes.append(
+                            ExternalImportScopeRecord(
+                                module_id,
+                                node.lineno,
+                                node.col_offset,
+                                "import",
+                                alias.name,
+                                primary,
+                                flags,
+                            )
                         )
                         continue
                     if resolved != alias.name and resolved != alias.name + ".__init__":
@@ -390,6 +510,18 @@ def assess_package_graph_consistency(
                         continue
                     unmodeled_external_imports.append(
                         (module_id, node.lineno, "from", base)
+                    )
+                    primary, flags = scope_index[id(node)]
+                    external_scopes.append(
+                        ExternalImportScopeRecord(
+                            module_id,
+                            node.lineno,
+                            node.col_offset,
+                            "from",
+                            base,
+                            primary,
+                            flags,
+                        )
                     )
                     continue
                 if resolved == base and any(
@@ -471,6 +603,21 @@ def assess_package_graph_consistency(
         if expected != set(hard_edges[module_id]):
             return unknown("GRAPH_SOURCE_IMPORT_MISMATCH")
 
+    ordered_external_scopes = tuple(
+        sorted(
+            external_scopes,
+            key=lambda row: (
+                row.importer,
+                row.line,
+                row.form,
+                row.target,
+                row.column,
+                row.primary_scope,
+                row.ancestry_flags,
+            ),
+        )
+    )
+
     checked_source_modules = tuple(sorted(evidence_source_modules))
     internal_graph_state = "INDEXED_AST_GRAPH_MATCH_FOR_SELECTED_SOURCES"
     if unmodeled_namespace_parents:
@@ -481,6 +628,7 @@ def assess_package_graph_consistency(
             tuple(sorted(unmodeled_namespace_parents)),
             internal_graph_state,
             checked_source_modules,
+            external_scope_records=ordered_external_scopes,
         )
     if unmodeled_external_imports:
         return PackageGraphConsistency(
@@ -489,6 +637,7 @@ def assess_package_graph_consistency(
             tuple(sorted(unmodeled_external_imports)),
             internal_graph_state=internal_graph_state,
             checked_source_modules=checked_source_modules,
+            external_scope_records=ordered_external_scopes,
         )
     return PackageGraphConsistency(
         "CONSISTENT",

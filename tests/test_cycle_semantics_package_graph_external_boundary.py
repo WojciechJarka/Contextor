@@ -131,3 +131,115 @@ def test_optional_scc_with_external_import_never_model_passes():
     assert component.classification == "INDETERMINATE"
     assert component.coverage == "NONE"
     assert component.reason == "EXTERNAL_IMPORT_EXECUTION_UNMODELED"
+
+
+def test_g18_p2_p1_external_scope_evidence():
+    source = (
+        "import os\n"
+        "class C:\n"
+        "    import pathlib\n"
+        "    def method(self):\n"
+        "        import json\n"
+        "def worker():\n"
+        "    if True:\n"
+        "        import collections\n"
+        "async def async_worker():\n"
+        "    import asyncio\n"
+        "if True:\n"
+        "    import sys\n"
+        "try:\n"
+        "    import uuid\n"
+        "except ImportError:\n"
+        "    import warnings\n"
+    )
+
+    result = _check(source)
+
+    assert result.status == "INDETERMINATE"
+    assert result.reason == "EXTERNAL_IMPORT_EXECUTION_UNMODELED"
+
+    by_target = {
+        item.target: item
+        for item in result.external_scope_records
+    }
+
+    assert len(by_target) == 8
+    assert by_target["os"].primary_scope == "MODULE_BODY"
+    assert by_target["pathlib"].primary_scope == "CLASS_BODY"
+    assert by_target["json"].primary_scope == "METHOD_BODY"
+    assert by_target["collections"].primary_scope == "FUNCTION_BODY"
+    assert by_target["asyncio"].primary_scope == "ASYNC_FUNCTION_BODY"
+    assert by_target["sys"].ancestry_flags == ("IF",)
+    assert by_target["uuid"].ancestry_flags == ("TRY",)
+    assert by_target["warnings"].ancestry_flags == (
+        "TRY", "EXCEPT_HANDLER"
+    )
+
+
+def test_g18_p2_p1_scope_projection_is_lossless():
+    source = (
+        "import os, json\n"
+        "import pathlib; import pathlib\n"
+        "from collections import Counter\n"
+    )
+
+    result = _check(source)
+
+    projected = tuple(
+        sorted(
+            (
+                item.importer,
+                item.line,
+                item.form,
+                item.target,
+            )
+            for item in result.external_scope_records
+        )
+    )
+
+    assert projected == tuple(
+        sorted(result.unmodeled_external_imports)
+    )
+    assert len(result.external_scope_records) == 5
+
+    pathlib_records = [
+        item for item in result.external_scope_records
+        if item.target == "pathlib"
+    ]
+
+    assert len(pathlib_records) == 2
+    assert pathlib_records[0].column != pathlib_records[1].column
+
+
+def test_g18_p2_p1_deferred_import_remains_opaque():
+    result = _check(
+        "def worker():\n"
+        "    import os\n"
+    )
+
+    assert result.reason == "EXTERNAL_IMPORT_EXECUTION_UNMODELED"
+    assert result.status == "INDETERMINATE"
+    assert result.external_scope_records[0].primary_scope == (
+        "FUNCTION_BODY"
+    )
+
+
+def test_g18_p2_p1_internal_mismatch_stays_fail_closed():
+    result = _check(
+        "import os\n"
+        "import pkg.missing\n"
+    )
+
+    assert result.status == "INDETERMINATE"
+    assert result.reason == "MISSING_INDEXED_TARGET"
+    assert result.external_scope_records == ()
+
+
+def test_g18_p2_p1_deterministic_scope_records():
+    source = "import os\nimport json\n"
+
+    first = _check(source)
+    second = _check(source)
+
+    assert first == second
+    assert first.external_scope_records == second.external_scope_records
