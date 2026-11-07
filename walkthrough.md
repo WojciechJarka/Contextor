@@ -1,372 +1,327 @@
-# C16-B03-P1D3G18-P2-P5
+# C16-B03-P1D3G18-P2-P6
 
 ## HEAD_BEFORE/AFTER
 
-`d0bb50aff53f7a73df4fe9c86ed1e10f67aee8b3` before and after. Initial worktree clean. No commit or push.
+`93b208669bd8b99e9a505c83c06a724bb86176c7` before and after. Initial worktree clean. No commit or push.
 
 ## FILES_CHANGED
 
-- `contextor/core/cycle_semantics/package_model.py`
-- `tests/test_cycle_semantics_namespace_path_model.py`
+- `contextor/core/cycle_semantics/namespace_bound_model.py` (new)
+- `tests/test_cycle_semantics_namespace_bound_model.py` (new)
 
-`walkthrough.md` was overwritten as the required report.
+No existing production or test file was edited. `walkthrough.md` was overwritten as the required report.
 
 ## CPYTHON_IDENTITY
 
-Active repository `.venv\Scripts\python.exe`: CPython 3.15.2. No interpreter switch.
+Repository `.venv\Scripts\python.exe`: CPython 3.15.2. No interpreter switch.
 
-## CONDITIONAL_PEP420_CONTRACT
+## SOURCE_BOUND_CONDITIONAL_CONTRACT
 
-DIRECT_EVIDENCE: Added the exact namespace path import and appended `ConditionalNamespaceModelAssessment` plus `evaluate_conditional_namespace_import_order` after the existing evaluator. The new function validates a caller-supplied ordered portion inventory against the indexed AST cohort and package layout, rejects explicit synthetic initializer references, then invokes the unchanged restricted evaluator on an ephemeral in-memory mapping with empty namespace initializers. Its positive outcomes are prefixed `CONDITIONAL_` and its authority explicitly disclaims runtime/LIVE proof. No canonical source, hard edge, physical initializer or warning rule was changed. Existing evaluator behavior was not edited.
+DIRECT_EVIDENCE: Created the two supplied files with the exact source-bound conditional model and tests. The model first uses `bind_indexed_namespace_resolution` on caller-supplied portions, paths, fingerprints and byte snapshots. It validates the bound digest and indexed entry, reparses each verified snapshot's bytes, and invokes the P5 conditional evaluator on only those parsed ASTs. Positive outcomes retain `CONDITIONAL_`; authority disclaims runtime and LIVE proof. No existing scenario, warning, publication, graph or source closure consumer was edited. Source identity is a caller claim, not authenticated canonical provenance.
 
 ## TARGETED_TEST_RESULTS
 
-Four specified modules: **172 passed in 23.74s**, exit code 0. `git diff --check` exited 0.
+Five specified modules: **169 passed in 19.09s**, exit code 0. `git diff --check` exited 0.
 
-## POSITIVE_AND_NEGATIVE_SCENARIOS
+## POSITIVE_NEGATIVE_SCENARIOS
 
-CONTRACT_PROVED by supplied passing assertions: default namespace evaluation remains UNKNOWN. Supplied closed inventory can yield `CONDITIONAL_MODEL_PASS` or `CONDITIONAL_EARLY_BINDING_HAZARD`, with entry-order differences preserved. Two namespace portions are supported conditionally. Missing source, unlisted shadowing initializer, alternate loader, absent namespace parent and explicit synthetic initializer reference fail to UNKNOWN. Eager external import remains `UNKNOWN / RESTRICTED_MODEL_UNKNOWN`. No conditional outcome was promoted to unqualified MODEL_PASS.
+CONTRACT_PROVED by the supplied passing tests: source-bound conditional pass, conditional early-binding hazard and entry-order difference retain model-relative outcomes; finder assumption is required. Changed bytes, missing indexed source, syntax error, unindexed namespace entry, unindexed shadowing source and eager external import fail closed. Two caller-supplied namespace portions work conditionally; repeated input yields the same digest and outcome. No unqualified MODEL_PASS is returned by the new interface.
 
-## AST_IMMUTABILITY
+## SOURCE_SNAPSHOT_INTEGRITY
 
-CONTRACT_PROVED: the supplied determinism test passed and compared complete `ast.dump(..., include_attributes=True)` before and after repeated conditional evaluations. The implementation copies the source mapping and creates only in-memory synthetic AST nodes.
+DIRECT_EVIDENCE: The new function compares `SourceSnapshot.raw` SHA-256 and snapshot fingerprint to the claimed indexed fingerprint both in the existing binder and before `parse_source_snapshot`; AST is derived from bytes. The digest describes supplied evidence only. It is not a signature or proof of the actual runtime search path, canonical LIVE generation or genuine index.
 
-## REAL_SCC_REPLAY
+## REPOSITORY_REPLAY
 
-DIRECT_EVIDENCE: Read-only replay on canonical revision 1095. Physical production Python inventory remains 307 files (`contextor` 306 plus root `main.py`). SCC1: 44 members, optional closure 202, 607 external records/scope records, 4 namespace records, gate `OPAQUE_EXECUTION_POSSIBLE`. SCC2: 9 members, optional closure 222, 725 external records/scope records, 4 namespace records, same gate. Both retain consistency `INDETERMINATE / NAMESPACE_IMPORT_RESOLUTION_UNMODELED`; scenario classification INDETERMINATE, coverage NONE, zero entry assessments. The closure and external counts increased relative to the historical 201/221 and 605/723 after the new production import added a reachable module. The conditional evaluator was not used for real SCC assessment. Structural DFS cycles remain 16; no new MODEL_PASS claim.
-
-## SOURCE_BINDING
-
-DIRECT_EVIDENCE: Snapshot metadata and metadata-selected FileState agreed on revision 1095 and state_id `20261106_195021`. All 222 selected source SHA-256 fingerprints in the union matched FileState, zero missing or mismatched. An earlier revision-1093 replay found one changed file and was explicitly discarded as unbound; watcher later advanced canonical revisions without `update_file`.
+DIRECT_EVIDENCE: Physical production Python inventory is 308 files (`contextor` 307 plus root `main.py`); the new module is indexed once in canonical revision 1097. Read-only current-snapshot replay: SCC1 44 members, closure 202, 607 external records, 4 namespace records, external gate `OPAQUE_EXECUTION_POSSIBLE`; SCC2 9 members, closure 222, 725 external records, 4 namespace records, same gate. Both real scenarios retain `INDETERMINATE / NAMESPACE_IMPORT_RESOLUTION_UNMODELED`, coverage NONE and 0 entry assessments. The new conditional model was not used to replace real SCC assessments. Structural DFS cycles remain 16.
 
 ## MCP_POST_CHANGE_AUDIT
 
-DIRECT_EVIDENCE: Contextor MCP for both modified modules reported revision 1095, canonical_state fresh, workspace_sync verified, advisory warning null, syntax errors 0, structural DFS cycles 16, active warning count 16, model_pass_count 0, cycle_semantics stale. No FULL, update_file or restart was performed.
+DIRECT_EVIDENCE: Contextor MCP for both new modules returned revision 1097, canonical_state fresh, workspace_sync verified, advisory warning null, syntax errors 0, structural DFS cycles 16, active warning count 16, model_pass_count 0 and cycle_semantics stale. Snapshot and metadata-selected FileState agreed on revision 1097 and state_id `20261106_195021`; 222/222 selected source SHA-256 fingerprints matched FileState. No FULL, update_file or restart was performed.
 
 ## REMAINING_AUTHORITY_GAPS
 
-The supplied inventory does not authenticate actual runtime finder selection, search path, loaders, source bytes or LIVE installation. Real SCC namespace resolution and external import effects remain unmodeled. Runtime adoption of the new code was not certified; local replay used current repository source. No optional /3 receipt was claimed.
+Caller-supplied source and inventory cannot prove actual `sys.path`, `sys.meta_path`, `sys.modules`, loader selection, canonical LIVE freshness or warning eligibility. Real SCC namespace and external import uncertainty remains. Active runtime code adoption was not certified; replay used current repository source. No optional /3 receipt was claimed.
 
 ## FULL_DIFFS
 
-Complete actual Git diff follows.
+Complete actual new-file diffs follow.
 
 ```diff
-diff --git a/contextor/core/cycle_semantics/package_model.py b/contextor/core/cycle_semantics/package_model.py
-index c43d893..8722d49 100644
---- a/contextor/core/cycle_semantics/package_model.py
-+++ b/contextor/core/cycle_semantics/package_model.py
-@@ -11,6 +11,10 @@ from collections.abc import Mapping
- from dataclasses import dataclass, field, replace
- 
- from contextor.core.cycle_semantics.package_layout import build_package_layout
-+from contextor.core.cycle_semantics.namespace_path_model import (
-+    SearchPortion,
-+    resolve_namespace_path,
+diff --git a/contextor/core/cycle_semantics/namespace_bound_model.py b/contextor/core/cycle_semantics/namespace_bound_model.py
+new file mode 100644
+index 0000000..20a4882
+--- /dev/null
++++ b/contextor/core/cycle_semantics/namespace_bound_model.py
+@@ -0,0 +1,193 @@
++"""Source-bound, conditional PEP 420 cycle-order evidence.
++
++The supplied fingerprints and path inventory remain caller claims.
++This module does not authenticate runtime import finder state,
++canonical LIVE generations or warning-suppression eligibility.
++"""
++
++from __future__ import annotations
++
++import ast
++import hashlib
++from collections.abc import Mapping
++from dataclasses import dataclass
++from pathlib import Path
++
++from contextor.core.source import (
++    SourceError,
++    SourceSnapshot,
++    parse_source_snapshot,
 +)
- from contextor.core.cycle_semantics.typing_guard import (
-     RecognizedTypingGuard,
-     matches_typing_guard,
-@@ -1634,3 +1638,253 @@ def evaluate_package_import_order(
-         frames[-1] = (module, index + 1)
- 
-     return result("MODEL_PASS")
++
++from .model_identity import indexed_to_logical_module
++from .namespace_path_model import SearchPortion
++from .namespace_source_binding import (
++    IndexedSourcePath,
++    bind_indexed_namespace_resolution,
++)
++from .package_model import (
++    ConditionalNamespaceModelAssessment,
++    evaluate_conditional_namespace_import_order,
++)
 +
 +
 +@dataclass(frozen=True)
-+class ConditionalNamespaceModelAssessment:
++class SourceBoundConditionalNamespaceAssessment:
 +    entry_module: str
 +    outcome: str
 +    reason: str | None
-+    model_assessment: PackageImportAssessment | None
-+    namespace_parents: tuple[str, ...]
++    source_evidence_sha256: str | None
++    conditional_assessment: (
++        ConditionalNamespaceModelAssessment | None
++    )
 +    authority: str = (
-+        "CONDITIONAL_ORDERED_INVENTORY_AND_AST_"
++        "SOURCE_BOUND_CALLER_SUPPLIED_INVENTORY_"
 +        "NOT_RUNTIME_OR_LIVE_PROOF"
 +    )
 +
 +
-+def evaluate_conditional_namespace_import_order(
-+    indexed_sources: Mapping[str, ast.AST],
++def evaluate_source_bound_conditional_namespace_import_order(
++    roots: tuple[SearchPortion, ...],
++    bindings: tuple[IndexedSourcePath, ...],
++    indexed_fingerprints: Mapping[str, str],
++    source_snapshots: Mapping[str, SourceSnapshot],
 +    entry_module: str,
-+    portions: tuple[SearchPortion, ...],
-+) -> ConditionalNamespaceModelAssessment:
-+    """Evaluate a supplied closed PEP 420 inventory conditionally.
++    *,
++    standard_finder_assumed: bool = False,
++) -> SourceBoundConditionalNamespaceAssessment:
++    """Parse indexed byte snapshots and conditionally evaluate PEP 420.
 +
-+    This assumes standard finder behavior for the supplied ordered
-+    inventory. It does not authenticate actual runtime import state,
-+    sys.path, sys.modules, custom finders, external portions,
-+    source bytes or canonical LIVE freshness.
++    Binding verifies every supplied source against its claimed
++    fingerprint before AST parsing. The AST is derived only from
++    those bytes, never accepted as independent caller evidence.
 +
-+    Namespace parents are represented by an empty initialization
-+    program only within this private conditional evaluation.
-+    No synthetic source is written or indexed.
-+
-+    The result is never eligible for MODEL_PASS warning suppression.
++    This is not an authenticated index, runtime import environment,
++    LIVE generation or permission to suppress a cycle warning.
 +    """
 +
 +    def reject(
 +        reason: str,
-+        parents: tuple[str, ...] = (),
-+    ) -> ConditionalNamespaceModelAssessment:
-+        return ConditionalNamespaceModelAssessment(
++        digest: str | None = None,
++    ) -> SourceBoundConditionalNamespaceAssessment:
++        return SourceBoundConditionalNamespaceAssessment(
 +            entry_module=entry_module,
 +            outcome="UNKNOWN",
 +            reason=reason,
-+            model_assessment=None,
-+            namespace_parents=parents,
++            source_evidence_sha256=digest,
++            conditional_assessment=None,
 +        )
 +
 +    if (
-+        not isinstance(indexed_sources, Mapping)
-+        or type(entry_module) is not str
++        type(entry_module) is not str
 +        or not entry_module
-+        or type(portions) is not tuple
-+        or not portions
 +        or any(
-+            type(portion) is not SearchPortion
-+            or type(portion.files) is not frozenset
-+            or any(
-+                type(filename) is not str
-+                for filename in portion.files
-+            )
-+            for portion in portions
++            not part.isidentifier()
++            for part in entry_module.split(".")
 +        )
++        or type(standard_finder_assumed) is not bool
 +    ):
-+        return reject("INVALID_CONDITIONAL_INPUT")
++        return reject("INVALID_ENTRY_OR_FINDER_POLICY")
++
++    bound = bind_indexed_namespace_resolution(
++        roots,
++        bindings,
++        indexed_fingerprints,
++        source_snapshots,
++        entry_module,
++        standard_finder_assumed=standard_finder_assumed,
++    )
++
++    if bound.status != "SOURCE_BOUND_CONDITIONAL":
++        return reject(
++            bound.reason or "SOURCE_BINDING_INDETERMINATE"
++        )
++
++    digest = bound.evidence_sha256
 +
 +    if (
-+        not indexed_sources
-+        or len(indexed_sources) > 256
-+        or any(
-+            type(module_id) is not str
-+            or not isinstance(tree, ast.Module)
-+            for module_id, tree in indexed_sources.items()
-+        )
++        type(digest) is not str
++        or len(digest) != 64
 +    ):
-+        return reject("INVALID_CONDITIONAL_SOURCE_COHORT")
++        return reject("SOURCE_BINDING_DIGEST_INVALID")
 +
-+    try:
-+        layout = build_package_layout(indexed_sources)
-+    except (TypeError, ValueError):
-+        return reject("INVALID_CONDITIONAL_LAYOUT")
-+
-+    nodes = {
-+        node.name: node
-+        for node in layout.nodes
++    entry_candidates = {
++        indexed_to_logical_module(module_id)
++        for module_id in indexed_fingerprints
 +    }
 +
-+    namespace_parents = tuple(sorted(
-+        node.name
-+        for node in layout.nodes
-+        if node.kind == "NAMESPACE_CANDIDATE"
-+    ))
-+
-+    if not namespace_parents:
-+        return reject("NO_NAMESPACE_PARENT")
-+
-+    if any(
-+        node.kind not in {
-+            "REGULAR_PACKAGE",
-+            "MODULE_FILE",
-+            "NAMESPACE_CANDIDATE",
-+        }
-+        for node in layout.nodes
-+    ):
++    # An artificial namespace initializer is not an indexed
++    # physical source and cannot be a source-bound entry.
++    if entry_module not in entry_candidates:
 +        return reject(
-+            "AMBIGUOUS_CONDITIONAL_LAYOUT",
-+            namespace_parents,
++            "ENTRY_SOURCE_NOT_INDEXED",
++            digest,
 +        )
 +
-+    expected_files = tuple(sorted(
-+        module_id.replace(".", "/") + ".py"
-+        for module_id in indexed_sources
-+    ))
++    source_paths = {
++        row.module_id: row.relative_path
++        for row in bindings
++    }
 +
-+    inventory_files = tuple(sorted(
-+        filename
-+        for portion in portions
-+        for filename in portion.files
-+        if filename.endswith(".py")
-+    ))
++    parsed_sources: dict[str, ast.Module] = {}
 +
-+    if inventory_files != expected_files:
-+        return reject(
-+            "INVENTORY_SOURCE_DOMAIN_MISMATCH",
-+            namespace_parents,
-+        )
-+
-+    for node in layout.nodes:
-+        resolution = resolve_namespace_path(
-+            portions,
-+            node.name,
-+            standard_finder_assumed=True,
-+        )
-+
-+        if resolution.status != "CONDITIONAL":
-+            return reject(
-+                "CONDITIONAL_PATH_UNRESOLVED:" + node.name,
-+                namespace_parents,
-+            )
-+
-+        if node.kind == "NAMESPACE_CANDIDATE":
-+            if (
-+                resolution.kind != "NAMESPACE_PACKAGE"
-+                or resolution.source is not None
-+                or not resolution.portions
-+            ):
-+                return reject(
-+                    "NAMESPACE_PATH_KIND_MISMATCH:" + node.name,
-+                    namespace_parents,
-+                )
-+            continue
++    for module_id in sorted(indexed_fingerprints):
++        snapshot = source_snapshots.get(module_id)
++        expected = indexed_fingerprints[module_id]
++        path = source_paths.get(module_id)
 +
 +        if (
-+            len(node.indexed_module_ids) != 1
-+            or resolution.kind != node.kind
++            type(snapshot) is not SourceSnapshot
++            or type(snapshot.raw) is not bytes
++            or type(snapshot.source_fingerprint) is not str
++            or snapshot.source_fingerprint != expected
++            or hashlib.sha256(snapshot.raw).hexdigest()
++            != expected
++            or type(path) is not str
 +        ):
 +            return reject(
-+                "CONDITIONAL_SOURCE_KIND_MISMATCH:" + node.name,
-+                namespace_parents,
++                "SOURCE_CHANGED_AFTER_BINDING",
++                digest,
 +            )
 +
-+        expected_path = (
-+            node.indexed_module_ids[0].replace(".", "/")
-+            + ".py"
-+        )
-+
-+        selected_candidates = {
-+            portion.root_id + ":" + expected_path
-+            for portion in portions
-+            if expected_path in portion.files
-+        }
-+
-+        if resolution.source not in selected_candidates:
++        try:
++            parsed = parse_source_snapshot(
++                snapshot,
++                Path(path),
++            )
++        except SourceError:
 +            return reject(
-+                "CONDITIONAL_SOURCE_PATH_MISMATCH:" + node.name,
-+                namespace_parents,
++                "SOURCE_PARSE_FAILED:" + module_id,
++                digest,
 +            )
 +
-+    # An implicit namespace has no executable __init__.py.
-+    # Do not let a synthetic model-only initializer become
-+    # an explicitly importable source module.
-+    synthetic_ids = {
-+        name + ".__init__"
-+        for name in namespace_parents
-+    }
++        if not isinstance(parsed.tree, ast.Module):
++            return reject(
++                "SOURCE_AST_INVALID:" + module_id,
++                digest,
++            )
 +
-+    for tree in indexed_sources.values():
-+        for statement in ast.walk(tree):
-+            if isinstance(statement, ast.Import):
-+                if any(
-+                    alias.name in synthetic_ids
-+                    for alias in statement.names
-+                ):
-+                    return reject(
-+                        "SYNTHETIC_INITIALIZER_REFERENCE",
-+                        namespace_parents,
-+                    )
++        if parsed.source_fingerprint != expected:
++            return reject(
++                "SOURCE_AST_FINGERPRINT_MISMATCH:"
++                + module_id,
++                digest,
++            )
 +
-+            elif isinstance(statement, ast.ImportFrom):
-+                if (
-+                    statement.level == 0
-+                    and statement.module in namespace_parents
-+                    and any(
-+                        alias.name == "__init__"
-+                        for alias in statement.names
-+                    )
-+                ):
-+                    return reject(
-+                        "SYNTHETIC_INITIALIZER_REFERENCE",
-+                        namespace_parents,
-+                    )
++        parsed_sources[module_id] = parsed.tree
 +
-+    augmented = dict(indexed_sources)
-+
-+    for parent in namespace_parents:
-+        augmented[parent + ".__init__"] = ast.Module(
-+            body=[],
-+            type_ignores=[],
-+        )
-+
-+    # Reuse the existing import-order simulator.
-+    # Its internal observations remain model-relative.
-+    # Never change or promote its execution outcomes.
-+    model = evaluate_package_import_order(
-+        augmented,
++    conditional = evaluate_conditional_namespace_import_order(
++        parsed_sources,
 +        entry_module,
++        roots,
 +    )
 +
-+    conditional_outcomes = {
-+        "MODEL_PASS": "CONDITIONAL_MODEL_PASS",
-+        "EARLY_BINDING_HAZARD":
-+            "CONDITIONAL_EARLY_BINDING_HAZARD",
-+        "MISSING_EXPORT": "CONDITIONAL_MISSING_EXPORT",
-+        "MISSING_ATTRIBUTE": "CONDITIONAL_MISSING_ATTRIBUTE",
-+    }
-+
-+    outcome = conditional_outcomes.get(
-+        model.outcome,
-+        "UNKNOWN",
-+    )
-+
-+    return ConditionalNamespaceModelAssessment(
++    # Never convert CONDITIONAL_MODEL_PASS into MODEL_PASS.
++    # The original conditional assessment retains its
++    # restricted-model authority and complete event sequence.
++    return SourceBoundConditionalNamespaceAssessment(
 +        entry_module=entry_module,
-+        outcome=outcome,
-+        reason=(
-+            None
-+            if outcome != "UNKNOWN"
-+            else "RESTRICTED_MODEL_UNKNOWN"
-+        ),
-+        model_assessment=model,
-+        namespace_parents=namespace_parents,
++        outcome=conditional.outcome,
++        reason=conditional.reason,
++        source_evidence_sha256=digest,
++        conditional_assessment=conditional,
 +    )
-diff --git a/tests/test_cycle_semantics_namespace_path_model.py b/tests/test_cycle_semantics_namespace_path_model.py
-index c7a5eda..f747ab9 100644
---- a/tests/test_cycle_semantics_namespace_path_model.py
-+++ b/tests/test_cycle_semantics_namespace_path_model.py
-@@ -2,8 +2,14 @@
- 
- from __future__ import annotations
- 
-+import ast
+diff --git a/tests/test_cycle_semantics_namespace_bound_model.py b/tests/test_cycle_semantics_namespace_bound_model.py
+new file mode 100644
+index 0000000..a120041
+--- /dev/null
++++ b/tests/test_cycle_semantics_namespace_bound_model.py
+@@ -0,0 +1,312 @@
++"""Source-bound conditional PEP 420 regression contracts."""
 +
- from dataclasses import asdict
- 
-+from contextor.core.cycle_semantics.package_model import (
-+    evaluate_conditional_namespace_import_order,
-+    evaluate_package_import_order,
++from __future__ import annotations
++
++import hashlib
++
++from contextor.core.source import SourceSnapshot
++from contextor.core.cycle_semantics.namespace_bound_model import (
++    evaluate_source_bound_conditional_namespace_import_order,
 +)
- from contextor.core.cycle_semantics.namespace_path_model import (
-     SearchPortion,
-     resolve_namespace_path,
-@@ -244,3 +250,348 @@ def test_t11_deterministic_and_not_runtime_certified():
-         "CONDITIONAL_ORDERED_PATH_INVENTORY_NOT_RUNTIME_PROOF"
-     )
-     assert first.status == "CONDITIONAL"
++from contextor.core.cycle_semantics.namespace_path_model import (
++    SearchPortion,
++)
++from contextor.core.cycle_semantics.namespace_source_binding import (
++    IndexedSourcePath,
++)
 +
 +
-+def _g18_p2_p5_sources(*, hazard=False):
-+    return {
-+        "pkg.__init__": ast.parse("pass\n"),
-+        "pkg.ns.a": ast.parse(
-+            (
-+                "import pkg.ns.b\n"
-+                "value = 1\n"
-+            )
-+            if hazard else (
-+                "value = 1\n"
-+                "import pkg.ns.b\n"
-+            )
++def _snapshot(text):
++    raw = text.encode("utf-8")
++    return SourceSnapshot(
++        raw=raw,
++        source_fingerprint=hashlib.sha256(raw).hexdigest(),
++    )
++
++
++def _case(*, hazard=False):
++    texts = {
++        "pkg.__init__": "pass\n",
++        "pkg.ns.a": (
++            "import pkg.ns.b\n"
++            "value = 1\n"
++            if hazard
++            else
++            "value = 1\n"
++            "import pkg.ns.b\n"
 +        ),
-+        "pkg.ns.b": ast.parse(
-+            "from pkg.ns.a import value\n"
-+        ),
++        "pkg.ns.b": "from pkg.ns.a import value\n",
 +    }
 +
++    snapshots = {
++        module_id: _snapshot(text)
++        for module_id, text in texts.items()
++    }
 +
-+def _g18_p2_p5_portions():
-+    return (
++    fingerprints = {
++        module_id: snapshot.source_fingerprint
++        for module_id, snapshot in snapshots.items()
++    }
++
++    bindings = (
++        IndexedSourcePath(
++            "pkg.__init__",
++            "root",
++            "pkg/__init__.py",
++        ),
++        IndexedSourcePath(
++            "pkg.ns.a",
++            "root",
++            "pkg/ns/a.py",
++        ),
++        IndexedSourcePath(
++            "pkg.ns.b",
++            "root",
++            "pkg/ns/b.py",
++        ),
++    )
++
++    roots = (
 +        SearchPortion(
 +            "root",
 +            frozenset({
@@ -377,84 +332,181 @@ index c7a5eda..f747ab9 100644
 +        ),
 +    )
 +
++    return roots, bindings, fingerprints, snapshots
 +
-+def test_g18_p2_p5_default_namespace_remains_unknown():
-+    sources = _g18_p2_p5_sources()
 +
-+    result = evaluate_package_import_order(
-+        sources,
-+        "pkg.ns.a",
++def _evaluate(
++    args,
++    entry="pkg.ns.a",
++    *,
++    finder=True,
++):
++    return evaluate_source_bound_conditional_namespace_import_order(
++        *args,
++        entry,
++        standard_finder_assumed=finder,
 +    )
 +
-+    assert result.outcome == "UNKNOWN"
 +
-+
-+def test_g18_p2_p5_conditional_safe_order():
-+    sources = _g18_p2_p5_sources()
-+
-+    result = evaluate_conditional_namespace_import_order(
-+        sources,
-+        "pkg.ns.a",
-+        _g18_p2_p5_portions(),
-+    )
++def test_p6_source_bound_conditional_pass():
++    result = _evaluate(_case())
 +
 +    assert result.outcome == "CONDITIONAL_MODEL_PASS"
 +    assert result.reason is None
-+    assert result.model_assessment is not None
-+    assert result.model_assessment.outcome == "MODEL_PASS"
-+    assert result.namespace_parents == ("pkg.ns",)
++    assert result.source_evidence_sha256 is not None
++    assert len(result.source_evidence_sha256) == 64
++    assert result.conditional_assessment is not None
++    assert result.conditional_assessment.outcome == (
++        "CONDITIONAL_MODEL_PASS"
++    )
 +    assert result.authority == (
-+        "CONDITIONAL_ORDERED_INVENTORY_AND_AST_"
++        "SOURCE_BOUND_CALLER_SUPPLIED_INVENTORY_"
 +        "NOT_RUNTIME_OR_LIVE_PROOF"
 +    )
 +
 +
-+def test_g18_p2_p5_conditional_early_binding_hazard():
-+    sources = _g18_p2_p5_sources(hazard=True)
-+
-+    result = evaluate_conditional_namespace_import_order(
-+        sources,
-+        "pkg.ns.a",
-+        _g18_p2_p5_portions(),
-+    )
++def test_p6_source_bound_hazard():
++    result = _evaluate(_case(hazard=True))
 +
 +    assert result.outcome == (
 +        "CONDITIONAL_EARLY_BINDING_HAZARD"
 +    )
-+    assert result.model_assessment is not None
-+    assert result.model_assessment.outcome == (
-+        "EARLY_BINDING_HAZARD"
-+    )
-+    assert result.model_assessment.target_module == (
-+        "pkg.ns.a"
-+    )
-+    assert result.model_assessment.symbol == "value"
++    assert result.conditional_assessment is not None
++    assert result.conditional_assessment.model_assessment is not None
++    assert (
++        result.conditional_assessment
++        .model_assessment.symbol
++    ) == "value"
 +
 +
-+def test_g18_p2_p5_other_entry_can_pass():
-+    sources = _g18_p2_p5_sources(hazard=True)
-+
-+    result = evaluate_conditional_namespace_import_order(
-+        sources,
-+        "pkg.ns.b",
-+        _g18_p2_p5_portions(),
++def test_p6_entry_order_is_not_assumed():
++    result = _evaluate(
++        _case(hazard=True),
++        entry="pkg.ns.b",
 +    )
 +
 +    assert result.outcome == "CONDITIONAL_MODEL_PASS"
 +
 +
-+def test_g18_p2_p5_two_namespace_portions():
-+    sources = {
-+        "ns.a": ast.parse(
-+            "value = 1\n"
-+            "import ns.b\n"
-+        ),
-+        "ns.b": ast.parse(
-+            "from ns.a import value\n"
-+        ),
-+    }
++def test_p6_finder_assumption_is_required():
++    result = _evaluate(
++        _case(),
++        finder=False,
++    )
 +
-+    portions = (
++    assert result.outcome == "UNKNOWN"
++    assert result.reason == (
++        "IMPORT_FINDER_ENVIRONMENT_NOT_PROVED"
++    )
++    assert result.conditional_assessment is None
++
++
++def test_p6_changed_bytes_fail_closed():
++    roots, bindings, hashes, snapshots = _case()
++    snapshots["pkg.ns.a"] = _snapshot(
++        "value = 99\nimport pkg.ns.b\n"
++    )
++
++    result = _evaluate(
++        (roots, bindings, hashes, snapshots)
++    )
++
++    assert result.outcome == "UNKNOWN"
++    assert result.reason == "SOURCE_FINGERPRINT_MISMATCH"
++    assert result.source_evidence_sha256 is None
++    assert result.conditional_assessment is None
++
++
++def test_p6_missing_indexed_snapshot_fails():
++    roots, bindings, hashes, snapshots = _case()
++    del snapshots["pkg.ns.a"]
++
++    result = _evaluate(
++        (roots, bindings, hashes, snapshots)
++    )
++
++    assert result.outcome == "UNKNOWN"
++    assert result.reason == "SOURCE_INDEX_DOMAIN_MISMATCH"
++
++
++def test_p6_syntax_failure_after_valid_binding():
++    roots, bindings, hashes, snapshots = _case()
++
++    snapshots["pkg.ns.a"] = _snapshot(
++        "def invalid(:\n"
++    )
++    hashes["pkg.ns.a"] = (
++        snapshots["pkg.ns.a"].source_fingerprint
++    )
++
++    result = _evaluate(
++        (roots, bindings, hashes, snapshots)
++    )
++
++    assert result.outcome == "UNKNOWN"
++    assert result.reason == (
++        "SOURCE_PARSE_FAILED:pkg.ns.a"
++    )
++    assert result.source_evidence_sha256 is not None
++    assert result.conditional_assessment is None
++
++
++def test_p6_unindexed_namespace_entry_rejected():
++    result = _evaluate(
++        _case(),
++        entry="pkg.ns",
++    )
++
++    assert result.outcome == "UNKNOWN"
++    assert result.reason == "ENTRY_SOURCE_NOT_INDEXED"
++    assert result.conditional_assessment is None
++
++
++def test_p6_unindexed_shadowing_source_rejected():
++    roots, bindings, hashes, snapshots = _case()
++
++    roots = (
++        SearchPortion(
++            "root",
++            roots[0].files | frozenset({
++                "pkg/ns/__init__.py",
++            }),
++        ),
++    )
++
++    result = _evaluate(
++        (roots, bindings, hashes, snapshots)
++    )
++
++    assert result.outcome == "UNKNOWN"
++    assert result.reason == (
++        "INVENTORY_SOURCE_BINDING_MISMATCH"
++    )
++
++
++def test_p6_eager_external_import_unknown():
++    roots, bindings, hashes, snapshots = _case()
++
++    snapshots["pkg.ns.a"] = _snapshot(
++        "import os\n"
++        "value = 1\n"
++        "import pkg.ns.b\n"
++    )
++    hashes["pkg.ns.a"] = (
++        snapshots["pkg.ns.a"].source_fingerprint
++    )
++
++    result = _evaluate(
++        (roots, bindings, hashes, snapshots)
++    )
++
++    assert result.outcome == "UNKNOWN"
++    assert result.reason == "RESTRICTED_MODEL_UNKNOWN"
++    assert result.source_evidence_sha256 is not None
++
++
++def test_p6_two_portions_source_bound():
++    roots = (
 +        SearchPortion(
 +            "first",
 +            frozenset({"ns/a.py"}),
@@ -465,232 +517,56 @@ index c7a5eda..f747ab9 100644
 +        ),
 +    )
 +
-+    result = evaluate_conditional_namespace_import_order(
-+        sources,
-+        "ns.a",
-+        portions,
++    bindings = (
++        IndexedSourcePath(
++            "ns.a",
++            "first",
++            "ns/a.py",
++        ),
++        IndexedSourcePath(
++            "ns.b",
++            "second",
++            "ns/b.py",
++        ),
++    )
++
++    snapshots = {
++        "ns.a": _snapshot(
++            "value = 1\nimport ns.b\n"
++        ),
++        "ns.b": _snapshot(
++            "from ns.a import value\n"
++        ),
++    }
++
++    hashes = {
++        key: item.source_fingerprint
++        for key, item in snapshots.items()
++    }
++
++    result = _evaluate(
++        (roots, bindings, hashes, snapshots),
++        entry="ns.a",
 +    )
 +
 +    assert result.outcome == "CONDITIONAL_MODEL_PASS"
-+    assert result.namespace_parents == ("ns",)
++    assert result.source_evidence_sha256 is not None
 +
 +
-+def test_g18_p2_p5_unlisted_shadowing_source_unknown():
-+    sources = {
-+        "ns.a": ast.parse(
-+            "value = 1\n"
-+            "import ns.b\n"
-+        ),
-+        "ns.b": ast.parse(
-+            "from ns.a import value\n"
-+        ),
-+    }
++def test_p6_deterministic_digest_and_outcome():
++    args = _case()
 +
-+    portions = (
-+        SearchPortion(
-+            "namespace",
-+            frozenset({
-+                "ns/a.py",
-+                "ns/b.py",
-+            }),
-+        ),
-+        SearchPortion(
-+            "shadow",
-+            frozenset({
-+                "ns/__init__.py",
-+            }),
-+        ),
-+    )
-+
-+    result = evaluate_conditional_namespace_import_order(
-+        sources,
-+        "ns.a",
-+        portions,
-+    )
-+
-+    assert result.outcome == "UNKNOWN"
-+    assert result.reason == (
-+        "INVENTORY_SOURCE_DOMAIN_MISMATCH"
-+    )
-+
-+
-+def test_g18_p2_p5_alternative_loader_unknown():
-+    sources = {
-+        "ns.a": ast.parse(
-+            "value = 1\n"
-+            "import ns.b\n"
-+        ),
-+        "ns.b": ast.parse(
-+            "from ns.a import value\n"
-+        ),
-+    }
-+
-+    portions = (
-+        SearchPortion(
-+            "root",
-+            frozenset({
-+                "ns/a.py",
-+                "ns/b.py",
-+                "ns/a.cp315-win_amd64.pyd",
-+            }),
-+        ),
-+    )
-+
-+    result = evaluate_conditional_namespace_import_order(
-+        sources,
-+        "ns.a",
-+        portions,
-+    )
-+
-+    assert result.outcome == "UNKNOWN"
-+    assert result.reason == (
-+        "CONDITIONAL_PATH_UNRESOLVED:ns.a"
-+    )
-+
-+
-+def test_g18_p2_p5_missing_source_unknown():
-+    sources = _g18_p2_p5_sources()
-+
-+    portions = (
-+        SearchPortion(
-+            "root",
-+            frozenset({
-+                "pkg/__init__.py",
-+                "pkg/ns/a.py",
-+            }),
-+        ),
-+    )
-+
-+    result = evaluate_conditional_namespace_import_order(
-+        sources,
-+        "pkg.ns.a",
-+        portions,
-+    )
-+
-+    assert result.outcome == "UNKNOWN"
-+    assert result.reason == (
-+        "INVENTORY_SOURCE_DOMAIN_MISMATCH"
-+    )
-+
-+
-+def test_g18_p2_p5_no_namespace_parent_unknown():
-+    sources = {
-+        "pkg.__init__": ast.parse("pass\n"),
-+        "pkg.a": ast.parse("value = 1\n"),
-+    }
-+
-+    portions = (
-+        SearchPortion(
-+            "root",
-+            frozenset({
-+                "pkg/__init__.py",
-+                "pkg/a.py",
-+            }),
-+        ),
-+    )
-+
-+    result = evaluate_conditional_namespace_import_order(
-+        sources,
-+        "pkg.a",
-+        portions,
-+    )
-+
-+    assert result.outcome == "UNKNOWN"
-+    assert result.reason == "NO_NAMESPACE_PARENT"
-+
-+
-+def test_g18_p2_p5_explicit_synthetic_initializer_rejected():
-+    sources = {
-+        "ns.a": ast.parse(
-+            "import ns.__init__\n"
-+        ),
-+    }
-+
-+    portions = (
-+        SearchPortion(
-+            "root",
-+            frozenset({"ns/a.py"}),
-+        ),
-+    )
-+
-+    result = evaluate_conditional_namespace_import_order(
-+        sources,
-+        "ns.a",
-+        portions,
-+    )
-+
-+    assert result.outcome == "UNKNOWN"
-+    assert result.reason == (
-+        "SYNTHETIC_INITIALIZER_REFERENCE"
-+    )
-+
-+
-+def test_g18_p2_p5_external_execution_still_unknown():
-+    sources = {
-+        "ns.a": ast.parse(
-+            "import os\n"
-+            "import ns.b\n"
-+        ),
-+        "ns.b": ast.parse(
-+            "import ns.a\n"
-+        ),
-+    }
-+
-+    portions = (
-+        SearchPortion(
-+            "root",
-+            frozenset({
-+                "ns/a.py",
-+                "ns/b.py",
-+            }),
-+        ),
-+    )
-+
-+    result = evaluate_conditional_namespace_import_order(
-+        sources,
-+        "ns.a",
-+        portions,
-+    )
-+
-+    assert result.outcome == "UNKNOWN"
-+    assert result.reason == "RESTRICTED_MODEL_UNKNOWN"
-+
-+
-+def test_g18_p2_p5_deterministic_and_ast_immutable():
-+    sources = _g18_p2_p5_sources()
-+
-+    before = {
-+        name: ast.dump(
-+            tree,
-+            include_attributes=True,
-+        )
-+        for name, tree in sources.items()
-+    }
-+
-+    first = evaluate_conditional_namespace_import_order(
-+        sources,
-+        "pkg.ns.a",
-+        _g18_p2_p5_portions(),
-+    )
-+
-+    second = evaluate_conditional_namespace_import_order(
-+        sources,
-+        "pkg.ns.a",
-+        _g18_p2_p5_portions(),
-+    )
++    first = _evaluate(args)
++    second = _evaluate(args)
 +
 +    assert first == second
 +    assert first.outcome == "CONDITIONAL_MODEL_PASS"
-+
-+    assert before == {
-+        name: ast.dump(
-+            tree,
-+            include_attributes=True,
-+        )
-+        for name, tree in sources.items()
-+    }
++    assert (
++        first.source_evidence_sha256
++        == second.source_evidence_sha256
++    )
 ```
 
 ## FINAL_VERDICT
 
-PASS — exact conditional PEP 420 model, 172 targeted tests passed, all 222 current SCC source files FileState-bound, real SCCs remain INDETERMINATE and structural cycles remain 16.
+PASS — exact two-file source-bound conditional model, 169 targeted tests passed, both real FileState-bound SCCs remain INDETERMINATE and structural cycles remain 16.
