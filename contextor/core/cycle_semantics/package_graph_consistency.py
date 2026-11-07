@@ -21,6 +21,8 @@ class PackageGraphConsistency:
     reason: str | None
     unmodeled_external_imports: tuple[tuple[str, int, str, str], ...] = ()
     unmodeled_namespace_parents: tuple[tuple[str, int, str, str], ...] = ()
+    internal_graph_state: str = "NOT_PROVED"
+    checked_source_modules: tuple[str, ...] = ()
 
 
 def assess_package_graph_consistency(
@@ -469,17 +471,28 @@ def assess_package_graph_consistency(
         if expected != set(hard_edges[module_id]):
             return unknown("GRAPH_SOURCE_IMPORT_MISMATCH")
 
+    checked_source_modules = tuple(sorted(evidence_source_modules))
+    internal_graph_state = "INDEXED_AST_GRAPH_MATCH_FOR_SELECTED_SOURCES"
     if unmodeled_namespace_parents:
         return PackageGraphConsistency(
             "INDETERMINATE",
             "NAMESPACE_IMPORT_RESOLUTION_UNMODELED",
             tuple(sorted(unmodeled_external_imports)),
             tuple(sorted(unmodeled_namespace_parents)),
+            internal_graph_state,
+            checked_source_modules,
         )
     if unmodeled_external_imports:
         return PackageGraphConsistency(
             "INDETERMINATE",
             "EXTERNAL_IMPORT_EXECUTION_UNMODELED",
             tuple(sorted(unmodeled_external_imports)),
+            internal_graph_state=internal_graph_state,
+            checked_source_modules=checked_source_modules,
         )
-    return PackageGraphConsistency("CONSISTENT", None)
+    return PackageGraphConsistency(
+        "CONSISTENT",
+        None,
+        internal_graph_state=internal_graph_state,
+        checked_source_modules=checked_source_modules,
+    )
