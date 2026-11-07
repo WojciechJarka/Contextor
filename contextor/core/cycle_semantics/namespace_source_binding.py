@@ -21,11 +21,6 @@ from .namespace_path_model import (
 )
 
 
-_MAX_SOURCES = 256
-_MAX_SOURCE_BYTES = 2 * 1024 * 1024
-_MAX_TOTAL_BYTES = 32 * 1024 * 1024
-_MAX_INVENTORY_FILES = 16384
-
 _AUTHORITY = (
     "CALLER_SUPPLIED_INDEXED_SOURCE_BYTES_"
     "NOT_RUNTIME_OR_LIVE_CERTIFIED"
@@ -92,17 +87,10 @@ def bind_indexed_namespace_resolution(
     if (
         type(bindings) is not tuple
         or not bindings
-        or len(bindings) > _MAX_SOURCES
         or not isinstance(indexed_fingerprints, Mapping)
         or not isinstance(source_snapshots, Mapping)
     ):
         return reject("SOURCE_BINDING_INPUT_INVALID")
-
-    if (
-        sum(len(root.files) for root in roots)
-        > _MAX_INVENTORY_FILES
-    ):
-        return reject("INVENTORY_FILE_LIMIT")
 
     root_by_id = {}
 
@@ -182,7 +170,6 @@ def bind_indexed_namespace_resolution(
         return reject("INVENTORY_SOURCE_BINDING_MISMATCH")
 
     signatures = {}
-    retained_bytes = 0
 
     for module_id in sorted(required_ids):
         snapshot = source_snapshots[module_id]
@@ -200,14 +187,6 @@ def bind_indexed_namespace_resolution(
             )
         ):
             return reject("SOURCE_SNAPSHOT_SHAPE_INVALID")
-
-        if len(snapshot.raw) > _MAX_SOURCE_BYTES:
-            return reject("SOURCE_BYTE_LIMIT")
-
-        retained_bytes += len(snapshot.raw)
-
-        if retained_bytes > _MAX_TOTAL_BYTES:
-            return reject("SOURCE_TOTAL_BYTE_LIMIT")
 
         actual_sha = hashlib.sha256(snapshot.raw).hexdigest()
 

@@ -595,3 +595,37 @@ def test_g18_p2_p5_deterministic_and_ast_immutable():
         )
         for name, tree in sources.items()
     }
+
+
+def test_g18_p2_p7_conditional_model_accepts_308_sources():
+    sources = {
+        f"ns.m{index:05d}": ast.parse("pass\n")
+        for index in range(308)
+    }
+
+    portions = (
+        SearchPortion(
+            "root",
+            frozenset(
+                f"ns/m{index:05d}.py"
+                for index in range(308)
+            ),
+        ),
+    )
+
+    result = evaluate_conditional_namespace_import_order(
+        sources,
+        "ns.m00000",
+        portions,
+    )
+
+    assert len(sources) == 308
+    assert result.outcome == "CONDITIONAL_MODEL_PASS"
+    assert result.reason is None
+    assert result.namespace_parents == ("ns",)
+    assert result.model_assessment is not None
+    assert result.model_assessment.outcome == "MODEL_PASS"
+    assert result.authority == (
+        "CONDITIONAL_ORDERED_INVENTORY_AND_AST_"
+        "NOT_RUNTIME_OR_LIVE_PROOF"
+    )

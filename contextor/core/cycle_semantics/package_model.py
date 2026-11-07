@@ -1704,7 +1704,6 @@ def evaluate_conditional_namespace_import_order(
 
     if (
         not indexed_sources
-        or len(indexed_sources) > 256
         or any(
             type(module_id) is not str
             or not isinstance(tree, ast.Module)

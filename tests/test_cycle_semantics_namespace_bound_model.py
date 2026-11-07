@@ -310,3 +310,64 @@ def test_p6_deterministic_digest_and_outcome():
         first.source_evidence_sha256
         == second.source_evidence_sha256
     )
+
+
+def test_p7_source_bound_308_module_cohort():
+    names = tuple(
+        f"ns.m{index:05d}"
+        for index in range(308)
+    )
+
+    roots = (
+        SearchPortion(
+            "root",
+            frozenset(
+                name.replace(".", "/") + ".py"
+                for name in names
+            ),
+        ),
+    )
+
+    bindings = tuple(
+        IndexedSourcePath(
+            name,
+            "root",
+            name.replace(".", "/") + ".py",
+        )
+        for name in names
+    )
+
+    raw = b"pass\n"
+    digest = hashlib.sha256(raw).hexdigest()
+    snapshot = SourceSnapshot(raw, digest)
+
+    fingerprints = {
+        name: digest
+        for name in names
+    }
+
+    snapshots = {
+        name: snapshot
+        for name in names
+    }
+
+    result = evaluate_source_bound_conditional_namespace_import_order(
+        roots,
+        bindings,
+        fingerprints,
+        snapshots,
+        "ns.m00000",
+        standard_finder_assumed=True,
+    )
+
+    assert result.outcome == "CONDITIONAL_MODEL_PASS"
+    assert result.reason is None
+    assert result.source_evidence_sha256 is not None
+    assert result.conditional_assessment is not None
+    assert result.conditional_assessment.outcome == (
+        "CONDITIONAL_MODEL_PASS"
+    )
+    assert result.authority == (
+        "SOURCE_BOUND_CALLER_SUPPLIED_INVENTORY_"
+        "NOT_RUNTIME_OR_LIVE_PROOF"
+    )

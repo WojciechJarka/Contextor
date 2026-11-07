@@ -1,53 +1,423 @@
-# C16-B03-P1D3G18-P2-D7 — discovery
+# C16-B03-P1D3G18-P2-P7
 
-## CURRENT_CANONICAL_STATE
+## HEAD_BEFORE_AFTER
 
-DIRECT_EVIDENCE: Contextor MCP first for `namespace_bound_model`, `namespace_source_binding`, `namespace_path_model`, `package_model`, `package_layout`, `model_source_closure`, `scenarios`: revision 1097, `canonical_state=fresh`, each `workspace_sync=verified`, advisory warning null, syntax errors 0, structural DFS cycles 16, active warning count 16, `cycle_semantics=stale`. Snapshot metadata: state_id `20261106_195021`, repo_id `ctx_8efc50d8`, root `C:\Temp\Contextor_Repo`. Current HEAD `aac06a93db15e77862e589c810d20623aa4b469f`; worktree clean before report. Repository `.venv\Scripts\python.exe` reports CPython 3.15.2. Git HEAD and LIVE revision are distinct authorities.
+`6c90d2749e4d625bcd855eed2f272ffac68e65d1` before and after. Initial worktree clean; no commit or push.
 
-## SOURCE_DOMAIN_AND_SCC_CLOSURES
+## FILES_CHANGED
 
-DIRECT_EVIDENCE: Read-only `load_snapshot`, canonical `hard_edges` and `Module.imports`, followed by production `compute_cycle_model_source_closures_with_optional_children`. Physical production `.py` files: 308 (`contextor` 307 plus root `main.py`); all 308 occur in the canonical index. Canonical indexed graph has 626 module IDs including tests. SCC1: 44 members, 202 selected sources. SCC2: 9 members, 222 selected sources. Union 222; SCC1 is contained in SCC2. Indexed production modules outside union: 86; outside SCC1: 106. Metadata-selected FileState and snapshot both reported revision 1097/state_id `20261106_195021`. Current byte SHA-256 matched FileState for all 308 full-production files and all selected sources; zero missing or mismatched. Both SCCs encounter four namespace records, all under `contextor.core.git`.
+- `contextor/core/cycle_semantics/namespace_source_binding.py`
+- `contextor/core/cycle_semantics/package_model.py`
+- `tests/test_cycle_semantics_namespace_source_binding.py`
+- `tests/test_cycle_semantics_namespace_path_model.py`
+- `tests/test_cycle_semantics_namespace_bound_model.py`
 
-## EXACT_CAPACITY_GUARDS
+`walkthrough.md` was overwritten as the report.
 
-CODE_PATH_PROVED — `contextor/core/cycle_semantics/namespace_source_binding.py:24-27,95-105,168-209`: `_MAX_SOURCES=256`, `_MAX_SOURCE_BYTES=2*1024*1024`, `_MAX_TOTAL_BYTES=32*1024*1024`, `_MAX_INVENTORY_FILES=16384`. The binder first resolves the requested path, then rejects empty/non-tuple/>256 bindings or non-mapping fingerprints/snapshots with `SOURCE_BINDING_INPUT_INVALID`; checks inventory count; validates root IDs, binding identity and exact `module_id.replace('.', '/') + '.py'` path; requires exact equality of binding IDs, fingerprint keys and snapshot keys (`SOURCE_INDEX_DOMAIN_MISMATCH`); requires every supplied `.py` inventory entry to have a binding (`INVENTORY_SOURCE_BINDING_MISMATCH`); then checks per-source bytes, cumulative bytes and hashes. `contextor/core/cycle_semantics/package_model.py:1704-1714` separately rejects a conditional AST cohort over 256 as `INVALID_CONDITIONAL_SOURCE_COHORT`. These are distinct from path ambiguity, finder uncertainty and restricted AST execution. The selected cohorts stay below all measured count/byte limits; full production inventory exceeds only the source-count limit among these measured limits.
+## CPYTHON_IDENTITY
 
-## FULL_PRODUCTION_INVENTORY_REPLAY
+Active repository `.venv\Scripts\python.exe`: CPython 3.15.2. No interpreter switch.
 
-DIRECT_EVIDENCE: Supplied 308 canonical indexed physical production `.py` sources, exact repo-relative paths, current bytes and FileState-matching SHA-256; total 3,430,300 bytes; 308 inventory `.py` files. Entry `contextor.core.api.facade` is an indexed SCC1 member. `resolve_namespace_path(..., standard_finder_assumed=True)` returned `CONDITIONAL`, selected a `MODULE_FILE` from the supplied inventory. `bind_indexed_namespace_resolution` returned `INDETERMINATE / SOURCE_BINDING_INPUT_INVALID` at the `len(bindings)>256` guard. Source-bound wrapper returned `UNKNOWN / SOURCE_BINDING_INPUT_INVALID`, no digest, no conditional assessment, and no model execution. It did not reach source parsing or the separate conditional-model 256 guard. No limit was changed.
+## FIVE_LIMIT_REMOVAL_CONTRACT
 
-## SCC1_SELECTED_COHORT_REPLAY
+DIRECT_EVIDENCE: Removed `_MAX_SOURCES`, `_MAX_SOURCE_BYTES`, `_MAX_TOTAL_BYTES`, `_MAX_INVENTORY_FILES` and their binder acceptance guards. Removed `len(indexed_sources)>256` from the conditional model. Exact source-domain equality, module/path identity, duplicate rejection, SHA-256 comparison, namespace resolver, finder assumption, restricted AST rejection, operation budget and conditional authority were not edited. Source search found none of the five removed guard expressions in the two production files. No new input-size threshold was added.
 
-DIRECT_EVIDENCE: Supplied exactly 202 selected indexed sources and matching `.py` inventory entries, 2,373,594 bytes, 202/202 FileState-matching hashes. Same indexed entry `contextor.core.api.facade`. Path resolution `CONDITIONAL / MODULE_FILE`; binder `SOURCE_BOUND_CONDITIONAL` with digest. Wrapper returned `UNKNOWN / RESTRICTED_MODEL_UNKNOWN` with a conditional assessment. Its nested package assessment was `UNKNOWN`, first target `contextor.core.analysis.cache_manager`, symbol null, 0 events. CPython AST `compile(..., dont_inherit=True)` succeeds for that target, while the restricted `_compile` returns None; model evaluation reached AST compilation but not import-order execution. Inventory equality is proven only relative to these 202 supplied paths; 106 indexed production sources are omitted.
+## TARGETED_TEST_RESULTS
 
-## SCC2_SELECTED_COHORT_REPLAY
+Six specified modules: **206 passed in 25.01s**, exit code 0. `git diff --check` exited 0. The 16,385-file test ran once as part of this subset.
 
-DIRECT_EVIDENCE: Supplied exactly 222 selected indexed sources and matching `.py` inventory entries, 2,659,738 bytes, 222/222 FileState-matching hashes. Same indexed SCC1 entry, also present in SCC2's selected cohort. Path resolution `CONDITIONAL / MODULE_FILE`; binder `SOURCE_BOUND_CONDITIONAL` with digest. Wrapper returned `UNKNOWN / RESTRICTED_MODEL_UNKNOWN`; nested package assessment `UNKNOWN`, first target `contextor.core.analysis.cache_manager`, symbol null, 0 events. The same target passed CPython compile but failed restricted `_compile` in read-only diagnostic. Inventory equality is relative to 222 supplied paths; 86 indexed production sources are omitted. Neither selected-cohort result is a complete interpreter search-environment proof.
+## THRESHOLD_CROSSING_TESTS
 
-## NAMESPACE_PATH_RELEVANCE
+CONTRACT_PROVED by passing new tests: a >2 MiB source with valid fingerprint binds; 308 source bindings pass; 17 sources of 2 MiB each exceed 32 MiB and bind; 16,385 inventory files bind; the conditional model and source-bound wrapper accept a synthetic 308-module cohort and return only `CONDITIONAL_MODEL_PASS` with their non-runtime authority strings.
 
-DIRECT_EVIDENCE: Both SCCs have the same four records: `contextor.core.analysis.git_context:13` and `contextor.core.reporting_engine.header:2` request `contextor.core.git.repo_state`; `contextor.core.reporting_engine.io_manager:21` requests `contextor.core.git.diff_engine`; `contextor.core.reporting_engine.pipeline:114` requests `contextor.core.git.repo_state`. Candidate namespace parent is `contextor.core.git`. The physical directory contains indexed `repo_state.py` and `diff_engine.py`, with no `__init__.py`, no colliding `git.py`, and no `.pyd`/`.so` file there. Both requested children resolve under the supplied selected inventories as `CONDITIONAL / MODULE_FILE`, with a `NAMESPACE_PACKAGE` parent and corresponding selected source. No indexed production module outside the SCC union is at `contextor.core.git` or under either requested child path. These are local physical and supplied-inventory facts; the resolver's standard-finder assumption does not establish actual runtime selection or exclude unindexed/external portions.
+## NEGATIVE_SAFETY_TESTS
 
-## RUNTIME_AUTHORITY_BOUNDARY
+CONTRACT_PROVED by passing assertions: a 308-source cohort missing one snapshot returns `SOURCE_INDEX_DOMAIN_MISMATCH` without digest; a >2 MiB source with forged expected SHA-256 returns `SOURCE_FINGERPRINT_MISMATCH` without digest. Existing targeted negative tests for path identity, shadowing, alternate loaders, finder uncertainty and unsupported model behavior also passed. The replaced M12 changes only the obsolete byte-budget expectation.
 
-CODE_PATH_PROVED — `contextor/core/cycle_semantics/namespace_path_model.py:40-223` requires `standard_finder_assumed=True`, models `.py`/regular-package/namespace precedence and rejects tagged alternative loader candidates. It does not authenticate `sys.path`, `sys.meta_path`, `sys.modules`, loaders, dynamic path mutation or external portions. `namespace_source_binding.py:56-260` hashes caller-supplied inventory and bytes, not an actual interpreter environment. `namespace_bound_model.py` exposes only conditional outcomes. The actual SCCs remain `INDETERMINATE / NAMESPACE_IMPORT_RESOLUTION_UNMODELED`, despite successful conditional resolution of two individual requested paths. No MODEL_PASS or warning suppression follows.
+## FULL_PRODUCTION_SOURCE_BINDING_REPLAY
 
-## MISSING_SOURCE_NEGATIVE_CASE
+DIRECT_EVIDENCE: On canonical revision 1102, used all 308 indexed physical production `.py` files with exact module IDs, repo-relative paths, current bytes and FileState-matching SHA-256; total bytes 3,429,693, zero fingerprint mismatches. Indexed SCC entry `contextor.core.api.facade`, `standard_finder_assumed=True`. The binder now returns `SOURCE_BOUND_CONDITIONAL`, reason null, digest present and four selected path-chain sources. The source-bound wrapper then returns `UNKNOWN / RESTRICTED_MODEL_UNKNOWN`; nested model assessment is UNKNOWN with first target `contextor.__main__` and zero events. The next blocker is in the existing restricted model; this task does not classify its exact AST cause. The prior D7 `SOURCE_BINDING_INPUT_INVALID` size refusal is gone. Successful conditional binding is not actual runtime finder proof.
 
-DIRECT_EVIDENCE: An in-memory copy of SCC1 bindings omitted the selected indexed entry `contextor.core.api.facade` while retaining its fingerprint, snapshot and inventory path. The existing binder returned `INDETERMINATE / SOURCE_INDEX_DOMAIN_MISMATCH`, with no positive conditional assessment. No physical file was changed.
+## REAL_SCC_REPLAY
 
-## REGRESSION_TEST_COVERAGE
+DIRECT_EVIDENCE: Canonical hard_edges contain 626 indexed modules including tests; physical production inventory 308; optional SCC1 44 members/202 selected sources, SCC2 9 members/222 selected sources. All 222 selected source bytes in their union match FileState. SCC1: 607 external records, four namespace records, `OPAQUE_EXECUTION_POSSIBLE`. SCC2: 725 external records, four namespace records, same gate. Both retain consistency and scenario `INDETERMINATE / NAMESPACE_IMPORT_RESOLUTION_UNMODELED`, coverage NONE and zero entry assessments. Structural DFS cycles remain 16; no real SCC MODEL_PASS claim.
 
-Source inspected only; no pytest run. `tests/test_cycle_semantics_namespace_bound_model.py`: `test_p6_source_bound_conditional_pass`, `test_p6_changed_bytes_fail_closed`, `test_p6_missing_indexed_snapshot_fails`, `test_p6_finder_assumption_is_required`, `test_p6_unindexed_shadowing_source_rejected`, `test_p6_two_portions_source_bound`, `test_p6_eager_external_import_unknown`. `tests/test_cycle_semantics_namespace_source_binding.py`: `test_m01_namespace_source_bytes_are_bound`, `test_m02_two_portions_bind_distinct_children`, `test_m03_finder_assumption_is_not_automatic`, `test_m04_modified_raw_bytes_are_rejected`, `test_m05_forged_fingerprint_is_rejected`, `test_m07_unbound_python_inventory_entry_is_rejected`, `test_m08_missing_capture_is_rejected`, `test_m10_alternative_loader_remains_indeterminate`, `test_m12_source_byte_budget_fails_closed`, `test_m14_unindexed_shadowing_source_blocks_binding`. `tests/test_cycle_semantics_namespace_path_model.py`: `test_t03_two_namespace_portions`, `test_t04_regular_package_shadows_earlier_namespace`, `test_t06_finder_environment_not_proved`, `test_t08b_tagged_alternative_loaders_fail_closed`. `tests/test_cycle_semantics_namespace_pep420_contract.py`: `test_t03_namespace_with_two_portions`, `test_t04_later_regular_package_shadows_namespace`, `test_t05_namespace_path_changes_dynamically`, `test_t06_meta_path_finder_can_override_resolution`. The exact 308>256 full-inventory boundary, 32 MiB cumulative source limit and 16,384 inventory-file limit have no named targeted regression in these four modules; the first was observed directly here. No test was added.
+## SOURCE_BINDING
 
-## UNRESOLVED_FACTS
+DIRECT_EVIDENCE: Snapshot metadata and metadata-selected FileState agree on revision 1102 and state_id `20261106_195021`, repo_id `ctx_8efc50d8`, root `C:\Temp\Contextor_Repo`. Full-production 308/308 and selected union 222/222 SHA-256 comparisons passed. No source was executed; replay parsed AST and invoked only restricted model functions.
 
-The supplied full inventory is the local indexed physical `.py` domain, not authenticated runtime `sys.path` or all loaders. The selected cohorts omit 106/86 indexed production files respectively and cannot certify absence of shadowing outside supplied inventory. Exact unsupported AST statement in `cache_manager.py` was not classified here; direct evidence is only restricted `_compile=None` after successful CPython compile. Actual runtime finder state, dynamic imports, external namespace portions and LIVE adoption remain unknown. Canonical cycle semantics remains stale. No analyzed repository source was executed; diagnostics parsed AST and invoked only model functions.
+## MCP_POST_CHANGE_AUDIT
 
-## FILES_CHANGED_AND_FULL_DIFFS
+DIRECT_EVIDENCE: Contextor MCP for all five modified modules returned revision 1102, canonical_state fresh, workspace_sync verified, advisory warning null, syntax errors 0, structural DFS cycles 16, active warning count 16, model_pass_count 0 and cycle_semantics stale. No FULL, update_file or restart was performed.
 
-Production/test/docs changes: NONE. `ACTUAL_DIFF=DIFFS=FULL_DIFFS=NONE`. Only this root `walkthrough.md` report was overwritten. No FULL, update_file, restart, interpreter switch, dependency installation, pytest, Git mutation, warning change or /3 publication occurred.
+## REMAINING_AUTHORITY_GAPS
+
+The supplied inventory is not authenticated `sys.path`, `sys.meta_path`, `sys.modules` or loader state. The full-production model result remains UNKNOWN at `contextor.__main__`; real SCC namespace and external execution uncertainty remains. Active runtime adoption of changed source was not certified. No warning-policy change or optional /3 receipt occurred.
+
+## FULL_DIFFS
+
+Complete actual Git diff of all five changed production/test files follows.
+
+```diff
+diff --git a/contextor/core/cycle_semantics/namespace_source_binding.py b/contextor/core/cycle_semantics/namespace_source_binding.py
+index 1dc0750..5fd7220 100644
+--- a/contextor/core/cycle_semantics/namespace_source_binding.py
++++ b/contextor/core/cycle_semantics/namespace_source_binding.py
+@@ -21,11 +21,6 @@ from .namespace_path_model import (
+ )
+ 
+ 
+-_MAX_SOURCES = 256
+-_MAX_SOURCE_BYTES = 2 * 1024 * 1024
+-_MAX_TOTAL_BYTES = 32 * 1024 * 1024
+-_MAX_INVENTORY_FILES = 16384
+-
+ _AUTHORITY = (
+     "CALLER_SUPPLIED_INDEXED_SOURCE_BYTES_"
+     "NOT_RUNTIME_OR_LIVE_CERTIFIED"
+@@ -92,18 +87,11 @@ def bind_indexed_namespace_resolution(
+     if (
+         type(bindings) is not tuple
+         or not bindings
+-        or len(bindings) > _MAX_SOURCES
+         or not isinstance(indexed_fingerprints, Mapping)
+         or not isinstance(source_snapshots, Mapping)
+     ):
+         return reject("SOURCE_BINDING_INPUT_INVALID")
+ 
+-    if (
+-        sum(len(root.files) for root in roots)
+-        > _MAX_INVENTORY_FILES
+-    ):
+-        return reject("INVENTORY_FILE_LIMIT")
+-
+     root_by_id = {}
+ 
+     for root in roots:
+@@ -182,7 +170,6 @@ def bind_indexed_namespace_resolution(
+         return reject("INVENTORY_SOURCE_BINDING_MISMATCH")
+ 
+     signatures = {}
+-    retained_bytes = 0
+ 
+     for module_id in sorted(required_ids):
+         snapshot = source_snapshots[module_id]
+@@ -201,14 +188,6 @@ def bind_indexed_namespace_resolution(
+         ):
+             return reject("SOURCE_SNAPSHOT_SHAPE_INVALID")
+ 
+-        if len(snapshot.raw) > _MAX_SOURCE_BYTES:
+-            return reject("SOURCE_BYTE_LIMIT")
+-
+-        retained_bytes += len(snapshot.raw)
+-
+-        if retained_bytes > _MAX_TOTAL_BYTES:
+-            return reject("SOURCE_TOTAL_BYTE_LIMIT")
+-
+         actual_sha = hashlib.sha256(snapshot.raw).hexdigest()
+ 
+         if (
+diff --git a/contextor/core/cycle_semantics/package_model.py b/contextor/core/cycle_semantics/package_model.py
+index 8722d49..dad4f7c 100644
+--- a/contextor/core/cycle_semantics/package_model.py
++++ b/contextor/core/cycle_semantics/package_model.py
+@@ -1704,7 +1704,6 @@ def evaluate_conditional_namespace_import_order(
+ 
+     if (
+         not indexed_sources
+-        or len(indexed_sources) > 256
+         or any(
+             type(module_id) is not str
+             or not isinstance(tree, ast.Module)
+diff --git a/tests/test_cycle_semantics_namespace_bound_model.py b/tests/test_cycle_semantics_namespace_bound_model.py
+index a120041..0326078 100644
+--- a/tests/test_cycle_semantics_namespace_bound_model.py
++++ b/tests/test_cycle_semantics_namespace_bound_model.py
+@@ -310,3 +310,64 @@ def test_p6_deterministic_digest_and_outcome():
+         first.source_evidence_sha256
+         == second.source_evidence_sha256
+     )
++
++
++def test_p7_source_bound_308_module_cohort():
++    names = tuple(
++        f"ns.m{index:05d}"
++        for index in range(308)
++    )
++
++    roots = (
++        SearchPortion(
++            "root",
++            frozenset(
++                name.replace(".", "/") + ".py"
++                for name in names
++            ),
++        ),
++    )
++
++    bindings = tuple(
++        IndexedSourcePath(
++            name,
++            "root",
++            name.replace(".", "/") + ".py",
++        )
++        for name in names
++    )
++
++    raw = b"pass\n"
++    digest = hashlib.sha256(raw).hexdigest()
++    snapshot = SourceSnapshot(raw, digest)
++
++    fingerprints = {
++        name: digest
++        for name in names
++    }
++
++    snapshots = {
++        name: snapshot
++        for name in names
++    }
++
++    result = evaluate_source_bound_conditional_namespace_import_order(
++        roots,
++        bindings,
++        fingerprints,
++        snapshots,
++        "ns.m00000",
++        standard_finder_assumed=True,
++    )
++
++    assert result.outcome == "CONDITIONAL_MODEL_PASS"
++    assert result.reason is None
++    assert result.source_evidence_sha256 is not None
++    assert result.conditional_assessment is not None
++    assert result.conditional_assessment.outcome == (
++        "CONDITIONAL_MODEL_PASS"
++    )
++    assert result.authority == (
++        "SOURCE_BOUND_CALLER_SUPPLIED_INVENTORY_"
++        "NOT_RUNTIME_OR_LIVE_PROOF"
++    )
+diff --git a/tests/test_cycle_semantics_namespace_path_model.py b/tests/test_cycle_semantics_namespace_path_model.py
+index f747ab9..d955939 100644
+--- a/tests/test_cycle_semantics_namespace_path_model.py
++++ b/tests/test_cycle_semantics_namespace_path_model.py
+@@ -595,3 +595,37 @@ def test_g18_p2_p5_deterministic_and_ast_immutable():
+         )
+         for name, tree in sources.items()
+     }
++
++
++def test_g18_p2_p7_conditional_model_accepts_308_sources():
++    sources = {
++        f"ns.m{index:05d}": ast.parse("pass\n")
++        for index in range(308)
++    }
++
++    portions = (
++        SearchPortion(
++            "root",
++            frozenset(
++                f"ns/m{index:05d}.py"
++                for index in range(308)
++            ),
++        ),
++    )
++
++    result = evaluate_conditional_namespace_import_order(
++        sources,
++        "ns.m00000",
++        portions,
++    )
++
++    assert len(sources) == 308
++    assert result.outcome == "CONDITIONAL_MODEL_PASS"
++    assert result.reason is None
++    assert result.namespace_parents == ("ns",)
++    assert result.model_assessment is not None
++    assert result.model_assessment.outcome == "MODEL_PASS"
++    assert result.authority == (
++        "CONDITIONAL_ORDERED_INVENTORY_AND_AST_"
++        "NOT_RUNTIME_OR_LIVE_PROOF"
++    )
+diff --git a/tests/test_cycle_semantics_namespace_source_binding.py b/tests/test_cycle_semantics_namespace_source_binding.py
+index da5c3e5..b6b2572 100644
+--- a/tests/test_cycle_semantics_namespace_source_binding.py
++++ b/tests/test_cycle_semantics_namespace_source_binding.py
+@@ -239,10 +239,10 @@ def test_m11_inventory_order_changes_digest():
+     assert first.evidence_sha256 != second.evidence_sha256
+ 
+ 
+-def test_m12_source_byte_budget_fails_closed():
++def test_m12_source_over_old_byte_limit_is_bound():
+     roots, rows, hashes, snapshots = _base()
+ 
+-    oversized = b"x" * (2 * 1024 * 1024 + 1)
++    oversized = b"#" * (2 * 1024 * 1024 + 1)
+     digest = hashlib.sha256(oversized).hexdigest()
+ 
+     snapshots["pkg.ns.child"] = SourceSnapshot(
+@@ -253,8 +253,11 @@ def test_m12_source_byte_budget_fails_closed():
+ 
+     result = _bind(roots, rows, hashes, snapshots)
+ 
+-    assert result.reason == "SOURCE_BYTE_LIMIT"
+-    assert result.evidence_sha256 is None
++    assert result.status == "SOURCE_BOUND_CONDITIONAL"
++    assert result.reason is None
++    assert result.evidence_sha256 is not None
++    assert len(result.evidence_sha256) == 64
++    assert result.selected_sources[-1][2] == digest
+ 
+ 
+ def test_m13_deterministic_without_live_authority():
+@@ -319,3 +322,144 @@ def test_m15_indexed_shadowing_source_still_blocks_child():
+     assert result.resolution is not None
+     assert result.resolution.steps[-1].kind == "MODULE_FILE"
+     assert result.resolution.steps[-1].source == "root:pkg/ns.py"
++
++
++def _p7_inventory(count, *, raw=b"pass\n"):
++    names = tuple(
++        f"ns.m{index:05d}"
++        for index in range(count)
++    )
++
++    paths = tuple(
++        name.replace(".", "/") + ".py"
++        for name in names
++    )
++
++    roots = (
++        SearchPortion(
++            "root",
++            frozenset(paths),
++        ),
++    )
++
++    bindings = tuple(
++        IndexedSourcePath(
++            name,
++            "root",
++            path,
++        )
++        for name, path in zip(names, paths)
++    )
++
++    digest = hashlib.sha256(raw).hexdigest()
++    snapshot = SourceSnapshot(raw, digest)
++
++    fingerprints = {
++        name: digest
++        for name in names
++    }
++
++    snapshots = {
++        name: snapshot
++        for name in names
++    }
++
++    return (
++        roots,
++        bindings,
++        fingerprints,
++        snapshots,
++    )
++
++
++def test_p7_308_indexed_sources_are_bound():
++    args = _p7_inventory(308)
++
++    result = _bind(
++        *args,
++        requested="ns.m00000",
++    )
++
++    assert result.status == "SOURCE_BOUND_CONDITIONAL"
++    assert result.reason is None
++    assert result.evidence_sha256 is not None
++    assert len(args[1]) == 308
++
++
++def test_p7_total_source_size_above_32_mib_is_bound():
++    raw = b"#" * (2 * 1024 * 1024)
++
++    args = _p7_inventory(
++        17,
++        raw=raw,
++    )
++
++    assert 17 * len(raw) > 32 * 1024 * 1024
++
++    result = _bind(
++        *args,
++        requested="ns.m00000",
++    )
++
++    assert result.status == "SOURCE_BOUND_CONDITIONAL"
++    assert result.reason is None
++    assert result.evidence_sha256 is not None
++
++
++def test_p7_inventory_above_16384_files_is_bound():
++    args = _p7_inventory(16385)
++
++    assert len(args[0][0].files) == 16385
++    assert len(args[1]) == 16385
++
++    result = _bind(
++        *args,
++        requested="ns.m00000",
++    )
++
++    assert result.status == "SOURCE_BOUND_CONDITIONAL"
++    assert result.reason is None
++    assert result.evidence_sha256 is not None
++
++
++def test_p7_large_cohort_still_rejects_missing_source():
++    roots, bindings, fingerprints, snapshots = (
++        _p7_inventory(308)
++    )
++
++    del snapshots["ns.m00307"]
++
++    result = _bind(
++        roots,
++        bindings,
++        fingerprints,
++        snapshots,
++        requested="ns.m00000",
++    )
++
++    assert result.status == "INDETERMINATE"
++    assert result.reason == "SOURCE_INDEX_DOMAIN_MISMATCH"
++    assert result.evidence_sha256 is None
++
++
++def test_p7_large_source_still_checks_fingerprint():
++    roots, bindings, fingerprints, snapshots = (
++        _p7_inventory(
++            1,
++            raw=b"#" * (2 * 1024 * 1024 + 1),
++        )
++    )
++
++    fingerprints["ns.m00000"] = "0" * 64
++
++    result = _bind(
++        roots,
++        bindings,
++        fingerprints,
++        snapshots,
++        requested="ns.m00000",
++    )
++
++    assert result.status == "INDETERMINATE"
++    assert result.reason == "SOURCE_FINGERPRINT_MISMATCH"
++    assert result.evidence_sha256 is None
+```
 
 ## FINAL_VERDICT
 
-DISCOVERY_COMPLETE — all three caller-supplied inventories were measured against one FileState-bound generation; the full inventory fails at the 256-source capacity guard, while both selected cohorts bind and then fail at the restricted AST model without granting runtime authority.
+PASS — five specified input-size thresholds removed, 206 targeted tests passed, full 308-source binding passed, real SCCs remain INDETERMINATE and structural cycles remain 16.

@@ -239,10 +239,10 @@ def test_m11_inventory_order_changes_digest():
     assert first.evidence_sha256 != second.evidence_sha256
 
 
-def test_m12_source_byte_budget_fails_closed():
+def test_m12_source_over_old_byte_limit_is_bound():
     roots, rows, hashes, snapshots = _base()
 
-    oversized = b"x" * (2 * 1024 * 1024 + 1)
+    oversized = b"#" * (2 * 1024 * 1024 + 1)
     digest = hashlib.sha256(oversized).hexdigest()
 
     snapshots["pkg.ns.child"] = SourceSnapshot(
@@ -253,8 +253,11 @@ def test_m12_source_byte_budget_fails_closed():
 
     result = _bind(roots, rows, hashes, snapshots)
 
-    assert result.reason == "SOURCE_BYTE_LIMIT"
-    assert result.evidence_sha256 is None
+    assert result.status == "SOURCE_BOUND_CONDITIONAL"
+    assert result.reason is None
+    assert result.evidence_sha256 is not None
+    assert len(result.evidence_sha256) == 64
+    assert result.selected_sources[-1][2] == digest
 
 
 def test_m13_deterministic_without_live_authority():
@@ -319,3 +322,144 @@ def test_m15_indexed_shadowing_source_still_blocks_child():
     assert result.resolution is not None
     assert result.resolution.steps[-1].kind == "MODULE_FILE"
     assert result.resolution.steps[-1].source == "root:pkg/ns.py"
+
+
+def _p7_inventory(count, *, raw=b"pass\n"):
+    names = tuple(
+        f"ns.m{index:05d}"
+        for index in range(count)
+    )
+
+    paths = tuple(
+        name.replace(".", "/") + ".py"
+        for name in names
+    )
+
+    roots = (
+        SearchPortion(
+            "root",
+            frozenset(paths),
+        ),
+    )
+
+    bindings = tuple(
+        IndexedSourcePath(
+            name,
+            "root",
+            path,
+        )
+        for name, path in zip(names, paths)
+    )
+
+    digest = hashlib.sha256(raw).hexdigest()
+    snapshot = SourceSnapshot(raw, digest)
+
+    fingerprints = {
+        name: digest
+        for name in names
+    }
+
+    snapshots = {
+        name: snapshot
+        for name in names
+    }
+
+    return (
+        roots,
+        bindings,
+        fingerprints,
+        snapshots,
+    )
+
+
+def test_p7_308_indexed_sources_are_bound():
+    args = _p7_inventory(308)
+
+    result = _bind(
+        *args,
+        requested="ns.m00000",
+    )
+
+    assert result.status == "SOURCE_BOUND_CONDITIONAL"
+    assert result.reason is None
+    assert result.evidence_sha256 is not None
+    assert len(args[1]) == 308
+
+
+def test_p7_total_source_size_above_32_mib_is_bound():
+    raw = b"#" * (2 * 1024 * 1024)
+
+    args = _p7_inventory(
+        17,
+        raw=raw,
+    )
+
+    assert 17 * len(raw) > 32 * 1024 * 1024
+
+    result = _bind(
+        *args,
+        requested="ns.m00000",
+    )
+
+    assert result.status == "SOURCE_BOUND_CONDITIONAL"
+    assert result.reason is None
+    assert result.evidence_sha256 is not None
+
+
+def test_p7_inventory_above_16384_files_is_bound():
+    args = _p7_inventory(16385)
+
+    assert len(args[0][0].files) == 16385
+    assert len(args[1]) == 16385
+
+    result = _bind(
+        *args,
+        requested="ns.m00000",
+    )
+
+    assert result.status == "SOURCE_BOUND_CONDITIONAL"
+    assert result.reason is None
+    assert result.evidence_sha256 is not None
+
+
+def test_p7_large_cohort_still_rejects_missing_source():
+    roots, bindings, fingerprints, snapshots = (
+        _p7_inventory(308)
+    )
+
+    del snapshots["ns.m00307"]
+
+    result = _bind(
+        roots,
+        bindings,
+        fingerprints,
+        snapshots,
+        requested="ns.m00000",
+    )
+
+    assert result.status == "INDETERMINATE"
+    assert result.reason == "SOURCE_INDEX_DOMAIN_MISMATCH"
+    assert result.evidence_sha256 is None
+
+
+def test_p7_large_source_still_checks_fingerprint():
+    roots, bindings, fingerprints, snapshots = (
+        _p7_inventory(
+            1,
+            raw=b"#" * (2 * 1024 * 1024 + 1),
+        )
+    )
+
+    fingerprints["ns.m00000"] = "0" * 64
+
+    result = _bind(
+        roots,
+        bindings,
+        fingerprints,
+        snapshots,
+        requested="ns.m00000",
+    )
+
+    assert result.status == "INDETERMINATE"
+    assert result.reason == "SOURCE_FINGERPRINT_MISMATCH"
+    assert result.evidence_sha256 is None
