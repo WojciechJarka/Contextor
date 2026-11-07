@@ -1,498 +1,84 @@
-# C16-B03-P1D3G18-P2-P9 — interpreter-bound deferred annotation semantics
+# C16-B03-P1D3G18-P2-D10 — restricted model precompilation and decorator boundary
 
-## HEAD_BEFORE_AFTER
+## CURRENT_CANONICAL_STATE
 
-- Before and after: `3abd30b0c216c654d78147b7eada80900731bff5`. No commit or push.
-- Before: only prior `walkthrough.md` modification. After: four task source/test files and this report modified.
+- DIRECT_EVIDENCE — Contextor MCP `get_module_context` for `package_model`, `namespace_bound_model`, `full_analysis_lease`, `facade`, and `scenarios`: canonical revision **1109**, canonical_state=fresh, workspace_sync=verified, provenance=live, advisory_warning=null, graph/cycles fresh, cycle_semantics=stale, syntax_errors=0, structural DFS cycles=16, active_warning_count=16, model_pass_count=0. The MCP freshness envelope is source/index evidence, not proof of loaded runtime code.
+- DIRECT_EVIDENCE — metadata-selected generation: state_id `20261106_195021`, repo_id `ctx_8efc50d8`, root `C:\Temp\Contextor_Repo`, FileState `file_state.r1109.67d19cdfd16d4a2eb4cf494ba6cc9523.json`. FileState-file SHA-256 `fe1f3c5666c4e97fc21ba83d615b4ea25ae4b2d9d2619a4eb974c08207995c12`; its embedded revision/state_id match metadata.
+- DIRECT_EVIDENCE — repository interpreter Python 3.15.2. Git HEAD `3e4e3dfb7c57fba1ef6b1de64cf79bfb8f9cdb45`; worktree clean before this report overwrite. The previous P9 changes are in current HEAD, not merely an uncommitted worktree assumption.
 
-## FILES_CHANGED
+## REPRODUCED_P9_RESULT
 
-- `contextor/core/cycle_semantics/package_model.py`
-- `contextor/core/cycle_semantics/namespace_bound_model.py`
-- `tests/test_cycle_semantics_namespace_path_model.py`
-- `tests/test_cycle_semantics_namespace_bound_model.py`
-- `walkthrough.md` (report, excluded from its own FULL_DIFFS)
+- DIRECT_EVIDENCE — one fresh-process source-bound call to `namespace_bound_model.py:50`, `evaluate_source_bound_conditional_namespace_import_order`, entry `contextor.core.api.facade`, full 308 physical production source inventory (tests excluded), `standard_finder_assumed=True`, `target_python_version=(3,15)`. All 308 source SHA-256 values match the current metadata-selected FileState. The source binder accepted the supplied inventory and returned digest `6ca1f598aef59e2760bcadb4fac2ba2dbf4bbb180f63de5ab46625cd161b815d`; no binding error. Conservative model cohort: 202 ASTs (`package_model.py:1706-1848`).
+- DIRECT_EVIDENCE — outcome UNKNOWN, reason RESTRICTED_MODEL_UNKNOWN; nested first target `contextor.core.analysis.full_analysis_lease`, nested model event count **0**. Conditional authority remains `SOURCE_BOUND_CALLER_SUPPLIED_INVENTORY_NOT_RUNTIME_OR_LIVE_PROOF`. This reproduces P9 at revision 1109 and does not imply that the target was imported during modeled execution.
 
-## CPYTHON_IDENTITY
+## PRECOMPILATION_EXECUTION_BOUNDARY
 
-- DIRECT_EVIDENCE: repository `.venv\Scripts\python.exe -B -V` is Python 3.15.2. No interpreter switch.
+- CODE_PATH_PROVED — `package_model.py:914-1000`, `evaluate_package_import_order`: validates input and, if present, exact session AST identity; calls `build_package_layout` at 994 and rejects unsupported layout at 1000-1017.
+- CODE_PATH_PROVED — `package_model.py:1020-1050`: calls CPython `compile(tree, ..., "exec", dont_inherit=True)` for **every selected indexed source** to check code-object validity. It does not execute the code objects. Reaching a later restricted-model refusal implies the CPython compile loop completed for the full supplied source set.
+- CODE_PATH_PROVED — `package_model.py:1052-1070`: constructs logical source mapping and regular-package set. `package_model.py:1072-1129`: validates chains, then calls restricted `_compile` for **every logical source** before constructing model programs. A None return yields UNKNOWN with that source name.
+- CODE_PATH_PROVED — `package_model.py:1132-1189`: checks prebinding conflicts, initializes states/namespaces and a bootstrap frame. `package_model.py:1210-1294`: starts frame processing and emits first modeled START_IMPORT only when a missing import piece is entered. The replay stopped in restricted precompilation, before bootstrap execution, hence events=().
+- DISTINCT PROPERTIES — `full_analysis_lease` is in the 202-source conservative closure; its AST passed CPython compile validity; its AST did **not** pass restricted `_compile`; it was **not observed as visited by modeled import execution**. Inclusion, validity, restricted support and execution are separate claims.
 
-## D9_ROOT_CAUSE
+## FIRST_DECORATOR_REJECTION
 
-- CONTRACT_PROVED: absent explicit target, the restricted model passes `annotation_semantics=None`. `cache_manager.py:33-38` has a class with annotated `__init__`; `_safe_passive_function_definition` rejects parameter annotations under that mode, so `_compile` refuses the class. The P9 opt-in changes only the conditional evaluator's chosen annotation mode.
+- DIRECT_EVIDENCE — FileState-bound `contextor/core/analysis/full_analysis_lease.py` SHA-256 `4ce9464534019f0369fc03ff04d4780f53ad37ecf65cbc4d3cb4a17d70cbe5dd`. Under `annotation_semantics="DEFERRED"`, incremental top-level AST prefixes through index 14 compile; adding index 15 fails: `ast.ClassDef FullAnalysisLease`, line 28 column 0.
+- DIRECT_EVIDENCE — Decorator line 27: `@dataclass(frozen=True, slots=True)`. AST shape `Call(func=Name('dataclass'), keywords=[frozen=True, slots=True])`; both keyword values are boolean constants. Class bases=0; class keywords=0. Body has simple annotated fields `repo_key: str`, `token: str`, `owner: str`, `lock_path: str`, `repo_id: str`, `lock_fd: int`, `owner_pid: int = 0`, `owner_process_start_identity: int | None = None` (lines 29-36).
+- CODE_PATH_PROVED — `package_model.py:146-169`, `_safe_passive_class_definition`, rejects any nonempty `statement.decorator_list` before inspecting class body. The class-creation decorator is the exact first guard; it is not an annotation-only refusal. `_compile` dispatches ClassDef to this guard at `package_model.py:727-732`.
+- DIRECT_EVIDENCE — lexical binding `from dataclasses import dataclass` at `full_analysis_lease.py:17`, no later top-level assignment/import alias of the name found in this source. This identifies source-level provenance only. It does not authenticate the actual runtime callable, finder, module cache or third-party interference.
 
-## PEP649_VERSION_ASSUMPTION_CONTRACT
+## LATER_INDEPENDENT_BLOCKERS
 
-- Implementation: the requested helper accepts only exact tuples for CPython 3.10-3.15 matching the executing interpreter. It returns DEFERRED for 3.14+, STOCK_EAGER for older supported versions, and explicit errors for invalid, unsupported or mismatched versions. None retains the old behavior.
-- The selected version is a caller-declared, host-validated conditional model assumption. It is not evidence of an analyzed application's interpreter or its actual imports, finder state or LIVE adoption.
+- DIRECT_EVIDENCE — Independent single-statement restricted compilation under DEFERRED identified five rejected top-level statements: first decorated `FullAnalysisLease` ClassDef at line 28; later `FullAnalysisBusyError(RuntimeError)` ClassDef at line 39 (nonempty base); `_PROCESS_LOCKS_GUARD = threading.Lock()` Assign at line 51; `_ADMISSION_LOCKS_GUARD = threading.Lock()` Assign at line 53 (both call-valued assignments); decorated `_canonical_writer_admission` FunctionDef at line 122 (`@contextmanager`). Each is a potential independent restricted-compiler blocker. The prefix test identifies line 28 as the actual first failure.
+- CODE_PATH_PROVED — class-base, class-decorator and function-decorator rejection branches are `package_model.py:146-169,67-95`; call-valued assignment is outside the pure-literal/recognized assignment forms in `package_model.py:305-435,680-722`.
+- DIRECT_EVIDENCE — source has top-level `from contextlib import contextmanager`, `import json, os, threading, time, uuid`, `from dataclasses import dataclass`, `from pathlib import Path`, `from typing import ...`, and Contextor-internal imports (lines 11-23). Those imports are not automatically safe; they are potential modeled execution effects. The replay did not reach any modeled import event, so none is asserted as an observed execution failure.
+- CONTRACT PROVISO — single-statement checks isolate restricted AST support; they do not prove those later statements would be reached in a real import or that removing the first refusal would yield MODEL_PASS.
 
-## DEFAULT_VS_EXPLICIT_315_MODEL
+## COHORT_WIDE_REJECTION_CENSUS
 
-- DIRECT_EVIDENCE: with the current 308-source FileState-bound inventory, default call returns UNKNOWN / RESTRICTED_MODEL_UNKNOWN at `contextor.core.analysis.cache_manager`, zero model events. Explicit (3,15) returns UNKNOWN / RESTRICTED_MODEL_UNKNOWN at `contextor.core.analysis.full_analysis_lease`, zero model events.
-- DIRECT_EVIDENCE: `cache_manager` `_compile` is False with default semantics and True with DEFERRED. Next model target `full_analysis_lease.py:27-28` has `@dataclass(frozen=True, slots=True)` before `class FullAnalysisLease`; its decorated class is rejected by the existing passive-class guard. This is a model limitation, not a demonstrated runtime failure.
+- DIRECT_EVIDENCE — same in-memory 202-source conservative cohort, existing `_compile` with DEFERRED semantics, no source execution or model mutation: **94 accepted, 108 rejected**. First rejected top-level AST-kind distribution: ClassDef 70, Assign 33, FunctionDef 2, AnnAssign 2, If 1 (sum 108).
+- DIRECT_EVIDENCE — modules containing at least one decorated **top-level** class: 72; decorated top-level function: 6; top-level class with nonempty bases: 29. These categories overlap. Lexically eager module/class-body import targets outside selected physical/namespace source names: 467 sites across 149 modules. This is a source-domain census, not a verified classification of all 467 as external packages or evidence of execution.
+- Representative first rejections, with exact source construct: `contextor.core.analysis.full_analysis_lease` ClassDef 28 `@dataclass(frozen=True, slots=True)`; `contextor.core.analysis.function_analysis` ClassDef 11 `class ControlFlowAnalyzer(ast.NodeVisitor)`; `contextor.core.analysis.import_analysis` ClassDef 17 `class ImportUsageVisitor(ast.NodeVisitor)`; `contextor.core.analysis.incremental.engine` ClassDef 100 `@dataclass`; `contextor.core.analysis.incremental.graph_ops` ClassDef 18 `@dataclass(frozen=True)`; `contextor.core.analysis.incremental.plan_executor` ClassDef 46 `@dataclass`; `contextor.core.analysis.incremental.preparation` ClassDef 25 `@dataclass(frozen=True)`; `contextor.core.analysis.lineage_extraction` Assign 81 `_LINEAGE_CACHE_TOP_LEVEL_KEYS = frozenset(...)`; `contextor.core.analysis.lineage_extraction_bindings` Assign 17 `VisitFn = Callable[[...], None]`; `contextor.core.analysis.lineage_extraction_calls` Assign 10 same alias form. For each, the cited node is the observed first restricted-compiler rejection, not a claim that the node was executed. The exact subpredicate for representatives other than the separately inspected lease class was not exhaustively classified.
+- INFERENCE BOUNDARY — 202 means selected candidates, not 202 executed modules. Even a module accepted by `_compile` may later yield UNKNOWN from modeled import execution or an outside-domain target.
 
-## TARGETED_TEST_RESULTS
+## ENTRY_IMPORT_CHAIN
 
-- Exact six-module command from task, CPython 3.15.2: **301 passed in 31.07s**, zero failures. No full suite.
-- `git diff --check`: exit 0. Git emitted only line-ending conversion notices.
+- DIRECT_EVIDENCE — all four named source files exist and match FileState. Standard import semantics for `contextor.core.api.facade` structurally require package initialization of `contextor`, `contextor.core`, `contextor.core.api` before the facade module, subject to actual runtime finder/cache state.
+- DIRECT EVIDENCE — `contextor/__init__.py` has no top-level import statement (SHA-256 `ddbb4f795e5b16add318255d352e2e199bb65be33557655f533bb916ae04f9d8`). `contextor/core/__init__.py` first explicit import is line 12 `from contextor.core.graph.graph import build_graph`; subsequent top-level imports begin lines 19, 27, 30, 33. `contextor/core/api/__init__.py` is empty (SHA-256 `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`). `contextor/core/api/facade.py` first imports are `json` line 9, `os` 10, `time` 11, `pathlib.Path` 12, `typing.Any` 13, then Contextor-internal imports from line 15. Its FileState SHA-256 is `e7412c57ffabcc9ca8fc33e8a93fc882161cb34db7bd75756b94c7ce37b386d8`.
+- CODE_PATH PROVED — the restricted model constructs a package chain and bootstrap frame (`package_model.py:1072-1189`), but the current replay has zero START_IMPORT events. The chain is structurally required under ordinary standard import semantics; this replay does not establish that any listed initializer or subsequent import actually ran.
 
-## NEGATIVE_SAFETY_TESTS
+## EXISTING_TEST_COVERAGE
 
-- Passing P9 cases cover default UNKNOWN, mismatched and malformed interpreter versions, dynamic default UNKNOWN, annotation introspection UNKNOWN, external import UNKNOWN, source fingerprint mismatch and source-bound bad interpreter. Existing negative assertions in the six targeted modules passed.
-
-## FULL_SOURCE_BOUND_REPLAY
-
-- DIRECT_EVIDENCE: metadata-selected FileState was revision 1107/state_id `20261106_195021` during facade replay; 308 production source bytes matched its SHA-256 values, zero mismatches. No Git restoration was required. Selected model cohort: 202 ASTs. Bound digest for both calls: `6ca1f598aef59e2760bcadb4fac2ba2dbf4bbb180f63de5ab46625cd161b815d`.
-- Default and explicit outcomes are above. Both preserve outer authority `SOURCE_BOUND_CALLER_SUPPLIED_INVENTORY_NOT_RUNTIME_OR_LIVE_PROOF` and inner authority `CONDITIONAL_ORDERED_INVENTORY_AND_AST_NOT_RUNTIME_OR_LIVE_PROOF`.
-- Canonical revision advanced under the active watcher during this task. Each replay verified all input bytes against the metadata-selected FileState of its own observed revision. The SCC2 replay later used revision 1109 with a fresh all-source hash check. No mixed-generation inputs were accepted.
+- CONTRACT_PROVED by source inspection, not execution — `tests/test_cycle_semantics_package_model.py`: `test_p1d3_d1_unsupported_class_effects` (line 1407; parameter cases include dynamic base, metaclass, decorated class and class-body calls); `test_b0g4c5_definition_effects_updated_contract` (line 1178; decorated function UNKNOWN); `test_p1d3_d1_class_import_timing` (1331); `test_p1d3_d1_uncalled_method_import_is_deferred` (1375); `test_parent_initializer_precedes_submodule` (71); `test_package_early_from_import_hazard` (239); `test_b0g4c15_uncalled_function_local_from_supported` (1219).
+- CONTRACT_PROVED by source inspection — `tests/test_cycle_semantics_package_model_annotations315.py`: `test_deferred_function_annotations_and_literal_defaults` (34), `test_class_annotations_have_separate_binding_and_import_order` (54), `test_unknown_effects_remain_unknown` (line 105; decorator calls, dynamic bases, unknown external import), `test_early_binding_hazard_survives_annotations` (156). `tests/test_cycle_semantics_namespace_path_model.py`: `test_p9_cpython315_deferred_method_annotations` (454), `test_p9_external_import_still_unknown` (551), `test_g18_p2_p8_unreachable_unsupported_module` (785), `test_g18_p2_p8_parent_initializer_not_omitted` (901). `tests/test_cycle_semantics_namespace_bound_model.py`: `test_p6_eager_external_import_unknown` (316).
+- UNKNOWN / COVERAGE GAP — no focused existing test was identified that asserts full 202-source precompilation returns zero model events specifically at decorated `FullAnalysisLease`, or that distinguishes CPython code-object validity, restricted AST acceptance and modeled visit for this real module. No test was added or run.
 
 ## REAL_SCC_GATES
 
-- DIRECT_EVIDENCE: SCC1/facade entry remains UNKNOWN at `full_analysis_lease` under explicit 3.15. SCC2 entry `contextor.ui.gui`, with 308 FileState-matching production sources at revision 1109, remains UNKNOWN / RESTRICTED_MODEL_UNKNOWN at `full_analysis_lease`, zero model events.
-- MCP: 16 structural DFS cycles, 16 active warnings, model_pass_count=0, cycle_semantics=stale. No MODEL_PASS promotion, /3 receipt or warning suppression.
+- DIRECT_EVIDENCE — current canonical snapshot and `compute_cycle_model_source_closures_with_optional_children`: SCC1 44 members / 202 selected sources; SCC2 9 members / 222 selected sources. All selected source SHA-256 values matched current FileState (zero mismatch for each closure).
+- DIRECT_EVIDENCE — `assess_package_graph_consistency` on current closures: both status INDETERMINATE, reason NAMESPACE_IMPORT_RESOLUTION_UNMODELED, internal graph state INDEXED_AST_GRAPH_MATCH_FOR_SELECTED_SOURCES, four namespace candidates each. SCC1 has 608 opaque external candidates; SCC2 has 726. Both external execution gates are OPAQUE_EXECUTION_POSSIBLE. The canonical snapshot's cycle-semantics family is stale; these are read-only current-source diagnostics, not fresh stored semantic claims.
+- DIRECT_EVIDENCE — MCP structural DFS cycles 16, active warnings 16, model_pass_count 0. No SCC was promoted to MODEL_PASS; namespace and external execution uncertainty remain fail-closed.
 
-## MCP_POST_CHANGE_AUDIT
+## SOURCE_BINDING
 
-- Contextor MCP module contexts for both production modules and both changed test modules: canonical revision 1109, canonical_state=fresh, workspace_sync=verified, advisory_warning=null, module/graph/cycles fresh, cycle_semantics stale, syntax_errors=0, structural DFS cycles=16, active_warning_count=16, model_pass_count=0. Provenance LIVE. Read-only metadata at revision 1109 confirms state_id `20261106_195021`, repo_id `ctx_8efc50d8` and root `C:\Temp\Contextor_Repo`. MCP reports source freshness of the changed files; it does not establish that an already-running process loaded the changed Python code.
-- Current disk SHA-256: `package_model.py` `709bbae668a5a2f9a11dbabf491e14ca28f9c5f854fa8e37dc4154b430c17b4d`; `namespace_bound_model.py` `5952eec55fe7eecfb3047826aff38e76531707d4b89af4dd53adc6c1796bcf27`.
+- DIRECT_EVIDENCE — metadata-selected FileState revision 1109/state_id `20261106_195021` agreed with snapshot metadata and all 308 physical production source hashes used by the fresh-process replay. Five primary inspected source SHA-256 values: `package_model.py` `709bbae668a5a2f9a11dbabf491e14ca28f9c5f854fa8e37dc4154b430c17b4d`; `namespace_bound_model.py` `5952eec55fe7eecfb3047826aff38e76531707d4b89af4dd53adc6c1796bcf27`; `full_analysis_lease.py` `4ce9464534019f0369fc03ff04d4780f53ad37ecf65cbc4d3cb4a17d70cbe5dd`; `facade.py` `e7412c57ffabcc9ca8fc33e8a93fc882161cb34db7bd75756b94c7ce37b386d8`; `scenarios.py` `7e2c0475427e7fbd88417ed0109feb0ef5759aa67bfd25f946d264eab464b12a`. All five matched their FileState entries.
+- CONTRACT PROVED — `namespace_bound_model.py:50-196` validates supplied inventory/fingerprints and parses byte snapshots before calling the conditional evaluator. The resulting digest binds this caller-supplied inventory; it does not authenticate actual runtime import selection.
 
-## RESTART_DECISION
+## RESTART_AND_LIVE_ADOPTION
 
-- No restart was performed. The opt-in evaluator is not exposed directly by MCP, and fresh-process replay loaded the changed code. Adoption by the already-running Desktop/backend/LIVE process remains unverified. Later integration requires separate process identity, interpreter, GUI ownership and LIVE authority verification after controlled restart.
+- DIRECT EVIDENCE — no Desktop/backend restart performed. Active MCP module context has live canonical facts and verified on-disk source, but contains no process-code identity proof that the already-running backend imported P9. Runtime adoption is **UNVERIFIED**. The fresh-process replay imported the current P9 code separately.
+- CONTRACT BOUNDARY — a future LIVE/MCP adoption claim would require a controlled restart and verification of interpreter, process identity, GUI ownership and LIVE authority. No such adoption was attempted here.
 
-## REMAINING_UNKNOWN
+## UNRESOLVED_FACTS
 
-- Actual analyzed application interpreter, `sys.path`, `sys.meta_path`, `sys.modules`, external execution effects, and active-process code adoption remain unknown. The canonical cycle-semantics family remains stale. No production FULL or update_file was performed.
+- UNKNOWN — actual application import finder, `sys.path`, `sys.meta_path`, `sys.modules`, lexical `dataclass` callable identity at runtime, external import effects and which conservative cohort members execute. UNKNOWN is not proof of safety.
+- UNKNOWN — the exact per-module subpredicate for all 108 restricted compiler rejections was not requested or established; the first AST-kind distribution and ten representative constructs are reported without promoting them to runtime failures.
 
-## FULL_DIFFS
+## FILES_CHANGED_AND_FULL_DIFFS
 
-Complete actual diffs of the four production/test files follow. The report's own diff is excluded.
+FILES_CHANGED: `walkthrough.md` only (this report). No production, test or source documentation edits.
 
-```diff
-diff --git a/contextor/core/cycle_semantics/namespace_bound_model.py b/contextor/core/cycle_semantics/namespace_bound_model.py
-index 20a4882..59d3b46 100644
---- a/contextor/core/cycle_semantics/namespace_bound_model.py
-+++ b/contextor/core/cycle_semantics/namespace_bound_model.py
-@@ -27,6 +27,7 @@ from .namespace_source_binding import (
- )
- from .package_model import (
-     ConditionalNamespaceModelAssessment,
-+    _conditional_annotation_mode_for_target,
-     evaluate_conditional_namespace_import_order,
- )
- 
-@@ -54,6 +55,7 @@ def evaluate_source_bound_conditional_namespace_import_order(
-     entry_module: str,
-     *,
-     standard_finder_assumed: bool = False,
-+    target_python_version: tuple[int, int] | None = None,
- ) -> SourceBoundConditionalNamespaceAssessment:
-     """Parse indexed byte snapshots and conditionally evaluate PEP 420.
- 
-@@ -88,6 +90,15 @@ def evaluate_source_bound_conditional_namespace_import_order(
-     ):
-         return reject("INVALID_ENTRY_OR_FINDER_POLICY")
- 
-+    _, version_error = (
-+        _conditional_annotation_mode_for_target(
-+            target_python_version
-+        )
-+    )
-+
-+    if version_error is not None:
-+        return reject(version_error)
-+
-     bound = bind_indexed_namespace_resolution(
-         roots,
-         bindings,
-@@ -179,6 +190,7 @@ def evaluate_source_bound_conditional_namespace_import_order(
-         parsed_sources,
-         entry_module,
-         roots,
-+        target_python_version=target_python_version,
-     )
- 
-     # Never convert CONDITIONAL_MODEL_PASS into MODEL_PASS.
-diff --git a/contextor/core/cycle_semantics/package_model.py b/contextor/core/cycle_semantics/package_model.py
-index 3fea17e..eb5cb5a 100644
---- a/contextor/core/cycle_semantics/package_model.py
-+++ b/contextor/core/cycle_semantics/package_model.py
-@@ -7,6 +7,7 @@ Never executes analyzed code or certifies general runtime safety.
- from __future__ import annotations
- 
- import ast
-+import sys
- from collections.abc import Mapping
- from dataclasses import dataclass, field, replace
- 
-@@ -1651,6 +1652,55 @@ class ConditionalNamespaceModelAssessment:
-         "CONDITIONAL_ORDERED_INVENTORY_AND_AST_"
-         "NOT_RUNTIME_OR_LIVE_PROOF"
-     )
-+    target_python_version: tuple[int, int] | None = None
-+
-+
-+def _conditional_annotation_mode_for_target(
-+    target_python_version: tuple[int, int] | None,
-+) -> tuple[str | None, str | None]:
-+    """Select documented CPython annotation semantics.
-+
-+    The explicit target version must match the interpreter
-+    executing this restricted model. This does not prove the
-+    interpreter used by an analyzed application.
-+    """
-+
-+    if target_python_version is None:
-+        return None, None
-+
-+    if (
-+        type(target_python_version) is not tuple
-+        or len(target_python_version) != 2
-+        or any(
-+            type(part) is not int
-+            for part in target_python_version
-+        )
-+    ):
-+        return None, "INVALID_TARGET_PYTHON_VERSION"
-+
-+    if target_python_version not in {
-+        (3, 10),
-+        (3, 11),
-+        (3, 12),
-+        (3, 13),
-+        (3, 14),
-+        (3, 15),
-+    }:
-+        return None, "UNSUPPORTED_TARGET_PYTHON_VERSION"
-+
-+    if (
-+        sys.implementation.name != "cpython"
-+        or target_python_version != (
-+            sys.version_info.major,
-+            sys.version_info.minor,
-+        )
-+    ):
-+        return None, "TARGET_INTERPRETER_UNVERIFIED"
-+
-+    if target_python_version >= (3, 14):
-+        return "DEFERRED", None
-+
-+    return "STOCK_EAGER", None
- 
- 
- def _conditional_reachable_source_cohort(
-@@ -1800,6 +1850,8 @@ def evaluate_conditional_namespace_import_order(
-     indexed_sources: Mapping[str, ast.AST],
-     entry_module: str,
-     portions: tuple[SearchPortion, ...],
-+    *,
-+    target_python_version: tuple[int, int] | None = None,
- ) -> ConditionalNamespaceModelAssessment:
-     """Evaluate a supplied closed PEP 420 inventory conditionally.
- 
-@@ -1815,6 +1867,12 @@ def evaluate_conditional_namespace_import_order(
-     The result is never eligible for MODEL_PASS warning suppression.
-     """
- 
-+    annotation_mode, version_error = (
-+        _conditional_annotation_mode_for_target(
-+            target_python_version
-+        )
-+    )
-+
-     def reject(
-         reason: str,
-         parents: tuple[str, ...] = (),
-@@ -1825,8 +1883,16 @@ def evaluate_conditional_namespace_import_order(
-             reason=reason,
-             model_assessment=None,
-             namespace_parents=parents,
-+            target_python_version=(
-+                target_python_version
-+                if version_error is None
-+                else None
-+            ),
-         )
- 
-+    if version_error is not None:
-+        return reject(version_error)
-+
-     if (
-         not isinstance(indexed_sources, Mapping)
-         or type(entry_module) is not str
-@@ -2035,6 +2101,7 @@ def evaluate_conditional_namespace_import_order(
-     model = evaluate_package_import_order(
-         augmented,
-         entry_module,
-+        annotation_semantics=annotation_mode,
-     )
- 
-     conditional_outcomes = {
-@@ -2060,4 +2127,5 @@ def evaluate_conditional_namespace_import_order(
-         ),
-         model_assessment=model,
-         namespace_parents=namespace_parents,
-+        target_python_version=target_python_version,
-     )
-diff --git a/tests/test_cycle_semantics_namespace_bound_model.py b/tests/test_cycle_semantics_namespace_bound_model.py
-index c67ff9b..05fa83b 100644
---- a/tests/test_cycle_semantics_namespace_bound_model.py
-+++ b/tests/test_cycle_semantics_namespace_bound_model.py
-@@ -146,6 +146,90 @@ def test_p6_finder_assumption_is_required():
-     assert result.conditional_assessment is None
- 
- 
-+def _p9_source_bound_annotated_case():
-+    roots, bindings, hashes, snapshots = _case()
-+
-+    snapshots["pkg.ns.a"] = _snapshot(
-+        "class Holder:\n"
-+        "    def method(self, x: Later) -> Later:\n"
-+        "        pass\n"
-+        "value = 1\n"
-+        "import pkg.ns.b\n"
-+    )
-+
-+    hashes["pkg.ns.a"] = (
-+        snapshots["pkg.ns.a"].source_fingerprint
-+    )
-+
-+    return roots, bindings, hashes, snapshots
-+
-+
-+def test_p9_source_bound_default_stays_unknown():
-+    result = _evaluate(
-+        _p9_source_bound_annotated_case(),
-+    )
-+
-+    assert result.outcome == "UNKNOWN"
-+    assert result.reason == "RESTRICTED_MODEL_UNKNOWN"
-+
-+
-+def test_p9_source_bound_deferred_cpython315():
-+    result = evaluate_source_bound_conditional_namespace_import_order(
-+        *_p9_source_bound_annotated_case(),
-+        "pkg.ns.a",
-+        standard_finder_assumed=True,
-+        target_python_version=(3, 15),
-+    )
-+
-+    assert result.outcome == "CONDITIONAL_MODEL_PASS"
-+    assert result.reason is None
-+    assert result.source_evidence_sha256 is not None
-+    assert result.conditional_assessment is not None
-+    assert (
-+        result.conditional_assessment.target_python_version
-+        == (3, 15)
-+    )
-+    assert result.authority == (
-+        "SOURCE_BOUND_CALLER_SUPPLIED_INVENTORY_"
-+        "NOT_RUNTIME_OR_LIVE_PROOF"
-+    )
-+
-+
-+def test_p9_source_bound_deferred_still_checks_hash():
-+    roots, bindings, hashes, snapshots = (
-+        _p9_source_bound_annotated_case()
-+    )
-+
-+    hashes["pkg.ns.a"] = "0" * 64
-+
-+    result = evaluate_source_bound_conditional_namespace_import_order(
-+        roots,
-+        bindings,
-+        hashes,
-+        snapshots,
-+        "pkg.ns.a",
-+        standard_finder_assumed=True,
-+        target_python_version=(3, 15),
-+    )
-+
-+    assert result.outcome == "UNKNOWN"
-+    assert result.reason == "SOURCE_FINGERPRINT_MISMATCH"
-+    assert result.source_evidence_sha256 is None
-+
-+
-+def test_p9_source_bound_bad_interpreter_rejected():
-+    result = evaluate_source_bound_conditional_namespace_import_order(
-+        *_p9_source_bound_annotated_case(),
-+        "pkg.ns.a",
-+        standard_finder_assumed=True,
-+        target_python_version=(3, 14),
-+    )
-+
-+    assert result.outcome == "UNKNOWN"
-+    assert result.reason == "TARGET_INTERPRETER_UNVERIFIED"
-+    assert result.source_evidence_sha256 is None
-+
-+
- def test_p6_changed_bytes_fail_closed():
-     roots, bindings, hashes, snapshots = _case()
-     snapshots["pkg.ns.a"] = _snapshot(
-diff --git a/tests/test_cycle_semantics_namespace_path_model.py b/tests/test_cycle_semantics_namespace_path_model.py
-index c7cfdf0..8c2efc8 100644
---- a/tests/test_cycle_semantics_namespace_path_model.py
-+++ b/tests/test_cycle_semantics_namespace_path_model.py
-@@ -420,6 +420,157 @@ def test_g18_p2_p5_unlisted_shadowing_source_unknown():
-     )
- 
- 
-+def _p9_annotation_sources(code):
-+    return {"ns.a": ast.parse(code)}
-+
-+
-+def _p9_annotation_portions():
-+    return (
-+        SearchPortion(
-+            "root",
-+            frozenset({"ns/a.py"}),
-+        ),
-+    )
-+
-+
-+def test_p9_default_annotation_version_stays_unknown():
-+    sources = _p9_annotation_sources(
-+        "class Holder:\n"
-+        "    def method(self, value: Later) -> Later:\n"
-+        "        pass\n"
-+    )
-+
-+    result = evaluate_conditional_namespace_import_order(
-+        sources,
-+        "ns.a",
-+        _p9_annotation_portions(),
-+    )
-+
-+    assert result.outcome == "UNKNOWN"
-+    assert result.reason == "RESTRICTED_MODEL_UNKNOWN"
-+    assert result.target_python_version is None
-+
-+
-+def test_p9_cpython315_deferred_method_annotations():
-+    sources = _p9_annotation_sources(
-+        "class Holder:\n"
-+        "    def method(self, value: side_effect())"
-+        " -> Later:\n"
-+        "        pass\n"
-+    )
-+
-+    result = evaluate_conditional_namespace_import_order(
-+        sources,
-+        "ns.a",
-+        _p9_annotation_portions(),
-+        target_python_version=(3, 15),
-+    )
-+
-+    assert result.outcome == "CONDITIONAL_MODEL_PASS"
-+    assert result.reason is None
-+    assert result.target_python_version == (3, 15)
-+    assert result.model_assessment is not None
-+    assert result.model_assessment.outcome == "MODEL_PASS"
-+    assert result.authority == (
-+        "CONDITIONAL_ORDERED_INVENTORY_AND_AST_"
-+        "NOT_RUNTIME_OR_LIVE_PROOF"
-+    )
-+
-+
-+def test_p9_target_interpreter_mismatch_fails_closed():
-+    sources = _p9_annotation_sources("pass\n")
-+
-+    result = evaluate_conditional_namespace_import_order(
-+        sources,
-+        "ns.a",
-+        _p9_annotation_portions(),
-+        target_python_version=(3, 14),
-+    )
-+
-+    assert result.outcome == "UNKNOWN"
-+    assert result.reason == "TARGET_INTERPRETER_UNVERIFIED"
-+    assert result.model_assessment is None
-+
-+
-+def test_p9_invalid_target_version_fails_closed():
-+    sources = _p9_annotation_sources("pass\n")
-+
-+    for version in ((True, 15), "3.15", (3,), (3, 16)):
-+        result = evaluate_conditional_namespace_import_order(
-+            sources,
-+            "ns.a",
-+            _p9_annotation_portions(),
-+            target_python_version=version,
-+        )
-+
-+        assert result.outcome == "UNKNOWN"
-+        assert result.model_assessment is None
-+        assert result.reason in {
-+            "INVALID_TARGET_PYTHON_VERSION",
-+            "UNSUPPORTED_TARGET_PYTHON_VERSION",
-+        }
-+
-+
-+def test_p9_dynamic_default_remains_unknown():
-+    sources = _p9_annotation_sources(
-+        "class Holder:\n"
-+        "    def method(self, value: Later"
-+        " = side_effect()):\n"
-+        "        pass\n"
-+    )
-+
-+    result = evaluate_conditional_namespace_import_order(
-+        sources,
-+        "ns.a",
-+        _p9_annotation_portions(),
-+        target_python_version=(3, 15),
-+    )
-+
-+    assert result.outcome == "UNKNOWN"
-+    assert result.reason == "RESTRICTED_MODEL_UNKNOWN"
-+
-+
-+def test_p9_annotation_introspection_remains_unknown():
-+    sources = _p9_annotation_sources(
-+        "def method(value: side_effect()):\n"
-+        "    pass\n"
-+        "print(method.__annotations__)\n"
-+    )
-+
-+    result = evaluate_conditional_namespace_import_order(
-+        sources,
-+        "ns.a",
-+        _p9_annotation_portions(),
-+        target_python_version=(3, 15),
-+    )
-+
-+    assert result.outcome == "UNKNOWN"
-+    assert result.reason == "RESTRICTED_MODEL_UNKNOWN"
-+
-+
-+def test_p9_external_import_still_unknown():
-+    sources = _p9_annotation_sources(
-+        "import missing_external_xyz\n"
-+        "class Holder:\n"
-+        "    def method(self, x: Later):\n"
-+        "        pass\n"
-+    )
-+
-+    result = evaluate_conditional_namespace_import_order(
-+        sources,
-+        "ns.a",
-+        _p9_annotation_portions(),
-+        target_python_version=(3, 15),
-+    )
-+
-+    assert result.outcome == "UNKNOWN"
-+    assert result.reason == "RESTRICTED_MODEL_UNKNOWN"
-+    assert result.model_assessment is not None
-+    assert result.model_assessment.target_module == (
-+        "missing_external_xyz"
-+    )
-+
-+
- def test_g18_p2_p5_alternative_loader_unknown():
-     sources = {
-         "ns.a": ast.parse(
-```
+ACTUAL_DIFF=DIFFS=NONE for production/tests. FULL_DIFFS=NONE for production/tests. `walkthrough.md` is excluded from its own diff.
 
 ## FINAL_VERDICT
 
-PASS. Exact four-file implementation and test scope completed; all 301 targeted tests pass; both real SCC model replays remain UNKNOWN; 16 structural cycles and 16 active warnings remain; no runtime adoption is claimed.
+DISCOVERY_COMPLETE. Read-only evidence gathering ended after D10. No implementation, pytest, production FULL, update_file, restart, interpreter switch, source execution, Git mutation, dependency installation, warning suppression or MODEL_PASS promotion.
