@@ -20,6 +20,7 @@ class PackageGraphConsistency:
     status: str
     reason: str | None
     unmodeled_external_imports: tuple[tuple[str, int, str, str], ...] = ()
+    unmodeled_namespace_parents: tuple[tuple[str, int, str, str], ...] = ()
 
 
 def assess_package_graph_consistency(
@@ -27,7 +28,7 @@ def assess_package_graph_consistency(
     sources: Mapping[str, ast.Module],
     evidence_source_modules: tuple[str, ...],
 ) -> PackageGraphConsistency:
-    """Check indexed imports and retain unresolved external candidates."""
+    """Check indexed imports and retain unmodeled import candidates."""
     def unknown(reason: str) -> PackageGraphConsistency:
         return PackageGraphConsistency("INDETERMINATE", reason)
 
@@ -36,6 +37,7 @@ def assess_package_graph_consistency(
     indexed = frozenset(hard_edges)
     indexed_roots = frozenset(name.split(".", 1)[0] for name in indexed)
     unmodeled_external_imports: list[tuple[str, int, str, str]] = []
+    unmodeled_namespace_parents: list[tuple[str, int, str, str]] = []
     if any(name not in indexed or not isinstance(sources.get(name), ast.Module)
            for name in evidence_source_modules):
         return unknown("MISSING_INDEXED_TARGET")
@@ -43,14 +45,36 @@ def assess_package_graph_consistency(
     def target(name: str) -> str | None:
         return logical_to_indexed_module(name, indexed)
 
-    def regular_parents(name: str) -> bool:
+    def parent_classification(name: str) -> tuple[str, tuple[str, ...]]:
         parts = name.split(".")
-        return all(
-            target(".".join(parts[:length]))
-            == ".".join(parts[:length]) + ".__init__"
-            and ".".join(parts[:length]) + ".__init__" in sources
-            for length in range(1, len(parts))
-        )
+        namespace_parents: list[str] = []
+        for length in range(1, len(parts)):
+            parent = ".".join(parts[:length])
+            initializer = parent + ".__init__"
+            if initializer in indexed:
+                if parent in indexed or not isinstance(
+                    sources.get(initializer), ast.Module
+                ):
+                    return "INVALID", ()
+                continue
+            if parent in indexed or not any(
+                module.startswith(parent + ".") for module in indexed
+            ):
+                return "INVALID", ()
+            namespace_parents.append(parent)
+        if namespace_parents:
+            return "NAMESPACE_CANDIDATE", tuple(namespace_parents)
+        return "REGULAR", ()
+
+    def missing_namespace_base(name: str) -> tuple[str, ...] | None:
+        if name in indexed or name + ".__init__" in indexed:
+            return None
+        if not any(module.startswith(name + ".") for module in indexed):
+            return None
+        parent_state, namespace_parents = parent_classification(name)
+        if parent_state == "INVALID":
+            return None
+        return (*namespace_parents, name)
 
     def relative_base(module_id: str, level: int, named: str | None) -> str | None:
         logical = indexed_to_logical_module(module_id)
@@ -187,9 +211,9 @@ def assess_package_graph_consistency(
                         child_indexed is None
                         or child_indexed == initializer_id
                         or child_indexed not in sources
-                        or not regular_parents(
+                        or parent_classification(
                             child_logical
-                        )
+                        )[0] != "REGULAR"
                     ):
                         return False
 
@@ -301,15 +325,38 @@ def assess_package_graph_consistency(
                     resolved = target(alias.name)
                     if resolved is None:
                         if alias.name.split(".", 1)[0] in indexed_roots:
-                            return unknown("MISSING_INDEXED_TARGET")
+                            namespace_parents = missing_namespace_base(alias.name)
+                            if namespace_parents is None:
+                                return unknown("MISSING_INDEXED_TARGET")
+                            unmodeled_namespace_parents.extend(
+                                (module_id, node.lineno, alias.name, parent)
+                                for parent in namespace_parents
+                            )
+                            continue
                         unmodeled_external_imports.append(
                             (module_id, node.lineno, "import", alias.name)
                         )
                         continue
                     if resolved != alias.name and resolved != alias.name + ".__init__":
                         return unknown("AMBIGUOUS_PACKAGE_TARGET")
-                    if "." in alias.name and not regular_parents(alias.name):
+                    if resolved == alias.name and any(
+                        module.startswith(alias.name + ".")
+                        for module in indexed
+                    ):
+                        return unknown("AMBIGUOUS_PACKAGE_TARGET")
+                    if resolved.endswith(".__init__") and not isinstance(
+                        sources.get(resolved), ast.Module
+                    ):
                         return unknown("MISSING_REQUIRED_INITIALIZER")
+                    parent_state, namespace_parents = parent_classification(
+                        alias.name
+                    )
+                    if parent_state == "INVALID":
+                        return unknown("MISSING_REQUIRED_INITIALIZER")
+                    unmodeled_namespace_parents.extend(
+                        (module_id, node.lineno, alias.name, parent)
+                        for parent in namespace_parents
+                    )
                     if (
                         resolved != module_id
                         and id(node) not in type_only_ids
@@ -329,13 +376,31 @@ def assess_package_graph_consistency(
                 resolved = target(base)
                 if resolved is None:
                     if node.level or base.split(".", 1)[0] in indexed_roots:
-                        return unknown("MISSING_INDEXED_TARGET")
+                        if node.level:
+                            return unknown("MISSING_INDEXED_TARGET")
+                        namespace_parents = missing_namespace_base(base)
+                        if namespace_parents is None:
+                            return unknown("MISSING_INDEXED_TARGET")
+                        unmodeled_namespace_parents.extend(
+                            (module_id, node.lineno, base, parent)
+                            for parent in namespace_parents
+                        )
+                        continue
                     unmodeled_external_imports.append(
                         (module_id, node.lineno, "from", base)
                     )
                     continue
-                if "." in base and not regular_parents(base):
+                if resolved == base and any(
+                    module.startswith(base + ".") for module in indexed
+                ):
+                    return unknown("AMBIGUOUS_PACKAGE_TARGET")
+                parent_state, namespace_parents = parent_classification(base)
+                if parent_state == "INVALID":
                     return unknown("MISSING_REQUIRED_INITIALIZER")
+                unmodeled_namespace_parents.extend(
+                    (module_id, node.lineno, base, parent)
+                    for parent in namespace_parents
+                )
                 if resolved != module_id:
                     expected.add(resolved)
                 if resolved.endswith(".__init__"):
@@ -404,6 +469,13 @@ def assess_package_graph_consistency(
         if expected != set(hard_edges[module_id]):
             return unknown("GRAPH_SOURCE_IMPORT_MISMATCH")
 
+    if unmodeled_namespace_parents:
+        return PackageGraphConsistency(
+            "INDETERMINATE",
+            "NAMESPACE_IMPORT_RESOLUTION_UNMODELED",
+            tuple(sorted(unmodeled_external_imports)),
+            tuple(sorted(unmodeled_namespace_parents)),
+        )
     if unmodeled_external_imports:
         return PackageGraphConsistency(
             "INDETERMINATE",
