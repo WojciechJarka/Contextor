@@ -19,6 +19,7 @@ from .typing_guard import (
 class PackageGraphConsistency:
     status: str
     reason: str | None
+    unmodeled_external_imports: tuple[tuple[str, int, str, str], ...] = ()
 
 
 def assess_package_graph_consistency(
@@ -26,13 +27,15 @@ def assess_package_graph_consistency(
     sources: Mapping[str, ast.Module],
     evidence_source_modules: tuple[str, ...],
 ) -> PackageGraphConsistency:
-    """Require exact indexed targets for every supported source import."""
+    """Check indexed imports and retain unresolved external candidates."""
     def unknown(reason: str) -> PackageGraphConsistency:
         return PackageGraphConsistency("INDETERMINATE", reason)
 
     if not isinstance(hard_edges, Mapping) or not isinstance(sources, Mapping):
         return unknown("GRAPH_SOURCE_IMPORT_MISMATCH")
     indexed = frozenset(hard_edges)
+    indexed_roots = frozenset(name.split(".", 1)[0] for name in indexed)
+    unmodeled_external_imports: list[tuple[str, int, str, str]] = []
     if any(name not in indexed or not isinstance(sources.get(name), ast.Module)
            for name in evidence_source_modules):
         return unknown("MISSING_INDEXED_TARGET")
@@ -297,7 +300,12 @@ def assess_package_graph_consistency(
                         return unknown("UNSUPPORTED_IMPORT_FORM")
                     resolved = target(alias.name)
                     if resolved is None:
-                        return unknown("MISSING_INDEXED_TARGET")
+                        if alias.name.split(".", 1)[0] in indexed_roots:
+                            return unknown("MISSING_INDEXED_TARGET")
+                        unmodeled_external_imports.append(
+                            (module_id, node.lineno, "import", alias.name)
+                        )
+                        continue
                     if resolved != alias.name and resolved != alias.name + ".__init__":
                         return unknown("AMBIGUOUS_PACKAGE_TARGET")
                     if "." in alias.name and not regular_parents(alias.name):
@@ -320,7 +328,12 @@ def assess_package_graph_consistency(
                     return unknown("UNSUPPORTED_IMPORT_FORM")
                 resolved = target(base)
                 if resolved is None:
-                    return unknown("MISSING_INDEXED_TARGET")
+                    if node.level or base.split(".", 1)[0] in indexed_roots:
+                        return unknown("MISSING_INDEXED_TARGET")
+                    unmodeled_external_imports.append(
+                        (module_id, node.lineno, "from", base)
+                    )
+                    continue
                 if "." in base and not regular_parents(base):
                     return unknown("MISSING_REQUIRED_INITIALIZER")
                 if resolved != module_id:
@@ -391,4 +404,10 @@ def assess_package_graph_consistency(
         if expected != set(hard_edges[module_id]):
             return unknown("GRAPH_SOURCE_IMPORT_MISMATCH")
 
+    if unmodeled_external_imports:
+        return PackageGraphConsistency(
+            "INDETERMINATE",
+            "EXTERNAL_IMPORT_EXECUTION_UNMODELED",
+            tuple(sorted(unmodeled_external_imports)),
+        )
     return PackageGraphConsistency("CONSISTENT", None)
