@@ -88,6 +88,218 @@ def test_frozen_dataclass_rebound_name_does_not_bind_class():
     )
 
 
+def _r8_frozen_dataclass_result(
+    class_source,
+    *,
+    assume=True,
+    annotation_semantics="DEFERRED",
+):
+    return evaluate_package_import_order(
+        {
+            "pkg.__init__": ast.parse(
+                "from dataclasses import dataclass\n"
+                + class_source
+                + "\nfrom .child import token\n"
+            ),
+            "pkg.child": ast.parse("token = 7\n"),
+        },
+        "pkg",
+        annotation_semantics=annotation_semantics,
+        _compile_on_first_import=True,
+        _assume_passive_external_imports=True,
+        _assume_frozen_dataclass_decoration=assume,
+    )
+
+
+def _r8_assert_rejected(result, class_name="ImportRef"):
+    assert result.outcome == "UNKNOWN"
+    assert result.assumed_dataclass_decorations == ()
+    assert not any(
+        event.operation in {
+            "ASSUMED_FROZEN_DATACLASS_DECORATION",
+            "DEFINE_PASSIVE_CLASS",
+        }
+        and event.symbol == class_name
+        for event in result.events
+    )
+
+
+def test_r8_importref_shape_crosses_class_definition():
+    source = (
+        "@dataclass(frozen=True)\n"
+        "class ImportRef:\n"
+        '    """Raw AST import representation."""\n'
+        "    module: str | None\n"
+        "    level: int\n"
+        "    names: list[str]\n"
+        "    is_from_import: bool\n"
+        "    is_local: bool = False\n"
+        "    type_only: bool = False\n"
+        "    is_lazy: bool = False\n"
+    )
+
+    result = _r8_frozen_dataclass_result(source)
+
+    assert result.outcome == "MODEL_PASS"
+    assert result.evidence_scope == (
+        "CONDITIONAL_EXTERNAL_AND_FROZEN_DATACLASS_"
+        "ASSUMPTIONS_NOT_RUNTIME_PROOF"
+    )
+
+    assert len(result.assumed_dataclass_decorations) == 1
+
+    decoration = result.assumed_dataclass_decorations[0]
+    assert decoration.class_name == "ImportRef"
+    assert decoration.decorator == (
+        "dataclasses.dataclass(frozen=True)"
+    )
+    assert (decoration.line, decoration.column) == (2, 1)
+
+    events = list(result.events)
+
+    decorated_at = next(
+        index for index, event in enumerate(events)
+        if event.operation
+        == "ASSUMED_FROZEN_DATACLASS_DECORATION"
+        and event.symbol == "ImportRef"
+    )
+
+    defined_at = next(
+        index for index, event in enumerate(events)
+        if event.operation == "DEFINE_PASSIVE_CLASS"
+        and event.symbol == "ImportRef"
+    )
+
+    child_import_at = next(
+        index for index, event in enumerate(events)
+        if event.operation == "START_IMPORT"
+        and event.target == "pkg.child"
+    )
+
+    assert decorated_at < defined_at < child_import_at
+    assert result.reached_unmodeled_import is None
+
+
+@pytest.mark.parametrize(
+    "annotation",
+    [
+        "str | None",
+        "None | str",
+        "int | None",
+        "None | int",
+        "list[str] | None",
+        "None | list[str]",
+    ],
+)
+def test_r8_restricted_optional_annotation(annotation):
+    source = (
+        "@dataclass(frozen=True)\n"
+        "class ImportRef:\n"
+        f"    value: {annotation}\n"
+    )
+
+    result = _r8_frozen_dataclass_result(source)
+
+    assert result.outcome == "MODEL_PASS"
+    assert len(result.assumed_dataclass_decorations) == 1
+
+
+@pytest.mark.parametrize(
+    "literal",
+    [
+        "False",
+        "True",
+        "None",
+        "0",
+        "1.5",
+        "2j",
+        "'text'",
+        "b'bytes'",
+    ],
+)
+def test_r8_constant_field_defaults(literal):
+    source = (
+        "@dataclass(frozen=True)\n"
+        "class ImportRef:\n"
+        "    required: str\n"
+        f"    optional: str = {literal}\n"
+    )
+
+    result = _r8_frozen_dataclass_result(source)
+
+    assert result.outcome == "MODEL_PASS"
+    assert len(result.assumed_dataclass_decorations) == 1
+
+
+@pytest.mark.parametrize(
+    "field_source",
+    [
+        "value: bool = factory()",
+        "value: list[str] = []",
+        "value: bool = SOME_NAME",
+        "value: bool = 1 + 2",
+        "value: bool = (1, 2)",
+        "value: bool = {}",
+        "value: str | int",
+        "value: str | UnknownName",
+        "value: str | None | None",
+        "value: str + None",
+        "value: str | None = factory()",
+        "first: bool = False\n    later: int",
+    ],
+)
+def test_r8_rejects_unsupported_dataclass_fields(
+    field_source,
+):
+    source = (
+        "@dataclass(frozen=True)\n"
+        "class ImportRef:\n"
+        f"    {field_source}\n"
+    )
+
+    result = _r8_frozen_dataclass_result(source)
+
+    _r8_assert_rejected(result)
+
+
+def test_r8_optional_class_requires_explicit_assumption():
+    source = (
+        "@dataclass(frozen=True)\n"
+        "class ImportRef:\n"
+        "    module: str | None\n"
+        "    is_local: bool = False\n"
+    )
+
+    result = _r8_frozen_dataclass_result(
+        source,
+        assume=False,
+    )
+
+    _r8_assert_rejected(result)
+
+
+@pytest.mark.parametrize(
+    "annotation_semantics",
+    [None, "STRINGIFIED"],
+)
+def test_r8_optional_class_requires_deferred_annotations(
+    annotation_semantics,
+):
+    source = (
+        "@dataclass(frozen=True)\n"
+        "class ImportRef:\n"
+        "    module: str | None\n"
+        "    is_local: bool = False\n"
+    )
+
+    result = _r8_frozen_dataclass_result(
+        source,
+        annotation_semantics=annotation_semantics,
+    )
+
+    _r8_assert_rejected(result)
+
+
 def test_external_assumption_normal_model_still_unknown():
     result = _model({"pkg.__init__": "import os\n"}, "pkg")
     assert result.outcome == "UNKNOWN"

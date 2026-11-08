@@ -208,6 +208,30 @@ def _restricted_dataclass_field_annotation(
     if isinstance(node, ast.Constant):
         return type(node.value) is str
 
+    if isinstance(node, ast.BinOp):
+        if not isinstance(node.op, ast.BitOr):
+            return False
+
+        if (
+            isinstance(node.left, ast.Constant)
+            and type(node.left.value) is type(None)
+            and not isinstance(node.right, ast.BinOp)
+        ):
+            return _restricted_dataclass_field_annotation(
+                node.right
+            )
+
+        if (
+            isinstance(node.right, ast.Constant)
+            and type(node.right.value) is type(None)
+            and not isinstance(node.left, ast.BinOp)
+        ):
+            return _restricted_dataclass_field_annotation(
+                node.left
+            )
+
+        return False
+
     if isinstance(node, ast.Tuple):
         return all(
             _restricted_dataclass_field_annotation(item)
@@ -264,6 +288,8 @@ def _safe_passive_class_definition(
         return False
 
     if conditional_dataclass:
+        seen_default_field = False
+
         for body_statement in statement.body:
             if isinstance(
                 body_statement,
@@ -272,13 +298,32 @@ def _safe_passive_class_definition(
                 return False
 
             if isinstance(body_statement, ast.AnnAssign):
-                if (
-                    body_statement.value is not None
-                    or not _restricted_dataclass_field_annotation(
-                        body_statement.annotation
-                    )
+                if not _restricted_dataclass_field_annotation(
+                    body_statement.annotation
                 ):
                     return False
+
+                default_value = body_statement.value
+
+                if default_value is None:
+                    if seen_default_field:
+                        return False
+                else:
+                    if (
+                        type(default_value) is not ast.Constant
+                        or type(default_value.value) not in {
+                            type(None),
+                            bool,
+                            int,
+                            float,
+                            complex,
+                            str,
+                            bytes,
+                        }
+                    ):
+                        return False
+
+                    seen_default_field = True
 
             if isinstance(
                 body_statement,
