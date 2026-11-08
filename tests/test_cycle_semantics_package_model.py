@@ -717,6 +717,366 @@ def test_r10_requires_deferred_annotation_semantics(
     _r10_assert_rejected(result)
 
 
+def _r11_module_result(
+    module_source,
+    *,
+    import_type="from .imports import ImportRef\n",
+    import_dataclass="from dataclasses import dataclass, field\n",
+    prelude="",
+    annotation_semantics="DEFERRED",
+    assume=True,
+):
+    sources = {
+        "pkg.__init__": "pass\n",
+        "pkg.imports": (
+            "from dataclasses import dataclass\n"
+            "@dataclass(frozen=True)\n"
+            "class ImportRef:\n"
+            "    module: str | None\n"
+        ),
+        "pkg.module": (
+            import_dataclass
+            + import_type
+            + prelude
+            + module_source
+            + "\nfrom .child import token\n"
+        ),
+        "pkg.child": "token = 7\n",
+    }
+
+    return evaluate_package_import_order(
+        {
+            key: ast.parse(value)
+            for key, value in sources.items()
+        },
+        "pkg.module",
+        annotation_semantics=annotation_semantics,
+        _compile_on_first_import=True,
+        _assume_passive_external_imports=True,
+        _assume_frozen_dataclass_decoration=assume,
+    )
+
+
+def _r11_class_source():
+    return (
+        "@dataclass(frozen=True)\n"
+        "class Module:\n"
+        "    module_id: str\n"
+        "    path: str\n"
+        "    absolute_path: str\n"
+        "    imports: list[ImportRef] = field(hash=False)\n"
+        "    @property\n"
+        "    def ast_tree(self):\n"
+        "        return None\n"
+    )
+
+
+def _r11_assert_module_rejected(result):
+    assert result.outcome == "UNKNOWN"
+    assert not any(
+        item.class_name == "Module"
+        for item in result.assumed_dataclass_decorations
+    )
+    assert not any(
+        event.operation == "DEFINE_PASSIVE_CLASS"
+        and event.symbol == "Module"
+        for event in result.events
+    )
+
+
+def test_r11_real_module_shape_crosses_class():
+    result = _r11_module_result(_r11_class_source())
+
+    assert result.outcome == "MODEL_PASS"
+
+    assert tuple(
+        item.class_name
+        for item in result.assumed_dataclass_decorations
+    ) == (
+        "ImportRef",
+        "Module",
+    )
+
+    events = list(result.events)
+
+    imported_type = next(
+        index for index, event in enumerate(events)
+        if event.operation == "FROM"
+        and event.target == "pkg.imports"
+        and event.symbol == "ImportRef"
+    )
+
+    bound_field = next(
+        index for index, event in enumerate(events)
+        if event.operation == "CLASS_LOCAL_BIND"
+        and event.symbol == "imports"
+    )
+
+    decorated = next(
+        index for index, event in enumerate(events)
+        if event.operation
+        == "ASSUMED_FROZEN_DATACLASS_DECORATION"
+        and event.symbol == "Module"
+    )
+
+    bound_class = next(
+        index for index, event in enumerate(events)
+        if event.operation == "DEFINE_PASSIVE_CLASS"
+        and event.symbol == "Module"
+    )
+
+    imported_child = next(
+        index for index, event in enumerate(events)
+        if event.operation == "START_IMPORT"
+        and event.target == "pkg.child"
+    )
+
+    assert (
+        imported_type
+        < bound_field
+        < decorated
+        < bound_class
+        < imported_child
+    )
+
+    assert result.reached_unmodeled_import is None
+
+
+def test_r11_named_passive_class_annotation_not_hardcoded():
+    source = (
+        "@dataclass(frozen=True)\n"
+        "class Module:\n"
+        "    reference: OtherType\n"
+    )
+
+    sources = {
+        "pkg.__init__": "pass\n",
+        "pkg.imports": (
+            "class OtherType:\n"
+            "    pass\n"
+        ),
+        "pkg.module": (
+            "from dataclasses import dataclass\n"
+            "from .imports import OtherType\n"
+            + source
+        ),
+    }
+
+    result = evaluate_package_import_order(
+        {
+            key: ast.parse(value)
+            for key, value in sources.items()
+        },
+        "pkg.module",
+        annotation_semantics="DEFERRED",
+        _compile_on_first_import=True,
+        _assume_passive_external_imports=True,
+        _assume_frozen_dataclass_decoration=True,
+    )
+
+    assert result.outcome == "MODEL_PASS"
+    assert any(
+        item.class_name == "Module"
+        for item in result.assumed_dataclass_decorations
+    )
+
+
+@pytest.mark.parametrize(
+    "import_type,prelude",
+    [
+        ("", ""),
+        ("from pathlib import ImportRef\n", ""),
+        ("from .imports import ImportRef\n", "ImportRef = 7\n"),
+    ],
+)
+def test_r11_requires_proven_passive_type(
+    import_type,
+    prelude,
+):
+    result = _r11_module_result(
+        _r11_class_source(),
+        import_type=import_type,
+        prelude=prelude,
+    )
+
+    _r11_assert_module_rejected(result)
+
+
+@pytest.mark.parametrize(
+    "import_dataclass,prelude",
+    [
+        ("from dataclasses import dataclass\n", ""),
+        (
+            "from dataclasses import dataclass\n"
+            "from pathlib import Path as field\n",
+            "",
+        ),
+        (
+            "from dataclasses import dataclass, field\n",
+            "field = 42\n",
+        ),
+    ],
+)
+def test_r11_requires_exact_field_factory_binding(
+    import_dataclass,
+    prelude,
+):
+    result = _r11_module_result(
+        _r11_class_source(),
+        import_dataclass=import_dataclass,
+        prelude=prelude,
+    )
+
+    _r11_assert_module_rejected(result)
+
+    assert not any(
+        event.operation == "CLASS_LOCAL_BIND"
+        and event.symbol == "imports"
+        for event in result.events
+    )
+
+
+@pytest.mark.parametrize(
+    "default_expression",
+    [
+        "field()",
+        "field(default=1)",
+        "field(hash=True)",
+        "field(hash=0)",
+        "field(hash=False, compare=True)",
+        "other(hash=False)",
+        "field(hash=False) or None",
+    ],
+)
+def test_r11_rejects_other_default_calls(
+    default_expression,
+):
+    source = (
+        "@dataclass(frozen=True)\n"
+        "class Module:\n"
+        f"    imports: list[ImportRef] = {default_expression}\n"
+    )
+
+    result = _r11_module_result(source)
+
+    _r11_assert_module_rejected(result)
+
+
+@pytest.mark.parametrize(
+    "decorator",
+    [
+        "@property()",
+        "@unknown",
+        "@property\n    @unknown",
+    ],
+)
+def test_r11_rejects_other_method_decorators(decorator):
+    source = (
+        "@dataclass(frozen=True)\n"
+        "class Module:\n"
+        "    imports: list[ImportRef] = field(hash=False)\n"
+        f"    {decorator}\n"
+        "    def ast_tree(self):\n"
+        "        return None\n"
+    )
+
+    result = _r11_module_result(source)
+
+    _r11_assert_module_rejected(result)
+
+
+def test_r11_rejects_shadowed_builtin_property():
+    result = _r11_module_result(
+        _r11_class_source(),
+        prelude="property = 12\n",
+    )
+
+    _r11_assert_module_rejected(result)
+
+
+@pytest.mark.parametrize(
+    "shadow_source",
+    [
+        "    property: str = 'shadow'\n",
+        "    field: str = 'shadow'\n",
+    ],
+)
+def test_r11_rejects_class_local_callable_shadow(
+    shadow_source,
+):
+    source = _r11_class_source().replace(
+        "    imports: list[ImportRef] = field(hash=False)\n",
+        shadow_source
+        + "    imports: list[ImportRef] = field(hash=False)\n",
+    )
+
+    result = _r11_module_result(source)
+
+    _r11_assert_module_rejected(result)
+
+
+def test_r11_rejects_unmodeled_async_property():
+    source = (
+        "@dataclass(frozen=True)\n"
+        "class Module:\n"
+        "    imports: list[ImportRef] = field(hash=False)\n"
+        "    @property\n"
+        "    async def ast_tree(self):\n"
+        "        return None\n"
+    )
+
+    result = _r11_module_result(source)
+
+    _r11_assert_module_rejected(result)
+
+
+def test_r11_plain_class_property_remains_unmodeled():
+    sources = {
+        "pkg.__init__": (
+            "class Plain:\n"
+            "    @property\n"
+            "    def value(self):\n"
+            "        return 1\n"
+        )
+    }
+
+    result = evaluate_package_import_order(
+        {
+            key: ast.parse(value)
+            for key, value in sources.items()
+        },
+        "pkg",
+        annotation_semantics="DEFERRED",
+        _compile_on_first_import=True,
+    )
+
+    assert result.outcome == "UNKNOWN"
+
+
+def test_r11_requires_explicit_conditional_assumption():
+    result = _r11_module_result(
+        _r11_class_source(),
+        assume=False,
+    )
+
+    _r11_assert_module_rejected(result)
+
+
+@pytest.mark.parametrize(
+    "annotation_semantics",
+    [None, "STRINGIFIED"],
+)
+def test_r11_requires_deferred_annotation_semantics(
+    annotation_semantics,
+):
+    result = _r11_module_result(
+        _r11_class_source(),
+        annotation_semantics=annotation_semantics,
+    )
+
+    _r11_assert_module_rejected(result)
+
+
 def test_external_assumption_normal_model_still_unknown():
     result = _model({"pkg.__init__": "import os\n"}, "pkg")
     assert result.outcome == "UNKNOWN"

@@ -101,6 +101,7 @@ def _safe_passive_function_definition(
     *,
     allow_dunder: bool = False,
     annotation_semantics: str | None = None,
+    allow_builtin_property: bool = False,
 ) -> bool:
     """A definition whose creation has no unknown evaluations.
 
@@ -113,7 +114,18 @@ def _safe_passive_function_definition(
             statement.name.startswith("__")
             and not allow_dunder
         )
-        or statement.decorator_list
+        or (
+            bool(statement.decorator_list)
+            and not (
+                allow_builtin_property
+                and type(statement) is ast.FunctionDef
+                and len(statement.decorator_list) == 1
+                and type(statement.decorator_list[0])
+                is ast.Name
+                and statement.decorator_list[0].id
+                == "property"
+            )
+        )
         or (statement.returns is not None and annotation_semantics not in {
             "DEFERRED", "STRINGIFIED",
         })
@@ -195,15 +207,31 @@ def _exact_frozen_dataclass_decorator(
     )
 
 
+def _exact_restricted_dataclass_hash_field_call(
+    node: ast.AST,
+) -> bool:
+    return (
+        type(node) is ast.Call
+        and type(node.func) is ast.Name
+        and node.func.id == "field"
+        and not node.args
+        and len(node.keywords) == 1
+        and node.keywords[0].arg == "hash"
+        and type(node.keywords[0].value) is ast.Constant
+        and type(node.keywords[0].value.value) is bool
+        and node.keywords[0].value.value is False
+    )
+
+
 def _restricted_dataclass_field_annotation(
     node: ast.AST,
 ) -> bool:
     if isinstance(node, ast.Name):
-        return node.id in {
-            "str", "int", "bool", "float",
-            "bytes", "dict", "list",
-            "set", "tuple",
-        }
+        return (
+            node.id.isidentifier()
+            and not node.id.startswith("__")
+            and node.id != "ast"
+        )
 
     if type(node) is ast.Attribute:
         return (
@@ -305,6 +333,48 @@ def _safe_passive_class_definition(
     if conditional_dataclass:
         seen_default_field = False
 
+        uses_field_call = any(
+            isinstance(item, ast.AnnAssign)
+            and item.value is not None
+            and _exact_restricted_dataclass_hash_field_call(
+                item.value
+            )
+            for item in statement.body
+        )
+
+        uses_property = any(
+            type(item) is ast.FunctionDef
+            and len(item.decorator_list) == 1
+            and type(item.decorator_list[0]) is ast.Name
+            and item.decorator_list[0].id == "property"
+            for item in statement.body
+        )
+
+        protected_names = set()
+
+        if uses_field_call:
+            protected_names.add("field")
+
+        if uses_property:
+            protected_names.add("property")
+
+        if any(
+            (
+                isinstance(item, ast.AnnAssign)
+                and isinstance(item.target, ast.Name)
+                and item.target.id in protected_names
+            )
+            or (
+                isinstance(
+                    item,
+                    (ast.FunctionDef, ast.AsyncFunctionDef),
+                )
+                and item.name in protected_names
+            )
+            for item in statement.body
+        ):
+            return False
+
         for body_statement in statement.body:
             if isinstance(
                 body_statement,
@@ -324,9 +394,9 @@ def _safe_passive_class_definition(
                     if seen_default_field:
                         return False
                 else:
-                    if (
-                        type(default_value) is not ast.Constant
-                        or type(default_value.value) not in {
+                    literal_default = (
+                        type(default_value) is ast.Constant
+                        and type(default_value.value) in {
                             type(None),
                             bool,
                             int,
@@ -335,6 +405,14 @@ def _safe_passive_class_definition(
                             str,
                             bytes,
                         }
+                    )
+
+                    if (
+                        not literal_default
+                        and not
+                        _exact_restricted_dataclass_hash_field_call(
+                            default_value
+                        )
                     ):
                         return False
 
@@ -397,6 +475,7 @@ def _safe_passive_class_definition(
                 body_statement,
                 allow_dunder=True,
                 annotation_semantics=annotation_semantics,
+                allow_builtin_property=conditional_dataclass,
             )
         ):
             continue
@@ -945,15 +1024,47 @@ def _compile(
                     )
                     continue
 
-                if not isinstance(body_statement, (ast.Import, ast.ImportFrom)):
+                if not isinstance(
+                    body_statement,
+                    (ast.Import, ast.ImportFrom),
+                ):
                     if (
                         isinstance(body_statement, ast.AnnAssign)
                         and body_statement.value is not None
                     ):
-                        steps.append(_Step(
-                            "BIND", binding=body_statement.target.id,
-                            class_local=True,
-                        ))
+                        if _exact_restricted_dataclass_hash_field_call(
+                            body_statement.value
+                        ):
+                            steps.append(
+                                _Step(
+                                    "CHECK_DATACLASS_FIELD_FACTORY",
+                                    target="field",
+                                )
+                            )
+
+                        steps.append(
+                            _Step(
+                                "BIND",
+                                binding=body_statement.target.id,
+                                class_local=True,
+                            )
+                        )
+
+                    if (
+                        type(body_statement) is ast.FunctionDef
+                        and len(body_statement.decorator_list) == 1
+                        and type(body_statement.decorator_list[0])
+                        is ast.Name
+                        and body_statement.decorator_list[0].id
+                        == "property"
+                    ):
+                        steps.append(
+                            _Step(
+                                "CHECK_BUILTIN_PROPERTY",
+                                target="property",
+                            )
+                        )
+
                     continue
 
                 fragment = ast.Module(
@@ -2003,6 +2114,29 @@ def evaluate_package_import_order(
                 )
             )
 
+        elif step.op == "CHECK_DATACLASS_FIELD_FACTORY":
+            if (
+                step.target != "field"
+                or namespaces[module].get("field")
+                != "\x00ASSUMED_EXTERNAL:dataclasses:field"
+            ):
+                return result(
+                    "UNKNOWN",
+                    module,
+                    step.target,
+                )
+
+        elif step.op == "CHECK_BUILTIN_PROPERTY":
+            if (
+                step.target != "property"
+                or "property" in namespaces[module]
+            ):
+                return result(
+                    "UNKNOWN",
+                    module,
+                    step.target,
+                )
+
         elif step.op == "DEFINE_CONDITIONAL_FROZEN_DATACLASS":
             if (
                 namespaces[module].get("dataclass")
@@ -2012,7 +2146,27 @@ def evaluate_package_import_order(
                         namespaces[module].get(name)
                         != "\x00ASSUMED_EXTERNAL:ast"
                         if name == "ast"
-                        else name in namespaces[module]
+                        else (
+                            name in namespaces[module]
+                            if name in {
+                                "str",
+                                "int",
+                                "bool",
+                                "float",
+                                "bytes",
+                                "dict",
+                                "list",
+                                "set",
+                                "tuple",
+                            }
+                            else not (
+                                type(namespaces[module].get(name))
+                                is str
+                                and namespaces[module][name].startswith(
+                                    "\x00PASSIVE_CLASS:"
+                                )
+                            )
+                        )
                     )
                     for name in step.annotation_builtin_names
                 )

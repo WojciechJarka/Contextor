@@ -1,95 +1,686 @@
 # TASK
-P15-D11 — predefined three-entry real-source diagnostic, discovery only.
+P15-R11
 
 # PREFLIGHT
-DIRECT_EVIDENCE: local HEAD `68e0188960b8e57cc9cb1de7ac8a0e516eaa21e7`, clean worktree; repository `.venv\Scripts\python.exe` is CPython 3.15.2. First MCP call was `get_project_architecture`. Required `get_module_context` queries for `package_model`, `namespace_bound_model`, and `source` each returned canonical revision 1150, `canonical_state=fresh`, `workspace_sync=verified`.
+DIRECT_EVIDENCE: Contextor `get_module_context` returned `package_model.py` and `tests/test_cycle_semantics_package_model.py` at canonical revision 1150, `canonical_state=fresh`, `workspace_sync=verified`. All specified anchors A–G and the test insertion anchor matched. Source/test files had no pre-existing diff. Repository `.venv\Scripts\python.exe`: CPython 3.15.2.
 
-# CURRENT_CANONICAL_AUTHORITY
-DIRECT_EVIDENCE: one read-only LIVE snapshot revision 1150, repo_id `ctx_8efc50d8`, state_id `20261108_172727`; MCP `resync_required=false`, graph/cycles fresh, cycle_semantics stale, syntax errors 0. Indexed modules 627, hard edges 2509, structural DFS cycle paths 16. Cyclic SCC memberships:
-
-- SCC1 (44): contextor.core.analysis.full_analysis_coordinator, contextor.core.analysis.incremental.engine, contextor.core.analysis.incremental.materialization, contextor.core.analysis.incremental.plan_executor, contextor.core.analysis.incremental.preparation, contextor.core.analysis.incremental_engine, contextor.core.analysis.lineage_extraction, contextor.core.analysis.refresh_planner, contextor.core.analysis.state_manager, contextor.core.api.facade, contextor.core.cycle_semantics.cycle_warning_projection, contextor.core.cycle_semantics.cycle_warning_transitions, contextor.core.cycle_semantics.evidence, contextor.core.cycle_semantics.generation_manifest, contextor.core.cycle_semantics.live_cycle_warning_query, contextor.core.cycle_semantics.live_installed_claims, contextor.core.cycle_semantics.live_installed_optional_claims, contextor.core.cycle_semantics.live_installed_partial_claims, contextor.core.cycle_semantics.live_warning_diagnostics_summary, contextor.core.cycle_semantics.live_warning_transition_checkpoint, contextor.core.cycle_semantics.optional_generation_anchor, contextor.core.cycle_semantics.optional_scc_publication, contextor.core.cycle_semantics.original_worker_binding, contextor.core.cycle_semantics.original_worker_preparation, contextor.core.cycle_semantics.original_worker_reindex_planning, contextor.core.cycle_semantics.partial_scc_claims, contextor.core.cycle_semantics.partial_scc_publication, contextor.core.cycle_semantics.partial_warning_eligibility, contextor.core.cycle_semantics.publication_binding, contextor.core.cycle_semantics.source_proof, contextor.core.lineage_query.live_query, contextor.core.live_state.__init__, contextor.core.live_state.hydration, contextor.core.live_state.ipc, contextor.core.live_state.runtime, contextor.core.live_state.store, contextor.core.live_state.watcher, contextor.core.reference.module_usage_reuse, contextor.core.reporting_engine.pipeline, contextor.core.single_file.builders.__init__, contextor.core.single_file.builders.layer0_builders, contextor.core.single_file.builders.layer2_builders, contextor.core.single_file.single_file_analysis, contextor.core.symbol_engine.indexer.
-- SCC2 (9): contextor.repo_generator.__init__, contextor.repo_generator.filters, contextor.repo_generator.icons, contextor.repo_generator.main, contextor.ui.__init__, contextor.ui.exclude_gui, contextor.ui.gui, contextor.ui.gui_parser, contextor.ui.progress_widget.
-
-# SOURCE_INVENTORY
-DIRECT_EVIDENCE: current OPTIONAL_NAMED_CHILDREN cohorts 202 and 222; union 222 distinct indexed physical files. One deduplicated source inventory, one same-generation FileState, one `IndexedSourcePath` and `SourceSnapshot` per selected module, one `SearchPortion("repo", files)`. D11 inventory digest `576a76e6656b4ed6e34aca955359cc21ec56ee0012c7d75605c8dd0a0b358b79`, SHA256 of compact sorted-key JSON rows `[module_id, root-relative POSIX path, raw SHA256]`; distinct from D10.
-
-# FILESTATE_SHA_PARITY
-DIRECT_EVIDENCE: FileState revision 1150/state_id `20261108_172727`, trusted baseline. Raw bytes from `Module.absolute_path`: 222/222 SHA256 match same-generation FileState; mismatches 0, omitted selected sources 0.
-
-# FRESH_PROCESS_R10_ADOPTION
-DIRECT_EVIDENCE: fresh CPython 3.15.2 process imported `C:\Temp\Contextor_Repo\contextor\core\cycle_semantics\namespace_bound_model.py` and `C:\Temp\Contextor_Repo\contextor\core\cycle_semantics\package_model.py`. Inspection verified exact R10 `ast.AST` attribute restriction and `\x00ASSUMED_EXTERNAL:ast` binding check, R8 optional/default checks, R9 `ValueError` base/ordered check, and R7 conditional frozen dataclass path. This is adoption in this diagnostic process only.
-
-Event shorthand below: `module|operation|target|symbol`; `∅` means null. A leading `…` repeats the immediately preceding module, and when only target/symbol is shown after it, also repeats the immediately preceding operation. These are compact transcriptions of actual records, not inferred events. External shorthand: `importer|operation|target|symbol|line:column`; `…` repeats the immediately preceding importer.
-
-# ENTRY_A
-`contextor.repo_generator`: outer `UNKNOWN/RESTRICTED_MODEL_UNKNOWN`, authority `SOURCE_BOUND_CALLER_SUPPLIED_INVENTORY_NOT_RUNTIME_OR_LIVE_PROOF`, source evidence SHA256 `37019241563a4dff560131961f8cdc0f6cf34b1e7076049b13d73f7f156bef79`; inner conditional `UNKNOWN/RESTRICTED_MODEL_UNKNOWN`, inner model `UNKNOWN`, evidence_scope `CONDITIONAL_EXTERNAL_AND_FROZEN_DATACLASS_ASSUMPTIONS_NOT_RUNTIME_PROOF`. External assumptions 47; dataclass assumptions 4; events 110; evaluation 7.307688 s. First stop `contextor.core.domain.module` / `Module` class; reached_unmodeled_import null; observed early-binding hazard NO; conditional completion NO. Complete combined assumption-record digest (canonical compact sorted-key JSON of `{external,dataclass}`) `ac48570682369941c2f987736e3308f4780472c3b4e8cd0a59d2d0de3f602190`.
-
-First 15 events: `\0ENTRY|START_IMPORT|contextor|∅`; `contextor|READY|∅|∅`; `\0ENTRY|START_IMPORT|contextor.repo_generator|∅`; `contextor.repo_generator|START_IMPORT|contextor.repo_generator.main|∅`; `contextor.repo_generator.main|ASSUMED_EXTERNAL_IMPORT|os|∅`; `…|ASSUMED_EXTERNAL_IMPORT|shutil|∅`; `…|ASSUMED_EXTERNAL_IMPORT|subprocess|∅`; `…|ASSUMED_EXTERNAL_IMPORT|tkinter|∅`; `…|ASSUMED_EXTERNAL_IMPORT|tkinter|filedialog`; `…|ASSUMED_EXTERNAL_IMPORT|tkinter|messagebox`; `…|ASSUMED_EXTERNAL_IMPORT|tkinter|ttk`; `…|ASSUMED_EXTERNAL_IMPORT|tkinter|filedialog`; `…|ASSUMED_EXTERNAL_IMPORT|tkinter|messagebox`; `…|ASSUMED_EXTERNAL_IMPORT|tkinter|ttk`; `…|START_IMPORT|contextor.repo_generator.config|∅`.
-
-First 10 external records: `contextor.repo_generator.main|IMPORT|os|∅|1:0`; `…|IMPORT|shutil|∅|2:0`; `…|IMPORT|subprocess|∅|3:0`; `…|IMPORT|tkinter|∅|4:0`; `…|PREPARE_FROM_MEMBER|tkinter|filedialog|5:0`; `…|PREPARE_FROM_MEMBER|tkinter|messagebox|5:0`; `…|PREPARE_FROM_MEMBER|tkinter|ttk|5:0`; `…|FROM|tkinter|filedialog|5:0`; `…|FROM|tkinter|messagebox|5:0`; `…|FROM|tkinter|ttk|5:0`.
-
-Last 10 external records: `contextor.core.domain.module|FROM|dataclasses|dataclass|7:0`; `…|FROM|dataclasses|field|7:0`; `…|FROM|functools|lru_cache|8:0`; `…|FROM|pathlib|Path|9:0`; `contextor.core.source|IMPORT|ast|∅|3:0`; `…|IMPORT|hashlib|∅|4:0`; `…|IMPORT|io|∅|5:0`; `…|IMPORT|tokenize|∅|6:0`; `…|FROM|dataclasses|dataclass|7:0`; `…|FROM|pathlib|Path|8:0`.
-
-Last 20 events: `contextor.core.source|BIND|∅|__all__`; `…|DEFINE_PASSIVE_CLASS|∅|SourceError`; `…|ASSUMED_FROZEN_DATACLASS_DECORATION|∅|ParsedSourceInput`; `…|DEFINE_PASSIVE_CLASS|∅|ParsedSourceInput`; `…|ASSUMED_FROZEN_DATACLASS_DECORATION|∅|SourceSnapshot`; `…|DEFINE_PASSIVE_CLASS|∅|SourceSnapshot`; `…|DEFINE_OPAQUE_FUNCTION|∅|read_source`; `…|DEFINE_OPAQUE_FUNCTION|∅|_read_source_snapshot`; `…|DEFINE_OPAQUE_FUNCTION|∅|read_source_snapshot`; `…|DEFINE_OPAQUE_FUNCTION|∅|_decode_source_snapshot`; `…|DEFINE_OPAQUE_FUNCTION|∅|parse_source_snapshot`; `…|DEFINE_OPAQUE_FUNCTION|∅|parse_source_with_fingerprint`; `…|DEFINE_OPAQUE_FUNCTION|∅|parse_source`; `…|READY|∅|∅`; `contextor.core|BIND_CHILD|contextor.core.source|source`; `contextor.core.domain.module|PREPARE_FROM_MEMBER|contextor.core.source|SourceError`; `…|PREPARE_FROM_MEMBER|contextor.core.source|parse_source`; `…|FROM|contextor.core.source|SourceError`; `…|FROM|contextor.core.source|parse_source`; `…|FROM|contextor.core.domain.imports|ImportRef`.
-
-All dataclass records: `contextor.core.domain.graph|ProjectGraph|dataclasses.dataclass(frozen=True)|10:1`; `contextor.core.domain.imports|ImportRef|dataclasses.dataclass(frozen=True)|11:1`; `contextor.core.source|ParsedSourceInput|dataclasses.dataclass(frozen=True)|33:1`; `contextor.core.source|SourceSnapshot|dataclasses.dataclass(frozen=True)|39:1`.
-
-# ENTRY_B
-`contextor.ui`: outer `UNKNOWN/RESTRICTED_MODEL_UNKNOWN`, same authority and evidence_scope as A, source evidence SHA256 `c5716663bc6cb6adbca7cf7c723b21507386122b233d768186925feca45acefb`; inner conditional `UNKNOWN/RESTRICTED_MODEL_UNKNOWN`, inner model `UNKNOWN`. External assumptions 32; dataclass assumptions 4; events 79; evaluation 5.844432 s. First stop `contextor.core.domain.module` / `Module`; reached_unmodeled_import null; early-binding hazard NO; conditional completion NO. Complete combined assumption-record digest `3e245f059c4e073f33ebff51be85ab6a60cf4793573f96cc8b75d0ba7f728212`.
-
-First 15 events: `\0ENTRY|START_IMPORT|contextor|∅`; `contextor|READY|∅|∅`; `\0ENTRY|START_IMPORT|contextor.ui|∅`; `contextor.ui|START_IMPORT|contextor.ui.gui|∅`; `contextor.ui.gui|ASSUMED_EXTERNAL_IMPORT|os|∅`; `…|ASSUMED_EXTERNAL_IMPORT|threading|∅`; `…|ASSUMED_EXTERNAL_IMPORT|time|∅`; `…|ASSUMED_EXTERNAL_IMPORT|tkinter|∅`; `…|ASSUMED_EXTERNAL_IMPORT|uuid|∅`; `…|ASSUMED_EXTERNAL_IMPORT|datetime|datetime`; `…|ASSUMED_EXTERNAL_IMPORT|queue|Empty`; `…|ASSUMED_EXTERNAL_IMPORT|queue|Queue`; `…|ASSUMED_EXTERNAL_IMPORT|queue|Empty`; `…|ASSUMED_EXTERNAL_IMPORT|queue|Queue`; `…|ASSUMED_EXTERNAL_IMPORT|pathlib|Path`.
-
-First 10 external records: `contextor.ui.gui|IMPORT|os|∅|8:0`; `…|IMPORT|threading|∅|9:0`; `…|IMPORT|time|∅|10:0`; `…|IMPORT|tkinter|∅|11:0`; `…|IMPORT|uuid|∅|12:0`; `…|FROM|datetime|datetime|13:0`; `…|PREPARE_FROM_MEMBER|queue|Empty|14:0`; `…|PREPARE_FROM_MEMBER|queue|Queue|14:0`; `…|FROM|queue|Empty|14:0`; `…|FROM|queue|Queue|14:0`.
-
-Last 10 external records: `contextor.core.domain.module|FROM|dataclasses|dataclass|7:0`; `…|FROM|dataclasses|field|7:0`; `…|FROM|functools|lru_cache|8:0`; `…|FROM|pathlib|Path|9:0`; `contextor.core.source|IMPORT|ast|∅|3:0`; `…|IMPORT|hashlib|∅|4:0`; `…|IMPORT|io|∅|5:0`; `…|IMPORT|tokenize|∅|6:0`; `…|FROM|dataclasses|dataclass|7:0`; `…|FROM|pathlib|Path|8:0`.
-
-Last 20 events: `contextor.core.source|BIND|∅|__all__`; `…|DEFINE_PASSIVE_CLASS|∅|SourceError`; `…|ASSUMED_FROZEN_DATACLASS_DECORATION|∅|ParsedSourceInput`; `…|DEFINE_PASSIVE_CLASS|∅|ParsedSourceInput`; `…|ASSUMED_FROZEN_DATACLASS_DECORATION|∅|SourceSnapshot`; `…|DEFINE_PASSIVE_CLASS|∅|SourceSnapshot`; `…|DEFINE_OPAQUE_FUNCTION|∅|read_source`; `…|DEFINE_OPAQUE_FUNCTION|∅|_read_source_snapshot`; `…|DEFINE_OPAQUE_FUNCTION|∅|read_source_snapshot`; `…|DEFINE_OPAQUE_FUNCTION|∅|_decode_source_snapshot`; `…|DEFINE_OPAQUE_FUNCTION|∅|parse_source_snapshot`; `…|DEFINE_OPAQUE_FUNCTION|∅|parse_source_with_fingerprint`; `…|DEFINE_OPAQUE_FUNCTION|∅|parse_source`; `…|READY|∅|∅`; `contextor.core|BIND_CHILD|contextor.core.source|source`; `contextor.core.domain.module|PREPARE_FROM_MEMBER|contextor.core.source|SourceError`; `…|PREPARE_FROM_MEMBER|contextor.core.source|parse_source`; `…|FROM|contextor.core.source|SourceError`; `…|FROM|contextor.core.source|parse_source`; `…|FROM|contextor.core.domain.imports|ImportRef`.
-
-All dataclass records: `contextor.core.domain.graph|ProjectGraph|dataclasses.dataclass(frozen=True)|10:1`; `contextor.core.domain.imports|ImportRef|dataclasses.dataclass(frozen=True)|11:1`; `contextor.core.source|ParsedSourceInput|dataclasses.dataclass(frozen=True)|33:1`; `contextor.core.source|SourceSnapshot|dataclasses.dataclass(frozen=True)|39:1`.
-
-# ENTRY_C
-`contextor.core.analysis.state_manager`: outer `UNKNOWN/RESTRICTED_MODEL_UNKNOWN`, same authority/evidence_scope as A, source evidence SHA256 `abd3ab69373857d4a61fa8a8a8f6e71b0a582a896a1ad6f26ba8fe812f48d3c0`; inner conditional `UNKNOWN/RESTRICTED_MODEL_UNKNOWN`, inner model `UNKNOWN`. External assumptions 14; dataclass assumptions 4; events 59; evaluation 4.432610 s. First stop `contextor.core.domain.module` / `Module`; reached_unmodeled_import null; early-binding hazard NO; conditional completion NO. Complete combined assumption-record digest `90dbd5a4adf1ba7c94455ca1d26b13848b3457a4aece3b3d4d4687957a1e5fe1`.
-
-First 15 events: `\0ENTRY|START_IMPORT|contextor|∅`; `contextor|READY|∅|∅`; `\0ENTRY|START_IMPORT|contextor.core|∅`; `contextor.core|START_IMPORT|contextor.core.graph|∅`; `contextor.core.graph|READY|∅|∅`; `contextor.core|BIND_CHILD|contextor.core.graph|graph`; `…|START_IMPORT|contextor.core.graph.graph|∅`; `contextor.core.graph.graph|START_IMPORT|contextor.core.domain|∅`; `contextor.core.domain|START_IMPORT|contextor.core.domain.graph|∅`; `contextor.core.domain.graph|ASSUMED_EXTERNAL_IMPORT|dataclasses|dataclass`; `…|ASSUMED_FROZEN_DATACLASS_DECORATION|∅|ProjectGraph`; `…|DEFINE_PASSIVE_CLASS|∅|ProjectGraph`; `…|READY|∅|∅`; `contextor.core.domain|BIND_CHILD|contextor.core.domain.graph|graph`; `…|FROM|contextor.core.domain.graph|ProjectGraph`.
-
-First 10 external records: `contextor.core.domain.graph|FROM|dataclasses|dataclass|7:0`; `contextor.core.domain.imports|FROM|dataclasses|dataclass|8:0`; `contextor.core.domain.module|PREPARE_FROM_MEMBER|dataclasses|dataclass|7:0`; `…|PREPARE_FROM_MEMBER|dataclasses|field|7:0`; `…|FROM|dataclasses|dataclass|7:0`; `…|FROM|dataclasses|field|7:0`; `…|FROM|functools|lru_cache|8:0`; `…|FROM|pathlib|Path|9:0`; `contextor.core.source|IMPORT|ast|∅|3:0`; `…|IMPORT|hashlib|∅|4:0`.
-
-Last 10 external records: `contextor.core.domain.module|FROM|dataclasses|dataclass|7:0`; `…|FROM|dataclasses|field|7:0`; `…|FROM|functools|lru_cache|8:0`; `…|FROM|pathlib|Path|9:0`; `contextor.core.source|IMPORT|ast|∅|3:0`; `…|IMPORT|hashlib|∅|4:0`; `…|IMPORT|io|∅|5:0`; `…|IMPORT|tokenize|∅|6:0`; `…|FROM|dataclasses|dataclass|7:0`; `…|FROM|pathlib|Path|8:0`.
-
-Last 20 events: `contextor.core.source|BIND|∅|__all__`; `…|DEFINE_PASSIVE_CLASS|∅|SourceError`; `…|ASSUMED_FROZEN_DATACLASS_DECORATION|∅|ParsedSourceInput`; `…|DEFINE_PASSIVE_CLASS|∅|ParsedSourceInput`; `…|ASSUMED_FROZEN_DATACLASS_DECORATION|∅|SourceSnapshot`; `…|DEFINE_PASSIVE_CLASS|∅|SourceSnapshot`; `…|DEFINE_OPAQUE_FUNCTION|∅|read_source`; `…|DEFINE_OPAQUE_FUNCTION|∅|_read_source_snapshot`; `…|DEFINE_OPAQUE_FUNCTION|∅|read_source_snapshot`; `…|DEFINE_OPAQUE_FUNCTION|∅|_decode_source_snapshot`; `…|DEFINE_OPAQUE_FUNCTION|∅|parse_source_snapshot`; `…|DEFINE_OPAQUE_FUNCTION|∅|parse_source_with_fingerprint`; `…|DEFINE_OPAQUE_FUNCTION|∅|parse_source`; `…|READY|∅|∅`; `contextor.core|BIND_CHILD|contextor.core.source|source`; `contextor.core.domain.module|PREPARE_FROM_MEMBER|contextor.core.source|SourceError`; `…|PREPARE_FROM_MEMBER|contextor.core.source|parse_source`; `…|FROM|contextor.core.source|SourceError`; `…|FROM|contextor.core.source|parse_source`; `…|FROM|contextor.core.domain.imports|ImportRef`.
-
-All dataclass records: `contextor.core.domain.graph|ProjectGraph|dataclasses.dataclass(frozen=True)|10:1`; `contextor.core.domain.imports|ImportRef|dataclasses.dataclass(frozen=True)|11:1`; `contextor.core.source|ParsedSourceInput|dataclasses.dataclass(frozen=True)|33:1`; `contextor.core.source|SourceSnapshot|dataclasses.dataclass(frozen=True)|39:1`.
-
-# PARSEDSOURCEINPUT_EVIDENCE
-For A/B/C: REACHED=YES, DECORATED=YES, BOUND=YES. Actual trace has `ASSUMED_FROZEN_DATACLASS_DECORATION` immediately followed by `DEFINE_PASSIVE_CLASS` for `ParsedSourceInput`. Current FileState-verified AST: decorator line 33 column 1, class line 34 column 0, `tree: ast.AST` line 35 column 4. This is conditional-model progression, not actual CPython execution.
-
-# SOURCESNAPSHOT_EVIDENCE
-For A/B/C: REACHED=YES, DECORATED=YES, BOUND=YES. Actual trace has `ASSUMED_FROZEN_DATACLASS_DECORATION` immediately followed by `DEFINE_PASSIVE_CLASS` for `SourceSnapshot`. Current AST: decorator line 39 column 1, class line 40 column 0. This is conditional-model progression.
-
-# SOURCE_MODULE_COMPLETION
-SOURCE_MODULE_READY=YES for all three: direct `READY contextor.core.source` event after the two class bindings and opaque function definitions. Subsequent actual import steps: `contextor.core.domain.module` prepares and imports `SourceError` and `parse_source` from source, then imports `ImportRef` from domain.imports. `READY` for source does not establish `READY` for domain.module or any entry module.
-
-# FIRST_NEW_EXECUTION_BOUNDARY
-For A/B/C: module `contextor.core.domain.module`, relative path `contextor/core/domain/module.py`; first unsupported statement `@dataclass(frozen=True) class Module`, `ClassDef` line 42 column 0 (decorator line 41 column 1). The first rejected field is `imports: list[ImportRef] = field(hash=False)`, `AnnAssign` line 56 column 4. `_compile` calls `_safe_passive_class_definition`; its conditional dataclass loop calls `_restricted_dataclass_field_annotation`, which rejects `ImportRef` within the `list[...]` subscript because that name is outside the accepted restricted annotation set. The dynamic `field(hash=False)` default would also fail the subsequent literal-default guard, but the annotation rejection occurs first; this is a code-path observation, not a second observed stop. Last successful event: `FROM contextor.core.domain.imports ImportRef`. The model exposes target module, not rejected-node coordinates; coordinates are derived from current FileState-verified AST. Classification: UNSUPPORTED_REACHED_STATEMENT, not an import-order hazard.
-
-# D10_VS_D11
-| Entry | External | Dataclass | Events | ProjectGraph | ImportRef | SourceError | ParsedSourceInput | SourceSnapshot | source READY | Stop | Hazard | Completion |
-|---|---:|---:|---:|---|---|---|---|---|---|---|---|---|
-| repo_generator | 47→47 | 2→4 | 92→110 | yes→yes | yes→yes | yes→yes | no→yes | no→yes | no→yes | source.py ParsedSourceInput→domain/module.py Module | no→no | no→no |
-| ui | 32→32 | 2→4 | 61→79 | yes→yes | yes→yes | yes→yes | no→yes | no→yes | no→yes | source.py ParsedSourceInput→domain/module.py Module | no→no | no→no |
-| state_manager | 14→14 | 2→4 | 41→59 | yes→yes | yes→yes | yes→yes | no→yes | no→yes | no→yes | source.py ParsedSourceInput→domain/module.py Module | no→no | no→no |
-
-# PERFORMANCE
-D11 inventory 12.962515 s; A/B/C evaluations 7.307688 / 5.844432 / 4.432610 s; total 30.547281 s. D10 reference inventory 11.067395 s; evaluations 6.546550 / 5.654504 / 4.246904 s; total 27.515386 s. No threshold inference.
-
-# AUTHORITY_LIMITATIONS
-Canonical LIVE graph, verified source bytes, fresh diagnostic interpreter, conditional external-import and dataclass assumptions, and actual CPython runtime behavior remain distinct. UNKNOWN is not safety; CONDITIONAL_MODEL_PASS would not be runtime proof. Persistent MCP interpreter adoption of R10 remains UNKNOWN. No warning or structural SCC change.
+# HEAD_BEFORE
+`d36023c5c9dd81586e445b9e1d3ef2be92e3727d`; worktree clean before R11.
 
 # FILES_CHANGED
-`walkthrough.md` only.
+- `contextor/core/cycle_semantics/package_model.py`
+- `tests/test_cycle_semantics_package_model.py`
+
+# EXACT_PATCH_VERIFICATION
+CONTRACT_PROVED: supplied production patches A–G and exact test block were applied at their specified anchors. No unrelated production/test changes. The supplied patch is internally inconsistent with the existing later class validation loop; no unsupplied correction was made.
+
+# TARGETED_TESTS
+`& .\.venv\Scripts\python.exe -m pytest -q -rs tests/test_cycle_semantics_package_model.py`: **1 failed, 200 passed** (15.33 s). Failure: `test_r11_real_module_shape_crosses_class`, line 790, expected `MODEL_PASS`, actual `UNKNOWN`. `git diff --check`: PASS.
+
+# MCP_POST_CHANGE_AUDIT
+DIRECT_EVIDENCE: `get_live_events(after_revision=1150)` returned continuous desktop_watcher events at 1151 (`package_model.py` UPDATED), 1152 (same path UNCHANGED), 1153 (test file UPDATED), `resync_required=false`. Post-change `get_module_context` returned production canonical revision 1153, `canonical_state=fresh`, `workspace_sync=verified`. `cycle_semantics=stale`. No FULL analysis, `update_file`, restart, commit, or push.
+
+# PASSIVE_CLASS_ANNOTATION_BINDING
+CODE_PATH_PROVED: the supplied syntax validator accepts a nonbuiltin name and the supplied conditional decoration guard requires a previously modeled `\x00PASSIVE_CLASS:` binding. The failing positive case reaches `FROM pkg.imports ImportRef`, with ImportRef already conditionally decorated and bound. It stops before Module decoration.
+
+# DATACLASS_FIELD_CALL_AUTHORITY
+DIRECT_EVIDENCE: for the supplied positive fixture, `result.outcome=UNKNOWN`, `target_module=pkg.module`, `symbol=None`; the last event is `FROM pkg.imports ImportRef`. Direct function checks on its AST returned `_safe_passive_class_definition(..., allow_conditional_frozen_dataclass=True) == False` and `_safe_annassign(imports_field, "DEFERRED") == False`. CODE_PATH_PROVED: the new initial conditional validator admits `field(hash=False)`, but the preserved later loop calls `_safe_annassign`, which accepts only no value or `_pure_literal_expression(value)`. `field(hash=False)` is an `ast.Call`, so the later loop returns False before `_compile` emits `CHECK_DATACLASS_FIELD_FACTORY`. The instructions explicitly prohibit changing `_safe_annassign` and prescribe no exception in the later loop. This is the exact blocking contradiction.
+
+# BUILTIN_PROPERTY_AUTHORITY
+The supplied recognizer, validator option, ordered check step, and evaluator check are present. The positive fixture never reaches these steps because class validation fails earlier. No claim of successful property behavior is made.
+
+# CLASS_BODY_EVALUATION_ORDER
+CODE_PATH_PROVED from inserted code: `CHECK_DATACLASS_FIELD_FACTORY` would precede `CLASS_LOCAL_BIND`, and `CHECK_BUILTIN_PROPERTY` would occur at method-definition position before conditional decoration. The failing fixture does not reach those compiled steps.
+
+# NEGATIVE_REGRESSIONS
+The target file's other 200 cases passed, including the supplied negative R11 cases. This does not satisfy the failed positive contract.
+
+# R7_R10_REGRESSION_STATUS
+Existing tests in the target file passed within the 200 passing cases; the required R11 positive case failed. No full-suite or runtime certification claim.
+
+# AUTHORITY_LIMITATIONS
+No actual CPython import execution or runtime cycle safety was proven. Watcher source parity does not establish persistent MCP interpreter adoption. No conditional result was promoted or warning suppressed. Auditor correction is needed before implementation can pass the supplied contract.
 
 # FULL_DIFFS
-ACTUAL_DIFF=DIFFS=NONE for source/test/docs. D11 introduced no source/test changes; historical R10 changes are not attributed to D11.
+```diff
+diff --git a/contextor/core/cycle_semantics/package_model.py b/contextor/core/cycle_semantics/package_model.py
+index 1374295..4ba018e 100644
+--- a/contextor/core/cycle_semantics/package_model.py
++++ b/contextor/core/cycle_semantics/package_model.py
+@@ -101,6 +101,7 @@ def _safe_passive_function_definition(
+     *,
+     allow_dunder: bool = False,
+     annotation_semantics: str | None = None,
++    allow_builtin_property: bool = False,
+ ) -> bool:
+     """A definition whose creation has no unknown evaluations.
+ 
+@@ -113,7 +114,18 @@ def _safe_passive_function_definition(
+             statement.name.startswith("__")
+             and not allow_dunder
+         )
+-        or statement.decorator_list
++        or (
++            bool(statement.decorator_list)
++            and not (
++                allow_builtin_property
++                and type(statement) is ast.FunctionDef
++                and len(statement.decorator_list) == 1
++                and type(statement.decorator_list[0])
++                is ast.Name
++                and statement.decorator_list[0].id
++                == "property"
++            )
++        )
+         or (statement.returns is not None and annotation_semantics not in {
+             "DEFERRED", "STRINGIFIED",
+         })
+@@ -195,15 +207,31 @@ def _exact_frozen_dataclass_decorator(
+     )
+ 
+ 
++def _exact_restricted_dataclass_hash_field_call(
++    node: ast.AST,
++) -> bool:
++    return (
++        type(node) is ast.Call
++        and type(node.func) is ast.Name
++        and node.func.id == "field"
++        and not node.args
++        and len(node.keywords) == 1
++        and node.keywords[0].arg == "hash"
++        and type(node.keywords[0].value) is ast.Constant
++        and type(node.keywords[0].value.value) is bool
++        and node.keywords[0].value.value is False
++    )
++
++
+ def _restricted_dataclass_field_annotation(
+     node: ast.AST,
+ ) -> bool:
+     if isinstance(node, ast.Name):
+-        return node.id in {
+-            "str", "int", "bool", "float",
+-            "bytes", "dict", "list",
+-            "set", "tuple",
+-        }
++        return (
++            node.id.isidentifier()
++            and not node.id.startswith("__")
++            and node.id != "ast"
++        )
+ 
+     if type(node) is ast.Attribute:
+         return (
+@@ -305,6 +333,48 @@ def _safe_passive_class_definition(
+     if conditional_dataclass:
+         seen_default_field = False
+ 
++        uses_field_call = any(
++            isinstance(item, ast.AnnAssign)
++            and item.value is not None
++            and _exact_restricted_dataclass_hash_field_call(
++                item.value
++            )
++            for item in statement.body
++        )
++
++        uses_property = any(
++            type(item) is ast.FunctionDef
++            and len(item.decorator_list) == 1
++            and type(item.decorator_list[0]) is ast.Name
++            and item.decorator_list[0].id == "property"
++            for item in statement.body
++        )
++
++        protected_names = set()
++
++        if uses_field_call:
++            protected_names.add("field")
++
++        if uses_property:
++            protected_names.add("property")
++
++        if any(
++            (
++                isinstance(item, ast.AnnAssign)
++                and isinstance(item.target, ast.Name)
++                and item.target.id in protected_names
++            )
++            or (
++                isinstance(
++                    item,
++                    (ast.FunctionDef, ast.AsyncFunctionDef),
++                )
++                and item.name in protected_names
++            )
++            for item in statement.body
++        ):
++            return False
++
+         for body_statement in statement.body:
+             if isinstance(
+                 body_statement,
+@@ -324,9 +394,9 @@ def _safe_passive_class_definition(
+                     if seen_default_field:
+                         return False
+                 else:
+-                    if (
+-                        type(default_value) is not ast.Constant
+-                        or type(default_value.value) not in {
++                    literal_default = (
++                        type(default_value) is ast.Constant
++                        and type(default_value.value) in {
+                             type(None),
+                             bool,
+                             int,
+@@ -335,6 +405,14 @@ def _safe_passive_class_definition(
+                             str,
+                             bytes,
+                         }
++                    )
++
++                    if (
++                        not literal_default
++                        and not
++                        _exact_restricted_dataclass_hash_field_call(
++                            default_value
++                        )
+                     ):
+                         return False
+ 
+@@ -397,6 +475,7 @@ def _safe_passive_class_definition(
+                 body_statement,
+                 allow_dunder=True,
+                 annotation_semantics=annotation_semantics,
++                allow_builtin_property=conditional_dataclass,
+             )
+         ):
+             continue
+@@ -945,15 +1024,47 @@ def _compile(
+                     )
+                     continue
+ 
+-                if not isinstance(body_statement, (ast.Import, ast.ImportFrom)):
++                if not isinstance(
++                    body_statement,
++                    (ast.Import, ast.ImportFrom),
++                ):
+                     if (
+                         isinstance(body_statement, ast.AnnAssign)
+                         and body_statement.value is not None
+                     ):
+-                        steps.append(_Step(
+-                            "BIND", binding=body_statement.target.id,
+-                            class_local=True,
+-                        ))
++                        if _exact_restricted_dataclass_hash_field_call(
++                            body_statement.value
++                        ):
++                            steps.append(
++                                _Step(
++                                    "CHECK_DATACLASS_FIELD_FACTORY",
++                                    target="field",
++                                )
++                            )
++
++                        steps.append(
++                            _Step(
++                                "BIND",
++                                binding=body_statement.target.id,
++                                class_local=True,
++                            )
++                        )
++
++                    if (
++                        type(body_statement) is ast.FunctionDef
++                        and len(body_statement.decorator_list) == 1
++                        and type(body_statement.decorator_list[0])
++                        is ast.Name
++                        and body_statement.decorator_list[0].id
++                        == "property"
++                    ):
++                        steps.append(
++                            _Step(
++                                "CHECK_BUILTIN_PROPERTY",
++                                target="property",
++                            )
++                        )
++
+                     continue
+ 
+                 fragment = ast.Module(
+@@ -2003,6 +2114,29 @@ def evaluate_package_import_order(
+                 )
+             )
+ 
++        elif step.op == "CHECK_DATACLASS_FIELD_FACTORY":
++            if (
++                step.target != "field"
++                or namespaces[module].get("field")
++                != "\x00ASSUMED_EXTERNAL:dataclasses:field"
++            ):
++                return result(
++                    "UNKNOWN",
++                    module,
++                    step.target,
++                )
++
++        elif step.op == "CHECK_BUILTIN_PROPERTY":
++            if (
++                step.target != "property"
++                or "property" in namespaces[module]
++            ):
++                return result(
++                    "UNKNOWN",
++                    module,
++                    step.target,
++                )
++
+         elif step.op == "DEFINE_CONDITIONAL_FROZEN_DATACLASS":
+             if (
+                 namespaces[module].get("dataclass")
+@@ -2012,7 +2146,27 @@ def evaluate_package_import_order(
+                         namespaces[module].get(name)
+                         != "\x00ASSUMED_EXTERNAL:ast"
+                         if name == "ast"
+-                        else name in namespaces[module]
++                        else (
++                            name in namespaces[module]
++                            if name in {
++                                "str",
++                                "int",
++                                "bool",
++                                "float",
++                                "bytes",
++                                "dict",
++                                "list",
++                                "set",
++                                "tuple",
++                            }
++                            else not (
++                                type(namespaces[module].get(name))
++                                is str
++                                and namespaces[module][name].startswith(
++                                    "\x00PASSIVE_CLASS:"
++                                )
++                            )
++                        )
+                     )
+                     for name in step.annotation_builtin_names
+                 )
+diff --git a/tests/test_cycle_semantics_package_model.py b/tests/test_cycle_semantics_package_model.py
+index 55002f6..a50c607 100644
+--- a/tests/test_cycle_semantics_package_model.py
++++ b/tests/test_cycle_semantics_package_model.py
+@@ -717,6 +717,366 @@ def test_r10_requires_deferred_annotation_semantics(
+     _r10_assert_rejected(result)
+ 
+ 
++def _r11_module_result(
++    module_source,
++    *,
++    import_type="from .imports import ImportRef\n",
++    import_dataclass="from dataclasses import dataclass, field\n",
++    prelude="",
++    annotation_semantics="DEFERRED",
++    assume=True,
++):
++    sources = {
++        "pkg.__init__": "pass\n",
++        "pkg.imports": (
++            "from dataclasses import dataclass\n"
++            "@dataclass(frozen=True)\n"
++            "class ImportRef:\n"
++            "    module: str | None\n"
++        ),
++        "pkg.module": (
++            import_dataclass
++            + import_type
++            + prelude
++            + module_source
++            + "\nfrom .child import token\n"
++        ),
++        "pkg.child": "token = 7\n",
++    }
++
++    return evaluate_package_import_order(
++        {
++            key: ast.parse(value)
++            for key, value in sources.items()
++        },
++        "pkg.module",
++        annotation_semantics=annotation_semantics,
++        _compile_on_first_import=True,
++        _assume_passive_external_imports=True,
++        _assume_frozen_dataclass_decoration=assume,
++    )
++
++
++def _r11_class_source():
++    return (
++        "@dataclass(frozen=True)\n"
++        "class Module:\n"
++        "    module_id: str\n"
++        "    path: str\n"
++        "    absolute_path: str\n"
++        "    imports: list[ImportRef] = field(hash=False)\n"
++        "    @property\n"
++        "    def ast_tree(self):\n"
++        "        return None\n"
++    )
++
++
++def _r11_assert_module_rejected(result):
++    assert result.outcome == "UNKNOWN"
++    assert not any(
++        item.class_name == "Module"
++        for item in result.assumed_dataclass_decorations
++    )
++    assert not any(
++        event.operation == "DEFINE_PASSIVE_CLASS"
++        and event.symbol == "Module"
++        for event in result.events
++    )
++
++
++def test_r11_real_module_shape_crosses_class():
++    result = _r11_module_result(_r11_class_source())
++
++    assert result.outcome == "MODEL_PASS"
++
++    assert tuple(
++        item.class_name
++        for item in result.assumed_dataclass_decorations
++    ) == (
++        "ImportRef",
++        "Module",
++    )
++
++    events = list(result.events)
++
++    imported_type = next(
++        index for index, event in enumerate(events)
++        if event.operation == "FROM"
++        and event.target == "pkg.imports"
++        and event.symbol == "ImportRef"
++    )
++
++    bound_field = next(
++        index for index, event in enumerate(events)
++        if event.operation == "CLASS_LOCAL_BIND"
++        and event.symbol == "imports"
++    )
++
++    decorated = next(
++        index for index, event in enumerate(events)
++        if event.operation
++        == "ASSUMED_FROZEN_DATACLASS_DECORATION"
++        and event.symbol == "Module"
++    )
++
++    bound_class = next(
++        index for index, event in enumerate(events)
++        if event.operation == "DEFINE_PASSIVE_CLASS"
++        and event.symbol == "Module"
++    )
++
++    imported_child = next(
++        index for index, event in enumerate(events)
++        if event.operation == "START_IMPORT"
++        and event.target == "pkg.child"
++    )
++
++    assert (
++        imported_type
++        < bound_field
++        < decorated
++        < bound_class
++        < imported_child
++    )
++
++    assert result.reached_unmodeled_import is None
++
++
++def test_r11_named_passive_class_annotation_not_hardcoded():
++    source = (
++        "@dataclass(frozen=True)\n"
++        "class Module:\n"
++        "    reference: OtherType\n"
++    )
++
++    sources = {
++        "pkg.__init__": "pass\n",
++        "pkg.imports": (
++            "class OtherType:\n"
++            "    pass\n"
++        ),
++        "pkg.module": (
++            "from dataclasses import dataclass\n"
++            "from .imports import OtherType\n"
++            + source
++        ),
++    }
++
++    result = evaluate_package_import_order(
++        {
++            key: ast.parse(value)
++            for key, value in sources.items()
++        },
++        "pkg.module",
++        annotation_semantics="DEFERRED",
++        _compile_on_first_import=True,
++        _assume_passive_external_imports=True,
++        _assume_frozen_dataclass_decoration=True,
++    )
++
++    assert result.outcome == "MODEL_PASS"
++    assert any(
++        item.class_name == "Module"
++        for item in result.assumed_dataclass_decorations
++    )
++
++
++@pytest.mark.parametrize(
++    "import_type,prelude",
++    [
++        ("", ""),
++        ("from pathlib import ImportRef\n", ""),
++        ("from .imports import ImportRef\n", "ImportRef = 7\n"),
++    ],
++)
++def test_r11_requires_proven_passive_type(
++    import_type,
++    prelude,
++):
++    result = _r11_module_result(
++        _r11_class_source(),
++        import_type=import_type,
++        prelude=prelude,
++    )
++
++    _r11_assert_module_rejected(result)
++
++
++@pytest.mark.parametrize(
++    "import_dataclass,prelude",
++    [
++        ("from dataclasses import dataclass\n", ""),
++        (
++            "from dataclasses import dataclass\n"
++            "from pathlib import Path as field\n",
++            "",
++        ),
++        (
++            "from dataclasses import dataclass, field\n",
++            "field = 42\n",
++        ),
++    ],
++)
++def test_r11_requires_exact_field_factory_binding(
++    import_dataclass,
++    prelude,
++):
++    result = _r11_module_result(
++        _r11_class_source(),
++        import_dataclass=import_dataclass,
++        prelude=prelude,
++    )
++
++    _r11_assert_module_rejected(result)
++
++    assert not any(
++        event.operation == "CLASS_LOCAL_BIND"
++        and event.symbol == "imports"
++        for event in result.events
++    )
++
++
++@pytest.mark.parametrize(
++    "default_expression",
++    [
++        "field()",
++        "field(default=1)",
++        "field(hash=True)",
++        "field(hash=0)",
++        "field(hash=False, compare=True)",
++        "other(hash=False)",
++        "field(hash=False) or None",
++    ],
++)
++def test_r11_rejects_other_default_calls(
++    default_expression,
++):
++    source = (
++        "@dataclass(frozen=True)\n"
++        "class Module:\n"
++        f"    imports: list[ImportRef] = {default_expression}\n"
++    )
++
++    result = _r11_module_result(source)
++
++    _r11_assert_module_rejected(result)
++
++
++@pytest.mark.parametrize(
++    "decorator",
++    [
++        "@property()",
++        "@unknown",
++        "@property\n    @unknown",
++    ],
++)
++def test_r11_rejects_other_method_decorators(decorator):
++    source = (
++        "@dataclass(frozen=True)\n"
++        "class Module:\n"
++        "    imports: list[ImportRef] = field(hash=False)\n"
++        f"    {decorator}\n"
++        "    def ast_tree(self):\n"
++        "        return None\n"
++    )
++
++    result = _r11_module_result(source)
++
++    _r11_assert_module_rejected(result)
++
++
++def test_r11_rejects_shadowed_builtin_property():
++    result = _r11_module_result(
++        _r11_class_source(),
++        prelude="property = 12\n",
++    )
++
++    _r11_assert_module_rejected(result)
++
++
++@pytest.mark.parametrize(
++    "shadow_source",
++    [
++        "    property: str = 'shadow'\n",
++        "    field: str = 'shadow'\n",
++    ],
++)
++def test_r11_rejects_class_local_callable_shadow(
++    shadow_source,
++):
++    source = _r11_class_source().replace(
++        "    imports: list[ImportRef] = field(hash=False)\n",
++        shadow_source
++        + "    imports: list[ImportRef] = field(hash=False)\n",
++    )
++
++    result = _r11_module_result(source)
++
++    _r11_assert_module_rejected(result)
++
++
++def test_r11_rejects_unmodeled_async_property():
++    source = (
++        "@dataclass(frozen=True)\n"
++        "class Module:\n"
++        "    imports: list[ImportRef] = field(hash=False)\n"
++        "    @property\n"
++        "    async def ast_tree(self):\n"
++        "        return None\n"
++    )
++
++    result = _r11_module_result(source)
++
++    _r11_assert_module_rejected(result)
++
++
++def test_r11_plain_class_property_remains_unmodeled():
++    sources = {
++        "pkg.__init__": (
++            "class Plain:\n"
++            "    @property\n"
++            "    def value(self):\n"
++            "        return 1\n"
++        )
++    }
++
++    result = evaluate_package_import_order(
++        {
++            key: ast.parse(value)
++            for key, value in sources.items()
++        },
++        "pkg",
++        annotation_semantics="DEFERRED",
++        _compile_on_first_import=True,
++    )
++
++    assert result.outcome == "UNKNOWN"
++
++
++def test_r11_requires_explicit_conditional_assumption():
++    result = _r11_module_result(
++        _r11_class_source(),
++        assume=False,
++    )
++
++    _r11_assert_module_rejected(result)
++
++
++@pytest.mark.parametrize(
++    "annotation_semantics",
++    [None, "STRINGIFIED"],
++)
++def test_r11_requires_deferred_annotation_semantics(
++    annotation_semantics,
++):
++    result = _r11_module_result(
++        _r11_class_source(),
++        annotation_semantics=annotation_semantics,
++    )
++
++    _r11_assert_module_rejected(result)
++
++
+ def test_external_assumption_normal_model_still_unknown():
+     result = _model({"pkg.__init__": "import os\n"}, "pkg")
+     assert result.outcome == "UNKNOWN"
+```
 
 # FINAL_VERDICT
-PASS for the completed three-entry D11 diagnostic with 222/222 same-generation FileState SHA parity and recorded event progression. Both source dataclasses are crossed conditionally; source reaches READY. All three outcomes remain UNKNOWN at the next restricted-model boundary. No runtime cycle-safety claim.
+FAIL. Exact supplied patch and tests do not satisfy the positive R11 contract because preserved `_safe_annassign` rejects the exact `field(hash=False)` call in the later validation loop. 200 tests pass, 1 fails. No unsupplied fix was made. Auditor correction is required before proceeding.
