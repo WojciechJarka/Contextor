@@ -458,6 +458,265 @@ def test_r9_existing_plain_class_unchanged():
     )
 
 
+def _r10_qualified_ast_result(
+    class_source,
+    *,
+    prelude="import ast\n",
+    after_class="",
+    assume=True,
+    annotation_semantics="DEFERRED",
+):
+    source = (
+        prelude
+        + "from dataclasses import dataclass\n"
+        + class_source
+        + "\n"
+        + after_class
+        + "from .child import token\n"
+    )
+
+    return evaluate_package_import_order(
+        {
+            "pkg.__init__": ast.parse(source),
+            "pkg.child": ast.parse("token = 7\n"),
+        },
+        "pkg",
+        annotation_semantics=annotation_semantics,
+        _compile_on_first_import=True,
+        _assume_passive_external_imports=True,
+        _assume_frozen_dataclass_decoration=assume,
+    )
+
+
+def _r10_assert_rejected(result):
+    assert result.outcome == "UNKNOWN"
+    assert result.assumed_dataclass_decorations == ()
+
+    assert not any(
+        event.operation in {
+            "ASSUMED_FROZEN_DATACLASS_DECORATION",
+            "DEFINE_PASSIVE_CLASS",
+        }
+        and event.symbol == "ParsedSourceInput"
+        for event in result.events
+    )
+
+
+def test_r10_parsed_source_input_crosses_class():
+    source = (
+        "@dataclass(frozen=True)\n"
+        "class ParsedSourceInput:\n"
+        "    tree: ast.AST\n"
+        "    source_fingerprint: str\n"
+    )
+
+    result = _r10_qualified_ast_result(source)
+
+    assert result.outcome == "MODEL_PASS"
+    assert result.evidence_scope == (
+        "CONDITIONAL_EXTERNAL_AND_FROZEN_DATACLASS_"
+        "ASSUMPTIONS_NOT_RUNTIME_PROOF"
+    )
+
+    assert len(result.assumed_dataclass_decorations) == 1
+
+    decoration = result.assumed_dataclass_decorations[0]
+
+    assert decoration.class_name == "ParsedSourceInput"
+    assert decoration.decorator == (
+        "dataclasses.dataclass(frozen=True)"
+    )
+
+    events = list(result.events)
+
+    decorated = next(
+        index for index, event in enumerate(events)
+        if event.operation
+        == "ASSUMED_FROZEN_DATACLASS_DECORATION"
+        and event.symbol == "ParsedSourceInput"
+    )
+
+    bound = next(
+        index for index, event in enumerate(events)
+        if event.operation == "DEFINE_PASSIVE_CLASS"
+        and event.symbol == "ParsedSourceInput"
+    )
+
+    imported = next(
+        index for index, event in enumerate(events)
+        if event.operation == "START_IMPORT"
+        and event.target == "pkg.child"
+    )
+
+    assert decorated < bound < imported
+    assert result.reached_unmodeled_import is None
+
+
+def test_r10_both_source_dataclasses_cross():
+    source = (
+        "@dataclass(frozen=True)\n"
+        "class ParsedSourceInput:\n"
+        "    tree: ast.AST\n"
+        "    source_fingerprint: str\n"
+        "\n"
+        "@dataclass(frozen=True)\n"
+        "class SourceSnapshot:\n"
+        "    raw: bytes\n"
+        "    source_fingerprint: str\n"
+    )
+
+    result = _r10_qualified_ast_result(source)
+
+    assert result.outcome == "MODEL_PASS"
+
+    assert tuple(
+        record.class_name
+        for record in result.assumed_dataclass_decorations
+    ) == (
+        "ParsedSourceInput",
+        "SourceSnapshot",
+    )
+
+
+@pytest.mark.parametrize(
+    "annotation",
+    [
+        "ast.AST",
+        "ast.AST | None",
+        "None | ast.AST",
+        "list[ast.AST]",
+    ],
+)
+def test_r10_restricted_qualified_annotations(annotation):
+    source = (
+        "@dataclass(frozen=True)\n"
+        "class ParsedSourceInput:\n"
+        f"    tree: {annotation}\n"
+    )
+
+    result = _r10_qualified_ast_result(source)
+
+    assert result.outcome == "MODEL_PASS"
+    assert len(result.assumed_dataclass_decorations) == 1
+
+
+@pytest.mark.parametrize(
+    "annotation",
+    [
+        "ast.Unknown",
+        "ast.AST.child",
+        "ast.AST()",
+        "os.AST",
+        "unknown.AST",
+        "ast.AST | str",
+        "ast.AST | None | None",
+    ],
+)
+def test_r10_rejects_unsupported_qualified_annotations(
+    annotation,
+):
+    source = (
+        "@dataclass(frozen=True)\n"
+        "class ParsedSourceInput:\n"
+        f"    tree: {annotation}\n"
+    )
+
+    result = _r10_qualified_ast_result(source)
+
+    _r10_assert_rejected(result)
+
+
+@pytest.mark.parametrize(
+    "prelude",
+    [
+        "",
+        "import os as ast\n",
+        "import ast\nast = 42\n",
+    ],
+)
+def test_r10_rejects_unproven_ast_binding(prelude):
+    source = (
+        "@dataclass(frozen=True)\n"
+        "class ParsedSourceInput:\n"
+        "    tree: ast.AST\n"
+    )
+
+    result = _r10_qualified_ast_result(
+        source,
+        prelude=prelude,
+    )
+
+    _r10_assert_rejected(result)
+
+
+def test_r10_later_ast_rebinding_does_not_retroactively_fail():
+    source = (
+        "@dataclass(frozen=True)\n"
+        "class ParsedSourceInput:\n"
+        "    tree: ast.AST\n"
+    )
+
+    result = _r10_qualified_ast_result(
+        source,
+        after_class="ast = 42\n",
+    )
+
+    assert result.outcome == "MODEL_PASS"
+    assert len(result.assumed_dataclass_decorations) == 1
+
+    events = list(result.events)
+
+    bound = next(
+        index for index, event in enumerate(events)
+        if event.operation == "DEFINE_PASSIVE_CLASS"
+        and event.symbol == "ParsedSourceInput"
+    )
+
+    rebound = next(
+        index for index, event in enumerate(events)
+        if event.operation == "BIND"
+        and event.symbol == "ast"
+    )
+
+    assert bound < rebound
+
+
+def test_r10_requires_explicit_dataclass_assumption():
+    source = (
+        "@dataclass(frozen=True)\n"
+        "class ParsedSourceInput:\n"
+        "    tree: ast.AST\n"
+    )
+
+    result = _r10_qualified_ast_result(
+        source,
+        assume=False,
+    )
+
+    _r10_assert_rejected(result)
+
+
+@pytest.mark.parametrize(
+    "annotation_semantics",
+    [None, "STRINGIFIED"],
+)
+def test_r10_requires_deferred_annotation_semantics(
+    annotation_semantics,
+):
+    source = (
+        "@dataclass(frozen=True)\n"
+        "class ParsedSourceInput:\n"
+        "    tree: ast.AST\n"
+    )
+
+    result = _r10_qualified_ast_result(
+        source,
+        annotation_semantics=annotation_semantics,
+    )
+
+    _r10_assert_rejected(result)
+
+
 def test_external_assumption_normal_model_still_unknown():
     result = _model({"pkg.__init__": "import os\n"}, "pkg")
     assert result.outcome == "UNKNOWN"

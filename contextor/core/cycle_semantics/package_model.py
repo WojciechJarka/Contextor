@@ -205,6 +205,13 @@ def _restricted_dataclass_field_annotation(
             "set", "tuple",
         }
 
+    if type(node) is ast.Attribute:
+        return (
+            type(node.value) is ast.Name
+            and node.value.id == "ast"
+            and node.attr == "AST"
+        )
+
     if isinstance(node, ast.Constant):
         return type(node.value) is str
 
@@ -2001,7 +2008,12 @@ def evaluate_package_import_order(
                 namespaces[module].get("dataclass")
                 != "\x00ASSUMED_EXTERNAL:dataclasses:dataclass"
                 or any(
-                    name in namespaces[module]
+                    (
+                        namespaces[module].get(name)
+                        != "\x00ASSUMED_EXTERNAL:ast"
+                        if name == "ast"
+                        else name in namespaces[module]
+                    )
                     for name in step.annotation_builtin_names
                 )
             ):
