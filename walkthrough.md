@@ -1,262 +1,71 @@
-# CONTEXTOR C16-B03-P1D3-P14-R18 — exact fix
+# CONTEXTOR C16-B03-P1D3-P14-R18-FINAL — canonical semantic refresh acceptance
 
 ## PREFLIGHT
 
-- Contextor MCP before edit: LIVE canonical revision 1124, canonical_state=fresh, graph/cycles/cycle_semantics=fresh, 2 cyclic SCCs and 16 structural DFS paths. The three target module contexts (`contextor.ui.gui`, `contextor.repo_generator.__init__`, `contextor.repo_generator.main`) each reported workspace_sync=verified and revision 1124. Read-only snapshot metadata: state_id `20261108_132120`, repo_id `ctx_8efc50d8`, root `C:\Temp\Contextor_Repo`.
-- Git HEAD before/after `38dcc9b3eb7c0aa31c3f94aefdcbe6c566199e4c`; before edit only D17 `walkthrough.md` was modified. Repository interpreter CPython 3.15.2.
-- Exact anchors matched at `contextor/ui/gui.py:43,383-390`, `contextor/repo_generator/__init__.py:1`, `contextor/repo_generator/main.py:522`. `rg` found no direct consumer or monkeypatch of module-level `contextor.ui.gui.run_repo_generator`; only its original import and use within `open_repo_builder`. No compatibility change was added.
+- DIRECT_EVIDENCE — Contextor MCP before FULL: LIVE revision 1127, canonical_state=fresh, graph/cycles=fresh, cycle_semantics=stale with `SOURCE_CHANGED`, resync_required=false, syntax_errors=0, 16 structural DFS paths, 17 name collisions. Target GUI module was workspace_sync=verified. Read-only snapshot/FileState: revision 1127, state_id `20261108_132120`, repo_id `ctx_8efc50d8`, root `C:\Temp\Contextor_Repo`, FileState baseline trusted.
+- DIRECT_EVIDENCE — Git HEAD before/after `56dd18d3495c08b3d46981ffdd36fed323e7f661`; worktree clean before this report. R18 GUI method-scoped import at `contextor/ui/gui.py:389`, renamed C26 test at `tests/test_cycle_semantics_conditional_export.py:149`, and new regression module with both fresh-import orders were present. Repository interpreter CPython 3.15.2.
+- DIRECT_EVIDENCE — read-only durable analysis-job inventory contained 40 jobs and no queued/running job. MCP omitted-job status returned a prior completed job; it was not treated alone as proof that no job was active. The MCP FULL API coordinates with the existing job/lease mechanism; no parallel FULL was started.
+- Before FULL, current canonical SCC identity digests over ordered members and internal edges: SCC1 `b5b0fc8ba0d6c43a4e3743be7b64dbcae3d77c8588648dcd298faec92c2236f5`; SCC2 `cccc41ab4de52b8489d91eab8b29f7f89b22c6657c1601bf5e2c95e2764ce3b3`.
 
-## EXACT_PRODUCTION_DIFF
+## FULL_JOB_AND_PUBLICATION
 
-- Removed the eager `from contextor.repo_generator import run_repo_generator` in `contextor/ui/gui.py` and placed precisely the same import in the `else` branch of `ContextorGUI.open_repo_builder`, immediately before the call. No other production file changed.
+- Exactly one Contextor MCP `analyze_project(C:\Temp\Contextor_Repo)` call; new job ID `de319c1d19914c82af1d00ad7df3f4cd`, `reused=false`. No additional exclusions supplied. It advanced queued → running → completed. Exact-job `get_analysis_status` reported `Analysis completed successfully`, error null, no skipped Python files and syntax_error_count=0.
+- LIVE publication status **success**; exact mutation job `mu-9e4eae5ad2704fa7b29b9a2d40118800`, expected revision/published revision **1128**, expected state_id `20261108_172727`, service_instance_id `4f4f112fb61d4422ab57e2c53bfc37c1`, process_start_identity `134386112371137577`, idempotency key `cp-e62fc9f609eae7c5e5920617c0c1378862989f0e01edee2497d0effee0b49037`. This is the exact verified publication receipt, not mere admission.
+- No retry, second FULL, update_file, backend/Desktop/LIVE restart, pytest or package installation.
 
-## EXACT_TEST_DIFFS
+## CANONICAL_IDENTITY_BEFORE_AFTER
 
-- Renamed the one real-source C26 test and replaced only its final assertions with `UNKNOWN`, `IMPORT_HOP_NOT_UNIQUELY_PROVED`, and `UNKNOWN_NOT_EVALUATED`. Synthetic positive C26/C28 fixtures were not changed.
-- Added the auditor-specified `tests/test_cycle_semantics_scc2_import_order_regression.py` verbatim: two independent `-I -B` import-order subprocess cases with public export assertions, plus a source AST assertion that the GUI import is method scoped.
+| Identity | Before | After |
+|---|---|---|
+| canonical revision | 1127 | 1128 |
+| state_id | `20261108_132120` | `20261108_172727` |
+| repo_id | `ctx_8efc50d8` | `ctx_8efc50d8` |
+| root | `C:\Temp\Contextor_Repo` | same |
+| canonical snapshot writer | `live-service` | `mcp` |
+| FileState revision/state_id | 1127 / `20261108_132120` | 1128 / `20261108_172727` |
 
-## TARGETED_TEST_RESULTS
+- DIRECT_EVIDENCE — post-FULL `load_snapshot`, `FileStateManager` and MCP LIVE revision all agree on 1128. FileState baseline trusted. MCP provenance=live, canonical_state=fresh, resync_required=false. No repository source/test change occurred during this acceptance task.
 
-- Command: `C:\Temp\Contextor_Repo\.venv\Scripts\python.exe -B -m pytest -q -rs tests/test_cycle_semantics_scc2_import_order_regression.py tests/test_cycle_semantics_conditional_export.py tests/test_cycle_semantics_conditional_discovery.py` with `PYTHONDONTWRITEBYTECODE=1`.
-- Result: **30 passed in 27.83s**, 0 failures. No full suite.
+## FRESHNESS_AND_SOURCE_HASH_PARITY
 
-## TWO_FRESH_IMPORT_ORDERS
+- MCP post-FULL: graph=fresh, cycles=fresh, cycle_semantics=fresh, syntax_errors=0. All three target module contexts (`contextor.ui.gui`, `contextor.repo_generator.__init__`, `contextor.repo_generator.main`) report workspace_sync=verified at revision 1128 with no advisory warning. Untargeted architecture workspace_sync=unverified is its global query contract, not a target mismatch.
+- DIRECT_EVIDENCE — disk = same-generation FileState = canonical semantic observed source fingerprint for `contextor/ui/gui.py`: `9e0a9319e140f682c4e66d232d1d6fc89c48a03a8234a800f6a413191c347315`; `contextor/repo_generator/__init__.py`: `fa3cb9e8574537ded0f4ce2710a1d85eb81b0318e20e1faa3ca537163c6fcb44`; `contextor/repo_generator/main.py`: `0ae7971102588f5cd2b143d880168e4f4ddae9aa32988498991e408b0dd48878`.
+- Current disk = FileState for R18 tests: `tests/test_cycle_semantics_conditional_export.py` `012aa20b9aac3d3b43c8e762f846eb12873f145f53a00183b280bcc90ae7d07b`; `tests/test_cycle_semantics_scc2_import_order_regression.py` `5c950696599f1628161ae6d8cdeb6de4525eacfd74da5602853ee344b26d2b7c`.
 
-- The new regression ran `contextor.repo_generator` and `contextor.ui` in distinct fresh CPython 3.15 subprocesses. Both passed with returncode 0 under the targeted test. D17 had observed the former fail at `contextor/ui/gui.py:43` before this patch.
+## SCC_STRUCTURAL_PARITY
 
-## PUBLIC_EXPORT_PARITY
+- Current authoritative snapshot SCC1: 44 members, 110 internal hard edges, identity digest `b5b0fc8ba0d6c43a4e3743be7b64dbcae3d77c8588648dcd298faec92c2236f5`, exactly equal to pre-FULL.
+- Current authoritative snapshot SCC2: 9 members, 16 internal hard edges, identity digest `cccc41ab4de52b8489d91eab8b29f7f89b22c6657c1601bf5e2c95e2764ce3b3`, exactly equal to pre-FULL. It includes `contextor.repo_generator.__init__`, `contextor.ui.__init__`, `contextor.ui.gui` and the unchanged GUI→repo_generator hard edge.
+- MCP fresh current cycles report 16 structural DFS back-edge paths; current semantic diagnostic reports 2 cyclic SCCs and 53 cyclic modules. Counts and exact ordered member/edge identities were checked. Active warnings remain 16, model_pass_count=0; no warning suppression or MODEL_PASS promotion.
 
-- Each fresh child additionally imported `run_repo_generator` from `contextor.repo_generator` and `run` from `contextor.ui` and asserted both callable. Both parametrized cases passed. Package initializer exports and provider definition were not edited.
+## GUI_IMPORT_ACTIVATION_EVIDENCE
 
-## MCP_POST_CHANGE_AUDIT
+- DIRECT_EVIDENCE — **new authoritative** revision-1128 `CycleSemanticsSnapshot.import_sites`: the `contextor.ui.gui` → `contextor.repo_generator.__init__` hard edge is `LEXICAL_CANDIDATES` with one site at `contextor/ui/gui.py:389:12`, `IMPORT_FROM`, `FROM_BASE`, `FUNCTION_SCOPED`, lexical scope `ContextorGUI` → `open_repo_builder`, control frame `IF/ELSE` at line 385. There is no matching `MODULE_TOP_LEVEL` site. This is current committed semantic evidence, not a source-only replay or historical FULL report.
+- The import's lexical scope is function-only; no assertion of runtime safety follows from that fact.
 
-- Watcher incorporated the edits into LIVE revision **1127**. Target `get_module_context(contextor.ui.gui)` now reports canonical_state=fresh, workspace_sync=verified, graph/cycles=fresh, and the `contextor.repo_generator.__init__` outbound hard dependency retained. Canonical snapshot metadata and FileState are revision 1127, state_id `20261108_132120`, baseline trusted.
-- `cycle_semantics` is **stale**, invalidation reason `SOURCE_CHANGED`; MCP's current semantic diagnostic reports the same and does not expose fresh lexical activation. No FULL or update_file was used to force regeneration.
-- Direct read-only replay of the existing `analyze_cyclic_import_sites` and `analyze_cycle_activation_view` on current canonical hard_edges and 53 FileState-matching SCC sources found the GUI→repo_generator edge at `gui.py:389:12`, match kind `FROM_BASE`, activation `FUNCTION_SCOPED`, guarded by the `else` branch of the builder-window check at line 385. It found no `MODULE_TOP_LEVEL` site for that edge. Existing `discover_conditional_reexports` replay returned 0 candidates and complete bounded selection. These are current source/graph diagnostic replays, **not** a fresh published canonical cycle_semantics family.
-- Current MCP architecture: canonical revision 1127, syntax errors 0, structural DFS paths 16, cycle_semantics stale. Name-collision count 17 was observed (preflight 16); no collision diagnosis or unrelated change was made under this exact task.
+## CONDITIONAL_WITNESS_BEFORE_AFTER
 
-## STRUCTURAL_CYCLE_PARITY
+- Before R18: D16 current snapshot/historical projection had one grouped conditional delayed-reexport relationship and three eager return witnesses with closing GUI import at line 43.
+- After the one FULL: **new authoritative** revision-1128 `conditional_discovery.candidates` is empty globally and for SCC2; coverage_status=`BOUNDED_SELECTION_COMPLETE`. The three former eager witnesses no longer qualify because their closing GUI hop is not a top-level exact import. This is not MODEL_PASS or a static safety proof.
 
-- Current canonical graph replay: SCC1 44 members/110 internal hard edges, SCC2 9 members/16 internal hard edges. MCP current DFS structural path count remains **16** and graph/cycles are fresh. The GUI→repo_generator hard edge is still present. Structural topology was not intentionally changed.
+## NAME_COLLISION_16_TO_17_ANALYSIS
 
-## LEXICAL_ACTIVATION_BEFORE_AFTER
+- Historical pre-R18 completed FULL report had 16 collision identities. Pre-FULL revision-1127 canonical LIVE had 17; post-FULL revision-1128 LIVE has 17. Comparing identity keys (artifact type plus symbol name) shows one added identity and no removed identities. The 16 prior identities persisted through the acceptance FULL.
+- Added: `CHILD_CODE`, `artifact_type=variable`, `collision_type=NAME_COLLISION`, severity warning, conflicting (not identical). `tests.test_cycle_semantics_scc2_import_order_regression` defines a Python import-probe string at `tests/test_cycle_semantics_scc2_import_order_regression.py:14`; `tests.test_mcp_job_tree_isolated_windows` defines a process-tree probe string at `tests/test_mcp_job_tree_isolated_windows.py:34`. Canonical source evidence shows different string bodies, each used locally in its own test module (`:69` versus `:164,313`). `rg` found no cross-module import of either `CHILD_CODE`. This collision is caused by the exact new R18 test file, not by moving the GUI import and not by a production symbol conflict. No collision logic was changed.
+- Existing `ROOT` identical-definition group also gained the new R18 test module at line 12 alongside `tests.test_cycle_semantics_scc01_binding_order:21` and `tests.test_py315_launcher_migration_guard:12`; it remains one prior collision identity, so it does not account for the count increase. No unresolved production regression was established by the new test-only warning.
 
-- Before: canonical revision 1124 `gui.py:43:0`, `MODULE_TOP_LEVEL`, `FROM_BASE`; D16 conditional group had 3 eager return witnesses.
-- After: current FileState-bound read-only replay at revision 1127 `gui.py:389:12`, `FUNCTION_SCOPED`, `FROM_BASE`, `IF/ELSE` guard at line 385; zero eager conditional candidates in replay. The canonical published semantic family remains stale, so authoritative post-change lexical activation cannot be certified.
+## R18_TARGETED_TEST_EVIDENCE
 
-## SOURCE_HASH_PARITY
-
-- Current disk = FileState SHA-256: `contextor/ui/gui.py` `9e0a9319e140f682c4e66d232d1d6fc89c48a03a8234a800f6a413191c347315`; `tests/test_cycle_semantics_conditional_export.py` `012aa20b9aac3d3b43c8e762f846eb12873f145f53a00183b280bcc90ae7d07b`; `tests/test_cycle_semantics_scc2_import_order_regression.py` `5c950696599f1628161ae6d8cdeb6de4525eacfd74da5602853ee344b26d2b7c`. All 53 selected SCC sources matched current FileState for the read-only replay. MCP target workspace_sync=verified; untargeted architecture workspace_sync=unverified by contract.
+- Prior R18 targeted command passed **30 tests** across `tests/test_cycle_semantics_scc2_import_order_regression.py`, `tests/test_cycle_semantics_conditional_export.py`, and `tests/test_cycle_semantics_conditional_discovery.py`. Its two independent fresh CPython 3.15 import-order cases passed and both public exports were callable. These tests were not rerun in this acceptance task, as required.
 
 ## FILES_CHANGED
 
-- `contextor/ui/gui.py`
-- `tests/test_cycle_semantics_conditional_export.py`
-- `tests/test_cycle_semantics_scc2_import_order_regression.py`
-- `walkthrough.md` (report only)
+- `walkthrough.md` only in this task. The existing R18 source and test changes were preserved; their Git HEAD already contains them.
 
 ## FULL_DIFFS
 
-Actual complete source/test diffs follow. `walkthrough.md` is excluded from its own diff.
-
-```diff
-diff --git a/contextor/ui/gui.py b/contextor/ui/gui.py
-index f855fad..e6f95e0 100644
---- a/contextor/ui/gui.py
-+++ b/contextor/ui/gui.py
-@@ -40,7 +40,6 @@ from contextor.core.repository_identity import (
-     read_repository_identity,
- )
- from contextor.core.paths import prune_startup_caches
--from contextor.repo_generator import run_repo_generator
- from contextor.mcp_backend_control import (
-     BackendOwnerAlreadyClaimed,
-     BackendOwnerInstanceRevoked,
-@@ -387,6 +386,7 @@ class ContextorGUI:
-             self.repo_builder_win.lift()
-             self.repo_builder_win.focus_force()
-         else:
-+            from contextor.repo_generator import run_repo_generator
-             self.repo_builder_win = run_repo_generator(parent=self.root)
-
-     def open_parser_window(self):
-diff --git a/tests/test_cycle_semantics_conditional_export.py b/tests/test_cycle_semantics_conditional_export.py
-index 9914399..6690d40 100644
---- a/tests/test_cycle_semantics_conditional_export.py
-+++ b/tests/test_cycle_semantics_conditional_export.py
-@@ -146,7 +146,7 @@ def test_c26_closing_symbol_mismatch_unknown():
-     assert _analyze(sources).status == "UNKNOWN"
-
-
--def test_c26_real_contextor_sources_without_import():
-+def test_c26_real_contextor_chain_has_no_eager_return_hop():
-     root = (
-         Path(__file__).resolve().parents[1]
-         / "contextor"
-@@ -187,14 +187,9 @@ def test_c26_real_contextor_sources_without_import():
-         "run_repo_generator",
-     )
-
--    assert result.status == (
--        "CONDITIONAL_DELAYED_REEXPORT"
--    )
--    assert result.provider_definition_line > (
--        result.hops[1].line
--    )
--    assert result.prefix_execution_status == (
--        "UNVERIFIED_TRANSITIVE_PREFIX"
-+    assert result.status == "UNKNOWN"
-+    assert result.reason == (
-+        "IMPORT_HOP_NOT_UNIQUELY_PROVED"
-     )
-     assert result.runtime_execution_status == (
-         "UNKNOWN_NOT_EVALUATED"
-diff --git a/tests/test_cycle_semantics_scc2_import_order_regression.py b/tests/test_cycle_semantics_scc2_import_order_regression.py
-new file mode 100644
-index 0000000..5ea9f98
---- /dev/null
-+++ b/tests/test_cycle_semantics_scc2_import_order_regression.py
-@@ -0,0 +1,138 @@
-+from __future__ import annotations
-+
-+import ast
-+import json
-+import subprocess
-+import sys
-+from pathlib import Path
-+
-+import pytest
-+
-+
-+ROOT = Path(__file__).resolve().parents[1]
-+
-+CHILD_CODE = r"""
-+import importlib
-+import json
-+import sys
-+import traceback
-+
-+entry = sys.argv[1]
-+root = sys.argv[2]
-+sys.path.insert(0, root)
-+
-+try:
-+    importlib.import_module(entry)
-+
-+    from contextor.repo_generator import run_repo_generator
-+    from contextor.ui import run
-+
-+    if not callable(run_repo_generator):
-+        raise AssertionError("Generator export is not callable")
-+
-+    if not callable(run):
-+        raise AssertionError("UI export is not callable")
-+
-+except BaseException as exc:
-+    print(json.dumps({
-+        "entry": entry,
-+        "status": "EXCEPTION",
-+        "exception_type": type(exc).__name__,
-+        "exception_message": str(exc),
-+        "traceback": traceback.format_exc(),
-+    }, ensure_ascii=False))
-+    sys.exit(1)
-+
-+print(json.dumps({
-+    "entry": entry,
-+    "status": "PASS",
-+    "generator_export": True,
-+    "ui_export": True,
-+}, ensure_ascii=False))
-+"""
-+
-+
-+@pytest.mark.parametrize(
-+    "entry",
-+    (
-+        "contextor.repo_generator",
-+        "contextor.ui",
-+    ),
-+)
-+def test_scc2_fresh_import_order(entry):
-+    completed = subprocess.run(
-+        [
-+            sys.executable,
-+            "-I",
-+            "-B",
-+            "-c",
-+            CHILD_CODE,
-+            entry,
-+            str(ROOT),
-+        ],
-+        cwd=str(ROOT),
-+        capture_output=True,
-+        text=True,
-+        encoding="utf-8",
-+        errors="replace",
-+        timeout=45,
-+        check=False,
-+    )
-+
-+    assert completed.returncode == 0, (
-+        f"entry={entry}\n"
-+        f"stdout={completed.stdout}\n"
-+        f"stderr={completed.stderr}"
-+    )
-+
-+    result = json.loads(completed.stdout.strip())
-+
-+    assert result == {
-+        "entry": entry,
-+        "status": "PASS",
-+        "generator_export": True,
-+        "ui_export": True,
-+    }
-+
-+
-+def test_scc2_gui_generator_import_remains_method_scoped():
-+    path = ROOT / "contextor" / "ui" / "gui.py"
-+    tree = ast.parse(path.read_text(encoding="utf-8"))
-+
-+    def matching_import(node):
-+        return (
-+            isinstance(node, ast.ImportFrom)
-+            and node.module == "contextor.repo_generator"
-+            and any(
-+                alias.name == "run_repo_generator"
-+                for alias in node.names
-+            )
-+        )
-+
-+    assert not any(
-+        matching_import(node)
-+        for node in tree.body
-+    )
-+
-+    classes = [
-+        node
-+        for node in tree.body
-+        if isinstance(node, ast.ClassDef)
-+        and node.name == "ContextorGUI"
-+    ]
-+    assert len(classes) == 1
-+
-+    methods = [
-+        node
-+        for node in classes[0].body
-+        if isinstance(node, ast.FunctionDef)
-+        and node.name == "open_repo_builder"
-+    ]
-+    assert len(methods) == 1
-+
-+    imports = [
-+        node
-+        for node in ast.walk(methods[0])
-+        if matching_import(node)
-+    ]
-+    assert len(imports) == 1
-```
+- Source/tests in this task: **NONE**. No production, test, documentation or Git mutation in this acceptance task. `walkthrough.md` is the report and excluded from its own diff.
 
 ## FINAL_VERDICT
 
-**BLOCKED** — the literal fix, both fresh-import orders, and all 30 targeted tests pass; the current canonical graph retains the hard edge and 16 paths. The mandatory authoritative lexical-activation audit cannot meet the PASS gate while the published `cycle_semantics` family is stale (`SOURCE_CHANGED`). The current source/graph replay is explicitly distinguished from canonical semantic freshness. No FULL, update_file or restart was performed.
+**PASS** — exactly one FULL completed with verified LIVE publication of revision 1128; canonical semantic evidence is fresh and source-bound; SCC identities and 16 structural paths are preserved; the GUI import is FUNCTION_SCOPED, obsolete eager witnesses are absent, and the 16→17 collision change is attributed to the exact new test-only `CHILD_CODE` symbol without an unresolved production regression.
