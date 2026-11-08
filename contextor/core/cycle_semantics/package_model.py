@@ -32,6 +32,16 @@ class PackageModelEvent:
 
 
 @dataclass(frozen=True)
+class ReachedUnmodeledImport:
+    importer: str
+    operation: str
+    target: str
+    symbol: str | None
+    line: int | None
+    column: int | None
+
+
+@dataclass(frozen=True)
 class PackageImportAssessment:
     entry_module: str
     outcome: str
@@ -39,6 +49,9 @@ class PackageImportAssessment:
     symbol: str | None
     events: tuple[PackageModelEvent, ...]
     evidence_scope: str = "RESTRICTED_REGULAR_PACKAGE_MODEL"
+    reached_unmodeled_import: (
+        ReachedUnmodeledImport | None
+    ) = None
 
 
 @dataclass(frozen=True)
@@ -51,6 +64,8 @@ class _Step:
     function_body: tuple[_Step, ...] = ()
     function_local: bool = False
     class_local: bool = False
+    source_line: int | None = None
+    source_column: int | None = None
 
 
 @dataclass
@@ -500,6 +515,8 @@ def _compile(
                         alias.name,
                         binding=alias.asname or alias.name.split(".")[0],
                         explicit_alias=alias.asname is not None,
+                        source_line=stmt.lineno,
+                        source_column=stmt.col_offset,
                     )
                 )
 
@@ -562,6 +579,8 @@ def _compile(
                             "PREPARE_FROM_MEMBER",
                             target,
                             alias.name,
+                            source_line=stmt.lineno,
+                            source_column=stmt.col_offset,
                         )
                     )
 
@@ -585,6 +604,8 @@ def _compile(
                         target,
                         alias.name,
                         alias.asname or alias.name,
+                        source_line=stmt.lineno,
+                        source_column=stmt.col_offset,
                     )
                 )
 
@@ -1009,6 +1030,10 @@ def evaluate_package_import_order(
         outcome: str,
         target: str | None = None,
         symbol: str | None = None,
+        *,
+        reached_unmodeled_import: (
+            ReachedUnmodeledImport | None
+        ) = None,
     ) -> PackageImportAssessment:
         return PackageImportAssessment(
             entry_module,
@@ -1016,6 +1041,7 @@ def evaluate_package_import_order(
             target,
             symbol,
             tuple(events),
+            reached_unmodeled_import=reached_unmodeled_import,
         )
 
     if (
@@ -1442,7 +1468,23 @@ def evaluate_package_import_order(
             target = step.target
 
             if not target or target not in programs:
-                return result("UNKNOWN", target)
+                blocker = (
+                    ReachedUnmodeledImport(
+                        importer=module,
+                        operation=step.op,
+                        target=target,
+                        symbol=step.symbol,
+                        line=step.source_line,
+                        column=step.source_column,
+                    )
+                    if target and module != bootstrap
+                    else None
+                )
+                return result(
+                    "UNKNOWN",
+                    target,
+                    reached_unmodeled_import=blocker,
+                )
 
             next_piece = missing_piece(target)
 

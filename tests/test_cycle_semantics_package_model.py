@@ -21,6 +21,116 @@ def _model(source, entry):
     )
 
 
+def test_reached_unmodeled_import_direct_import():
+    result = _model({"pkg.__init__": "import os\nvalue=1\n"}, "pkg")
+
+    assert result.outcome == "UNKNOWN"
+    assert result.target_module == "os"
+    blocker = result.reached_unmodeled_import
+    assert blocker is not None
+    assert blocker.importer == "pkg"
+    assert blocker.operation == "IMPORT"
+    assert blocker.target == "os"
+    assert blocker.symbol is None
+    assert blocker.line == 1
+    assert blocker.column == 0
+
+    encoded = json.dumps(asdict(result), sort_keys=True)
+    assert json.loads(encoded)["reached_unmodeled_import"] == {
+        "column": 0,
+        "importer": "pkg",
+        "line": 1,
+        "operation": "IMPORT",
+        "symbol": None,
+        "target": "os",
+    }
+    assert encoded == json.dumps(asdict(result), sort_keys=True)
+
+
+def test_reached_unmodeled_import_from_import():
+    result = _model(
+        {"pkg.__init__": "from dataclasses import dataclass\n"},
+        "pkg",
+    )
+
+    assert result.outcome == "UNKNOWN"
+    blocker = result.reached_unmodeled_import
+    assert blocker is not None
+    assert blocker.operation == "FROM"
+    assert blocker.target == "dataclasses"
+    assert blocker.symbol == "dataclass"
+    assert blocker.line == 1
+    assert blocker.column == 0
+
+
+def test_reached_unmodeled_import_called_function_body():
+    result = _model(
+        {
+            "pkg.__init__": (
+                "def activate():\n"
+                "    import os\n"
+                "activate()\n"
+            ),
+        },
+        "pkg",
+    )
+
+    assert result.outcome == "UNKNOWN"
+    blocker = result.reached_unmodeled_import
+    assert blocker is not None
+    assert blocker.importer == "pkg"
+    assert blocker.operation == "IMPORT"
+    assert blocker.target == "os"
+    assert blocker.line == 2
+    assert blocker.column == 4
+    assert "CALL_FUNCTION" in (event.operation for event in result.events)
+
+
+def test_uncalled_function_import_has_no_reached_blocker():
+    result = _model(
+        {
+            "pkg.__init__": (
+                "def activate():\n"
+                "    import os\n"
+                "value=1\n"
+            ),
+        },
+        "pkg",
+    )
+
+    assert result.outcome == "MODEL_PASS"
+    assert result.reached_unmodeled_import is None
+
+
+def test_earlier_unsupported_statement_has_no_reached_blocker():
+    result = _model(
+        {
+            "pkg.__init__": (
+                "value=1\n"
+                "unsupported_call()\n"
+                "import os\n"
+            ),
+        },
+        "pkg",
+    )
+
+    assert result.outcome == "UNKNOWN"
+    assert result.reached_unmodeled_import is None
+
+
+def test_indexed_import_has_no_reached_blocker():
+    result = _model(
+        {
+            "pkg.__init__": "from .child import value\n",
+            "pkg.child": "value=7\n",
+        },
+        "pkg",
+    )
+
+    assert result.outcome == "MODEL_PASS"
+    assert result.reached_unmodeled_import is None
+
+
 def _actual(tmp_path, source, entry):
     for module_id, code in source.items():
         parts = module_id.split(".")

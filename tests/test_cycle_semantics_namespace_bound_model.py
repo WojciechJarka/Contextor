@@ -333,6 +333,25 @@ def test_p6_eager_external_import_unknown():
     assert result.reason == "RESTRICTED_MODEL_UNKNOWN"
     assert result.source_evidence_sha256 is not None
 
+    assert result.conditional_assessment is not None
+
+    model = (
+        result.conditional_assessment.model_assessment
+    )
+
+    assert model is not None
+    assert model.outcome == "UNKNOWN"
+    assert model.reached_unmodeled_import is not None
+
+    blocker = model.reached_unmodeled_import
+
+    assert blocker.importer == "pkg.ns.a"
+    assert blocker.operation == "IMPORT"
+    assert blocker.target == "os"
+    assert blocker.symbol is None
+    assert blocker.line == 1
+    assert blocker.column == 0
+
 
 def test_p6_two_portions_source_bound():
     roots = (

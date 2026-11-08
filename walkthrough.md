@@ -1,71 +1,336 @@
-# CONTEXTOR C16-B03-P1D3-P14-R18-FINAL — canonical semantic refresh acceptance
+# CONTEXTOR C16-B03-P1D3-P15-R4 — reached unmodeled import
 
 ## PREFLIGHT
 
-- DIRECT_EVIDENCE — Contextor MCP before FULL: LIVE revision 1127, canonical_state=fresh, graph/cycles=fresh, cycle_semantics=stale with `SOURCE_CHANGED`, resync_required=false, syntax_errors=0, 16 structural DFS paths, 17 name collisions. Target GUI module was workspace_sync=verified. Read-only snapshot/FileState: revision 1127, state_id `20261108_132120`, repo_id `ctx_8efc50d8`, root `C:\Temp\Contextor_Repo`, FileState baseline trusted.
-- DIRECT_EVIDENCE — Git HEAD before/after `56dd18d3495c08b3d46981ffdd36fed323e7f661`; worktree clean before this report. R18 GUI method-scoped import at `contextor/ui/gui.py:389`, renamed C26 test at `tests/test_cycle_semantics_conditional_export.py:149`, and new regression module with both fresh-import orders were present. Repository interpreter CPython 3.15.2.
-- DIRECT_EVIDENCE — read-only durable analysis-job inventory contained 40 jobs and no queued/running job. MCP omitted-job status returned a prior completed job; it was not treated alone as proof that no job was active. The MCP FULL API coordinates with the existing job/lease mechanism; no parallel FULL was started.
-- Before FULL, current canonical SCC identity digests over ordered members and internal edges: SCC1 `b5b0fc8ba0d6c43a4e3743be7b64dbcae3d77c8588648dcd298faec92c2236f5`; SCC2 `cccc41ab4de52b8489d91eab8b29f7f89b22c6657c1601bf5e2c95e2764ce3b3`.
+- DIRECT_EVIDENCE: Contextor MCP module contexts before editing: `contextor.core.cycle_semantics.package_model` and `contextor.core.cycle_semantics.namespace_bound_model` both canonical revision 1128, `canonical_state=fresh`, `workspace_sync=verified`, provenance LIVE. Architecture at revision 1128: graph/cycles/cycle_semantics fresh, 2 cyclic SCCs, 16 DFS paths. Git HEAD `8261654e6f2ca09375dffe65243fea53dd093eb0`; only pre-existing `walkthrough.md` modification. Repository interpreter CPython 3.15.2.
+- CODE_PATH_PROVED: exact anchors existed in `package_model.py`: frozen `PackageImportAssessment`, `_Step`, `_compile` IMPORT/FROM/PREPARE_FROM_MEMBER constructors, local `result()`, and `if not target or target not in programs: return result("UNKNOWN", target)`. Focused `rg` showed direct assessment construction only in this result helper; `scenarios.py`, `evidence.py`, namespace conditional model consume the type; `PackageModelEvent` construction is in the model and event consumers. No material anchor drift.
 
-## FULL_JOB_AND_PUBLICATION
+## EXACT_MODEL_CONTRACT_ADDITION
 
-- Exactly one Contextor MCP `analyze_project(C:\Temp\Contextor_Repo)` call; new job ID `de319c1d19914c82af1d00ad7df3f4cd`, `reused=false`. No additional exclusions supplied. It advanced queued → running → completed. Exact-job `get_analysis_status` reported `Analysis completed successfully`, error null, no skipped Python files and syntax_error_count=0.
-- LIVE publication status **success**; exact mutation job `mu-9e4eae5ad2704fa7b29b9a2d40118800`, expected revision/published revision **1128**, expected state_id `20261108_172727`, service_instance_id `4f4f112fb61d4422ab57e2c53bfc37c1`, process_start_identity `134386112371137577`, idempotency key `cp-e62fc9f609eae7c5e5920617c0c1378862989f0e01edee2497d0effee0b49037`. This is the exact verified publication receipt, not mere admission.
-- No retry, second FULL, update_file, backend/Desktop/LIVE restart, pytest or package installation.
+- Added frozen `ReachedUnmodeledImport(importer, operation, target, symbol, line, column)` immediately before `PackageImportAssessment`; appended nullable `reached_unmodeled_import` after existing `evidence_scope`. Existing positional fields retain order and default behavior.
+- Appended nullable `source_line`/`source_column` to `_Step`. The record means only that an actually reached import target is outside the restricted indexed program domain. It does not assert absence from Python's installed environment.
 
-## CANONICAL_IDENTITY_BEFORE_AFTER
+## EXACT_IMPORT_STEP_SOURCE_BINDING
 
-| Identity | Before | After |
-|---|---|---|
-| canonical revision | 1127 | 1128 |
-| state_id | `20261108_132120` | `20261108_172727` |
-| repo_id | `ctx_8efc50d8` | `ctx_8efc50d8` |
-| root | `C:\Temp\Contextor_Repo` | same |
-| canonical snapshot writer | `live-service` | `mcp` |
-| FileState revision/state_id | 1127 / `20261108_132120` | 1128 / `20261108_172727` |
+- `_compile` now copies the original import AST statement's `lineno` and `col_offset` onto generated IMPORT, PREPARE_FROM_MEMBER and FROM steps. The called local-function body path compiles the original body statement in an in-memory fragment, so its original coordinates propagate to its reached step. Alias resolution, execution order, binding flags and AST remain unchanged.
 
-- DIRECT_EVIDENCE — post-FULL `load_snapshot`, `FileStateManager` and MCP LIVE revision all agree on 1128. FileState baseline trusted. MCP provenance=live, canonical_state=fresh, resync_required=false. No repository source/test change occurred during this acceptance task.
+## UNKNOWN_BRANCH_BEFORE_AFTER
 
-## FRESHNESS_AND_SOURCE_HASH_PARITY
+- Before: `if not target or target not in programs: return result("UNKNOWN", target)`.
+- After: this same branch constructs `ReachedUnmodeledImport` only when `target` is truthy and the executing module is not the synthetic bootstrap, then returns the same `UNKNOWN` and target with the record. The local `result()` has one keyword-only nullable argument and passes it into `PackageImportAssessment`. No event is appended, no other UNKNOWN branch changed, and no target is skipped or whitelisted.
 
-- MCP post-FULL: graph=fresh, cycles=fresh, cycle_semantics=fresh, syntax_errors=0. All three target module contexts (`contextor.ui.gui`, `contextor.repo_generator.__init__`, `contextor.repo_generator.main`) report workspace_sync=verified at revision 1128 with no advisory warning. Untargeted architecture workspace_sync=unverified is its global query contract, not a target mismatch.
-- DIRECT_EVIDENCE — disk = same-generation FileState = canonical semantic observed source fingerprint for `contextor/ui/gui.py`: `9e0a9319e140f682c4e66d232d1d6fc89c48a03a8234a800f6a413191c347315`; `contextor/repo_generator/__init__.py`: `fa3cb9e8574537ded0f4ce2710a1d85eb81b0318e20e1faa3ca537163c6fcb44`; `contextor/repo_generator/main.py`: `0ae7971102588f5cd2b143d880168e4f4ddae9aa32988498991e408b0dd48878`.
-- Current disk = FileState for R18 tests: `tests/test_cycle_semantics_conditional_export.py` `012aa20b9aac3d3b43c8e762f846eb12873f145f53a00183b280bcc90ae7d07b`; `tests/test_cycle_semantics_scc2_import_order_regression.py` `5c950696599f1628161ae6d8cdeb6de4525eacfd74da5602853ee344b26d2b7c`.
+## REGRESSION_T01_T06
 
-## SCC_STRUCTURAL_PARITY
+- T01 direct `import os`: UNKNOWN/os; blocker `pkg`, IMPORT, os, null symbol, line 1 column 0; deterministic `dataclasses.asdict`/`json.dumps` equality and exact serialized blocker fields.
+- T02 `from dataclasses import dataclass`: UNKNOWN; blocker FROM/dataclasses/dataclass, line 1 column 0.
+- T03 called local function: UNKNOWN; blocker IMPORT/os at original line 2 column 4; CALL_FUNCTION event present.
+- T04 uncalled local function: MODEL_PASS, no reached blocker.
+- T05 earlier unsupported call: UNKNOWN, no fabricated blocker for later `import os`.
+- T06 fully indexed relative import: MODEL_PASS, no blocker.
 
-- Current authoritative snapshot SCC1: 44 members, 110 internal hard edges, identity digest `b5b0fc8ba0d6c43a4e3743be7b64dbcae3d77c8588648dcd298faec92c2236f5`, exactly equal to pre-FULL.
-- Current authoritative snapshot SCC2: 9 members, 16 internal hard edges, identity digest `cccc41ab4de52b8489d91eab8b29f7f89b22c6657c1601bf5e2c95e2764ce3b3`, exactly equal to pre-FULL. It includes `contextor.repo_generator.__init__`, `contextor.ui.__init__`, `contextor.ui.gui` and the unchanged GUI→repo_generator hard edge.
-- MCP fresh current cycles report 16 structural DFS back-edge paths; current semantic diagnostic reports 2 cyclic SCCs and 53 cyclic modules. Counts and exact ordered member/edge identities were checked. Active warnings remain 16, model_pass_count=0; no warning suppression or MODEL_PASS promotion.
+## CONDITIONAL_NAMESPACE_REGRESSION
 
-## GUI_IMPORT_ACTIVATION_EVIDENCE
+Existing `test_p6_eager_external_import_unknown` retained original UNKNOWN, RESTRICTED_MODEL_UNKNOWN and non-null source-bound digest assertions. Added exact nested-model assertions: UNKNOWN with `pkg.ns.a` IMPORT/os, null symbol, line 1 column 0. Source binding and namespace resolution implementations were not edited; conditional authority was not promoted.
 
-- DIRECT_EVIDENCE — **new authoritative** revision-1128 `CycleSemanticsSnapshot.import_sites`: the `contextor.ui.gui` → `contextor.repo_generator.__init__` hard edge is `LEXICAL_CANDIDATES` with one site at `contextor/ui/gui.py:389:12`, `IMPORT_FROM`, `FROM_BASE`, `FUNCTION_SCOPED`, lexical scope `ContextorGUI` → `open_repo_builder`, control frame `IF/ELSE` at line 385. There is no matching `MODULE_TOP_LEVEL` site. This is current committed semantic evidence, not a source-only replay or historical FULL report.
-- The import's lexical scope is function-only; no assertion of runtime safety follows from that fact.
+## TARGETED_TEST_RESULTS
 
-## CONDITIONAL_WITNESS_BEFORE_AFTER
+DIRECT_EVIDENCE: requested four modules only — `tests/test_cycle_semantics_package_model.py`, `tests/test_cycle_semantics_namespace_bound_model.py`, `tests/test_cycle_semantics_namespace_path_model.py`, `tests/test_cycle_semantics_scenarios.py` — run with repository CPython 3.15.2, `-B -m pytest -q -rs`, `PYTHONDONTWRITEBYTECODE=1`: **196 passed in 18.00s**, zero failures. `git diff --check` exit 0. No full suite.
 
-- Before R18: D16 current snapshot/historical projection had one grouped conditional delayed-reexport relationship and three eager return witnesses with closing GUI import at line 43.
-- After the one FULL: **new authoritative** revision-1128 `conditional_discovery.candidates` is empty globally and for SCC2; coverage_status=`BOUNDED_SELECTION_COMPLETE`. The three former eager witnesses no longer qualify because their closing GUI hop is not a top-level exact import. This is not MODEL_PASS or a static safety proof.
+## MODEL_OUTCOME_PARITY
 
-## NAME_COLLISION_16_TO_17_ANALYSIS
+- CONTRACT_PROVED by focused regressions: new reached external cases remain UNKNOWN; uncalled and fully indexed cases remain MODEL_PASS; unsupported prefix stays UNKNOWN without a false reached record. Existing namespace, path-model and scenario tests also passed. No external code execution or external-module whitelist was added to the model. Existing intentionally isolated tests within requested modules retain their own behavior.
+- CODE_PATH_PROVED: the only production behavior change is an extra nullable field returned from one already-UNKNOWN branch. `PackageImportAssessment` old outcome, target and symbol arguments are unchanged. AST nodes are read to obtain coordinates, not mutated. No warning suppression or conditional assessment promotion code changed.
 
-- Historical pre-R18 completed FULL report had 16 collision identities. Pre-FULL revision-1127 canonical LIVE had 17; post-FULL revision-1128 LIVE has 17. Comparing identity keys (artifact type plus symbol name) shows one added identity and no removed identities. The 16 prior identities persisted through the acceptance FULL.
-- Added: `CHILD_CODE`, `artifact_type=variable`, `collision_type=NAME_COLLISION`, severity warning, conflicting (not identical). `tests.test_cycle_semantics_scc2_import_order_regression` defines a Python import-probe string at `tests/test_cycle_semantics_scc2_import_order_regression.py:14`; `tests.test_mcp_job_tree_isolated_windows` defines a process-tree probe string at `tests/test_mcp_job_tree_isolated_windows.py:34`. Canonical source evidence shows different string bodies, each used locally in its own test module (`:69` versus `:164,313`). `rg` found no cross-module import of either `CHILD_CODE`. This collision is caused by the exact new R18 test file, not by moving the GUI import and not by a production symbol conflict. No collision logic was changed.
-- Existing `ROOT` identical-definition group also gained the new R18 test module at line 12 alongside `tests.test_cycle_semantics_scc01_binding_order:21` and `tests.test_py315_launcher_migration_guard:12`; it remains one prior collision identity, so it does not account for the count increase. No unresolved production regression was established by the new test-only warning.
+## EVENT_SEQUENCE_PARITY
 
-## R18_TARGETED_TEST_EVIDENCE
+- CODE_PATH_PROVED: the changed branch still returns before emitting a `PackageModelEvent`; no event constructors or append order were changed. `_Step` source fields are metadata only. Existing event-sequence tests in the four requested modules passed. A byte-for-byte capture of every prior event sequence was not separately performed; the code-path and focused test evidence support parity within the tested contracts.
 
-- Prior R18 targeted command passed **30 tests** across `tests/test_cycle_semantics_scc2_import_order_regression.py`, `tests/test_cycle_semantics_conditional_export.py`, and `tests/test_cycle_semantics_conditional_discovery.py`. Its two independent fresh CPython 3.15 import-order cases passed and both public exports were callable. These tests were not rerun in this acceptance task, as required.
+## MCP_POST_CHANGE_AUDIT
+
+- DIRECT_EVIDENCE: after watcher processing, target `package_model` module context: LIVE revision **1131**, `canonical_state=fresh`, `workspace_sync=verified`, no advisory warning; graph and cycles fresh; cycle_semantics **stale**. Architecture: 627 modules, `resync_required=false`, 0 syntax errors, 2 cyclic SCCs, 16 structural DFS paths, runtime execution `UNKNOWN_NOT_EVALUATED`.
+- DIRECT_EVIDENCE: metadata and referenced FileState both revision 1131, state_id `20261108_172727`, repo_id `ctx_8efc50d8`. On-disk SHA-256 equals FileState for all three edited files: production `d4e29fbc6ace6fc610a1c21c4bf15249fa4ec89028433056411700e6bae2d031`; package-model test `7b90cbf0dbc78fb42f21e3a2f00442f90cbe085a31498f5a909532585907adfd`; namespace-bound test `700774095a055990940482561810f593d5f5241b70faeada029a6713b50bbdfa`.
+- DIRECT_EVIDENCE: source/test diff contains only the three allowlisted files; no unrelated production modification. No `update_file` was called.
+
+## CANONICAL_FRESHNESS_LIMITATION
+
+- The canonical `cycle_semantics` family became `stale` after `SOURCE_CHANGED`; no FULL was run to refresh it. Current on-disk tests and source are synchronized to FileState, but this does **not** prove the persistent LIVE Python process adopted the edited `package_model.py`. Any installed-runtime behavior claim remains unverified.
 
 ## FILES_CHANGED
 
-- `walkthrough.md` only in this task. The existing R18 source and test changes were preserved; their Git HEAD already contains them.
+- `contextor/core/cycle_semantics/package_model.py`
+- `tests/test_cycle_semantics_package_model.py`
+- `tests/test_cycle_semantics_namespace_bound_model.py`
+- `walkthrough.md` (report only; excluded from its own diff)
 
 ## FULL_DIFFS
 
-- Source/tests in this task: **NONE**. No production, test, documentation or Git mutation in this acceptance task. `walkthrough.md` is the report and excluded from its own diff.
+Complete actual Git diffs of every changed production/test file follow. `walkthrough.md` is excluded from its own diff.
+
+```diff
+diff --git a/contextor/core/cycle_semantics/package_model.py b/contextor/core/cycle_semantics/package_model.py
+index 4ccaa26..58b98ca 100644
+--- a/contextor/core/cycle_semantics/package_model.py
++++ b/contextor/core/cycle_semantics/package_model.py
+@@ -31,6 +31,16 @@ class PackageModelEvent:
+     symbol: str | None = None
+ 
+ 
++@dataclass(frozen=True)
++class ReachedUnmodeledImport:
++    importer: str
++    operation: str
++    target: str
++    symbol: str | None
++    line: int | None
++    column: int | None
++
++
+ @dataclass(frozen=True)
+ class PackageImportAssessment:
+     entry_module: str
+@@ -39,6 +49,9 @@ class PackageImportAssessment:
+     symbol: str | None
+     events: tuple[PackageModelEvent, ...]
+     evidence_scope: str = "RESTRICTED_REGULAR_PACKAGE_MODEL"
++    reached_unmodeled_import: (
++        ReachedUnmodeledImport | None
++    ) = None
+ 
+ 
+ @dataclass(frozen=True)
+@@ -51,6 +64,8 @@ class _Step:
+     function_body: tuple[_Step, ...] = ()
+     function_local: bool = False
+     class_local: bool = False
++    source_line: int | None = None
++    source_column: int | None = None
+ 
+ 
+ @dataclass
+@@ -500,6 +515,8 @@ def _compile(
+                         alias.name,
+                         binding=alias.asname or alias.name.split(".")[0],
+                         explicit_alias=alias.asname is not None,
++                        source_line=stmt.lineno,
++                        source_column=stmt.col_offset,
+                     )
+                 )
+ 
+@@ -562,6 +579,8 @@ def _compile(
+                             "PREPARE_FROM_MEMBER",
+                             target,
+                             alias.name,
++                            source_line=stmt.lineno,
++                            source_column=stmt.col_offset,
+                         )
+                     )
+ 
+@@ -585,6 +604,8 @@ def _compile(
+                         target,
+                         alias.name,
+                         alias.asname or alias.name,
++                        source_line=stmt.lineno,
++                        source_column=stmt.col_offset,
+                     )
+                 )
+ 
+@@ -1009,6 +1030,10 @@ def evaluate_package_import_order(
+         outcome: str,
+         target: str | None = None,
+         symbol: str | None = None,
++        *,
++        reached_unmodeled_import: (
++            ReachedUnmodeledImport | None
++        ) = None,
+     ) -> PackageImportAssessment:
+         return PackageImportAssessment(
+             entry_module,
+@@ -1016,6 +1041,7 @@ def evaluate_package_import_order(
+             target,
+             symbol,
+             tuple(events),
++            reached_unmodeled_import=reached_unmodeled_import,
+         )
+ 
+     if (
+@@ -1442,7 +1468,23 @@ def evaluate_package_import_order(
+             target = step.target
+ 
+             if not target or target not in programs:
+-                return result("UNKNOWN", target)
++                blocker = (
++                    ReachedUnmodeledImport(
++                        importer=module,
++                        operation=step.op,
++                        target=target,
++                        symbol=step.symbol,
++                        line=step.source_line,
++                        column=step.source_column,
++                    )
++                    if target and module != bootstrap
++                    else None
++                )
++                return result(
++                    "UNKNOWN",
++                    target,
++                    reached_unmodeled_import=blocker,
++                )
+ 
+             next_piece = missing_piece(target)
+ 
+diff --git a/tests/test_cycle_semantics_namespace_bound_model.py b/tests/test_cycle_semantics_namespace_bound_model.py
+index 05fa83b..58f0fc1 100644
+--- a/tests/test_cycle_semantics_namespace_bound_model.py
++++ b/tests/test_cycle_semantics_namespace_bound_model.py
+@@ -333,6 +333,25 @@ def test_p6_eager_external_import_unknown():
+     assert result.reason == "RESTRICTED_MODEL_UNKNOWN"
+     assert result.source_evidence_sha256 is not None
+ 
++    assert result.conditional_assessment is not None
++
++    model = (
++        result.conditional_assessment.model_assessment
++    )
++
++    assert model is not None
++    assert model.outcome == "UNKNOWN"
++    assert model.reached_unmodeled_import is not None
++
++    blocker = model.reached_unmodeled_import
++
++    assert blocker.importer == "pkg.ns.a"
++    assert blocker.operation == "IMPORT"
++    assert blocker.target == "os"
++    assert blocker.symbol is None
++    assert blocker.line == 1
++    assert blocker.column == 0
++
+ 
+ def test_p6_two_portions_source_bound():
+     roots = (
+diff --git a/tests/test_cycle_semantics_package_model.py b/tests/test_cycle_semantics_package_model.py
+index 5556799..c83ecb4 100644
+--- a/tests/test_cycle_semantics_package_model.py
++++ b/tests/test_cycle_semantics_package_model.py
+@@ -21,6 +21,116 @@ def _model(source, entry):
+     )
+ 
+ 
++def test_reached_unmodeled_import_direct_import():
++    result = _model({"pkg.__init__": "import os\nvalue=1\n"}, "pkg")
++
++    assert result.outcome == "UNKNOWN"
++    assert result.target_module == "os"
++    blocker = result.reached_unmodeled_import
++    assert blocker is not None
++    assert blocker.importer == "pkg"
++    assert blocker.operation == "IMPORT"
++    assert blocker.target == "os"
++    assert blocker.symbol is None
++    assert blocker.line == 1
++    assert blocker.column == 0
++
++    encoded = json.dumps(asdict(result), sort_keys=True)
++    assert json.loads(encoded)["reached_unmodeled_import"] == {
++        "column": 0,
++        "importer": "pkg",
++        "line": 1,
++        "operation": "IMPORT",
++        "symbol": None,
++        "target": "os",
++    }
++    assert encoded == json.dumps(asdict(result), sort_keys=True)
++
++
++def test_reached_unmodeled_import_from_import():
++    result = _model(
++        {"pkg.__init__": "from dataclasses import dataclass\n"},
++        "pkg",
++    )
++
++    assert result.outcome == "UNKNOWN"
++    blocker = result.reached_unmodeled_import
++    assert blocker is not None
++    assert blocker.operation == "FROM"
++    assert blocker.target == "dataclasses"
++    assert blocker.symbol == "dataclass"
++    assert blocker.line == 1
++    assert blocker.column == 0
++
++
++def test_reached_unmodeled_import_called_function_body():
++    result = _model(
++        {
++            "pkg.__init__": (
++                "def activate():\n"
++                "    import os\n"
++                "activate()\n"
++            ),
++        },
++        "pkg",
++    )
++
++    assert result.outcome == "UNKNOWN"
++    blocker = result.reached_unmodeled_import
++    assert blocker is not None
++    assert blocker.importer == "pkg"
++    assert blocker.operation == "IMPORT"
++    assert blocker.target == "os"
++    assert blocker.line == 2
++    assert blocker.column == 4
++    assert "CALL_FUNCTION" in (event.operation for event in result.events)
++
++
++def test_uncalled_function_import_has_no_reached_blocker():
++    result = _model(
++        {
++            "pkg.__init__": (
++                "def activate():\n"
++                "    import os\n"
++                "value=1\n"
++            ),
++        },
++        "pkg",
++    )
++
++    assert result.outcome == "MODEL_PASS"
++    assert result.reached_unmodeled_import is None
++
++
++def test_earlier_unsupported_statement_has_no_reached_blocker():
++    result = _model(
++        {
++            "pkg.__init__": (
++                "value=1\n"
++                "unsupported_call()\n"
++                "import os\n"
++            ),
++        },
++        "pkg",
++    )
++
++    assert result.outcome == "UNKNOWN"
++    assert result.reached_unmodeled_import is None
++
++
++def test_indexed_import_has_no_reached_blocker():
++    result = _model(
++        {
++            "pkg.__init__": "from .child import value\n",
++            "pkg.child": "value=7\n",
++        },
++        "pkg",
++    )
++
++    assert result.outcome == "MODEL_PASS"
++    assert result.reached_unmodeled_import is None
++
++
+ def _actual(tmp_path, source, entry):
+     for module_id, code in source.items():
+         parts = module_id.split(".")
+```
 
 ## FINAL_VERDICT
 
-**PASS** — exactly one FULL completed with verified LIVE publication of revision 1128; canonical semantic evidence is fresh and source-bound; SCC identities and 16 structural paths are preserved; the GUI import is FUNCTION_SCOPED, obsolete eager witnesses are absent, and the 16→17 collision change is attributed to the exact new test-only `CHILD_CODE` symbol without an unresolved production regression.
+PASS — literal change implemented; 196 targeted tests pass, exact blocker identities and coordinates verified, existing outcomes/events preserved within focused contracts, and MCP post-change source/FileState audit succeeded. Canonical cycle_semantics is stale and persistent runtime adoption remains unverified.
