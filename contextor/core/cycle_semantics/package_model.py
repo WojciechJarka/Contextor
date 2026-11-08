@@ -434,10 +434,25 @@ def _safe_passive_class_definition(
         if isinstance(body_statement, (ast.Import, ast.ImportFrom)):
             continue
 
-        if isinstance(body_statement, ast.AnnAssign) and _safe_annassign(
-            body_statement, annotation_semantics,
-        ):
-            continue
+        if isinstance(body_statement, ast.AnnAssign):
+            if _safe_annassign(
+                body_statement, annotation_semantics,
+            ):
+                continue
+
+            if (
+                conditional_dataclass
+                and type(body_statement.target) is ast.Name
+                and body_statement.simple == 1
+                and body_statement.target.id.isidentifier()
+                and not body_statement.target.id.startswith("__")
+                and _exact_restricted_dataclass_hash_field_call(
+                    body_statement.value
+                )
+            ):
+                continue
+
+            return False
 
         if isinstance(body_statement, ast.Assign):
             if (

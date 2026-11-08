@@ -1077,6 +1077,41 @@ def test_r11_requires_deferred_annotation_semantics(
     _r11_assert_module_rejected(result)
 
 
+def test_r11_f1_plain_class_field_call_remains_unknown():
+    result = _r11_module_result(
+        "class Plain:\n"
+        "    imports: list[ImportRef] = field(hash=False)\n"
+    )
+
+    assert result.outcome == "UNKNOWN"
+    assert not any(
+        event.operation == "DEFINE_PASSIVE_CLASS"
+        and event.symbol == "Plain"
+        for event in result.events
+    )
+
+
+@pytest.mark.parametrize(
+    "field_target",
+    [
+        "holder.imports",
+        "holder['imports']",
+    ],
+)
+def test_r11_f1_field_call_requires_simple_name_target(
+    field_target,
+):
+    source = (
+        "@dataclass(frozen=True)\n"
+        "class Module:\n"
+        f"    {field_target}: list[ImportRef] = field(hash=False)\n"
+    )
+
+    result = _r11_module_result(source)
+
+    _r11_assert_module_rejected(result)
+
+
 def test_external_assumption_normal_model_still_unknown():
     result = _model({"pkg.__init__": "import os\n"}, "pkg")
     assert result.outcome == "UNKNOWN"
