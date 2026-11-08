@@ -71,7 +71,7 @@ echo Checking dependencies...
 if errorlevel 1 goto install_deps
 
 echo [OK] Dependencies are already installed.
-goto check_backend_autostart
+goto check_ruff
 
 
 :install_deps
@@ -88,6 +88,43 @@ if errorlevel 1 goto install_failed
 
 echo [SUCCESS] Dependencies installed.
 echo.
+goto check_ruff
+
+
+:check_ruff
+if exist "%PROJECT_DIR%\.contextor_py315_cutover.guard" goto cutover_blocked
+echo Checking Ruff development tool...
+
+"%VENV_PY%" -c "import importlib.metadata as m, re, sys; v=m.version('ruff'); p=re.fullmatch(r'(\d+)\.(\d+)\.(\d+)',v); sys.exit(0 if p and tuple(map(int,p.groups())) >= (0,17,0) else 1)" >nul 2>&1
+if errorlevel 1 goto install_ruff
+
+if not exist "%VENV_DIR%\Scripts\ruff.exe" goto install_ruff
+
+"%VENV_DIR%\Scripts\ruff.exe" --version >nul 2>&1
+if errorlevel 1 goto install_ruff
+
+echo [OK] Ruff >=0.17.0 is available.
+goto check_backend_autostart
+
+
+:install_ruff
+if exist "%PROJECT_DIR%\.contextor_py315_cutover.guard" goto cutover_blocked
+echo [INFO] Installing Ruff into the project virtual environment...
+
+"%VENV_PY%" -m pip install "ruff>=0.17.0"
+if errorlevel 1 goto ruff_unavailable
+
+if not exist "%VENV_DIR%\Scripts\ruff.exe" goto ruff_unavailable
+
+"%VENV_DIR%\Scripts\ruff.exe" --version >nul 2>&1
+if errorlevel 1 goto ruff_unavailable
+
+echo [SUCCESS] Ruff installed and verified.
+goto check_backend_autostart
+
+
+:ruff_unavailable
+echo [WARNING] Ruff is unavailable. Continuing without optional lint tooling.
 goto check_backend_autostart
 
 

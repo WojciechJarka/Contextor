@@ -106,3 +106,38 @@ def test_py315_project_metadata_and_ruff_contract():
         "pytest>=7.4"
         in config["project"]["optional-dependencies"]["dev"]
     )
+
+
+def test_launcher_optional_ruff_uses_project_venv():
+    source = (
+        ROOT / "run_contextor.bat"
+    ).read_text(encoding="utf-8").lower()
+
+    assert source.count("goto check_ruff") == 2
+    assert ":check_ruff\n" in source
+
+    assert "m.version('ruff')" in source
+    assert ">= (0,17,0)" in source
+
+    assert (
+        'if not exist "%venv_dir%\\scripts\\ruff.exe" '
+        'goto install_ruff'
+    ) in source
+
+    assert (
+        '"%venv_py%" -m pip install "ruff>=0.17.0"'
+    ) in source
+
+    assert ":install_ruff\n" in source
+    assert ":ruff_unavailable\n" in source
+
+    optional_failure = source.split(
+        ":ruff_unavailable\n", 1
+    )[1].split(
+        ":check_backend_autostart\n", 1
+    )[0]
+
+    assert "goto check_backend_autostart" in optional_failure
+    assert "continuing without optional lint tooling" in (
+        optional_failure
+    )

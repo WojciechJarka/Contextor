@@ -1,125 +1,155 @@
-# C16-B03-P1D3-P13B — CPython 3.15 package and Ruff metadata
+# C16-B03-P1D3-P13B-R1 — optional Ruff in project launcher
 
 ## HEAD_BEFORE_AFTER
 
-- DIRECT_EVIDENCE: HEAD before/after `1eedda847f75e6a40f1b62b6af27567a84b76590`; no Git mutation. Preflight worktree already contained uncommitted P13A test and `walkthrough.md`; both were preserved. Repository `.venv` identified as CPython 3.15.2 / `cpython`. P13A `_require_cpython315` and native runtime gate were present.
-- Contextor MCP first: canonical revision 1121, state_id `20261106_195021`, repo_id `ctx_8efc50d8`, canonical_state=fresh, workspace_sync=verified, LIVE provenance, graph/cycles fresh, cycle_semantics stale, structural DFS cycles=16, active warnings=16, model_pass_count=0.
-- Target test pre-edit SHA-256 `58cd1c0f7fbd2930e0879361de85e03ad61a9f47fe16fb300d9bbd5660430e67` matched FileState. `pyproject.toml` is not indexed in Python FileState; its pre-edit disk hash was `7068a9178ea269bd616b42550ab4b1157f9e26509eabd8a23f66fbfcf124c232`.
+- Preflight Contextor MCP: revision 1122, state_id `20261106_195021`, repo_id `ctx_8efc50d8`, canonical_state=fresh, workspace_sync=verified, LIVE provenance, graph/cycles fresh, cycle_semantics stale, 16 structural DFS cycles, 16 active warnings, model_pass_count=0. Repository `.venv` is CPython 3.15.2.
+- HEAD before/after `924d69e6e48b367f4e9848e1e9ce9339c7f57059`; pre-edit worktree clean, no Git mutation. P13A native 3.15 test and P13B metadata/test changes were present. Target test pre-edit SHA-256 matched FileState; BAT is outside Python FileState.
+- Exact target paths, matching anchors and planned diff summary were recorded in this `walkthrough.md` before edits: `run_contextor.bat:73-74`, `:89-91`, `:94`, and EOF of `tests/test_py315_launcher_migration_guard.py`.
 
 ## FILES_CHANGED
 
-- `pyproject.toml`
+- `run_contextor.bat`
 - `tests/test_py315_launcher_migration_guard.py`
 - `walkthrough.md` (report, excluded from its own diff)
-- The pre-existing P13A test modification remains in the worktree and is outside this task's changed files.
 
-## PYTHON_DISTRIBUTION_CONTRACT
+## RUFF_VERSION_CHECK
 
-- Literal project metadata edit: `requires-python = ">=3.15,<3.16"`. This restricts Contextor's own package distribution runtime; it does not change the interpreter semantics of repositories Contextor analyzes. Project version, runtime dependencies and build backend were unchanged.
+- Literal new `:check_ruff` block checks project-local `importlib.metadata.version('ruff')` against parsed numeric `>= (0,17,0)`, confirms `%VENV_DIR%\Scripts\ruff.exe` exists and that `--version` exits successfully. `pyproject.toml` still declares `ruff>=0.17.0` and `target-version=py315`.
+- This is source-contract evidence. The launcher was intentionally not executed, so actual later normal-start behavior remains unobserved.
 
-## RUFF_PY315_CONTRACT
+## LOCAL_VENV_INSTALLATION
 
-- Literal optional dev dependency edit: `ruff>=0.17.0`; literal Ruff target: `py315`. Other Ruff rules unchanged. Ruff was absent from repository `.venv` and PATH (`RUFF_NOT_INSTALLED_IN_VENV`, `RUFF_NOT_ON_PATH`), so parser recognition by an installed Ruff is **TOOL_NOT_VERIFIED**. No install or upgrade was attempted.
+- Literal `:install_ruff` block uses only `"%VENV_PY%" -m pip install "ruff>=0.17.0"`; the executable check is under `%VENV_DIR%\Scripts`. No global installer or manual installation was run. The cutover guard appears before the new check and installation labels.
 
-## PACKAGE_METADATA_VALIDATION
+## EXISTING_RUFF_NO_REINSTALL
 
-- Exact requested isolated CPython command parsed TOML successfully and printed `>=3.15,<3.16 py315`.
-- New test `test_py315_project_metadata_and_ruff_contract` checks distribution version, Ruff target, Ruff dev dependency and retained `pytest>=7.4`. Existing assertions were unchanged.
+- The existing-version path passes `m.version`, executable existence and `--version` before jumping to `:check_backend_autostart`; it does not take the install branch when all checks pass. Missing/older/unusable Ruff enters `:install_ruff`.
+
+## OPTIONAL_FAILURE_NONBLOCKING
+
+- The `:ruff_unavailable` label emits the exact optional-tool warning and jumps to `:check_backend_autostart`. Pip, executable-absence and failed `--version` paths all reach it. No fail-closed runtime dependency branch was weakened.
+
+## EXISTING_DEPENDENCY_PARITY
+
+- Existing mandatory runtime import check, requirements installation and error handling are unchanged. Both successful dependency paths now jump to `:check_ruff`, then proceed to the original backend/GUI startup labels. No startup command changed. No Python 3.10 reference was added.
 
 ## TARGETED_TEST_RESULTS
 
-- Exact four-module command: **80 passed, 0 failed, 0 skipped, 2 dependency deprecation warnings** in 14.72s. Warnings originated in installed FastMCP/Authlib, not changed code. Repository interpreter was CPython 3.15.2.
-- `git diff --check` was first run while the preceding D13 `walkthrough.md` was still present; it flagged trailing whitespace in that old report only. The current P13B report replaces that file. After replacing the old report and removing blank diff-context markers that would appear as trailing whitespace inside this report, the final `git diff --check` exited 0.
-
-## ANALYZED_SOURCE_SEMANTICS_UNCHANGED
-
-- No changes to `package_model.py`, `namespace_bound_model.py`, parser/indexer, fingerprints, cycle topology, warning suppression, LIVE/MCP code or process ownership. The metadata constraint applies to the package executing Contextor. The existing model's explicit analyzed-source target-version checks remain separate.
+- Exact two-module pytest command: **32 passed, 0 failed, 0 skipped, 2 installed-dependency deprecation warnings** in 6.45s. Existing launcher guard tests and the new literal Ruff source-contract test passed. No full suite.
+- `git diff --check` exited 0 with only working-copy line-ending notices. The launcher was not run, no Ruff was installed manually or automatically during this task, and no production Python module changed.
 
 ## MCP_POST_CHANGE_AUDIT
 
-- MCP target test context after change: revision **1122**, state_id `20261106_195021`, canonical_state=fresh, workspace_sync=verified, advisory_warning=null, LIVE provenance, graph/cycles fresh, cycle_semantics stale, syntax_errors=0, structural DFS cycles=16, active_warning_count=16, model_pass_count=0.
-- Changed test SHA-256 `859d478c5aab93d5b6110e1e78ad2e70a49ea415c393467c7f522a04fb9df5c6` exactly matches FileState. `pyproject.toml` disk SHA-256 `b550874cd1915cc48975246c8e98aba6393cfbd0887202b001b3d0a3c9fed6d4`; it has no Python FileState entry. TOML parsing and exact metadata test verify its content.
-- No FULL, update_file, backend restart, dependency installation, interpreter switch, commit/push/reset, warning-policy change or MODEL_PASS promotion.
+- Immediate MCP read after editing observed revision 1122 and `workspace_sync=out_of_sync` for the changed test; after the active watcher completed, read-only MCP reported revision **1123**, state_id `20261106_195021`, repo_id `ctx_8efc50d8`, canonical_state=fresh, workspace_sync=verified, advisory=null, LIVE provenance, graph/cycles fresh, cycle_semantics stale, syntax_errors=0, structural DFS cycles=16, active warnings=16, model_pass_count=0.
+- Changed test disk SHA-256 `5de787537a8483ebd507a14995904c4a66ace6b59b0edfc09f05e81ad9001bdb` equals FileState. BAT disk SHA-256 `d7abe672dc054704614c97548f57269100ce3e6862f6b260e8da382be47b9809`; BAT is not indexed in Python FileState.
+- No FULL, update_file, restart, interpreter switch, dependency installation, commit/push, or warning-policy change.
 
 ## REMAINING_UNKNOWN
 
-- Installed Ruff configuration recognition remains TOOL_NOT_VERIFIED because Ruff is absent. Active backend/Desktop loaded-code adoption was not assessed. Canonical cycle_semantics remains stale.
+- Actual Ruff installation/reuse at a subsequent normal launcher start is untested. Active backend/Desktop loaded-code adoption and cycle_semantics freshness are not certified by this BAT/test patch.
 
 ## FULL_DIFFS
 
-Complete actual diffs of the two task-modified files follow. `walkthrough.md` excluded from its own diff; pre-existing P13A diff excluded from P13B task diff.
-diff --git a/pyproject.toml b/pyproject.toml
-index 7e772d0..72e8506 100644
---- a/pyproject.toml
-+++ b/pyproject.toml
-@@ -3,7 +3,7 @@ name = "contextor"
- version = "1.1.0b0"
- description = "Static architectural analysis turning Python repositories into LLM-ready context."
- readme = "README.md"
--requires-python = ">=3.10"
-+requires-python = ">=3.15,<3.16"
- license = { file = "LICENSE" }
- dependencies = [
-     "orjson>=3.9",
-@@ -15,7 +15,7 @@ dependencies = [
- [project.optional-dependencies]
- dev = [
-     "pytest>=7.4",
--    "ruff>=0.5",
-+    "ruff>=0.17.0",
- ]
+Complete actual Git diffs for the two task-changed files follow. `walkthrough.md` excluded from its own diff.
+diff --git a/run_contextor.bat b/run_contextor.bat
+index 9df2cdc..e62a060 100644
+--- a/run_contextor.bat
++++ b/run_contextor.bat
+@@ -71,7 +71,7 @@ echo Checking dependencies...
+ if errorlevel 1 goto install_deps
 
- [project.scripts]
-@@ -41,7 +41,7 @@ markers = [
+ echo [OK] Dependencies are already installed.
+-goto check_backend_autostart
++goto check_ruff
 
- [tool.ruff]
- line-length = 100
--target-version = "py310"
-+target-version = "py315"
 
- [tool.ruff.lint]
- select = ["E", "F", "W", "I", "UP", "B"]
+ :install_deps
+@@ -88,6 +88,43 @@ if errorlevel 1 goto install_failed
+
+ echo [SUCCESS] Dependencies installed.
+ echo.
++goto check_ruff
++
++
++:check_ruff
++if exist "%PROJECT_DIR%\.contextor_py315_cutover.guard" goto cutover_blocked
++echo Checking Ruff development tool...
++
++"%VENV_PY%" -c "import importlib.metadata as m, re, sys; v=m.version('ruff'); p=re.fullmatch(r'(\d+)\.(\d+)\.(\d+)',v); sys.exit(0 if p and tuple(map(int,p.groups())) >= (0,17,0) else 1)" >nul 2>&1
++if errorlevel 1 goto install_ruff
++
++if not exist "%VENV_DIR%\Scripts\ruff.exe" goto install_ruff
++
++"%VENV_DIR%\Scripts\ruff.exe" --version >nul 2>&1
++if errorlevel 1 goto install_ruff
++
++echo [OK] Ruff >=0.17.0 is available.
++goto check_backend_autostart
++
++
++:install_ruff
++if exist "%PROJECT_DIR%\.contextor_py315_cutover.guard" goto cutover_blocked
++echo [INFO] Installing Ruff into the project virtual environment...
++
++"%VENV_PY%" -m pip install "ruff>=0.17.0"
++if errorlevel 1 goto ruff_unavailable
++
++if not exist "%VENV_DIR%\Scripts\ruff.exe" goto ruff_unavailable
++
++"%VENV_DIR%\Scripts\ruff.exe" --version >nul 2>&1
++if errorlevel 1 goto ruff_unavailable
++
++echo [SUCCESS] Ruff installed and verified.
++goto check_backend_autostart
++
++
++:ruff_unavailable
++echo [WARNING] Ruff is unavailable. Continuing without optional lint tooling.
+ goto check_backend_autostart
+
+
 diff --git a/tests/test_py315_launcher_migration_guard.py b/tests/test_py315_launcher_migration_guard.py
-index d91f082..01ca57b 100644
+index 01ca57b..c7a6010 100644
 --- a/tests/test_py315_launcher_migration_guard.py
 +++ b/tests/test_py315_launcher_migration_guard.py
-@@ -3,6 +3,7 @@
- import os
- import subprocess
- import sys
-+import tomllib
- from pathlib import Path
-
- import pytest
-@@ -79,3 +80,29 @@ def test_mcp_installer_uses_only_project_local_venv():
-     assert 'if not exist "%python_exe%"' in source
-     assert "python --version" not in source
-     assert "for /d %%d" not in source
+@@ -106,3 +106,38 @@ def test_py315_project_metadata_and_ruff_contract():
+         "pytest>=7.4"
+         in config["project"]["optional-dependencies"]["dev"]
+     )
 +
 +
-+def test_py315_project_metadata_and_ruff_contract():
-+    config = tomllib.loads(
-+        (ROOT / "pyproject.toml").read_text(
-+            encoding="utf-8"
-+        )
-+    )
++def test_launcher_optional_ruff_uses_project_venv():
++    source = (
++        ROOT / "run_contextor.bat"
++    ).read_text(encoding="utf-8").lower()
++
++    assert source.count("goto check_ruff") == 2
++    assert ":check_ruff\n" in source
++
++    assert "m.version('ruff')" in source
++    assert ">= (0,17,0)" in source
 +
 +    assert (
-+        config["project"]["requires-python"]
-+        == ">=3.15,<3.16"
-+    )
-+    assert (
-+        config["tool"]["ruff"]["target-version"]
-+        == "py315"
-+    )
-+    assert (
-+        "ruff>=0.17.0"
-+        in config["project"]["optional-dependencies"]["dev"]
-+    )
++        'if not exist "%venv_dir%\\scripts\\ruff.exe" '
++        'goto install_ruff'
++    ) in source
 +
 +    assert (
-+        "pytest>=7.4"
-+        in config["project"]["optional-dependencies"]["dev"]
++        '"%venv_py%" -m pip install "ruff>=0.17.0"'
++    ) in source
++
++    assert ":install_ruff\n" in source
++    assert ":ruff_unavailable\n" in source
++
++    optional_failure = source.split(
++        ":ruff_unavailable\n", 1
++    )[1].split(
++        ":check_backend_autostart\n", 1
++    )[0]
++
++    assert "goto check_backend_autostart" in optional_failure
++    assert "continuing without optional lint tooling" in (
++        optional_failure
 +    )
 
 ## FINAL_VERDICT
