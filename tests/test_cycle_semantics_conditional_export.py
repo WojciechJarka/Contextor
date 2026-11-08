@@ -146,7 +146,7 @@ def test_c26_closing_symbol_mismatch_unknown():
     assert _analyze(sources).status == "UNKNOWN"
 
 
-def test_c26_real_contextor_sources_without_import():
+def test_c26_real_contextor_chain_has_no_eager_return_hop():
     root = (
         Path(__file__).resolve().parents[1]
         / "contextor"
@@ -187,14 +187,9 @@ def test_c26_real_contextor_sources_without_import():
         "run_repo_generator",
     )
 
-    assert result.status == (
-        "CONDITIONAL_DELAYED_REEXPORT"
-    )
-    assert result.provider_definition_line > (
-        result.hops[1].line
-    )
-    assert result.prefix_execution_status == (
-        "UNVERIFIED_TRANSITIVE_PREFIX"
+    assert result.status == "UNKNOWN"
+    assert result.reason == (
+        "IMPORT_HOP_NOT_UNIQUELY_PROVED"
     )
     assert result.runtime_execution_status == (
         "UNKNOWN_NOT_EVALUATED"

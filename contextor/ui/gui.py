@@ -40,7 +40,6 @@ from contextor.core.repository_identity import (
     read_repository_identity,
 )
 from contextor.core.paths import prune_startup_caches
-from contextor.repo_generator import run_repo_generator
 from contextor.mcp_backend_control import (
     BackendOwnerAlreadyClaimed,
     BackendOwnerInstanceRevoked,
@@ -387,6 +386,7 @@ class ContextorGUI:
             self.repo_builder_win.lift()
             self.repo_builder_win.focus_force()
         else:
+            from contextor.repo_generator import run_repo_generator
             self.repo_builder_win = run_repo_generator(parent=self.root)
 
     def open_parser_window(self):

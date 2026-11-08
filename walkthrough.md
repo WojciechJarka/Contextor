@@ -1,157 +1,262 @@
-# C16-B03-P1D3-P13B-R1 — optional Ruff in project launcher
+# CONTEXTOR C16-B03-P1D3-P14-R18 — exact fix
 
-## HEAD_BEFORE_AFTER
+## PREFLIGHT
 
-- Preflight Contextor MCP: revision 1122, state_id `20261106_195021`, repo_id `ctx_8efc50d8`, canonical_state=fresh, workspace_sync=verified, LIVE provenance, graph/cycles fresh, cycle_semantics stale, 16 structural DFS cycles, 16 active warnings, model_pass_count=0. Repository `.venv` is CPython 3.15.2.
-- HEAD before/after `924d69e6e48b367f4e9848e1e9ce9339c7f57059`; pre-edit worktree clean, no Git mutation. P13A native 3.15 test and P13B metadata/test changes were present. Target test pre-edit SHA-256 matched FileState; BAT is outside Python FileState.
-- Exact target paths, matching anchors and planned diff summary were recorded in this `walkthrough.md` before edits: `run_contextor.bat:73-74`, `:89-91`, `:94`, and EOF of `tests/test_py315_launcher_migration_guard.py`.
+- Contextor MCP before edit: LIVE canonical revision 1124, canonical_state=fresh, graph/cycles/cycle_semantics=fresh, 2 cyclic SCCs and 16 structural DFS paths. The three target module contexts (`contextor.ui.gui`, `contextor.repo_generator.__init__`, `contextor.repo_generator.main`) each reported workspace_sync=verified and revision 1124. Read-only snapshot metadata: state_id `20261108_132120`, repo_id `ctx_8efc50d8`, root `C:\Temp\Contextor_Repo`.
+- Git HEAD before/after `38dcc9b3eb7c0aa31c3f94aefdcbe6c566199e4c`; before edit only D17 `walkthrough.md` was modified. Repository interpreter CPython 3.15.2.
+- Exact anchors matched at `contextor/ui/gui.py:43,383-390`, `contextor/repo_generator/__init__.py:1`, `contextor/repo_generator/main.py:522`. `rg` found no direct consumer or monkeypatch of module-level `contextor.ui.gui.run_repo_generator`; only its original import and use within `open_repo_builder`. No compatibility change was added.
 
-## FILES_CHANGED
+## EXACT_PRODUCTION_DIFF
 
-- `run_contextor.bat`
-- `tests/test_py315_launcher_migration_guard.py`
-- `walkthrough.md` (report, excluded from its own diff)
+- Removed the eager `from contextor.repo_generator import run_repo_generator` in `contextor/ui/gui.py` and placed precisely the same import in the `else` branch of `ContextorGUI.open_repo_builder`, immediately before the call. No other production file changed.
 
-## RUFF_VERSION_CHECK
+## EXACT_TEST_DIFFS
 
-- Literal new `:check_ruff` block checks project-local `importlib.metadata.version('ruff')` against parsed numeric `>= (0,17,0)`, confirms `%VENV_DIR%\Scripts\ruff.exe` exists and that `--version` exits successfully. `pyproject.toml` still declares `ruff>=0.17.0` and `target-version=py315`.
-- This is source-contract evidence. The launcher was intentionally not executed, so actual later normal-start behavior remains unobserved.
-
-## LOCAL_VENV_INSTALLATION
-
-- Literal `:install_ruff` block uses only `"%VENV_PY%" -m pip install "ruff>=0.17.0"`; the executable check is under `%VENV_DIR%\Scripts`. No global installer or manual installation was run. The cutover guard appears before the new check and installation labels.
-
-## EXISTING_RUFF_NO_REINSTALL
-
-- The existing-version path passes `m.version`, executable existence and `--version` before jumping to `:check_backend_autostart`; it does not take the install branch when all checks pass. Missing/older/unusable Ruff enters `:install_ruff`.
-
-## OPTIONAL_FAILURE_NONBLOCKING
-
-- The `:ruff_unavailable` label emits the exact optional-tool warning and jumps to `:check_backend_autostart`. Pip, executable-absence and failed `--version` paths all reach it. No fail-closed runtime dependency branch was weakened.
-
-## EXISTING_DEPENDENCY_PARITY
-
-- Existing mandatory runtime import check, requirements installation and error handling are unchanged. Both successful dependency paths now jump to `:check_ruff`, then proceed to the original backend/GUI startup labels. No startup command changed. No Python 3.10 reference was added.
+- Renamed the one real-source C26 test and replaced only its final assertions with `UNKNOWN`, `IMPORT_HOP_NOT_UNIQUELY_PROVED`, and `UNKNOWN_NOT_EVALUATED`. Synthetic positive C26/C28 fixtures were not changed.
+- Added the auditor-specified `tests/test_cycle_semantics_scc2_import_order_regression.py` verbatim: two independent `-I -B` import-order subprocess cases with public export assertions, plus a source AST assertion that the GUI import is method scoped.
 
 ## TARGETED_TEST_RESULTS
 
-- Exact two-module pytest command: **32 passed, 0 failed, 0 skipped, 2 installed-dependency deprecation warnings** in 6.45s. Existing launcher guard tests and the new literal Ruff source-contract test passed. No full suite.
-- `git diff --check` exited 0 with only working-copy line-ending notices. The launcher was not run, no Ruff was installed manually or automatically during this task, and no production Python module changed.
+- Command: `C:\Temp\Contextor_Repo\.venv\Scripts\python.exe -B -m pytest -q -rs tests/test_cycle_semantics_scc2_import_order_regression.py tests/test_cycle_semantics_conditional_export.py tests/test_cycle_semantics_conditional_discovery.py` with `PYTHONDONTWRITEBYTECODE=1`.
+- Result: **30 passed in 27.83s**, 0 failures. No full suite.
+
+## TWO_FRESH_IMPORT_ORDERS
+
+- The new regression ran `contextor.repo_generator` and `contextor.ui` in distinct fresh CPython 3.15 subprocesses. Both passed with returncode 0 under the targeted test. D17 had observed the former fail at `contextor/ui/gui.py:43` before this patch.
+
+## PUBLIC_EXPORT_PARITY
+
+- Each fresh child additionally imported `run_repo_generator` from `contextor.repo_generator` and `run` from `contextor.ui` and asserted both callable. Both parametrized cases passed. Package initializer exports and provider definition were not edited.
 
 ## MCP_POST_CHANGE_AUDIT
 
-- Immediate MCP read after editing observed revision 1122 and `workspace_sync=out_of_sync` for the changed test; after the active watcher completed, read-only MCP reported revision **1123**, state_id `20261106_195021`, repo_id `ctx_8efc50d8`, canonical_state=fresh, workspace_sync=verified, advisory=null, LIVE provenance, graph/cycles fresh, cycle_semantics stale, syntax_errors=0, structural DFS cycles=16, active warnings=16, model_pass_count=0.
-- Changed test disk SHA-256 `5de787537a8483ebd507a14995904c4a66ace6b59b0edfc09f05e81ad9001bdb` equals FileState. BAT disk SHA-256 `d7abe672dc054704614c97548f57269100ce3e6862f6b260e8da382be47b9809`; BAT is not indexed in Python FileState.
-- No FULL, update_file, restart, interpreter switch, dependency installation, commit/push, or warning-policy change.
+- Watcher incorporated the edits into LIVE revision **1127**. Target `get_module_context(contextor.ui.gui)` now reports canonical_state=fresh, workspace_sync=verified, graph/cycles=fresh, and the `contextor.repo_generator.__init__` outbound hard dependency retained. Canonical snapshot metadata and FileState are revision 1127, state_id `20261108_132120`, baseline trusted.
+- `cycle_semantics` is **stale**, invalidation reason `SOURCE_CHANGED`; MCP's current semantic diagnostic reports the same and does not expose fresh lexical activation. No FULL or update_file was used to force regeneration.
+- Direct read-only replay of the existing `analyze_cyclic_import_sites` and `analyze_cycle_activation_view` on current canonical hard_edges and 53 FileState-matching SCC sources found the GUI→repo_generator edge at `gui.py:389:12`, match kind `FROM_BASE`, activation `FUNCTION_SCOPED`, guarded by the `else` branch of the builder-window check at line 385. It found no `MODULE_TOP_LEVEL` site for that edge. Existing `discover_conditional_reexports` replay returned 0 candidates and complete bounded selection. These are current source/graph diagnostic replays, **not** a fresh published canonical cycle_semantics family.
+- Current MCP architecture: canonical revision 1127, syntax errors 0, structural DFS paths 16, cycle_semantics stale. Name-collision count 17 was observed (preflight 16); no collision diagnosis or unrelated change was made under this exact task.
 
-## REMAINING_UNKNOWN
+## STRUCTURAL_CYCLE_PARITY
 
-- Actual Ruff installation/reuse at a subsequent normal launcher start is untested. Active backend/Desktop loaded-code adoption and cycle_semantics freshness are not certified by this BAT/test patch.
+- Current canonical graph replay: SCC1 44 members/110 internal hard edges, SCC2 9 members/16 internal hard edges. MCP current DFS structural path count remains **16** and graph/cycles are fresh. The GUI→repo_generator hard edge is still present. Structural topology was not intentionally changed.
+
+## LEXICAL_ACTIVATION_BEFORE_AFTER
+
+- Before: canonical revision 1124 `gui.py:43:0`, `MODULE_TOP_LEVEL`, `FROM_BASE`; D16 conditional group had 3 eager return witnesses.
+- After: current FileState-bound read-only replay at revision 1127 `gui.py:389:12`, `FUNCTION_SCOPED`, `FROM_BASE`, `IF/ELSE` guard at line 385; zero eager conditional candidates in replay. The canonical published semantic family remains stale, so authoritative post-change lexical activation cannot be certified.
+
+## SOURCE_HASH_PARITY
+
+- Current disk = FileState SHA-256: `contextor/ui/gui.py` `9e0a9319e140f682c4e66d232d1d6fc89c48a03a8234a800f6a413191c347315`; `tests/test_cycle_semantics_conditional_export.py` `012aa20b9aac3d3b43c8e762f846eb12873f145f53a00183b280bcc90ae7d07b`; `tests/test_cycle_semantics_scc2_import_order_regression.py` `5c950696599f1628161ae6d8cdeb6de4525eacfd74da5602853ee344b26d2b7c`. All 53 selected SCC sources matched current FileState for the read-only replay. MCP target workspace_sync=verified; untargeted architecture workspace_sync=unverified by contract.
+
+## FILES_CHANGED
+
+- `contextor/ui/gui.py`
+- `tests/test_cycle_semantics_conditional_export.py`
+- `tests/test_cycle_semantics_scc2_import_order_regression.py`
+- `walkthrough.md` (report only)
 
 ## FULL_DIFFS
 
-Complete actual Git diffs for the two task-changed files follow. `walkthrough.md` excluded from its own diff.
-diff --git a/run_contextor.bat b/run_contextor.bat
-index 9df2cdc..e62a060 100644
---- a/run_contextor.bat
-+++ b/run_contextor.bat
-@@ -71,7 +71,7 @@ echo Checking dependencies...
- if errorlevel 1 goto install_deps
+Actual complete source/test diffs follow. `walkthrough.md` is excluded from its own diff.
 
- echo [OK] Dependencies are already installed.
--goto check_backend_autostart
-+goto check_ruff
+```diff
+diff --git a/contextor/ui/gui.py b/contextor/ui/gui.py
+index f855fad..e6f95e0 100644
+--- a/contextor/ui/gui.py
++++ b/contextor/ui/gui.py
+@@ -40,7 +40,6 @@ from contextor.core.repository_identity import (
+     read_repository_identity,
+ )
+ from contextor.core.paths import prune_startup_caches
+-from contextor.repo_generator import run_repo_generator
+ from contextor.mcp_backend_control import (
+     BackendOwnerAlreadyClaimed,
+     BackendOwnerInstanceRevoked,
+@@ -387,6 +386,7 @@ class ContextorGUI:
+             self.repo_builder_win.lift()
+             self.repo_builder_win.focus_force()
+         else:
++            from contextor.repo_generator import run_repo_generator
+             self.repo_builder_win = run_repo_generator(parent=self.root)
 
-
- :install_deps
-@@ -88,6 +88,43 @@ if errorlevel 1 goto install_failed
-
- echo [SUCCESS] Dependencies installed.
- echo.
-+goto check_ruff
-+
-+
-+:check_ruff
-+if exist "%PROJECT_DIR%\.contextor_py315_cutover.guard" goto cutover_blocked
-+echo Checking Ruff development tool...
-+
-+"%VENV_PY%" -c "import importlib.metadata as m, re, sys; v=m.version('ruff'); p=re.fullmatch(r'(\d+)\.(\d+)\.(\d+)',v); sys.exit(0 if p and tuple(map(int,p.groups())) >= (0,17,0) else 1)" >nul 2>&1
-+if errorlevel 1 goto install_ruff
-+
-+if not exist "%VENV_DIR%\Scripts\ruff.exe" goto install_ruff
-+
-+"%VENV_DIR%\Scripts\ruff.exe" --version >nul 2>&1
-+if errorlevel 1 goto install_ruff
-+
-+echo [OK] Ruff >=0.17.0 is available.
-+goto check_backend_autostart
-+
-+
-+:install_ruff
-+if exist "%PROJECT_DIR%\.contextor_py315_cutover.guard" goto cutover_blocked
-+echo [INFO] Installing Ruff into the project virtual environment...
-+
-+"%VENV_PY%" -m pip install "ruff>=0.17.0"
-+if errorlevel 1 goto ruff_unavailable
-+
-+if not exist "%VENV_DIR%\Scripts\ruff.exe" goto ruff_unavailable
-+
-+"%VENV_DIR%\Scripts\ruff.exe" --version >nul 2>&1
-+if errorlevel 1 goto ruff_unavailable
-+
-+echo [SUCCESS] Ruff installed and verified.
-+goto check_backend_autostart
-+
-+
-+:ruff_unavailable
-+echo [WARNING] Ruff is unavailable. Continuing without optional lint tooling.
- goto check_backend_autostart
+     def open_parser_window(self):
+diff --git a/tests/test_cycle_semantics_conditional_export.py b/tests/test_cycle_semantics_conditional_export.py
+index 9914399..6690d40 100644
+--- a/tests/test_cycle_semantics_conditional_export.py
++++ b/tests/test_cycle_semantics_conditional_export.py
+@@ -146,7 +146,7 @@ def test_c26_closing_symbol_mismatch_unknown():
+     assert _analyze(sources).status == "UNKNOWN"
 
 
-diff --git a/tests/test_py315_launcher_migration_guard.py b/tests/test_py315_launcher_migration_guard.py
-index 01ca57b..c7a6010 100644
---- a/tests/test_py315_launcher_migration_guard.py
-+++ b/tests/test_py315_launcher_migration_guard.py
-@@ -106,3 +106,38 @@ def test_py315_project_metadata_and_ruff_contract():
-         "pytest>=7.4"
-         in config["project"]["optional-dependencies"]["dev"]
+-def test_c26_real_contextor_sources_without_import():
++def test_c26_real_contextor_chain_has_no_eager_return_hop():
+     root = (
+         Path(__file__).resolve().parents[1]
+         / "contextor"
+@@ -187,14 +187,9 @@ def test_c26_real_contextor_sources_without_import():
+         "run_repo_generator",
      )
+
+-    assert result.status == (
+-        "CONDITIONAL_DELAYED_REEXPORT"
+-    )
+-    assert result.provider_definition_line > (
+-        result.hops[1].line
+-    )
+-    assert result.prefix_execution_status == (
+-        "UNVERIFIED_TRANSITIVE_PREFIX"
++    assert result.status == "UNKNOWN"
++    assert result.reason == (
++        "IMPORT_HOP_NOT_UNIQUELY_PROVED"
+     )
+     assert result.runtime_execution_status == (
+         "UNKNOWN_NOT_EVALUATED"
+diff --git a/tests/test_cycle_semantics_scc2_import_order_regression.py b/tests/test_cycle_semantics_scc2_import_order_regression.py
+new file mode 100644
+index 0000000..5ea9f98
+--- /dev/null
++++ b/tests/test_cycle_semantics_scc2_import_order_regression.py
+@@ -0,0 +1,138 @@
++from __future__ import annotations
++
++import ast
++import json
++import subprocess
++import sys
++from pathlib import Path
++
++import pytest
 +
 +
-+def test_launcher_optional_ruff_uses_project_venv():
-+    source = (
-+        ROOT / "run_contextor.bat"
-+    ).read_text(encoding="utf-8").lower()
++ROOT = Path(__file__).resolve().parents[1]
 +
-+    assert source.count("goto check_ruff") == 2
-+    assert ":check_ruff\n" in source
++CHILD_CODE = r"""
++import importlib
++import json
++import sys
++import traceback
 +
-+    assert "m.version('ruff')" in source
-+    assert ">= (0,17,0)" in source
++entry = sys.argv[1]
++root = sys.argv[2]
++sys.path.insert(0, root)
 +
-+    assert (
-+        'if not exist "%venv_dir%\\scripts\\ruff.exe" '
-+        'goto install_ruff'
-+    ) in source
++try:
++    importlib.import_module(entry)
 +
-+    assert (
-+        '"%venv_py%" -m pip install "ruff>=0.17.0"'
-+    ) in source
++    from contextor.repo_generator import run_repo_generator
++    from contextor.ui import run
 +
-+    assert ":install_ruff\n" in source
-+    assert ":ruff_unavailable\n" in source
++    if not callable(run_repo_generator):
++        raise AssertionError("Generator export is not callable")
 +
-+    optional_failure = source.split(
-+        ":ruff_unavailable\n", 1
-+    )[1].split(
-+        ":check_backend_autostart\n", 1
-+    )[0]
++    if not callable(run):
++        raise AssertionError("UI export is not callable")
 +
-+    assert "goto check_backend_autostart" in optional_failure
-+    assert "continuing without optional lint tooling" in (
-+        optional_failure
++except BaseException as exc:
++    print(json.dumps({
++        "entry": entry,
++        "status": "EXCEPTION",
++        "exception_type": type(exc).__name__,
++        "exception_message": str(exc),
++        "traceback": traceback.format_exc(),
++    }, ensure_ascii=False))
++    sys.exit(1)
++
++print(json.dumps({
++    "entry": entry,
++    "status": "PASS",
++    "generator_export": True,
++    "ui_export": True,
++}, ensure_ascii=False))
++"""
++
++
++@pytest.mark.parametrize(
++    "entry",
++    (
++        "contextor.repo_generator",
++        "contextor.ui",
++    ),
++)
++def test_scc2_fresh_import_order(entry):
++    completed = subprocess.run(
++        [
++            sys.executable,
++            "-I",
++            "-B",
++            "-c",
++            CHILD_CODE,
++            entry,
++            str(ROOT),
++        ],
++        cwd=str(ROOT),
++        capture_output=True,
++        text=True,
++        encoding="utf-8",
++        errors="replace",
++        timeout=45,
++        check=False,
 +    )
++
++    assert completed.returncode == 0, (
++        f"entry={entry}\n"
++        f"stdout={completed.stdout}\n"
++        f"stderr={completed.stderr}"
++    )
++
++    result = json.loads(completed.stdout.strip())
++
++    assert result == {
++        "entry": entry,
++        "status": "PASS",
++        "generator_export": True,
++        "ui_export": True,
++    }
++
++
++def test_scc2_gui_generator_import_remains_method_scoped():
++    path = ROOT / "contextor" / "ui" / "gui.py"
++    tree = ast.parse(path.read_text(encoding="utf-8"))
++
++    def matching_import(node):
++        return (
++            isinstance(node, ast.ImportFrom)
++            and node.module == "contextor.repo_generator"
++            and any(
++                alias.name == "run_repo_generator"
++                for alias in node.names
++            )
++        )
++
++    assert not any(
++        matching_import(node)
++        for node in tree.body
++    )
++
++    classes = [
++        node
++        for node in tree.body
++        if isinstance(node, ast.ClassDef)
++        and node.name == "ContextorGUI"
++    ]
++    assert len(classes) == 1
++
++    methods = [
++        node
++        for node in classes[0].body
++        if isinstance(node, ast.FunctionDef)
++        and node.name == "open_repo_builder"
++    ]
++    assert len(methods) == 1
++
++    imports = [
++        node
++        for node in ast.walk(methods[0])
++        if matching_import(node)
++    ]
++    assert len(imports) == 1
+```
 
 ## FINAL_VERDICT
 
-PASS
+**BLOCKED** — the literal fix, both fresh-import orders, and all 30 targeted tests pass; the current canonical graph retains the hard edge and 16 paths. The mandatory authoritative lexical-activation audit cannot meet the PASS gate while the published `cycle_semantics` family is stale (`SOURCE_CHANGED`). The current source/graph replay is explicitly distinguished from canonical semantic freshness. No FULL, update_file or restart was performed.
