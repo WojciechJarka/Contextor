@@ -1430,3 +1430,77 @@ def test_p1d3_d1_deterministic_events_and_ast_unchanged():
     assert first.events == second.events
     assert first.outcome == "EARLY_BINDING_HAZARD"
     assert {key: ast.dump(tree, include_attributes=True) for key, tree in sources.items()} == before
+
+
+def test_p10_eager_contract_unchanged_and_lazy_opt_in():
+    source = {
+        "pkg.__init__": ast.parse("pass"),
+        "pkg.a": ast.parse(
+            "def later():\n"
+            "    import pkg.bad\n"
+            "value = 1\n"
+        ),
+        "pkg.bad": ast.parse(
+            "@unknown_decorator\n"
+            "class Bad:\n"
+            "    pass\n"
+        ),
+    }
+
+    eager = evaluate_package_import_order(
+        source,
+        "pkg.a",
+        annotation_semantics="DEFERRED",
+    )
+    lazy = evaluate_package_import_order(
+        source,
+        "pkg.a",
+        annotation_semantics="DEFERRED",
+        _compile_on_first_import=True,
+    )
+
+    assert eager.outcome == "UNKNOWN"
+    assert eager.target_module == "pkg.bad"
+    assert eager.events == ()
+
+    assert lazy.outcome == "MODEL_PASS"
+    assert not any(
+        event.operation == "START_IMPORT"
+        and event.target == "pkg.bad"
+        for event in lazy.events
+    )
+
+
+def test_p10_private_mode_invalid_flag_fails_closed():
+    sources = {
+        "pkg.__init__": ast.parse("pass"),
+        "pkg.a": ast.parse("pass"),
+    }
+
+    for invalid in (None, 1, "True"):
+        result = evaluate_package_import_order(
+            sources,
+            "pkg.a",
+            _compile_on_first_import=invalid,
+        )
+        assert result.outcome == "UNKNOWN"
+
+
+def test_p10_private_mode_rejects_session_combination():
+    from contextor.core.cycle_semantics.package_model import (
+        _PackageSourceSession,
+    )
+
+    sources = {
+        "pkg.__init__": ast.parse("pass"),
+        "pkg.a": ast.parse("pass"),
+    }
+
+    result = evaluate_package_import_order(
+        sources,
+        "pkg.a",
+        _session=_PackageSourceSession(),
+        _compile_on_first_import=True,
+    )
+
+    assert result.outcome == "UNKNOWN"

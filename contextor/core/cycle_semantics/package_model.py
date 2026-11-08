@@ -917,6 +917,7 @@ def evaluate_package_import_order(
     *,
     _session: _PackageSourceSession | None = None,
     annotation_semantics: str | None = None,
+    _compile_on_first_import: bool = False,
 ) -> PackageImportAssessment:
     """Simulate a restricted closed regular-package source set.
 
@@ -946,6 +947,11 @@ def evaluate_package_import_order(
         or annotation_semantics not in {
             None, "STOCK_EAGER", "STRINGIFIED", "DEFERRED",
         }
+        or type(_compile_on_first_import) is not bool
+        or (
+            _compile_on_first_import
+            and _session is not None
+        )
     ):
         return result("UNKNOWN")
 
@@ -1080,6 +1086,7 @@ def evaluate_package_import_order(
         return result("UNKNOWN", entry_module)
 
     programs: dict[str, list[_Step]] = {}
+    pending_programs: set[str] = set()
 
     for name, tree in logical_sources.items():
         if not valid_chain(name):
@@ -1094,6 +1101,10 @@ def evaluate_package_import_order(
         )
         if annotation_semantics == "STRINGIFIED" and not has_future_annotations:
             return result("UNKNOWN", name)
+        if _compile_on_first_import:
+            programs[name] = []
+            pending_programs.add(name)
+            continue
         typing_guard = recognize_typing_guard(
             indexed_sources[indexed_id],
             frozenset(indexed_sources),
@@ -1132,7 +1143,9 @@ def evaluate_package_import_order(
     # A package may prebind a same-named attribute before a later
     # from-import; the attribute takes priority. Keep more complex
     # package-owned import/rebinding sequences indeterminate.
-    for package in packages:
+    for package in (
+        packages if not _compile_on_first_import else ()
+    ):
         children = {
             name.rsplit(".", 1)[1]
             for name in programs
@@ -1214,6 +1227,86 @@ def evaluate_package_import_order(
             return result("UNKNOWN")
 
         module, index = frames[-1]
+
+        if module in pending_programs:
+            tree = logical_sources[module]
+            indexed_id = nodes[module].indexed_module_ids[0]
+
+            has_future_annotations = any(
+                isinstance(statement, ast.ImportFrom)
+                and statement.module == "__future__"
+                and any(
+                    alias.name == "annotations"
+                    for alias in statement.names
+                )
+                for statement in tree.body
+            )
+
+            typing_guard = recognize_typing_guard(
+                indexed_sources[indexed_id],
+                frozenset(indexed_sources),
+            )
+
+            program = _compile(
+                tree,
+                module,
+                module in packages,
+                typing_guard=typing_guard,
+                annotation_semantics=(
+                    "STRINGIFIED"
+                    if has_future_annotations
+                    else annotation_semantics
+                ),
+            )
+
+            if program is None:
+                return result("UNKNOWN", module)
+
+            if module in packages:
+                children = {
+                    name.rsplit(".", 1)[1]
+                    for name in programs
+                    if (
+                        "." in name
+                        and name.rsplit(".", 1)[0] == module
+                    )
+                }
+
+                if any(
+                    step.op in {
+                        "DEFINE_FUNCTION",
+                        "DEFINE_OPAQUE_FUNCTION",
+                        "DEFINE_PASSIVE_CLASS",
+                    }
+                    and step.binding in children
+                    for step in program
+                ):
+                    return result("UNKNOWN", module)
+
+                writes_child = any(
+                    step.binding in children
+                    and (
+                        step.op in {"BIND", "ALIAS"}
+                        or (
+                            step.op == "FROM"
+                            and step.target != module
+                        )
+                    )
+                    for step in program
+                )
+
+                if writes_child and any(
+                    step.op in {
+                        "IMPORT",
+                        "FROM",
+                        "CALL_FUNCTION",
+                    }
+                    for step in program
+                ):
+                    return result("UNKNOWN", module)
+
+            programs[module] = list(program)
+            pending_programs.remove(module)
 
         steps = (
             (_Step("IMPORT", entry_module, binding=None),)
@@ -2102,6 +2195,7 @@ def evaluate_conditional_namespace_import_order(
         augmented,
         entry_module,
         annotation_semantics=annotation_mode,
+        _compile_on_first_import=True,
     )
 
     conditional_outcomes = {

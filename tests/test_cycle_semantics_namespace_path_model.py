@@ -420,6 +420,230 @@ def test_g18_p2_p5_unlisted_shadowing_source_unknown():
     )
 
 
+def _p10_assess(sources, entry="ns.a"):
+    paths = frozenset(
+        module.replace(".", "/") + ".py"
+        for module in sources
+    )
+
+    return evaluate_conditional_namespace_import_order(
+        sources,
+        entry,
+        (SearchPortion("root", paths),),
+        target_python_version=(3, 15),
+    )
+
+
+def test_p10_deferred_unreached_decorator_does_not_block():
+    sources = {
+        "ns.a": ast.parse(
+            "def later():\n"
+            "    import ns.unused\n"
+            "value = 1\n"
+        ),
+        "ns.unused": ast.parse(
+            "@unknown_decorator\n"
+            "class Bad:\n"
+            "    pass\n"
+        ),
+    }
+
+    before = {
+        name: ast.dump(tree, include_attributes=True)
+        for name, tree in sources.items()
+    }
+
+    first = _p10_assess(sources)
+    second = _p10_assess(sources)
+
+    assert first == second
+    assert first.outcome == "CONDITIONAL_MODEL_PASS"
+    assert first.model_assessment is not None
+
+    assert not any(
+        event.operation == "START_IMPORT"
+        and event.target == "ns.unused"
+        for event in first.model_assessment.events
+    )
+
+    assert before == {
+        name: ast.dump(tree, include_attributes=True)
+        for name, tree in sources.items()
+    }
+
+
+def test_p10_reached_decorated_class_still_unknown():
+    sources = {
+        "ns.a": ast.parse("import ns.bad"),
+        "ns.bad": ast.parse(
+            "@unknown_decorator\n"
+            "class Bad:\n"
+            "    pass\n"
+        ),
+    }
+
+    result = _p10_assess(sources)
+
+    assert result.outcome == "UNKNOWN"
+    assert result.reason == "RESTRICTED_MODEL_UNKNOWN"
+    assert result.model_assessment is not None
+    assert result.model_assessment.target_module == "ns.bad"
+
+    assert any(
+        event.operation == "START_IMPORT"
+        and event.target == "ns.bad"
+        for event in result.model_assessment.events
+    )
+
+
+def test_p10_from_child_reached_decorator_still_unknown():
+    sources = {
+        "ns.a": ast.parse("from ns import bad"),
+        "ns.bad": ast.parse(
+            "@unknown_decorator\n"
+            "class Bad:\n"
+            "    pass\n"
+        ),
+    }
+
+    result = _p10_assess(sources)
+
+    assert result.outcome == "UNKNOWN"
+    assert result.model_assessment is not None
+    assert result.model_assessment.target_module == "ns.bad"
+
+
+def test_p10_regular_parent_initializer_not_skipped():
+    sources = {
+        "pkg.__init__": ast.parse(
+            "@unknown_decorator\n"
+            "class Bad:\n"
+            "    pass\n"
+        ),
+        "pkg.ns.a": ast.parse("pass"),
+    }
+
+    result = _p10_assess(
+        sources,
+        entry="pkg.ns.a",
+    )
+
+    assert result.outcome == "UNKNOWN"
+    assert result.model_assessment is not None
+    assert result.model_assessment.target_module == "pkg"
+
+
+def test_p10_unselected_false_branch_remains_unvisited():
+    sources = {
+        "ns.a": ast.parse(
+            "if False:\n"
+            "    import ns.bad\n"
+            "value = 1\n"
+        ),
+        "ns.bad": ast.parse(
+            "@unknown_decorator\n"
+            "class Bad:\n"
+            "    pass\n"
+        ),
+    }
+
+    result = _p10_assess(sources)
+
+    assert result.outcome == "CONDITIONAL_MODEL_PASS"
+
+
+def test_p10_compile_invalid_unreached_source_fails_closed():
+    sources = {
+        "ns.a": ast.parse(
+            "def later():\n"
+            "    import ns.bad\n"
+        ),
+        "ns.bad": ast.parse(
+            "def broken():\n"
+            "    break\n"
+        ),
+    }
+
+    result = _p10_assess(sources)
+
+    assert result.outcome == "UNKNOWN"
+    assert result.model_assessment is not None
+    assert result.model_assessment.target_module == "ns.bad"
+    assert result.model_assessment.events == ()
+
+
+def test_p10_lazy_package_child_shadow_remains_unknown():
+    sources = {
+        "pkg.__init__": ast.parse(
+            "def child():\n"
+            "    pass\n"
+        ),
+        "pkg.ns.a": ast.parse(
+            "def later():\n"
+            "    import pkg.child\n"
+        ),
+        "pkg.child": ast.parse("pass"),
+    }
+
+    result = _p10_assess(
+        sources,
+        entry="pkg.ns.a",
+    )
+
+    assert result.outcome == "UNKNOWN"
+    assert result.model_assessment is not None
+    assert result.model_assessment.target_module == "pkg"
+
+
+def test_p10_early_binding_hazard_is_not_hidden():
+    sources = {
+        "ns.a": ast.parse(
+            "from ns.b import ready\n"
+            "ready = 1\n"
+            "def later():\n"
+            "    import ns.unused\n"
+        ),
+        "ns.b": ast.parse(
+            "from ns.a import ready\n"
+        ),
+        "ns.unused": ast.parse(
+            "@unknown_decorator\n"
+            "class Bad:\n"
+            "    pass\n"
+        ),
+    }
+
+    result = _p10_assess(sources)
+
+    assert result.outcome == (
+        "CONDITIONAL_EARLY_BINDING_HAZARD"
+    )
+    assert result.model_assessment is not None
+    assert result.model_assessment.outcome == (
+        "EARLY_BINDING_HAZARD"
+    )
+    assert any(
+        event.operation == "EARLY_BINDING_HAZARD"
+        for event in result.model_assessment.events
+    )
+
+
+def test_p10_reached_external_import_still_unknown():
+    sources = {
+        "ns.a": ast.parse(
+            "import missing_external_xyz\n"
+        ),
+    }
+
+    result = _p10_assess(sources)
+
+    assert result.outcome == "UNKNOWN"
+    assert result.model_assessment is not None
+    assert result.model_assessment.target_module == (
+        "missing_external_xyz"
+    )
+
+
 def _p9_annotation_sources(code):
     return {"ns.a": ast.parse(code)}
 

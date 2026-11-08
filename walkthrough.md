@@ -1,84 +1,545 @@
-# C16-B03-P1D3G18-P2-D10 — restricted model precompilation and decorator boundary
+# C16-B03-P1D3G18-P2-P10 — compile restricted programs on first modeled import
 
-## CURRENT_CANONICAL_STATE
+## HEAD_BEFORE_AFTER
 
-- DIRECT_EVIDENCE — Contextor MCP `get_module_context` for `package_model`, `namespace_bound_model`, `full_analysis_lease`, `facade`, and `scenarios`: canonical revision **1109**, canonical_state=fresh, workspace_sync=verified, provenance=live, advisory_warning=null, graph/cycles fresh, cycle_semantics=stale, syntax_errors=0, structural DFS cycles=16, active_warning_count=16, model_pass_count=0. The MCP freshness envelope is source/index evidence, not proof of loaded runtime code.
-- DIRECT_EVIDENCE — metadata-selected generation: state_id `20261106_195021`, repo_id `ctx_8efc50d8`, root `C:\Temp\Contextor_Repo`, FileState `file_state.r1109.67d19cdfd16d4a2eb4cf494ba6cc9523.json`. FileState-file SHA-256 `fe1f3c5666c4e97fc21ba83d615b4ea25ae4b2d9d2619a4eb974c08207995c12`; its embedded revision/state_id match metadata.
-- DIRECT_EVIDENCE — repository interpreter Python 3.15.2. Git HEAD `3e4e3dfb7c57fba1ef6b1de64cf79bfb8f9cdb45`; worktree clean before this report overwrite. The previous P9 changes are in current HEAD, not merely an uncommitted worktree assumption.
+- Before and after: `15147701b1ad401900a4eed1d9cd6dd7ded6353d`. Worktree clean before P10. No commit, push or reset.
 
-## REPRODUCED_P9_RESULT
+## FILES_CHANGED
 
-- DIRECT_EVIDENCE — one fresh-process source-bound call to `namespace_bound_model.py:50`, `evaluate_source_bound_conditional_namespace_import_order`, entry `contextor.core.api.facade`, full 308 physical production source inventory (tests excluded), `standard_finder_assumed=True`, `target_python_version=(3,15)`. All 308 source SHA-256 values match the current metadata-selected FileState. The source binder accepted the supplied inventory and returned digest `6ca1f598aef59e2760bcadb4fac2ba2dbf4bbb180f63de5ab46625cd161b815d`; no binding error. Conservative model cohort: 202 ASTs (`package_model.py:1706-1848`).
-- DIRECT_EVIDENCE — outcome UNKNOWN, reason RESTRICTED_MODEL_UNKNOWN; nested first target `contextor.core.analysis.full_analysis_lease`, nested model event count **0**. Conditional authority remains `SOURCE_BOUND_CALLER_SUPPLIED_INVENTORY_NOT_RUNTIME_OR_LIVE_PROOF`. This reproduces P9 at revision 1109 and does not imply that the target was imported during modeled execution.
+- `contextor/core/cycle_semantics/package_model.py`
+- `tests/test_cycle_semantics_package_model.py`
+- `tests/test_cycle_semantics_namespace_path_model.py`
+- `walkthrough.md` (report; excluded from its own diff)
 
-## PRECOMPILATION_EXECUTION_BOUNDARY
+## PRECOMPILATION_ROOT_CAUSE
 
-- CODE_PATH_PROVED — `package_model.py:914-1000`, `evaluate_package_import_order`: validates input and, if present, exact session AST identity; calls `build_package_layout` at 994 and rejects unsupported layout at 1000-1017.
-- CODE_PATH_PROVED — `package_model.py:1020-1050`: calls CPython `compile(tree, ..., "exec", dont_inherit=True)` for **every selected indexed source** to check code-object validity. It does not execute the code objects. Reaching a later restricted-model refusal implies the CPython compile loop completed for the full supplied source set.
-- CODE_PATH_PROVED — `package_model.py:1052-1070`: constructs logical source mapping and regular-package set. `package_model.py:1072-1129`: validates chains, then calls restricted `_compile` for **every logical source** before constructing model programs. A None return yields UNKNOWN with that source name.
-- CODE_PATH_PROVED — `package_model.py:1132-1189`: checks prebinding conflicts, initializes states/namespaces and a bootstrap frame. `package_model.py:1210-1294`: starts frame processing and emits first modeled START_IMPORT only when a missing import piece is entered. The replay stopped in restricted precompilation, before bootstrap execution, hence events=().
-- DISTINCT PROPERTIES — `full_analysis_lease` is in the 202-source conservative closure; its AST passed CPython compile validity; its AST did **not** pass restricted `_compile`; it was **not observed as visited by modeled import execution**. Inclusion, validity, restricted support and execution are separate claims.
+- CONTRACT_PROVED: prior `evaluate_package_import_order` compiled every selected source with restricted `_compile` before its bootstrap import frame. An unsupported source included in the conservative cohort could therefore return UNKNOWN with zero modeled events even when its import was never reached. The full CPython `compile(..., dont_inherit=True)` validity pass is a separate earlier stage.
 
-## FIRST_DECORATOR_REJECTION
+## P10_PRIVATE_OPT_IN_CONTRACT
 
-- DIRECT_EVIDENCE — FileState-bound `contextor/core/analysis/full_analysis_lease.py` SHA-256 `4ce9464534019f0369fc03ff04d4780f53ad37ecf65cbc4d3cb4a17d70cbe5dd`. Under `annotation_semantics="DEFERRED"`, incremental top-level AST prefixes through index 14 compile; adding index 15 fails: `ast.ClassDef FullAnalysisLease`, line 28 column 0.
-- DIRECT_EVIDENCE — Decorator line 27: `@dataclass(frozen=True, slots=True)`. AST shape `Call(func=Name('dataclass'), keywords=[frozen=True, slots=True])`; both keyword values are boolean constants. Class bases=0; class keywords=0. Body has simple annotated fields `repo_key: str`, `token: str`, `owner: str`, `lock_path: str`, `repo_id: str`, `lock_fd: int`, `owner_pid: int = 0`, `owner_process_start_identity: int | None = None` (lines 29-36).
-- CODE_PATH_PROVED — `package_model.py:146-169`, `_safe_passive_class_definition`, rejects any nonempty `statement.decorator_list` before inspecting class body. The class-creation decorator is the exact first guard; it is not an annotation-only refusal. `_compile` dispatches ClassDef to this guard at `package_model.py:727-732`.
-- DIRECT_EVIDENCE — lexical binding `from dataclasses import dataclass` at `full_analysis_lease.py:17`, no later top-level assignment/import alias of the name found in this source. This identifies source-level provenance only. It does not authenticate the actual runtime callable, finder, module cache or third-party interference.
+- Added keyword-only `_compile_on_first_import: bool = False` to `evaluate_package_import_order`. Exact bool validation rejects None, integers and strings; combining the opt-in with a non-null `_session` returns UNKNOWN.
+- Existing eager behavior remains the default. Only `evaluate_conditional_namespace_import_order` passes `_compile_on_first_import=True`. The conditional/source-bound authority strings, source cohort and outcome mapping were not changed.
 
-## LATER_INDEPENDENT_BLOCKERS
+## FULL_CPYTHON_VALIDATION_PRESERVED
 
-- DIRECT_EVIDENCE — Independent single-statement restricted compilation under DEFERRED identified five rejected top-level statements: first decorated `FullAnalysisLease` ClassDef at line 28; later `FullAnalysisBusyError(RuntimeError)` ClassDef at line 39 (nonempty base); `_PROCESS_LOCKS_GUARD = threading.Lock()` Assign at line 51; `_ADMISSION_LOCKS_GUARD = threading.Lock()` Assign at line 53 (both call-valued assignments); decorated `_canonical_writer_admission` FunctionDef at line 122 (`@contextmanager`). Each is a potential independent restricted-compiler blocker. The prefix test identifies line 28 as the actual first failure.
-- CODE_PATH_PROVED — class-base, class-decorator and function-decorator rejection branches are `package_model.py:146-169,67-95`; call-valued assignment is outside the pure-literal/recognized assignment forms in `package_model.py:305-435,680-722`.
-- DIRECT_EVIDENCE — source has top-level `from contextlib import contextmanager`, `import json, os, threading, time, uuid`, `from dataclasses import dataclass`, `from pathlib import Path`, `from typing import ...`, and Contextor-internal imports (lines 11-23). Those imports are not automatically safe; they are potential modeled execution effects. The replay did not reach any modeled import event, so none is asserted as an observed execution failure.
-- CONTRACT PROVISO — single-statement checks isolate restricted AST support; they do not prove those later statements would be reached in a real import or that removing the first refusal would yield MODEL_PASS.
+- CODE_PATH_PROVED: layout validation, full CPython validity compilation of every selected AST, logical mapping and `valid_chain` still precede the pending-program path. The new negative test confirms that an unreachable AST containing an invalid `break` fails closed before any modeled event.
 
-## COHORT_WIDE_REJECTION_CENSUS
+## ON_FIRST_IMPORT_COMPILATION_CONTRACT
 
-- DIRECT_EVIDENCE — same in-memory 202-source conservative cohort, existing `_compile` with DEFERRED semantics, no source execution or model mutation: **94 accepted, 108 rejected**. First rejected top-level AST-kind distribution: ClassDef 70, Assign 33, FunctionDef 2, AnnAssign 2, If 1 (sum 108).
-- DIRECT_EVIDENCE — modules containing at least one decorated **top-level** class: 72; decorated top-level function: 6; top-level class with nonempty bases: 29. These categories overlap. Lexically eager module/class-body import targets outside selected physical/namespace source names: 467 sites across 149 modules. This is a source-domain census, not a verified classification of all 467 as external packages or evidence of execution.
-- Representative first rejections, with exact source construct: `contextor.core.analysis.full_analysis_lease` ClassDef 28 `@dataclass(frozen=True, slots=True)`; `contextor.core.analysis.function_analysis` ClassDef 11 `class ControlFlowAnalyzer(ast.NodeVisitor)`; `contextor.core.analysis.import_analysis` ClassDef 17 `class ImportUsageVisitor(ast.NodeVisitor)`; `contextor.core.analysis.incremental.engine` ClassDef 100 `@dataclass`; `contextor.core.analysis.incremental.graph_ops` ClassDef 18 `@dataclass(frozen=True)`; `contextor.core.analysis.incremental.plan_executor` ClassDef 46 `@dataclass`; `contextor.core.analysis.incremental.preparation` ClassDef 25 `@dataclass(frozen=True)`; `contextor.core.analysis.lineage_extraction` Assign 81 `_LINEAGE_CACHE_TOP_LEVEL_KEYS = frozenset(...)`; `contextor.core.analysis.lineage_extraction_bindings` Assign 17 `VisitFn = Callable[[...], None]`; `contextor.core.analysis.lineage_extraction_calls` Assign 10 same alias form. For each, the cited node is the observed first restricted-compiler rejection, not a claim that the node was executed. The exact subpredicate for representatives other than the separately inspected lease class was not exhaustively classified.
-- INFERENCE BOUNDARY — 202 means selected candidates, not 202 executed modules. Even a module accepted by `_compile` may later yield UNKNOWN from modeled import execution or an outside-domain target.
+- All logical names receive a pending empty placeholder. The execution loop compiles an entered pending module before reading its steps; it replaces the placeholder and removes the pending marker only after successful compilation and package checks. A failed reached `_compile` returns UNKNOWN with that module. The original step budget, import frame flow, function-body insertion, compiler and annotation modes remain unchanged.
+- The full `programs` key set is retained for optional from-child candidates and package-child checks. No analyzed source code is executed by the model.
 
-## ENTRY_IMPORT_CHAIN
+## PACKAGE_SHADOWING_PARITY
 
-- DIRECT_EVIDENCE — all four named source files exist and match FileState. Standard import semantics for `contextor.core.api.facade` structurally require package initialization of `contextor`, `contextor.core`, `contextor.core.api` before the facade module, subject to actual runtime finder/cache state.
-- DIRECT EVIDENCE — `contextor/__init__.py` has no top-level import statement (SHA-256 `ddbb4f795e5b16add318255d352e2e199bb65be33557655f533bb916ae04f9d8`). `contextor/core/__init__.py` first explicit import is line 12 `from contextor.core.graph.graph import build_graph`; subsequent top-level imports begin lines 19, 27, 30, 33. `contextor/core/api/__init__.py` is empty (SHA-256 `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`). `contextor/core/api/facade.py` first imports are `json` line 9, `os` 10, `time` 11, `pathlib.Path` 12, `typing.Any` 13, then Contextor-internal imports from line 15. Its FileState SHA-256 is `e7412c57ffabcc9ca8fc33e8a93fc882161cb34db7bd75756b94c7ce37b386d8`.
-- CODE_PATH PROVED — the restricted model constructs a package chain and bootstrap frame (`package_model.py:1072-1189`), but the current replay has zero START_IMPORT events. The chain is structurally required under ordinary standard import semantics; this replay does not establish that any listed initializer or subsequent import actually ran.
+- Eager package-shadowing loop body remains unchanged. In opt-in mode, the same checks run on the program of each actually entered package before its steps execute, using all logical `programs` keys to find direct children. Targeted negative tests for package child shadowing and parent initializer refusal pass.
 
-## EXISTING_TEST_COVERAGE
+## TARGETED_TEST_RESULTS
 
-- CONTRACT_PROVED by source inspection, not execution — `tests/test_cycle_semantics_package_model.py`: `test_p1d3_d1_unsupported_class_effects` (line 1407; parameter cases include dynamic base, metaclass, decorated class and class-body calls); `test_b0g4c5_definition_effects_updated_contract` (line 1178; decorated function UNKNOWN); `test_p1d3_d1_class_import_timing` (1331); `test_p1d3_d1_uncalled_method_import_is_deferred` (1375); `test_parent_initializer_precedes_submodule` (71); `test_package_early_from_import_hazard` (239); `test_b0g4c15_uncalled_function_local_from_supported` (1219).
-- CONTRACT_PROVED by source inspection — `tests/test_cycle_semantics_package_model_annotations315.py`: `test_deferred_function_annotations_and_literal_defaults` (34), `test_class_annotations_have_separate_binding_and_import_order` (54), `test_unknown_effects_remain_unknown` (line 105; decorator calls, dynamic bases, unknown external import), `test_early_binding_hazard_survives_annotations` (156). `tests/test_cycle_semantics_namespace_path_model.py`: `test_p9_cpython315_deferred_method_annotations` (454), `test_p9_external_import_still_unknown` (551), `test_g18_p2_p8_unreachable_unsupported_module` (785), `test_g18_p2_p8_parent_initializer_not_omitted` (901). `tests/test_cycle_semantics_namespace_bound_model.py`: `test_p6_eager_external_import_unknown` (316).
-- UNKNOWN / COVERAGE GAP — no focused existing test was identified that asserts full 202-source precompilation returns zero model events specifically at decorated `FullAnalysisLease`, or that distinguishes CPython code-object validity, restricted AST acceptance and modeled visit for this real module. No test was added or run.
+- Exact six-module P10 command using repository CPython 3.15.2: **313 passed in 33.19s**, zero failures. No full pytest.
+- `git diff --check` restricted to the three changed source/test files: exit 0, no whitespace errors. Git printed only a Windows line-ending conversion notice.
 
-## REAL_SCC_GATES
+## NEGATIVE_SAFETY_TESTS
 
-- DIRECT_EVIDENCE — current canonical snapshot and `compute_cycle_model_source_closures_with_optional_children`: SCC1 44 members / 202 selected sources; SCC2 9 members / 222 selected sources. All selected source SHA-256 values matched current FileState (zero mismatch for each closure).
-- DIRECT_EVIDENCE — `assess_package_graph_consistency` on current closures: both status INDETERMINATE, reason NAMESPACE_IMPORT_RESOLUTION_UNMODELED, internal graph state INDEXED_AST_GRAPH_MATCH_FOR_SELECTED_SOURCES, four namespace candidates each. SCC1 has 608 opaque external candidates; SCC2 has 726. Both external execution gates are OPAQUE_EXECUTION_POSSIBLE. The canonical snapshot's cycle-semantics family is stale; these are read-only current-source diagnostics, not fresh stored semantic claims.
-- DIRECT_EVIDENCE — MCP structural DFS cycles 16, active warnings 16, model_pass_count 0. No SCC was promoted to MODEL_PASS; namespace and external execution uncertainty remain fail-closed.
+- Passing P10 tests cover unsupported reached decorated class, from-import child, required regular parent initializer, false branch remaining unvisited, CPython-invalid unreachable source, package child shadowing, early-binding hazard, reached external import, invalid private flag and private-mode/session incompatibility. Existing six-module regression assertions also passed without alteration.
 
-## SOURCE_BINDING
+## FULL_SOURCE_BOUND_REPLAY
 
-- DIRECT_EVIDENCE — metadata-selected FileState revision 1109/state_id `20261106_195021` agreed with snapshot metadata and all 308 physical production source hashes used by the fresh-process replay. Five primary inspected source SHA-256 values: `package_model.py` `709bbae668a5a2f9a11dbabf491e14ca28f9c5f854fa8e37dc4154b430c17b4d`; `namespace_bound_model.py` `5952eec55fe7eecfb3047826aff38e76531707d4b89af4dd53adc6c1796bcf27`; `full_analysis_lease.py` `4ce9464534019f0369fc03ff04d4780f53ad37ecf65cbc4d3cb4a17d70cbe5dd`; `facade.py` `e7412c57ffabcc9ca8fc33e8a93fc882161cb34db7bd75756b94c7ce37b386d8`; `scenarios.py` `7e2c0475427e7fbd88417ed0109feb0ef5759aa67bfd25f946d264eab464b12a`. All five matched their FileState entries.
-- CONTRACT PROVED — `namespace_bound_model.py:50-196` validates supplied inventory/fingerprints and parses byte snapshots before calling the conditional evaluator. The resulting digest binds this caller-supplied inventory; it does not authenticate actual runtime import selection.
+- DIRECT_EVIDENCE: one metadata-selected FileState generation, revision **1111**, state_id `20261106_195021`, repo_id `ctx_8efc50d8`, root `C:\Temp\Contextor_Repo`. All **308** physical production source bytes matched FileState SHA-256, mismatch count 0. Conservative facade cohort: **202** ASTs. Both calls produced source-binding digest `43193b26845af8ed95aa5e74df8ef5f8596c0ab13f70b61c91f35ed74ea137a0`.
+- Explicit `target_python_version=(3,15)`: UNKNOWN / RESTRICTED_MODEL_UNKNOWN, first UNKNOWN target `contextor.core.domain.graph`, **9** events, first START_IMPORT target `contextor`. No START_IMPORT for `contextor.core.analysis.full_analysis_lease`; that module was selected but not reached by modeled import execution.
+- Default `target_python_version=None`: UNKNOWN / RESTRICTED_MODEL_UNKNOWN, first UNKNOWN target `contextor.core.graph.graph`, **7** events, first START_IMPORT target `contextor`. No modeled START_IMPORT for `full_analysis_lease`.
+- Both retain outer authority `SOURCE_BOUND_CALLER_SUPPLIED_INVENTORY_NOT_RUNTIME_OR_LIVE_PROOF` and inner authority `CONDITIONAL_ORDERED_INVENTORY_AND_AST_NOT_RUNTIME_OR_LIVE_PROOF`. Conditional replay cannot certify actual application import behavior or runtime safety.
 
-## RESTART_AND_LIVE_ADOPTION
+## SCC1_SCC2_GATES
 
-- DIRECT EVIDENCE — no Desktop/backend restart performed. Active MCP module context has live canonical facts and verified on-disk source, but contains no process-code identity proof that the already-running backend imported P9. Runtime adoption is **UNVERIFIED**. The fresh-process replay imported the current P9 code separately.
-- CONTRACT BOUNDARY — a future LIVE/MCP adoption claim would require a controlled restart and verification of interpreter, process identity, GUI ownership and LIVE authority. No such adoption was attempted here.
+- DIRECT_EVIDENCE at revision **1112**, same state_id: current canonical snapshot and read-only source-closure reconstruction. SCC1: 44 members, 202 sources, zero FileState SHA-256 mismatches. SCC2: 9 members, 222 sources, zero mismatches.
+- Both graph-consistency assessments remain INDETERMINATE / NAMESPACE_IMPORT_RESOLUTION_UNMODELED with four namespace candidates and OPAQUE_EXECUTION_POSSIBLE external gate. SCC1 has 608 opaque external candidates; SCC2 has 726. No MODEL_PASS promotion, warning suppression or /3 receipt was performed.
 
-## UNRESOLVED_FACTS
+## MCP_POST_CHANGE_AUDIT
 
-- UNKNOWN — actual application import finder, `sys.path`, `sys.meta_path`, `sys.modules`, lexical `dataclass` callable identity at runtime, external import effects and which conservative cohort members execute. UNKNOWN is not proof of safety.
-- UNKNOWN — the exact per-module subpredicate for all 108 restricted compiler rejections was not requested or established; the first AST-kind distribution and ten representative constructs are reported without promoting them to runtime failures.
+- Contextor MCP contexts for `package_model` and both changed test modules: canonical revision **1112**, canonical_state=fresh, workspace_sync=verified, advisory_warning=null, LIVE provenance; graph/cycles fresh, cycle_semantics stale; syntax errors 0, structural DFS cycles **16**, active warnings **16**, model_pass_count **0**.
+- Metadata at revision 1112: state_id `20261106_195021`, repo_id `ctx_8efc50d8`. Changed-file on-disk SHA-256 equals metadata-selected FileState: `package_model.py` `85d084002ec3d2ef382979efc51077720b4d6653fc50c8c10ac93a353d21f097`; `test_cycle_semantics_package_model.py` `65d5b150b5ddfc7467f74b82daed05e93708680be683743f44eb39a8db78908a`; `test_cycle_semantics_namespace_path_model.py` `4db66f51123783e22b2c86cd27c11827837c51142bc67d7acf27cb571182c27e`.
 
-## FILES_CHANGED_AND_FULL_DIFFS
+## RESTART_DECISION
 
-FILES_CHANGED: `walkthrough.md` only (this report). No production, test or source documentation edits.
+- No Desktop/backend restart. Fresh-process replay loaded the modified code directly. Adoption by the active Desktop/backend process is **UNVERIFIED** until a later controlled restart and identity audit. No production FULL or update_file.
 
-ACTUAL_DIFF=DIFFS=NONE for production/tests. FULL_DIFFS=NONE for production/tests. `walkthrough.md` is excluded from its own diff.
+## REMAINING_UNKNOWN
+
+- Actual application finder, interpreter state, `sys.path`, `sys.meta_path`, `sys.modules`, external import effects and live-process code adoption remain unknown. The canonical cycle-semantics family remains stale. UNKNOWN is not proof of safety.
+
+## FULL_DIFFS
+
+Complete actual diffs for all three changed production/test files follow. `walkthrough.md` is excluded from its own diff.
+
+```diff
+diff --git a/contextor/core/cycle_semantics/package_model.py b/contextor/core/cycle_semantics/package_model.py
+index eb5cb5a..363dca0 100644
+--- a/contextor/core/cycle_semantics/package_model.py
++++ b/contextor/core/cycle_semantics/package_model.py
+@@ -917,6 +917,7 @@ def evaluate_package_import_order(
+     *,
+     _session: _PackageSourceSession | None = None,
+     annotation_semantics: str | None = None,
++    _compile_on_first_import: bool = False,
+ ) -> PackageImportAssessment:
+     """Simulate a restricted closed regular-package source set.
+ 
+@@ -946,6 +947,11 @@ def evaluate_package_import_order(
+         or annotation_semantics not in {
+             None, "STOCK_EAGER", "STRINGIFIED", "DEFERRED",
+         }
++        or type(_compile_on_first_import) is not bool
++        or (
++            _compile_on_first_import
++            and _session is not None
++        )
+     ):
+         return result("UNKNOWN")
+ 
+@@ -1080,6 +1086,7 @@ def evaluate_package_import_order(
+         return result("UNKNOWN", entry_module)
+ 
+     programs: dict[str, list[_Step]] = {}
++    pending_programs: set[str] = set()
+ 
+     for name, tree in logical_sources.items():
+         if not valid_chain(name):
+@@ -1094,6 +1101,10 @@ def evaluate_package_import_order(
+         )
+         if annotation_semantics == "STRINGIFIED" and not has_future_annotations:
+             return result("UNKNOWN", name)
++        if _compile_on_first_import:
++            programs[name] = []
++            pending_programs.add(name)
++            continue
+         typing_guard = recognize_typing_guard(
+             indexed_sources[indexed_id],
+             frozenset(indexed_sources),
+@@ -1132,7 +1143,9 @@ def evaluate_package_import_order(
+     # A package may prebind a same-named attribute before a later
+     # from-import; the attribute takes priority. Keep more complex
+     # package-owned import/rebinding sequences indeterminate.
+-    for package in packages:
++    for package in (
++        packages if not _compile_on_first_import else ()
++    ):
+         children = {
+             name.rsplit(".", 1)[1]
+             for name in programs
+@@ -1215,6 +1228,86 @@ def evaluate_package_import_order(
+ 
+         module, index = frames[-1]
+ 
++        if module in pending_programs:
++            tree = logical_sources[module]
++            indexed_id = nodes[module].indexed_module_ids[0]
++
++            has_future_annotations = any(
++                isinstance(statement, ast.ImportFrom)
++                and statement.module == "__future__"
++                and any(
++                    alias.name == "annotations"
++                    for alias in statement.names
++                )
++                for statement in tree.body
++            )
++
++            typing_guard = recognize_typing_guard(
++                indexed_sources[indexed_id],
++                frozenset(indexed_sources),
++            )
++
++            program = _compile(
++                tree,
++                module,
++                module in packages,
++                typing_guard=typing_guard,
++                annotation_semantics=(
++                    "STRINGIFIED"
++                    if has_future_annotations
++                    else annotation_semantics
++                ),
++            )
++
++            if program is None:
++                return result("UNKNOWN", module)
++
++            if module in packages:
++                children = {
++                    name.rsplit(".", 1)[1]
++                    for name in programs
++                    if (
++                        "." in name
++                        and name.rsplit(".", 1)[0] == module
++                    )
++                }
++
++                if any(
++                    step.op in {
++                        "DEFINE_FUNCTION",
++                        "DEFINE_OPAQUE_FUNCTION",
++                        "DEFINE_PASSIVE_CLASS",
++                    }
++                    and step.binding in children
++                    for step in program
++                ):
++                    return result("UNKNOWN", module)
++
++                writes_child = any(
++                    step.binding in children
++                    and (
++                        step.op in {"BIND", "ALIAS"}
++                        or (
++                            step.op == "FROM"
++                            and step.target != module
++                        )
++                    )
++                    for step in program
++                )
++
++                if writes_child and any(
++                    step.op in {
++                        "IMPORT",
++                        "FROM",
++                        "CALL_FUNCTION",
++                    }
++                    for step in program
++                ):
++                    return result("UNKNOWN", module)
++
++            programs[module] = list(program)
++            pending_programs.remove(module)
++
+         steps = (
+             (_Step("IMPORT", entry_module, binding=None),)
+             if module == bootstrap
+@@ -2102,6 +2195,7 @@ def evaluate_conditional_namespace_import_order(
+         augmented,
+         entry_module,
+         annotation_semantics=annotation_mode,
++        _compile_on_first_import=True,
+     )
+ 
+     conditional_outcomes = {
+diff --git a/tests/test_cycle_semantics_namespace_path_model.py b/tests/test_cycle_semantics_namespace_path_model.py
+index 8c2efc8..0403be6 100644
+--- a/tests/test_cycle_semantics_namespace_path_model.py
++++ b/tests/test_cycle_semantics_namespace_path_model.py
+@@ -420,6 +420,230 @@ def test_g18_p2_p5_unlisted_shadowing_source_unknown():
+     )
+ 
+ 
++def _p10_assess(sources, entry="ns.a"):
++    paths = frozenset(
++        module.replace(".", "/") + ".py"
++        for module in sources
++    )
++
++    return evaluate_conditional_namespace_import_order(
++        sources,
++        entry,
++        (SearchPortion("root", paths),),
++        target_python_version=(3, 15),
++    )
++
++
++def test_p10_deferred_unreached_decorator_does_not_block():
++    sources = {
++        "ns.a": ast.parse(
++            "def later():\n"
++            "    import ns.unused\n"
++            "value = 1\n"
++        ),
++        "ns.unused": ast.parse(
++            "@unknown_decorator\n"
++            "class Bad:\n"
++            "    pass\n"
++        ),
++    }
++
++    before = {
++        name: ast.dump(tree, include_attributes=True)
++        for name, tree in sources.items()
++    }
++
++    first = _p10_assess(sources)
++    second = _p10_assess(sources)
++
++    assert first == second
++    assert first.outcome == "CONDITIONAL_MODEL_PASS"
++    assert first.model_assessment is not None
++
++    assert not any(
++        event.operation == "START_IMPORT"
++        and event.target == "ns.unused"
++        for event in first.model_assessment.events
++    )
++
++    assert before == {
++        name: ast.dump(tree, include_attributes=True)
++        for name, tree in sources.items()
++    }
++
++
++def test_p10_reached_decorated_class_still_unknown():
++    sources = {
++        "ns.a": ast.parse("import ns.bad"),
++        "ns.bad": ast.parse(
++            "@unknown_decorator\n"
++            "class Bad:\n"
++            "    pass\n"
++        ),
++    }
++
++    result = _p10_assess(sources)
++
++    assert result.outcome == "UNKNOWN"
++    assert result.reason == "RESTRICTED_MODEL_UNKNOWN"
++    assert result.model_assessment is not None
++    assert result.model_assessment.target_module == "ns.bad"
++
++    assert any(
++        event.operation == "START_IMPORT"
++        and event.target == "ns.bad"
++        for event in result.model_assessment.events
++    )
++
++
++def test_p10_from_child_reached_decorator_still_unknown():
++    sources = {
++        "ns.a": ast.parse("from ns import bad"),
++        "ns.bad": ast.parse(
++            "@unknown_decorator\n"
++            "class Bad:\n"
++            "    pass\n"
++        ),
++    }
++
++    result = _p10_assess(sources)
++
++    assert result.outcome == "UNKNOWN"
++    assert result.model_assessment is not None
++    assert result.model_assessment.target_module == "ns.bad"
++
++
++def test_p10_regular_parent_initializer_not_skipped():
++    sources = {
++        "pkg.__init__": ast.parse(
++            "@unknown_decorator\n"
++            "class Bad:\n"
++            "    pass\n"
++        ),
++        "pkg.ns.a": ast.parse("pass"),
++    }
++
++    result = _p10_assess(
++        sources,
++        entry="pkg.ns.a",
++    )
++
++    assert result.outcome == "UNKNOWN"
++    assert result.model_assessment is not None
++    assert result.model_assessment.target_module == "pkg"
++
++
++def test_p10_unselected_false_branch_remains_unvisited():
++    sources = {
++        "ns.a": ast.parse(
++            "if False:\n"
++            "    import ns.bad\n"
++            "value = 1\n"
++        ),
++        "ns.bad": ast.parse(
++            "@unknown_decorator\n"
++            "class Bad:\n"
++            "    pass\n"
++        ),
++    }
++
++    result = _p10_assess(sources)
++
++    assert result.outcome == "CONDITIONAL_MODEL_PASS"
++
++
++def test_p10_compile_invalid_unreached_source_fails_closed():
++    sources = {
++        "ns.a": ast.parse(
++            "def later():\n"
++            "    import ns.bad\n"
++        ),
++        "ns.bad": ast.parse(
++            "def broken():\n"
++            "    break\n"
++        ),
++    }
++
++    result = _p10_assess(sources)
++
++    assert result.outcome == "UNKNOWN"
++    assert result.model_assessment is not None
++    assert result.model_assessment.target_module == "ns.bad"
++    assert result.model_assessment.events == ()
++
++
++def test_p10_lazy_package_child_shadow_remains_unknown():
++    sources = {
++        "pkg.__init__": ast.parse(
++            "def child():\n"
++            "    pass\n"
++        ),
++        "pkg.ns.a": ast.parse(
++            "def later():\n"
++            "    import pkg.child\n"
++        ),
++        "pkg.child": ast.parse("pass"),
++    }
++
++    result = _p10_assess(
++        sources,
++        entry="pkg.ns.a",
++    )
++
++    assert result.outcome == "UNKNOWN"
++    assert result.model_assessment is not None
++    assert result.model_assessment.target_module == "pkg"
++
++
++def test_p10_early_binding_hazard_is_not_hidden():
++    sources = {
++        "ns.a": ast.parse(
++            "from ns.b import ready\n"
++            "ready = 1\n"
++            "def later():\n"
++            "    import ns.unused\n"
++        ),
++        "ns.b": ast.parse(
++            "from ns.a import ready\n"
++        ),
++        "ns.unused": ast.parse(
++            "@unknown_decorator\n"
++            "class Bad:\n"
++            "    pass\n"
++        ),
++    }
++
++    result = _p10_assess(sources)
++
++    assert result.outcome == (
++        "CONDITIONAL_EARLY_BINDING_HAZARD"
++    )
++    assert result.model_assessment is not None
++    assert result.model_assessment.outcome == (
++        "EARLY_BINDING_HAZARD"
++    )
++    assert any(
++        event.operation == "EARLY_BINDING_HAZARD"
++        for event in result.model_assessment.events
++    )
++
++
++def test_p10_reached_external_import_still_unknown():
++    sources = {
++        "ns.a": ast.parse(
++            "import missing_external_xyz\n"
++        ),
++    }
++
++    result = _p10_assess(sources)
++
++    assert result.outcome == "UNKNOWN"
++    assert result.model_assessment is not None
++    assert result.model_assessment.target_module == (
++        "missing_external_xyz"
++    )
++
++
+ def _p9_annotation_sources(code):
+     return {"ns.a": ast.parse(code)}
+ 
+diff --git a/tests/test_cycle_semantics_package_model.py b/tests/test_cycle_semantics_package_model.py
+index da99426..a91541e 100644
+--- a/tests/test_cycle_semantics_package_model.py
++++ b/tests/test_cycle_semantics_package_model.py
+@@ -1430,3 +1430,77 @@ def test_p1d3_d1_deterministic_events_and_ast_unchanged():
+     assert first.events == second.events
+     assert first.outcome == "EARLY_BINDING_HAZARD"
+     assert {key: ast.dump(tree, include_attributes=True) for key, tree in sources.items()} == before
++
++
++def test_p10_eager_contract_unchanged_and_lazy_opt_in():
++    source = {
++        "pkg.__init__": ast.parse("pass"),
++        "pkg.a": ast.parse(
++            "def later():\n"
++            "    import pkg.bad\n"
++            "value = 1\n"
++        ),
++        "pkg.bad": ast.parse(
++            "@unknown_decorator\n"
++            "class Bad:\n"
++            "    pass\n"
++        ),
++    }
++
++    eager = evaluate_package_import_order(
++        source,
++        "pkg.a",
++        annotation_semantics="DEFERRED",
++    )
++    lazy = evaluate_package_import_order(
++        source,
++        "pkg.a",
++        annotation_semantics="DEFERRED",
++        _compile_on_first_import=True,
++    )
++
++    assert eager.outcome == "UNKNOWN"
++    assert eager.target_module == "pkg.bad"
++    assert eager.events == ()
++
++    assert lazy.outcome == "MODEL_PASS"
++    assert not any(
++        event.operation == "START_IMPORT"
++        and event.target == "pkg.bad"
++        for event in lazy.events
++    )
++
++
++def test_p10_private_mode_invalid_flag_fails_closed():
++    sources = {
++        "pkg.__init__": ast.parse("pass"),
++        "pkg.a": ast.parse("pass"),
++    }
++
++    for invalid in (None, 1, "True"):
++        result = evaluate_package_import_order(
++            sources,
++            "pkg.a",
++            _compile_on_first_import=invalid,
++        )
++        assert result.outcome == "UNKNOWN"
++
++
++def test_p10_private_mode_rejects_session_combination():
++    from contextor.core.cycle_semantics.package_model import (
++        _PackageSourceSession,
++    )
++
++    sources = {
++        "pkg.__init__": ast.parse("pass"),
++        "pkg.a": ast.parse("pass"),
++    }
++
++    result = evaluate_package_import_order(
++        sources,
++        "pkg.a",
++        _session=_PackageSourceSession(),
++        _compile_on_first_import=True,
++    )
++
++    assert result.outcome == "UNKNOWN"
+```
 
 ## FINAL_VERDICT
 
-DISCOVERY_COMPLETE. Read-only evidence gathering ended after D10. No implementation, pytest, production FULL, update_file, restart, interpreter switch, source execution, Git mutation, dependency installation, warning suppression or MODEL_PASS promotion.
+PASS. Exact P10 implementation and test scope completed; 313 targeted tests passed; both source-bound replays remain UNKNOWN; 16 structural cycles and 16 active warnings remain; no active-process code adoption is claimed.
