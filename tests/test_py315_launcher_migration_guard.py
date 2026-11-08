@@ -3,6 +3,7 @@
 import os
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -79,3 +80,29 @@ def test_mcp_installer_uses_only_project_local_venv():
     assert 'if not exist "%python_exe%"' in source
     assert "python --version" not in source
     assert "for /d %%d" not in source
+
+
+def test_py315_project_metadata_and_ruff_contract():
+    config = tomllib.loads(
+        (ROOT / "pyproject.toml").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert (
+        config["project"]["requires-python"]
+        == ">=3.15,<3.16"
+    )
+    assert (
+        config["tool"]["ruff"]["target-version"]
+        == "py315"
+    )
+    assert (
+        "ruff>=0.17.0"
+        in config["project"]["optional-dependencies"]["dev"]
+    )
+
+    assert (
+        "pytest>=7.4"
+        in config["project"]["optional-dependencies"]["dev"]
+    )

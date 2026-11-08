@@ -1,76 +1,126 @@
-# C16-B03-P1D3-P12-F1 — two-failure test contract correction
+# C16-B03-P1D3-P13B — CPython 3.15 package and Ruff metadata
 
 ## HEAD_BEFORE_AFTER
 
-- DIRECT_EVIDENCE: local HEAD before/after `2358650effe3208842b400fa7697edb035f93da6`; no commit or push. Initial worktree already contained modifications to `contextor/core/cycle_semantics/activation_view.py`, `tests/test_cycle_semantics_activation_view.py`, and `walkthrough.md`; these were preserved without editing.
-- Contextor MCP first: revision 1118, state_id `20261106_195021`, repo_id `ctx_8efc50d8`, canonical_state=fresh, workspace_sync=verified, LIVE provenance. Graph/cycles fresh; 16 structural DFS cycles, 16 active warnings, model_pass_count=0, cycle_semantics stale, syntax errors=0.
-- Pre-edit test SHA-256 `f822775abbf75608f37b0404db810c93fd4f852b2f7ffdf2d04e98b03ed97471` matched metadata-selected FileState.
+- DIRECT_EVIDENCE: HEAD before/after `1eedda847f75e6a40f1b62b6af27567a84b76590`; no Git mutation. Preflight worktree already contained uncommitted P13A test and `walkthrough.md`; both were preserved. Repository `.venv` identified as CPython 3.15.2 / `cpython`. P13A `_require_cpython315` and native runtime gate were present.
+- Contextor MCP first: canonical revision 1121, state_id `20261106_195021`, repo_id `ctx_8efc50d8`, canonical_state=fresh, workspace_sync=verified, LIVE provenance, graph/cycles fresh, cycle_semantics stale, structural DFS cycles=16, active warnings=16, model_pass_count=0.
+- Target test pre-edit SHA-256 `58cd1c0f7fbd2930e0879361de85e03ad61a9f47fe16fb300d9bbd5660430e67` matched FileState. `pyproject.toml` is not indexed in Python FileState; its pre-edit disk hash was `7068a9178ea269bd616b42550ab4b1157f9e26509eabd8a23f66fbfcf124c232`.
 
 ## FILES_CHANGED
 
-- `tests/test_cycle_semantics_capture_capacity.py` — current task.
-- `walkthrough.md` — report, excluded from its own diff.
-- The two pre-existing P12 source/test modifications remained in the worktree and are outside this task's FILES_CHANGED.
+- `pyproject.toml`
+- `tests/test_py315_launcher_migration_guard.py`
+- `walkthrough.md` (report, excluded from its own diff)
+- The pre-existing P13A test modification remains in the worktree and is outside this task's changed files.
 
-## T01_OBSOLETE_CONSTANT_ROOT_CAUSE
+## PYTHON_DISTRIBUTION_CONTRACT
 
-- DIRECT_EVIDENCE: the old T01 referenced `original_worker_reindex_planning._MAX_SELECTED`, a constant no longer present in the shared selector contract. The test now checks actual selector identity and retains the 256-module capture limit assertion. No production constant was restored or limit altered.
+- Literal project metadata edit: `requires-python = ">=3.15,<3.16"`. This restricts Contextor's own package distribution runtime; it does not change the interpreter semantics of repositories Contextor analyzes. Project version, runtime dependencies and build backend were unchanged.
 
-## REINDEX_SELECTOR_IDENTITY_CONTRACT
+## RUFF_PY315_CONTRACT
 
-- CONTRACT_PROVED by targeted PASS: `original_worker_reindex_planning._select_original_worker_sources is original_worker_binding._select_original_worker_sources`; `original_worker_binding._MAX_MODULES == indexer._MAX_ORIGINAL_WORKER_CAPTURE_MODULES == 256`.
-- The import block and every other assertion in the module were unchanged. T02's 257-module negative contract passed.
+- Literal optional dev dependency edit: `ruff>=0.17.0`; literal Ruff target: `py315`. Other Ruff rules unchanged. Ruff was absent from repository `.venv` and PATH (`RUFF_NOT_INSTALLED_IN_VENV`, `RUFF_NOT_ON_PATH`), so parser recognition by an installed Ruff is **TOOL_NOT_VERIFIED**. No install or upgrade was attempted.
 
-## CPYTHON_310_IDENTITY
+## PACKAGE_METADATA_VALIDATION
 
-- DIRECT_EVIDENCE: `C:\SpiralProphet\python\WPy64-31090\python-3.10.9.amd64\python.exe` exists. `-I -B -c` reported version 3.10.9 and implementation `cpython`. Production repository `.venv` reported CPython 3.15.2 / `cpython`.
-
-## REQUIRED_INTERPRETER_GATE
-
-- `REQUIRED_VERSIONS=(10,15)` in `tests/test_cycle_semantics_namespace_cycle_parity.py` remained unchanged. The required coverage gate passed with both interpreters available. The parametrized matrix ran 3.10 and 3.15 cases; no mandatory-version skip was reported. The 3.11–3.14 cases remain `NOT_COVERED` when unavailable, not PASS.
+- Exact requested isolated CPython command parsed TOML successfully and printed `>=3.15,<3.16 py315`.
+- New test `test_py315_project_metadata_and_ruff_contract` checks distribution version, Ruff target, Ruff dev dependency and retained `pytest>=7.4`. Existing assertions were unchanged.
 
 ## TARGETED_TEST_RESULTS
 
-- In one PowerShell process, `CONTEXTOR_PYTHON_3_10` was set for the child pytest process and exactly the two requested modules were run through repository CPython 3.15.2: **40 passed, 64 skipped, 0 failed** in 20.78s. Skips: 16 each for CPython 3.11, 3.12, 3.13, 3.14; all say `NOT_COVERED: interpreter unavailable`.
-- T01, T02 and the required interpreter gate passed. `git diff --check` exited 0, with only Git working-copy line-ending notices. No full pytest.
+- Exact four-module command: **80 passed, 0 failed, 0 skipped, 2 dependency deprecation warnings** in 14.72s. Warnings originated in installed FastMCP/Authlib, not changed code. Repository interpreter was CPython 3.15.2.
+- `git diff --check` was first run while the preceding D13 `walkthrough.md` was still present; it flagged trailing whitespace in that old report only. The current P13B report replaces that file. After replacing the old report and removing blank diff-context markers that would appear as trailing whitespace inside this report, the final `git diff --check` exited 0.
 
-## GUI_ENVIRONMENT_INHERITANCE
+## ANALYZED_SOURCE_SEMANTICS_UNCHANGED
 
-- CODE_PATH_PROVED `contextor/ui/test_runner.py::_popen` uses `subprocess.Popen` without an `env=` argument. Python therefore passes the GUI process environment to pytest. Its command uses the GUI `sys.executable`; no GUI code was changed.
-- To expose the existing 3.10 interpreter to the GUI test runner, set `$env:CONTEXTOR_PYTHON_3_10 = 'C:\SpiralProphet\python\WPy64-31090\python-3.10.9.amd64\python.exe'` in the PowerShell process that launches the GUI, then launch the GUI from that same process. A GUI already launched from another parent does not gain this later shell-only variable. No permanent user/system environment change was made.
+- No changes to `package_model.py`, `namespace_bound_model.py`, parser/indexer, fingerprints, cycle topology, warning suppression, LIVE/MCP code or process ownership. The metadata constraint applies to the package executing Contextor. The existing model's explicit analyzed-source target-version checks remain separate.
 
 ## MCP_POST_CHANGE_AUDIT
 
-- MCP target test context after edit: revision 1119, canonical_state=fresh, workspace_sync=verified, advisory_warning=null, LIVE provenance; graph/cycles fresh, cycle_semantics stale, syntax errors=0, structural DFS cycles=16, active warnings=16, model_pass_count=0.
-- Metadata revision 1119/state_id `20261106_195021`/repo_id `ctx_8efc50d8`. Changed test SHA-256 `b1e76d54c70c58e0b0dd44d329cb0102b7eab131ff7beb7358bd2bfef2e8a3a7` equals its FileState SHA-256. No FULL, update_file, restart, interpreter switch for Contextor, dependency installation or warning suppression.
+- MCP target test context after change: revision **1122**, state_id `20261106_195021`, canonical_state=fresh, workspace_sync=verified, advisory_warning=null, LIVE provenance, graph/cycles fresh, cycle_semantics stale, syntax_errors=0, structural DFS cycles=16, active_warning_count=16, model_pass_count=0.
+- Changed test SHA-256 `859d478c5aab93d5b6110e1e78ad2e70a49ea415c393467c7f522a04fb9df5c6` exactly matches FileState. `pyproject.toml` disk SHA-256 `b550874cd1915cc48975246c8e98aba6393cfbd0887202b001b3d0a3c9fed6d4`; it has no Python FileState entry. TOML parsing and exact metadata test verify its content.
+- No FULL, update_file, backend restart, dependency installation, interpreter switch, commit/push/reset, warning-policy change or MODEL_PASS promotion.
 
 ## REMAINING_UNKNOWN
 
-- GUI process environment at its next launch was not inspected or changed; GUI test-suite parity in that process remains unverified. Active backend loaded-code adoption of prior P12 implementation remains outside F1. Canonical cycle_semantics remains stale.
+- Installed Ruff configuration recognition remains TOOL_NOT_VERIFIED because Ruff is absent. Active backend/Desktop loaded-code adoption was not assessed. Canonical cycle_semantics remains stale.
 
 ## FULL_DIFFS
 
-Complete actual diff for the only test modified by F1 follows. `walkthrough.md` is excluded from its own diff; pre-existing P12 diffs are not F1 changes.
-diff --git a/tests/test_cycle_semantics_capture_capacity.py b/tests/test_cycle_semantics_capture_capacity.py
-index c026574..5663f52 100644
---- a/tests/test_cycle_semantics_capture_capacity.py
-+++ b/tests/test_cycle_semantics_capture_capacity.py
-@@ -18,8 +18,13 @@ def _inline_worker(monkeypatch):
- 
- def test_t01_module_cap_contracts_are_aligned():
-     assert (
--        original_worker_reindex_planning._MAX_SELECTED
--        == original_worker_binding._MAX_MODULES
-+        original_worker_reindex_planning
-+        ._select_original_worker_sources
-+        is original_worker_binding
-+        ._select_original_worker_sources
+Complete actual diffs of the two task-modified files follow. `walkthrough.md` excluded from its own diff; pre-existing P13A diff excluded from P13B task diff.
+diff --git a/pyproject.toml b/pyproject.toml
+index 7e772d0..72e8506 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -3,7 +3,7 @@ name = "contextor"
+ version = "1.1.0b0"
+ description = "Static architectural analysis turning Python repositories into LLM-ready context."
+ readme = "README.md"
+-requires-python = ">=3.10"
++requires-python = ">=3.15,<3.16"
+ license = { file = "LICENSE" }
+ dependencies = [
+     "orjson>=3.9",
+@@ -15,7 +15,7 @@ dependencies = [
+ [project.optional-dependencies]
+ dev = [
+     "pytest>=7.4",
+-    "ruff>=0.5",
++    "ruff>=0.17.0",
+ ]
+
+ [project.scripts]
+@@ -41,7 +41,7 @@ markers = [
+
+ [tool.ruff]
+ line-length = 100
+-target-version = "py310"
++target-version = "py315"
+
+ [tool.ruff.lint]
+ select = ["E", "F", "W", "I", "UP", "B"]
+diff --git a/tests/test_py315_launcher_migration_guard.py b/tests/test_py315_launcher_migration_guard.py
+index d91f082..01ca57b 100644
+--- a/tests/test_py315_launcher_migration_guard.py
++++ b/tests/test_py315_launcher_migration_guard.py
+@@ -3,6 +3,7 @@
+ import os
+ import subprocess
+ import sys
++import tomllib
+ from pathlib import Path
+
+ import pytest
+@@ -79,3 +80,29 @@ def test_mcp_installer_uses_only_project_local_venv():
+     assert 'if not exist "%python_exe%"' in source
+     assert "python --version" not in source
+     assert "for /d %%d" not in source
++
++
++def test_py315_project_metadata_and_ruff_contract():
++    config = tomllib.loads(
++        (ROOT / "pyproject.toml").read_text(
++            encoding="utf-8"
++        )
++    )
++
++    assert (
++        config["project"]["requires-python"]
++        == ">=3.15,<3.16"
 +    )
 +    assert (
-+        original_worker_binding._MAX_MODULES
-         == indexer._MAX_ORIGINAL_WORKER_CAPTURE_MODULES
-         == 256
-     )
++        config["tool"]["ruff"]["target-version"]
++        == "py315"
++    )
++    assert (
++        "ruff>=0.17.0"
++        in config["project"]["optional-dependencies"]["dev"]
++    )
++
++    assert (
++        "pytest>=7.4"
++        in config["project"]["optional-dependencies"]["dev"]
++    )
 
 ## FINAL_VERDICT
 

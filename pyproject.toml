@@ -3,7 +3,7 @@ name = "contextor"
 version = "1.1.0b0"
 description = "Static architectural analysis turning Python repositories into LLM-ready context."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.15,<3.16"
 license = { file = "LICENSE" }
 dependencies = [
     "orjson>=3.9",
@@ -15,7 +15,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=7.4",
-    "ruff>=0.5",
+    "ruff>=0.17.0",
 ]
 
 [project.scripts]
@@ -41,7 +41,7 @@ markers = [
 
 [tool.ruff]
 line-length = 100
-target-version = "py310"
+target-version = "py315"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B"]
