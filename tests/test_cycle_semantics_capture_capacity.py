@@ -18,8 +18,13 @@ def _inline_worker(monkeypatch):
 
 def test_t01_module_cap_contracts_are_aligned():
     assert (
-        original_worker_reindex_planning._MAX_SELECTED
-        == original_worker_binding._MAX_MODULES
+        original_worker_reindex_planning
+        ._select_original_worker_sources
+        is original_worker_binding
+        ._select_original_worker_sources
+    )
+    assert (
+        original_worker_binding._MAX_MODULES
         == indexer._MAX_ORIGINAL_WORKER_CAPTURE_MODULES
         == 256
     )

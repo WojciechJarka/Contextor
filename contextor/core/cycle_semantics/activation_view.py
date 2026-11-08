@@ -37,6 +37,15 @@ class SCCActivationView:
     unguarded_direct_topology: ImportCycleTopology
     unresolved_edges: int
     evidence_scope: str = "INTERNAL_UNGUARDED_LEXICAL_SUBGRAPH_ONLY"
+    non_function_or_unresolved_edges: (
+        tuple[tuple[str, str], ...]
+    ) = ()
+    non_function_or_unresolved_topology: (
+        ImportCycleTopology | None
+    ) = None
+    function_only_edges: (
+        tuple[tuple[str, str], ...]
+    ) = ()
 
 
 @dataclass(frozen=True)
@@ -64,9 +73,32 @@ def analyze_cycle_activation_view(
         selected: dict[str, set[str]] = {
             member: set() for member in component.members
         }
+        non_function_or_unresolved: dict[
+            str, set[str]
+        ] = {
+            member: set()
+            for member in component.members
+        }
+        function_only: list[tuple[str, str]] = []
 
         for edge in component.internal_edges:
             sites = edge.sites
+            if (
+                edge.status != "LEXICAL_CANDIDATES"
+                or not sites
+                or any(
+                    site.activation_scope != "FUNCTION_SCOPED"
+                    for site in sites
+                )
+            ):
+                non_function_or_unresolved[
+                    edge.source
+                ].add(edge.target)
+            else:
+                function_only.append((
+                    edge.source,
+                    edge.target,
+                ))
 
             direct = sum(
                 site.activation_scope == "MODULE_TOP_LEVEL"
@@ -142,6 +174,15 @@ def analyze_cycle_activation_view(
             for source in sorted(selected)
             for target in sorted(selected[source])
         )
+        non_function_edges = tuple(
+            (source, target)
+            for source in sorted(
+                non_function_or_unresolved
+            )
+            for target in sorted(
+                non_function_or_unresolved[source]
+            )
+        )
 
         views.append(
             SCCActivationView(
@@ -155,6 +196,17 @@ def analyze_cycle_activation_view(
                         "UNRECOGNIZED_SITE_SEMANTICS",
                     }
                     for edge in edge_views
+                ),
+                non_function_or_unresolved_edges=(
+                    non_function_edges
+                ),
+                non_function_or_unresolved_topology=(
+                    analyze_import_cycle_topology(
+                        non_function_or_unresolved
+                    )
+                ),
+                function_only_edges=tuple(
+                    sorted(function_only)
                 ),
             )
         )

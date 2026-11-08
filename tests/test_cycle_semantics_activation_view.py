@@ -442,3 +442,256 @@ def test_deterministic_serializable_immutable_input_unchanged():
 def test_invalid_input():
     with pytest.raises(TypeError):
         analyze(None)
+
+
+def test_p12_function_only_reverse_keeps_structural_cycle():
+    result = analyze(
+        _report(
+            {"a": {"b"}, "b": {"a"}},
+            {
+                ("a", "b"): [
+                    ("MODULE_TOP_LEVEL", "FROM_BASE", 0)
+                ],
+                ("b", "a"): [
+                    ("FUNCTION_SCOPED", "FROM_BASE", 0)
+                ],
+            },
+        )
+    )
+
+    component = result.components[0]
+
+    assert len(
+        result.structural_topology.cyclic_components
+    ) == 1
+    assert component.non_function_or_unresolved_edges == (
+        ("a", "b"),
+    )
+    assert component.function_only_edges == (
+        ("b", "a"),
+    )
+    assert not (
+        component.non_function_or_unresolved_topology
+        .cyclic_components
+    )
+    assert result.evidence_scope == (
+        "ACTIVATION_CANDIDATES_NOT_RUNTIME_SAFETY"
+    )
+
+
+def test_p12_indirect_top_level_cycle_not_discarded():
+    result = analyze(
+        _report(
+            {"p": {"c"}, "c": {"p"}},
+            {
+                ("p", "c"): [
+                    ("MODULE_TOP_LEVEL", "OPTIONAL_FROM_CHILD", 0)
+                ],
+                ("c", "p"): [
+                    ("MODULE_TOP_LEVEL", "PARENT_INITIALIZER", 0)
+                ],
+            },
+        )
+    )
+
+    component = result.components[0]
+
+    assert not component.unguarded_direct_edges
+    assert component.non_function_or_unresolved_edges == (
+        ("c", "p"),
+        ("p", "c"),
+    )
+    assert len(
+        component.non_function_or_unresolved_topology
+        .cyclic_components
+    ) == 1
+    assert component.function_only_edges == ()
+
+
+def test_p12_guarded_and_class_body_are_candidates():
+    result = analyze(
+        _report(
+            {"a": {"b"}, "b": {"a"}},
+            {
+                ("a", "b"): [
+                    ("GUARDED_TOP_LEVEL", "FROM_BASE", 0)
+                ],
+                ("b", "a"): [
+                    ("OTHER_SCOPED", "FROM_BASE", 0)
+                ],
+            },
+        )
+    )
+
+    component = result.components[0]
+
+    assert len(
+        component.non_function_or_unresolved_topology
+        .cyclic_components
+    ) == 1
+    assert component.function_only_edges == ()
+    assert not component.unguarded_direct_edges
+
+
+def test_p12_mixed_sites_are_not_function_only():
+    result = analyze(
+        _report(
+            {"a": {"b"}, "b": {"a"}},
+            {
+                ("a", "b"): [
+                    ("FUNCTION_SCOPED", "FROM_BASE", 0),
+                    ("MODULE_TOP_LEVEL", "FROM_BASE", 1),
+                ],
+                ("b", "a"): [
+                    ("FUNCTION_SCOPED", "FROM_BASE", 0)
+                ],
+            },
+        )
+    )
+
+    component = result.components[0]
+
+    assert component.non_function_or_unresolved_edges == (
+        ("a", "b"),
+    )
+    assert component.function_only_edges == (
+        ("b", "a"),
+    )
+    assert not (
+        component.non_function_or_unresolved_topology
+        .cyclic_components
+    )
+
+
+def test_p12_missing_lexical_evidence_keeps_edges():
+    result = analyze(
+        _report(
+            {"a": {"b"}, "b": {"a"}},
+            {
+                ("a", "b"): [],
+                ("b", "a"): None,
+            },
+        )
+    )
+
+    component = result.components[0]
+
+    assert component.unresolved_edges == 2
+    assert component.non_function_or_unresolved_edges == (
+        ("a", "b"),
+        ("b", "a"),
+    )
+    assert len(
+        component.non_function_or_unresolved_topology
+        .cyclic_components
+    ) == 1
+    assert component.function_only_edges == ()
+
+
+def test_p12_function_only_indirect_candidate():
+    result = analyze(
+        _report(
+            {"a": {"b"}, "b": {"a"}},
+            {
+                ("a", "b"): [
+                    ("FUNCTION_SCOPED", "PARENT_INITIALIZER", 0)
+                ],
+                ("b", "a"): [
+                    ("MODULE_TOP_LEVEL", "FROM_BASE", 0)
+                ],
+            },
+        )
+    )
+
+    component = result.components[0]
+
+    assert component.function_only_edges == (
+        ("a", "b"),
+    )
+    assert component.non_function_or_unresolved_edges == (
+        ("b", "a"),
+    )
+    assert not (
+        component.non_function_or_unresolved_topology
+        .cyclic_components
+    )
+
+
+def test_p12_multiple_sccs_remain_independent():
+    result = analyze(
+        _report(
+            {
+                "a": {"b"},
+                "b": {"a"},
+                "x": {"y"},
+                "y": {"x"},
+            },
+            {
+                ("a", "b"): [
+                    ("FUNCTION_SCOPED", "FROM_BASE", 0)
+                ],
+                ("b", "a"): [
+                    ("MODULE_TOP_LEVEL", "FROM_BASE", 0)
+                ],
+                ("x", "y"): [
+                    ("MODULE_TOP_LEVEL", "FROM_BASE", 0)
+                ],
+                ("y", "x"): [
+                    ("MODULE_TOP_LEVEL", "FROM_BASE", 0)
+                ],
+            },
+        )
+    )
+
+    assert tuple(
+        component.members
+        for component in result.components
+    ) == (
+        ("a", "b"),
+        ("x", "y"),
+    )
+
+    assert [
+        len(
+            component.non_function_or_unresolved_topology
+            .cyclic_components
+        )
+        for component in result.components
+    ] == [0, 1]
+
+    assert [
+        len(component.function_only_edges)
+        for component in result.components
+    ] == [1, 0]
+
+
+def test_p12_projection_is_deterministic():
+    projection = _report(
+        {"a": {"b"}, "b": {"a"}},
+        {
+            ("a", "b"): [
+                ("FUNCTION_SCOPED", "FROM_BASE", 0)
+            ],
+            ("b", "a"): [
+                ("MODULE_TOP_LEVEL", "PARENT_INITIALIZER", 0)
+            ],
+        },
+    )
+
+    first = analyze(projection)
+    second = analyze(projection)
+
+    assert first == second
+    assert projection == _report(
+        {"a": {"b"}, "b": {"a"}},
+        {
+            ("a", "b"): [
+                ("FUNCTION_SCOPED", "FROM_BASE", 0)
+            ],
+            ("b", "a"): [
+                ("MODULE_TOP_LEVEL", "PARENT_INITIALIZER", 0)
+            ],
+        },
+    )
+
+    json.dumps(asdict(first))
