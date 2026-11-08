@@ -1504,3 +1504,41 @@ def test_p10_private_mode_rejects_session_combination():
     )
 
     assert result.outcome == "UNKNOWN"
+
+
+def test_p11_strict_mode_remains_whole_module_unknown():
+    sources = {
+        "pkg.__init__": ast.parse("pass"),
+        "pkg.a": ast.parse(
+            "value = 1\n"
+            "@unknown_decorator\n"
+            "class Bad:\n"
+            "    pass\n"
+        ),
+    }
+
+    strict = evaluate_package_import_order(
+        sources,
+        "pkg.a",
+        annotation_semantics="DEFERRED",
+    )
+
+    opt_in = evaluate_package_import_order(
+        sources,
+        "pkg.a",
+        annotation_semantics="DEFERRED",
+        _compile_on_first_import=True,
+    )
+
+    assert strict.outcome == "UNKNOWN"
+    assert strict.target_module == "pkg.a"
+    assert strict.events == ()
+
+    assert opt_in.outcome == "UNKNOWN"
+    assert opt_in.target_module == "pkg.a"
+    assert any(
+        event.operation == "BIND"
+        and event.module == "pkg.a"
+        and event.symbol == "value"
+        for event in opt_in.events
+    )

@@ -911,6 +911,83 @@ def _compile(
     return tuple(steps)
 
 
+def _compile_reachable_prefix(
+    tree: ast.Module,
+    logical: str,
+    package: bool,
+    *,
+    typing_guard: RecognizedTypingGuard | None,
+    annotation_semantics: str | None,
+) -> tuple[_Step, ...] | None:
+    """Preserve modeled effects before the first unsupported statement.
+
+    This helper is used only for a module actually entered by
+    the opt-in import-order simulator.
+
+    The caller must already have validated the complete
+    original AST with CPython compile(), without execution.
+
+    An unsupported statement is an unavoidable UNKNOWN
+    boundary, never an instruction that may be skipped.
+    """
+
+    complete = _compile(
+        tree,
+        logical,
+        package,
+        typing_guard=typing_guard,
+        annotation_semantics=annotation_semantics,
+    )
+
+    if complete is not None:
+        return complete
+
+    if not tree.body:
+        return None
+
+    def compile_prefix(
+        count: int,
+    ) -> tuple[_Step, ...] | None:
+        return _compile(
+            ast.Module(
+                body=tree.body[:count],
+                type_ignores=[],
+            ),
+            logical,
+            package,
+            typing_guard=typing_guard,
+            annotation_semantics=annotation_semantics,
+        )
+
+    # The existing restricted compiler processes top-level
+    # statements in order and aborts on its first refusal.
+    # Prefix support is monotonic for the same full-tree
+    # typing guard and annotation semantics.
+
+    low = 0
+    high = len(tree.body)
+
+    while low + 1 < high:
+        middle = (low + high) // 2
+
+        if compile_prefix(middle) is None:
+            high = middle
+        else:
+            low = middle
+
+    accepted = compile_prefix(low)
+
+    if (
+        accepted is None
+        or compile_prefix(high) is not None
+    ):
+        return None
+
+    return accepted + (
+        _Step("UNMODELED_STATEMENT"),
+    )
+
+
 def evaluate_package_import_order(
     indexed_sources: Mapping[str, ast.AST],
     entry_module: str,
@@ -1247,7 +1324,7 @@ def evaluate_package_import_order(
                 frozenset(indexed_sources),
             )
 
-            program = _compile(
+            program = _compile_reachable_prefix(
                 tree,
                 module,
                 module in packages,
@@ -1725,6 +1802,9 @@ def evaluate_package_import_order(
                     step.symbol,
                 )
             )
+
+        elif step.op == "UNMODELED_STATEMENT":
+            return result("UNKNOWN", module)
 
         else:
             return result("UNKNOWN")

@@ -420,6 +420,251 @@ def test_g18_p2_p5_unlisted_shadowing_source_unknown():
     )
 
 
+def test_p11_external_import_precedes_decorator_boundary():
+    sources = {
+        "ns.a": ast.parse(
+            "from dataclasses import dataclass\n"
+            "@dataclass(frozen=True)\n"
+            "class Model:\n"
+            "    value: int\n"
+        ),
+    }
+
+    result = _p10_assess(sources)
+
+    assert result.outcome == "UNKNOWN"
+    assert result.reason == "RESTRICTED_MODEL_UNKNOWN"
+    assert result.model_assessment is not None
+    assert result.model_assessment.target_module == (
+        "dataclasses"
+    )
+
+    assert not any(
+        event.operation == "DEFINE_PASSIVE_CLASS"
+        for event in result.model_assessment.events
+    )
+
+
+def test_p11_binding_before_unknown_boundary():
+    sources = {
+        "ns.a": ast.parse(
+            "value = 1\n"
+            "@unknown_decorator\n"
+            "class Bad:\n"
+            "    pass\n"
+        ),
+    }
+
+    result = _p10_assess(sources)
+
+    assert result.outcome == "UNKNOWN"
+    assert result.model_assessment is not None
+    assert result.model_assessment.target_module == "ns.a"
+
+    assert any(
+        event.operation == "BIND"
+        and event.module == "ns.a"
+        and event.symbol == "value"
+        for event in result.model_assessment.events
+    )
+
+
+def test_p11_reentrant_import_before_unknown_boundary():
+    sources = {
+        "ns.a": ast.parse(
+            "value = 1\n"
+            "import ns.b\n"
+            "@unknown_decorator\n"
+            "class Bad:\n"
+            "    pass\n"
+        ),
+        "ns.b": ast.parse(
+            "from ns.a import value\n"
+        ),
+    }
+
+    result = _p10_assess(sources)
+
+    assert result.outcome == "UNKNOWN"
+    assert result.model_assessment is not None
+    assert result.model_assessment.target_module == "ns.a"
+
+    events = result.model_assessment.events
+
+    assert any(
+        event.operation == "START_IMPORT"
+        and event.target == "ns.b"
+        for event in events
+    )
+
+    assert any(
+        event.operation == "FROM"
+        and event.module == "ns.b"
+        and event.target == "ns.a"
+        and event.symbol == "value"
+        for event in events
+    )
+
+    assert not any(
+        event.operation == "EARLY_BINDING_HAZARD"
+        for event in events
+    )
+
+
+def test_p11_early_binding_hazard_precedes_later_unknown():
+    sources = {
+        "ns.a": ast.parse(
+            "import ns.b\n"
+            "value = 1\n"
+            "@unknown_decorator\n"
+            "class Bad:\n"
+            "    pass\n"
+        ),
+        "ns.b": ast.parse(
+            "from ns.a import value\n"
+        ),
+    }
+
+    result = _p10_assess(sources)
+
+    assert result.outcome == (
+        "CONDITIONAL_EARLY_BINDING_HAZARD"
+    )
+    assert result.model_assessment is not None
+    assert result.model_assessment.outcome == (
+        "EARLY_BINDING_HAZARD"
+    )
+
+    assert any(
+        event.operation == "EARLY_BINDING_HAZARD"
+        for event in result.model_assessment.events
+    )
+
+
+def test_p11_unknown_parent_stops_before_child_entry():
+    sources = {
+        "pkg.__init__": ast.parse(
+            "value = 1\n"
+            "@unknown_decorator\n"
+            "class Bad:\n"
+            "    pass\n"
+        ),
+        "pkg.ns.a": ast.parse("pass\n"),
+    }
+
+    result = _p10_assess(
+        sources,
+        entry="pkg.ns.a",
+    )
+
+    assert result.outcome == "UNKNOWN"
+    assert result.model_assessment is not None
+    assert result.model_assessment.target_module == "pkg"
+
+    events = result.model_assessment.events
+
+    assert any(
+        event.operation == "BIND"
+        and event.module == "pkg"
+        and event.symbol == "value"
+        for event in events
+    )
+
+    assert not any(
+        event.operation == "START_IMPORT"
+        and event.target == "pkg.ns.a"
+        for event in events
+    )
+
+
+def test_p11_class_local_import_before_unknown_boundary():
+    sources = {
+        "ns.a": ast.parse(
+            "class Holder:\n"
+            "    import ns.b\n"
+            "@unknown_decorator\n"
+            "class Bad:\n"
+            "    pass\n"
+        ),
+        "ns.b": ast.parse("pass\n"),
+    }
+
+    result = _p10_assess(sources)
+
+    assert result.outcome == "UNKNOWN"
+    assert result.model_assessment is not None
+    assert result.model_assessment.target_module == "ns.a"
+
+    assert any(
+        event.operation == "CLASS_LOCAL_IMPORT"
+        and event.module == "ns.a"
+        and event.target == "ns.b"
+        for event in result.model_assessment.events
+    )
+
+
+def test_p11_called_function_steps_precede_unknown_boundary():
+    sources = {
+        "ns.a": ast.parse(
+            "def run():\n"
+            "    import ns.b\n"
+            "run()\n"
+            "@unknown_decorator\n"
+            "class Bad:\n"
+            "    pass\n"
+        ),
+        "ns.b": ast.parse("pass\n"),
+    }
+
+    result = _p10_assess(sources)
+
+    assert result.outcome == "UNKNOWN"
+    assert result.model_assessment is not None
+    assert result.model_assessment.target_module == "ns.a"
+
+    events = result.model_assessment.events
+
+    assert any(
+        event.operation == "CALL_FUNCTION"
+        and event.module == "ns.a"
+        and event.symbol == "run"
+        for event in events
+    )
+
+    assert any(
+        event.operation == "START_IMPORT"
+        and event.target == "ns.b"
+        for event in events
+    )
+
+
+def test_p11_deterministic_without_ast_mutation():
+    sources = {
+        "ns.a": ast.parse(
+            "value = 1\n"
+            "@unknown_decorator\n"
+            "class Bad:\n"
+            "    pass\n"
+        ),
+    }
+
+    before = {
+        name: ast.dump(tree, include_attributes=True)
+        for name, tree in sources.items()
+    }
+
+    first = _p10_assess(sources)
+    second = _p10_assess(sources)
+
+    assert first == second
+    assert first.outcome == "UNKNOWN"
+
+    assert before == {
+        name: ast.dump(tree, include_attributes=True)
+        for name, tree in sources.items()
+    }
+
+
 def _p10_assess(sources, entry="ns.a"):
     paths = frozenset(
         module.replace(".", "/") + ".py"
