@@ -300,6 +300,164 @@ def test_r8_optional_class_requires_deferred_annotations(
     _r8_assert_rejected(result)
 
 
+def _r9_builtin_base_result(source):
+    return evaluate_package_import_order(
+        {
+            "pkg.__init__": ast.parse(
+                source + "\nfrom .child import token\n"
+            ),
+            "pkg.child": ast.parse("token = 7\n"),
+            "pkg.side": ast.parse("ValueError = 123\n"),
+        },
+        "pkg",
+        annotation_semantics="DEFERRED",
+        _compile_on_first_import=True,
+    )
+
+
+def test_r9_sourceerror_shape_crosses_builtin_base():
+    source = (
+        "class SourceError(ValueError):\n"
+        '    """Structured source error."""\n'
+        "    def __init__(self, message: str, *, "
+        'error_status: str = "ERROR", '
+        "line_number: int | None = None, "
+        "column_number: int | None = None, "
+        "detail_message: str | None = None) -> None:\n"
+        "        super().__init__(message)\n"
+        "        self.error_status = error_status\n"
+    )
+
+    result = _r9_builtin_base_result(source)
+
+    assert result.outcome == "MODEL_PASS"
+    assert result.assumed_dataclass_decorations == ()
+
+    events = list(result.events)
+
+    defined = next(
+        i for i, event in enumerate(events)
+        if event.operation == "DEFINE_PASSIVE_CLASS"
+        and event.symbol == "SourceError"
+    )
+
+    imported = next(
+        i for i, event in enumerate(events)
+        if event.operation == "START_IMPORT"
+        and event.target == "pkg.child"
+    )
+
+    assert defined < imported
+    assert result.reached_unmodeled_import is None
+
+
+def test_r9_simple_builtin_exception_subclass():
+    result = _r9_builtin_base_result(
+        "class CustomError(ValueError):\n"
+        "    pass\n"
+    )
+
+    assert result.outcome == "MODEL_PASS"
+    assert any(
+        event.operation == "DEFINE_PASSIVE_CLASS"
+        and event.symbol == "CustomError"
+        for event in result.events
+    )
+
+
+@pytest.mark.parametrize(
+    "declaration",
+    [
+        "class CustomError(Exception):",
+        "class CustomError(BaseException):",
+        "class CustomError(UnknownBase):",
+        "class CustomError(pkg.ValueError):",
+        "class CustomError(ValueError, Exception):",
+        "class CustomError(ValueError, metaclass=Meta):",
+        "@decorator\nclass CustomError(ValueError):",
+    ],
+)
+def test_r9_rejects_unmodeled_bases(declaration):
+    result = _r9_builtin_base_result(
+        declaration + "\n    pass\n"
+    )
+
+    assert result.outcome == "UNKNOWN"
+    assert not any(
+        event.operation == "DEFINE_PASSIVE_CLASS"
+        and event.symbol == "CustomError"
+        for event in result.events
+    )
+
+
+def test_r9_rejects_shadowed_builtin_before_class_body():
+    result = _r9_builtin_base_result(
+        "ValueError = 123\n"
+        "class CustomError(ValueError):\n"
+        "    import pkg.side\n"
+    )
+
+    assert result.outcome == "UNKNOWN"
+    assert result.symbol == "ValueError"
+
+    assert not any(
+        event.operation == "DEFINE_PASSIVE_CLASS"
+        and event.symbol == "CustomError"
+        for event in result.events
+    )
+
+    assert not any(
+        event.operation == "START_IMPORT"
+        and event.target == "pkg.side"
+        for event in result.events
+    )
+
+
+def test_r9_rejects_imported_base_shadowing():
+    result = _r9_builtin_base_result(
+        "from .side import ValueError\n"
+        "class CustomError(ValueError):\n"
+        "    pass\n"
+    )
+
+    assert result.outcome == "UNKNOWN"
+    assert result.symbol == "ValueError"
+
+    assert not any(
+        event.operation == "DEFINE_PASSIVE_CLASS"
+        and event.symbol == "CustomError"
+        for event in result.events
+    )
+
+
+def test_r9_rejects_executable_class_body():
+    result = _r9_builtin_base_result(
+        "class CustomError(ValueError):\n"
+        "    execute_unknown_code()\n"
+    )
+
+    assert result.outcome == "UNKNOWN"
+    assert not any(
+        event.operation == "DEFINE_PASSIVE_CLASS"
+        and event.symbol == "CustomError"
+        for event in result.events
+    )
+
+
+def test_r9_existing_plain_class_unchanged():
+    result = _r9_builtin_base_result(
+        "class PlainClass:\n"
+        "    pass\n"
+    )
+
+    assert result.outcome == "MODEL_PASS"
+    assert any(
+        event.operation == "DEFINE_PASSIVE_CLASS"
+        and event.symbol == "PlainClass"
+        for event in result.events
+    )
+
+
 def test_external_assumption_normal_model_still_unknown():
     result = _model({"pkg.__init__": "import os\n"}, "pkg")
     assert result.outcome == "UNKNOWN"

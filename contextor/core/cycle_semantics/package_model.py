@@ -277,7 +277,15 @@ def _safe_passive_class_definition(
     if (
         not statement.name.isidentifier()
         or statement.name.startswith("__")
-        or statement.bases
+        or (
+            bool(statement.bases)
+            and (
+                conditional_dataclass
+                or len(statement.bases) != 1
+                or type(statement.bases[0]) is not ast.Name
+                or statement.bases[0].id != "ValueError"
+            )
+        )
         or statement.keywords
         or (
             bool(statement.decorator_list)
@@ -910,6 +918,14 @@ def _compile(
                 ),
             ):
                 return None
+
+            if stmt.bases:
+                steps.append(
+                    _Step(
+                        "CHECK_BUILTIN_CLASS_BASE",
+                        target="ValueError",
+                    )
+                )
 
             for body_statement in stmt.body:
                 if isinstance(body_statement, ast.Assign):
@@ -2020,6 +2036,17 @@ def evaluate_package_import_order(
                     symbol=step.binding,
                 )
             )
+
+        elif step.op == "CHECK_BUILTIN_CLASS_BASE":
+            if (
+                step.target != "ValueError"
+                or "ValueError" in namespaces[module]
+            ):
+                return result(
+                    "UNKNOWN",
+                    module,
+                    step.target,
+                )
 
         elif step.op == "DEFINE_PASSIVE_CLASS":
             namespaces[module][step.binding] = (
