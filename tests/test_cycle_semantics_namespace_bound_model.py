@@ -6,6 +6,8 @@ import hashlib
 import json
 from dataclasses import asdict
 
+import pytest
+
 from contextor.core.source import SourceSnapshot
 from contextor.core.cycle_semantics.namespace_bound_model import (
     evaluate_source_bound_conditional_namespace_import_order,
@@ -112,6 +114,257 @@ def _external_result(source, *, assume=False, child=None):
         standard_finder_assumed=True,
         assume_passive_external_imports=assume,
     )
+
+
+_FROZEN_CLASS = (
+    "@dataclass(frozen=True)\n"
+    "class Graph:\n"
+    "    hard_edges: dict[str, set[str]]\n"
+    "    soft_edges: dict[str, set[str]]\n"
+    "    def without_module(self, name: str) -> \"Graph\":\n"
+    "        return self\n"
+)
+
+
+def _dataclass_result(source, *, decorate=False, external=True, child=None):
+    return evaluate_source_bound_conditional_namespace_import_order(
+        *_external_case(source, child=child),
+        "pkg.ns.a",
+        standard_finder_assumed=True,
+        target_python_version=(3, 15),
+        assume_passive_external_imports=external,
+        assume_frozen_dataclass_decoration=decorate,
+    )
+
+
+def test_frozen_dataclass_t01_default_unknown():
+    result = _dataclass_result(
+        "from dataclasses import dataclass\n" + _FROZEN_CLASS
+    )
+    model = result.conditional_assessment.model_assessment
+    assert result.outcome == "UNKNOWN"
+    assert tuple(x.target for x in model.assumed_external_imports) == (
+        "dataclasses",
+    )
+    assert model.assumed_dataclass_decorations == ()
+    assert result.class_decorator_policy == "STOP_AT_UNMODELED"
+
+
+def test_frozen_dataclass_t02_exact_conditional_pass():
+    result = _dataclass_result(
+        "from dataclasses import dataclass\n" + _FROZEN_CLASS,
+        decorate=True,
+    )
+    model = result.conditional_assessment.model_assessment
+    assert result.outcome == "CONDITIONAL_MODEL_PASS"
+    assert model.outcome == "MODEL_PASS"
+    assert model.evidence_scope == (
+        "CONDITIONAL_EXTERNAL_AND_FROZEN_DATACLASS_"
+        "ASSUMPTIONS_NOT_RUNTIME_PROOF"
+    )
+    assert len(model.assumed_external_imports) == 1
+    assert model.assumed_external_imports[0].target == "dataclasses"
+    assert len(model.assumed_dataclass_decorations) == 1
+    row = model.assumed_dataclass_decorations[0]
+    assert (row.module, row.class_name, row.decorator) == (
+        "pkg.ns.a", "Graph", "dataclasses.dataclass(frozen=True)"
+    )
+    assert (row.line, row.column) == (2, 1)
+    assert result.class_decorator_policy == "ASSUME_PASSIVE_FROZEN_DATACLASS"
+    operations = [event.operation for event in model.events]
+    assert operations.index("ASSUMED_FROZEN_DATACLASS_DECORATION") < (
+        operations.index("DEFINE_PASSIVE_CLASS")
+    )
+
+
+def test_frozen_dataclass_t03_internal_hazard_retained():
+    result = _dataclass_result(
+        "from dataclasses import dataclass\n"
+        "import pkg.ns.b\n"
+        "@dataclass(frozen=True)\n"
+        "class Graph:\n"
+        "    value: int\n",
+        decorate=True,
+        child="from pkg.ns.a import Graph\n",
+    )
+    model = result.conditional_assessment.model_assessment
+    assert result.outcome == "CONDITIONAL_EARLY_BINDING_HAZARD"
+    assert model.outcome == "EARLY_BINDING_HAZARD"
+    assert (model.target_module, model.symbol) == ("pkg.ns.a", "Graph")
+    assert len(model.assumed_external_imports) == 1
+    assert model.assumed_dataclass_decorations == ()
+
+
+def test_frozen_dataclass_t04_class_bound_before_import():
+    result = _dataclass_result(
+        "from dataclasses import dataclass\n"
+        "@dataclass(frozen=True)\n"
+        "class Graph:\n"
+        "    value: int\n"
+        "import pkg.ns.b\n",
+        decorate=True,
+        child="from pkg.ns.a import Graph\n",
+    )
+    model = result.conditional_assessment.model_assessment
+    assert result.outcome == "CONDITIONAL_MODEL_PASS"
+    assert len(model.assumed_dataclass_decorations) == 1
+    assert any(
+        event.operation == "FROM" and event.symbol == "Graph"
+        for event in model.events
+    )
+
+
+@pytest.mark.parametrize(
+    "decorator",
+    ["other(frozen=True)", "dataclass(frozen=False)",
+     "dataclass(frozen=flag)", "dataclass",
+     "dataclass(slots=True, frozen=True)"],
+)
+def test_frozen_dataclass_t05_t06_nonexact_unknown(decorator):
+    result = _dataclass_result(
+        "from dataclasses import dataclass\n"
+        f"@{decorator}\nclass Graph:\n    value: int\n",
+        decorate=True,
+    )
+    assert result.outcome == "UNKNOWN"
+    assert (
+        result.conditional_assessment.model_assessment
+        .assumed_dataclass_decorations
+    ) == ()
+
+
+def test_frozen_dataclass_t07_dynamic_field_unknown():
+    result = _dataclass_result(
+        "from dataclasses import dataclass\n"
+        "@dataclass(frozen=True)\n"
+        "class Graph:\n"
+        "    value: int = field(default_factory=make)\n",
+        decorate=True,
+    )
+    assert result.outcome == "UNKNOWN"
+    assert result.conditional_assessment.model_assessment.assumed_dataclass_decorations == ()
+
+
+@pytest.mark.parametrize(
+    "class_text",
+    [
+        "class Graph:\n    import os\n",
+        "class Graph:\n    run()\n",
+        "class Graph(metaclass=Meta):\n    value: int\n",
+        "class Graph(Base):\n    value: int\n",
+    ],
+)
+def test_frozen_dataclass_t08_class_effects_unknown(class_text):
+    result = _dataclass_result(
+        "from dataclasses import dataclass\n"
+        "@dataclass(frozen=True)\n" + class_text,
+        decorate=True,
+    )
+    assert result.outcome == "UNKNOWN"
+    assert result.conditional_assessment.model_assessment.assumed_dataclass_decorations == ()
+
+
+def test_frozen_dataclass_t09_rebound_decorator_unknown():
+    result = _dataclass_result(
+        "from dataclasses import dataclass\n"
+        "dataclass = 1\n"
+        "@dataclass(frozen=True)\n"
+        "class Graph:\n    value: int\n",
+        decorate=True,
+    )
+    assert result.outcome == "UNKNOWN"
+    assert result.conditional_assessment.model_assessment.assumed_dataclass_decorations == ()
+
+
+def test_frozen_dataclass_t10_builtin_shadow_unknown():
+    result = _dataclass_result(
+        "from dataclasses import dataclass\n"
+        "dict = 1\n"
+        "@dataclass(frozen=True)\n"
+        "class Graph:\n    value: dict[str, int]\n",
+        decorate=True,
+    )
+    assert result.outcome == "UNKNOWN"
+    assert result.conditional_assessment.model_assessment.assumed_dataclass_decorations == ()
+
+
+def test_frozen_dataclass_t11_unreached_definition():
+    result = _dataclass_result(
+        "from dataclasses import dataclass\n"
+        "def later():\n"
+        "    @dataclass(frozen=True)\n"
+        "    class Graph:\n"
+        "        value: int\n",
+        decorate=True,
+    )
+    assert result.outcome == "CONDITIONAL_MODEL_PASS"
+    assert result.conditional_assessment.model_assessment.assumed_dataclass_decorations == ()
+
+
+def test_frozen_dataclass_t12_fingerprint_mismatch():
+    roots, bindings, hashes, snapshots = _external_case(
+        "from dataclasses import dataclass\n" + _FROZEN_CLASS
+    )
+    snapshots["pkg.ns.a"] = _snapshot("changed = True\n")
+    result = evaluate_source_bound_conditional_namespace_import_order(
+        roots, bindings, hashes, snapshots, "pkg.ns.a",
+        standard_finder_assumed=True,
+        target_python_version=(3, 15),
+        assume_passive_external_imports=True,
+        assume_frozen_dataclass_decoration=True,
+    )
+    assert (result.outcome, result.reason) == (
+        "UNKNOWN", "SOURCE_FINGERPRINT_MISMATCH"
+    )
+    assert result.conditional_assessment is None
+
+
+def test_frozen_dataclass_t13_invalid_policy():
+    result = evaluate_source_bound_conditional_namespace_import_order(
+        *_external_case("pass\n"), "pkg.ns.a",
+        assume_passive_external_imports=True,
+        assume_frozen_dataclass_decoration="yes",
+    )
+    assert (result.outcome, result.reason) == (
+        "UNKNOWN", "INVALID_DATACLASS_DECORATOR_ASSUMPTION"
+    )
+
+
+def test_frozen_dataclass_t14_requires_external_policy():
+    result = _dataclass_result("pass\n", decorate=True, external=False)
+    assert (result.outcome, result.reason) == (
+        "UNKNOWN", "DATACLASS_ASSUMPTION_REQUIRES_EXTERNAL_POLICY"
+    )
+
+
+def test_frozen_dataclass_t15_deterministic():
+    args = _external_case(
+        "from dataclasses import dataclass\n" + _FROZEN_CLASS
+    )
+    before = dict(args[3])
+    first = evaluate_source_bound_conditional_namespace_import_order(
+        *args, "pkg.ns.a", standard_finder_assumed=True,
+        target_python_version=(3, 15),
+        assume_passive_external_imports=True,
+        assume_frozen_dataclass_decoration=True,
+    )
+    second = evaluate_source_bound_conditional_namespace_import_order(
+        *args, "pkg.ns.a", standard_finder_assumed=True,
+        target_python_version=(3, 15),
+        assume_passive_external_imports=True,
+        assume_frozen_dataclass_decoration=True,
+    )
+    assert first == second
+    assert first.conditional_assessment.model_assessment.events == (
+        second.conditional_assessment.model_assessment.events
+    )
+    assert first.conditional_assessment.model_assessment.assumed_dataclass_decorations == (
+        second.conditional_assessment.model_assessment.assumed_dataclass_decorations
+    )
+    assert json.dumps(asdict(first), sort_keys=True) == json.dumps(
+        asdict(second), sort_keys=True
+    )
+    assert args[3] == before
 
 
 def test_external_policy_t01_default_still_unknown():

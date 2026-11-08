@@ -21,6 +21,73 @@ def _model(source, entry):
     )
 
 
+def test_frozen_dataclass_default_model_unknown():
+    result = _model(
+        {"pkg.__init__": (
+            "from dataclasses import dataclass\n"
+            "@dataclass(frozen=True)\nclass Graph:\n    value: int\n"
+        )},
+        "pkg",
+    )
+    assert result.outcome == "UNKNOWN"
+    assert result.assumed_dataclass_decorations == ()
+
+
+def test_frozen_dataclass_private_policy_requires_external():
+    result = evaluate_package_import_order(
+        {"pkg.__init__": ast.parse(
+            "@dataclass(frozen=True)\nclass Graph:\n    value: int\n"
+        )},
+        "pkg",
+        _compile_on_first_import=True,
+        _assume_frozen_dataclass_decoration=True,
+    )
+    assert result.outcome == "UNKNOWN"
+    assert result.assumed_dataclass_decorations == ()
+
+
+def test_frozen_dataclass_direct_conditional_record():
+    result = evaluate_package_import_order(
+        {"pkg.__init__": ast.parse(
+            "from dataclasses import dataclass\n"
+            "@dataclass(frozen=True)\nclass Graph:\n    value: int\n"
+        )},
+        "pkg",
+        annotation_semantics="DEFERRED",
+        _compile_on_first_import=True,
+        _assume_passive_external_imports=True,
+        _assume_frozen_dataclass_decoration=True,
+    )
+    assert result.outcome == "MODEL_PASS"
+    assert result.evidence_scope == (
+        "CONDITIONAL_EXTERNAL_AND_FROZEN_DATACLASS_"
+        "ASSUMPTIONS_NOT_RUNTIME_PROOF"
+    )
+    assert len(result.assumed_dataclass_decorations) == 1
+    assert result.assumed_dataclass_decorations[0].class_name == "Graph"
+
+
+def test_frozen_dataclass_rebound_name_does_not_bind_class():
+    result = evaluate_package_import_order(
+        {"pkg.__init__": ast.parse(
+            "from dataclasses import dataclass\n"
+            "dataclass = 1\n"
+            "@dataclass(frozen=True)\nclass Graph:\n    value: int\n"
+        )},
+        "pkg",
+        annotation_semantics="DEFERRED",
+        _compile_on_first_import=True,
+        _assume_passive_external_imports=True,
+        _assume_frozen_dataclass_decoration=True,
+    )
+    assert result.outcome == "UNKNOWN"
+    assert result.assumed_dataclass_decorations == ()
+    assert not any(
+        event.operation == "DEFINE_PASSIVE_CLASS" and event.symbol == "Graph"
+        for event in result.events
+    )
+
+
 def test_external_assumption_normal_model_still_unknown():
     result = _model({"pkg.__init__": "import os\n"}, "pkg")
     assert result.outcome == "UNKNOWN"

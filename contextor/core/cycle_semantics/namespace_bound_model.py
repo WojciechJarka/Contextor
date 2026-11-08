@@ -46,6 +46,7 @@ class SourceBoundConditionalNamespaceAssessment:
         "NOT_RUNTIME_OR_LIVE_PROOF"
     )
     external_import_policy: str = "STOP_AT_UNMODELED"
+    class_decorator_policy: str = "STOP_AT_UNMODELED"
 
 
 def evaluate_source_bound_conditional_namespace_import_order(
@@ -58,6 +59,7 @@ def evaluate_source_bound_conditional_namespace_import_order(
     standard_finder_assumed: bool = False,
     target_python_version: tuple[int, int] | None = None,
     assume_passive_external_imports: bool = False,
+    assume_frozen_dataclass_decoration: bool = False,
 ) -> SourceBoundConditionalNamespaceAssessment:
     """Parse indexed byte snapshots and conditionally evaluate PEP 420.
 
@@ -74,6 +76,11 @@ def evaluate_source_bound_conditional_namespace_import_order(
         if assume_passive_external_imports is True
         else "STOP_AT_UNMODELED"
     )
+    class_decorator_policy = (
+        "ASSUME_PASSIVE_FROZEN_DATACLASS"
+        if assume_frozen_dataclass_decoration is True
+        else "STOP_AT_UNMODELED"
+    )
 
     def reject(
         reason: str,
@@ -86,7 +93,16 @@ def evaluate_source_bound_conditional_namespace_import_order(
             source_evidence_sha256=digest,
             conditional_assessment=None,
             external_import_policy=external_import_policy,
+            class_decorator_policy=class_decorator_policy,
         )
+
+    if type(assume_frozen_dataclass_decoration) is not bool:
+        return reject("INVALID_DATACLASS_DECORATOR_ASSUMPTION")
+    if (
+        assume_frozen_dataclass_decoration
+        and not assume_passive_external_imports
+    ):
+        return reject("DATACLASS_ASSUMPTION_REQUIRES_EXTERNAL_POLICY")
 
     if type(assume_passive_external_imports) is not bool:
         return reject("INVALID_EXTERNAL_IMPORT_ASSUMPTION")
@@ -206,6 +222,9 @@ def evaluate_source_bound_conditional_namespace_import_order(
         assume_passive_external_imports=(
             assume_passive_external_imports
         ),
+        assume_frozen_dataclass_decoration=(
+            assume_frozen_dataclass_decoration
+        ),
     )
 
     # Never convert CONDITIONAL_MODEL_PASS into MODEL_PASS.
@@ -218,4 +237,5 @@ def evaluate_source_bound_conditional_namespace_import_order(
         source_evidence_sha256=digest,
         conditional_assessment=conditional,
         external_import_policy=external_import_policy,
+        class_decorator_policy=class_decorator_policy,
     )

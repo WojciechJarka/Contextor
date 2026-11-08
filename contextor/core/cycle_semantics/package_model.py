@@ -42,6 +42,15 @@ class ReachedUnmodeledImport:
 
 
 @dataclass(frozen=True)
+class AssumedFrozenDataclassDecoration:
+    module: str
+    class_name: str
+    decorator: str
+    line: int
+    column: int
+
+
+@dataclass(frozen=True)
 class PackageImportAssessment:
     entry_module: str
     outcome: str
@@ -54,6 +63,9 @@ class PackageImportAssessment:
     ) = None
     assumed_external_imports: (
         tuple[ReachedUnmodeledImport, ...]
+    ) = ()
+    assumed_dataclass_decorations: (
+        tuple[AssumedFrozenDataclassDecoration, ...]
     ) = ()
 
 
@@ -69,6 +81,7 @@ class _Step:
     class_local: bool = False
     source_line: int | None = None
     source_column: int | None = None
+    annotation_builtin_names: tuple[str, ...] = ()
 
 
 @dataclass
@@ -161,10 +174,64 @@ def _safe_passive_function_definition(
     return True
 
 
+def _exact_frozen_dataclass_decorator(
+    decorator: ast.AST,
+) -> bool:
+    return (
+        isinstance(decorator, ast.Call)
+        and isinstance(decorator.func, ast.Name)
+        and decorator.func.id == "dataclass"
+        and not decorator.args
+        and len(decorator.keywords) == 1
+        and decorator.keywords[0].arg == "frozen"
+        and isinstance(
+            decorator.keywords[0].value,
+            ast.Constant,
+        )
+        and decorator.keywords[0].value.value is True
+        and type(
+            decorator.keywords[0].value.value
+        ) is bool
+    )
+
+
+def _restricted_dataclass_field_annotation(
+    node: ast.AST,
+) -> bool:
+    if isinstance(node, ast.Name):
+        return node.id in {
+            "str", "int", "bool", "float",
+            "bytes", "dict", "list",
+            "set", "tuple",
+        }
+
+    if isinstance(node, ast.Constant):
+        return type(node.value) is str
+
+    if isinstance(node, ast.Tuple):
+        return all(
+            _restricted_dataclass_field_annotation(item)
+            for item in node.elts
+        )
+
+    if isinstance(node, ast.Subscript):
+        return (
+            _restricted_dataclass_field_annotation(
+                node.value
+            )
+            and _restricted_dataclass_field_annotation(
+                node.slice
+            )
+        )
+
+    return False
+
+
 def _safe_passive_class_definition(
     statement: ast.ClassDef,
     *,
     annotation_semantics: str | None = None,
+    allow_conditional_frozen_dataclass: bool = False,
 ) -> bool:
     """Validate a class whose body has no unknown effects.
 
@@ -175,15 +242,50 @@ def _safe_passive_class_definition(
     Direct class-body imports execute before class-name
     binding. Method bodies remain deferred.
     """
+    conditional_dataclass = (
+        allow_conditional_frozen_dataclass
+        and annotation_semantics == "DEFERRED"
+        and len(statement.decorator_list) == 1
+        and _exact_frozen_dataclass_decorator(
+            statement.decorator_list[0]
+        )
+    )
     if (
         not statement.name.isidentifier()
         or statement.name.startswith("__")
         or statement.bases
         or statement.keywords
-        or statement.decorator_list
+        or (
+            bool(statement.decorator_list)
+            and not conditional_dataclass
+        )
         or getattr(statement, "type_params", ())
     ):
         return False
+
+    if conditional_dataclass:
+        for body_statement in statement.body:
+            if isinstance(
+                body_statement,
+                (ast.Import, ast.ImportFrom, ast.Assign),
+            ):
+                return False
+
+            if isinstance(body_statement, ast.AnnAssign):
+                if (
+                    body_statement.value is not None
+                    or not _restricted_dataclass_field_annotation(
+                        body_statement.annotation
+                    )
+                ):
+                    return False
+
+            if isinstance(
+                body_statement,
+                (ast.FunctionDef, ast.AsyncFunctionDef),
+            ):
+                if body_statement.name.startswith("__"):
+                    return False
 
     for index, body_statement in enumerate(
         statement.body
@@ -458,6 +560,7 @@ def _compile(
     _depth: int = 0,
     typing_guard: RecognizedTypingGuard | None = None,
     annotation_semantics: str | None = None,
+    assume_frozen_dataclass: bool = False,
 ) -> tuple[_Step, ...] | None:
     steps: list[_Step] = []
 
@@ -671,6 +774,7 @@ def _compile(
                 package,
                 _depth=_depth + 1,
                 annotation_semantics=annotation_semantics,
+                assume_frozen_dataclass=assume_frozen_dataclass,
             )
 
             if selected_steps is None:
@@ -750,8 +854,15 @@ def _compile(
                 steps.append(_Step("BIND", binding=stmt.target.id))
 
         elif isinstance(stmt, ast.ClassDef):
+            conditional_dataclass = (
+                assume_frozen_dataclass
+                and bool(stmt.decorator_list)
+            )
             if not _safe_passive_class_definition(
                 stmt, annotation_semantics=annotation_semantics,
+                allow_conditional_frozen_dataclass=(
+                    conditional_dataclass
+                ),
             ):
                 return None
 
@@ -786,6 +897,7 @@ def _compile(
                     logical,
                     package,
                     _depth=_depth + 1,
+                    assume_frozen_dataclass=assume_frozen_dataclass,
                 )
                 if (
                     compiled is None
@@ -805,12 +917,29 @@ def _compile(
                     for item in compiled
                 )
 
-            steps.append(
-                _Step(
-                    "DEFINE_PASSIVE_CLASS",
-                    binding=stmt.name,
+            if conditional_dataclass:
+                steps.append(
+                    _Step(
+                        "DEFINE_CONDITIONAL_FROZEN_DATACLASS",
+                        binding=stmt.name,
+                        source_line=stmt.decorator_list[0].lineno,
+                        source_column=stmt.decorator_list[0].col_offset,
+                        annotation_builtin_names=tuple(sorted({
+                            node.id
+                            for field in stmt.body
+                            if isinstance(field, ast.AnnAssign)
+                            for node in ast.walk(field.annotation)
+                            if isinstance(node, ast.Name)
+                        })),
+                    )
                 )
-            )
+            else:
+                steps.append(
+                    _Step(
+                        "DEFINE_PASSIVE_CLASS",
+                        binding=stmt.name,
+                    )
+                )
 
         elif isinstance(stmt, ast.FunctionDef):
             if not _safe_passive_function_definition(
@@ -853,6 +982,7 @@ def _compile(
                         fragment,
                         logical,
                         package,
+                        assume_frozen_dataclass=assume_frozen_dataclass,
                     )
 
                     if (
@@ -942,6 +1072,7 @@ def _compile_reachable_prefix(
     *,
     typing_guard: RecognizedTypingGuard | None,
     annotation_semantics: str | None,
+    assume_frozen_dataclass: bool = False,
 ) -> tuple[_Step, ...] | None:
     """Preserve modeled effects before the first unsupported statement.
 
@@ -961,6 +1092,7 @@ def _compile_reachable_prefix(
         package,
         typing_guard=typing_guard,
         annotation_semantics=annotation_semantics,
+        assume_frozen_dataclass=assume_frozen_dataclass,
     )
 
     if complete is not None:
@@ -981,6 +1113,7 @@ def _compile_reachable_prefix(
             package,
             typing_guard=typing_guard,
             annotation_semantics=annotation_semantics,
+            assume_frozen_dataclass=assume_frozen_dataclass,
         )
 
     # The existing restricted compiler processes top-level
@@ -1020,6 +1153,7 @@ def evaluate_package_import_order(
     annotation_semantics: str | None = None,
     _compile_on_first_import: bool = False,
     _assume_passive_external_imports: bool = False,
+    _assume_frozen_dataclass_decoration: bool = False,
 ) -> PackageImportAssessment:
     """Simulate a restricted closed regular-package source set.
 
@@ -1030,6 +1164,9 @@ def evaluate_package_import_order(
     """
     events: list[PackageModelEvent] = []
     assumed_external_imports: list[ReachedUnmodeledImport] = []
+    assumed_dataclass_decorations: list[
+        AssumedFrozenDataclassDecoration
+    ] = []
 
     def result(
         outcome: str,
@@ -1047,7 +1184,10 @@ def evaluate_package_import_order(
             symbol,
             tuple(events),
             evidence_scope=(
-                "CONDITIONAL_PASSIVE_EXTERNAL_IMPORT_"
+                "CONDITIONAL_EXTERNAL_AND_FROZEN_DATACLASS_"
+                "ASSUMPTIONS_NOT_RUNTIME_PROOF"
+                if _assume_frozen_dataclass_decoration is True
+                else "CONDITIONAL_PASSIVE_EXTERNAL_IMPORT_"
                 "ASSUMPTION_NOT_RUNTIME_PROOF"
                 if _assume_passive_external_imports is True
                 else "RESTRICTED_REGULAR_PACKAGE_MODEL"
@@ -1055,6 +1195,9 @@ def evaluate_package_import_order(
             reached_unmodeled_import=reached_unmodeled_import,
             assumed_external_imports=tuple(
                 assumed_external_imports
+            ),
+            assumed_dataclass_decorations=tuple(
+                assumed_dataclass_decorations
             ),
         )
 
@@ -1066,6 +1209,14 @@ def evaluate_package_import_order(
         }
         or type(_compile_on_first_import) is not bool
         or type(_assume_passive_external_imports) is not bool
+        or type(_assume_frozen_dataclass_decoration) is not bool
+        or (
+            _assume_frozen_dataclass_decoration
+            and (
+                not _compile_on_first_import
+                or not _assume_passive_external_imports
+            )
+        )
         or (
             _assume_passive_external_imports
             and not _compile_on_first_import
@@ -1281,6 +1432,7 @@ def evaluate_package_import_order(
                 "DEFINE_FUNCTION",
                 "DEFINE_OPAQUE_FUNCTION",
                 "DEFINE_PASSIVE_CLASS",
+                "DEFINE_CONDITIONAL_FROZEN_DATACLASS",
             }
             and step.binding in children
             for step in programs[package]
@@ -1383,6 +1535,9 @@ def evaluate_package_import_order(
                     if has_future_annotations
                     else annotation_semantics
                 ),
+                assume_frozen_dataclass=(
+                    _assume_frozen_dataclass_decoration
+                ),
             )
 
             if program is None:
@@ -1403,6 +1558,7 @@ def evaluate_package_import_order(
                         "DEFINE_FUNCTION",
                         "DEFINE_OPAQUE_FUNCTION",
                         "DEFINE_PASSIVE_CLASS",
+                        "DEFINE_CONDITIONAL_FROZEN_DATACLASS",
                     }
                     and step.binding in children
                     for step in program
@@ -1779,6 +1935,47 @@ def evaluate_package_import_order(
                 )
             )
 
+        elif step.op == "DEFINE_CONDITIONAL_FROZEN_DATACLASS":
+            if (
+                namespaces[module].get("dataclass")
+                != "\x00ASSUMED_EXTERNAL:dataclasses:dataclass"
+                or any(
+                    name in namespaces[module]
+                    for name in step.annotation_builtin_names
+                )
+            ):
+                return result("UNKNOWN", module, step.binding)
+
+            assumed_dataclass_decorations.append(
+                AssumedFrozenDataclassDecoration(
+                    module=module,
+                    class_name=step.binding,
+                    decorator="dataclasses.dataclass(frozen=True)",
+                    line=step.source_line,
+                    column=step.source_column,
+                )
+            )
+            namespaces[module][step.binding] = (
+                "\x00PASSIVE_CLASS:"
+                + module
+                + ":"
+                + step.binding
+            )
+            events.append(
+                PackageModelEvent(
+                    module,
+                    "ASSUMED_FROZEN_DATACLASS_DECORATION",
+                    symbol=step.binding,
+                )
+            )
+            events.append(
+                PackageModelEvent(
+                    module,
+                    "DEFINE_PASSIVE_CLASS",
+                    symbol=step.binding,
+                )
+            )
+
         elif step.op == "DEFINE_PASSIVE_CLASS":
             namespaces[module][step.binding] = (
                 "\x00PASSIVE_CLASS:"
@@ -1934,6 +2131,7 @@ class ConditionalNamespaceModelAssessment:
     )
     target_python_version: tuple[int, int] | None = None
     external_import_policy: str = "STOP_AT_UNMODELED"
+    class_decorator_policy: str = "STOP_AT_UNMODELED"
 
 
 def _conditional_annotation_mode_for_target(
@@ -2134,6 +2332,7 @@ def evaluate_conditional_namespace_import_order(
     *,
     target_python_version: tuple[int, int] | None = None,
     assume_passive_external_imports: bool = False,
+    assume_frozen_dataclass_decoration: bool = False,
 ) -> ConditionalNamespaceModelAssessment:
     """Evaluate a supplied closed PEP 420 inventory conditionally.
 
@@ -2159,6 +2358,11 @@ def evaluate_conditional_namespace_import_order(
         if assume_passive_external_imports is True
         else "STOP_AT_UNMODELED"
     )
+    class_decorator_policy = (
+        "ASSUME_PASSIVE_FROZEN_DATACLASS"
+        if assume_frozen_dataclass_decoration is True
+        else "STOP_AT_UNMODELED"
+    )
 
     def reject(
         reason: str,
@@ -2176,7 +2380,16 @@ def evaluate_conditional_namespace_import_order(
                 else None
             ),
             external_import_policy=external_import_policy,
+            class_decorator_policy=class_decorator_policy,
         )
+
+    if type(assume_frozen_dataclass_decoration) is not bool:
+        return reject("INVALID_DATACLASS_DECORATOR_ASSUMPTION")
+    if (
+        assume_frozen_dataclass_decoration
+        and not assume_passive_external_imports
+    ):
+        return reject("DATACLASS_ASSUMPTION_REQUIRES_EXTERNAL_POLICY")
 
     if type(assume_passive_external_imports) is not bool:
         return reject("INVALID_EXTERNAL_IMPORT_ASSUMPTION")
@@ -2397,6 +2610,9 @@ def evaluate_conditional_namespace_import_order(
         _assume_passive_external_imports=(
             assume_passive_external_imports
         ),
+        _assume_frozen_dataclass_decoration=(
+            assume_frozen_dataclass_decoration
+        ),
     )
 
     conditional_outcomes = {
@@ -2424,4 +2640,5 @@ def evaluate_conditional_namespace_import_order(
         namespace_parents=namespace_parents,
         target_python_version=target_python_version,
         external_import_policy=external_import_policy,
+        class_decorator_policy=class_decorator_policy,
     )
