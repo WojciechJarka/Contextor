@@ -45,6 +45,7 @@ class SourceBoundConditionalNamespaceAssessment:
         "SOURCE_BOUND_CALLER_SUPPLIED_INVENTORY_"
         "NOT_RUNTIME_OR_LIVE_PROOF"
     )
+    external_import_policy: str = "STOP_AT_UNMODELED"
 
 
 def evaluate_source_bound_conditional_namespace_import_order(
@@ -56,6 +57,7 @@ def evaluate_source_bound_conditional_namespace_import_order(
     *,
     standard_finder_assumed: bool = False,
     target_python_version: tuple[int, int] | None = None,
+    assume_passive_external_imports: bool = False,
 ) -> SourceBoundConditionalNamespaceAssessment:
     """Parse indexed byte snapshots and conditionally evaluate PEP 420.
 
@@ -67,6 +69,12 @@ def evaluate_source_bound_conditional_namespace_import_order(
     LIVE generation or permission to suppress a cycle warning.
     """
 
+    external_import_policy = (
+        "ASSUME_PASSIVE_EXTERNAL_SUCCESS"
+        if assume_passive_external_imports is True
+        else "STOP_AT_UNMODELED"
+    )
+
     def reject(
         reason: str,
         digest: str | None = None,
@@ -77,7 +85,11 @@ def evaluate_source_bound_conditional_namespace_import_order(
             reason=reason,
             source_evidence_sha256=digest,
             conditional_assessment=None,
+            external_import_policy=external_import_policy,
         )
+
+    if type(assume_passive_external_imports) is not bool:
+        return reject("INVALID_EXTERNAL_IMPORT_ASSUMPTION")
 
     if (
         type(entry_module) is not str
@@ -191,6 +203,9 @@ def evaluate_source_bound_conditional_namespace_import_order(
         entry_module,
         roots,
         target_python_version=target_python_version,
+        assume_passive_external_imports=(
+            assume_passive_external_imports
+        ),
     )
 
     # Never convert CONDITIONAL_MODEL_PASS into MODEL_PASS.
@@ -202,4 +217,5 @@ def evaluate_source_bound_conditional_namespace_import_order(
         reason=conditional.reason,
         source_evidence_sha256=digest,
         conditional_assessment=conditional,
+        external_import_policy=external_import_policy,
     )

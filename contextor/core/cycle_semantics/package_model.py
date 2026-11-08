@@ -52,6 +52,9 @@ class PackageImportAssessment:
     reached_unmodeled_import: (
         ReachedUnmodeledImport | None
     ) = None
+    assumed_external_imports: (
+        tuple[ReachedUnmodeledImport, ...]
+    ) = ()
 
 
 @dataclass(frozen=True)
@@ -1016,6 +1019,7 @@ def evaluate_package_import_order(
     _session: _PackageSourceSession | None = None,
     annotation_semantics: str | None = None,
     _compile_on_first_import: bool = False,
+    _assume_passive_external_imports: bool = False,
 ) -> PackageImportAssessment:
     """Simulate a restricted closed regular-package source set.
 
@@ -1025,6 +1029,7 @@ def evaluate_package_import_order(
     Results cannot certify general Python import safety.
     """
     events: list[PackageModelEvent] = []
+    assumed_external_imports: list[ReachedUnmodeledImport] = []
 
     def result(
         outcome: str,
@@ -1041,7 +1046,16 @@ def evaluate_package_import_order(
             target,
             symbol,
             tuple(events),
+            evidence_scope=(
+                "CONDITIONAL_PASSIVE_EXTERNAL_IMPORT_"
+                "ASSUMPTION_NOT_RUNTIME_PROOF"
+                if _assume_passive_external_imports is True
+                else "RESTRICTED_REGULAR_PACKAGE_MODEL"
+            ),
             reached_unmodeled_import=reached_unmodeled_import,
+            assumed_external_imports=tuple(
+                assumed_external_imports
+            ),
         )
 
     if (
@@ -1051,6 +1065,11 @@ def evaluate_package_import_order(
             None, "STOCK_EAGER", "STRINGIFIED", "DEFERRED",
         }
         or type(_compile_on_first_import) is not bool
+        or type(_assume_passive_external_imports) is not bool
+        or (
+            _assume_passive_external_imports
+            and not _compile_on_first_import
+        )
         or (
             _compile_on_first_import
             and _session is not None
@@ -1322,6 +1341,10 @@ def evaluate_package_import_order(
         return None
 
     step_budget = 10000
+    indexed_roots = frozenset(
+        name.split(".", 1)[0]
+        for name in programs
+    )
 
     while frames:
         step_budget -= 1
@@ -1468,6 +1491,48 @@ def evaluate_package_import_order(
             target = step.target
 
             if not target or target not in programs:
+                if (
+                    _assume_passive_external_imports
+                    and target
+                    and target not in programs
+                    and module != bootstrap
+                    and target.split(".", 1)[0]
+                    not in indexed_roots
+                ):
+                    assumed_external_imports.append(
+                        ReachedUnmodeledImport(
+                            importer=module,
+                            operation=step.op,
+                            target=target,
+                            symbol=step.symbol,
+                            line=step.source_line,
+                            column=step.source_column,
+                        )
+                    )
+                    events.append(
+                        PackageModelEvent(
+                            module,
+                            "ASSUMED_EXTERNAL_IMPORT",
+                            target,
+                            step.symbol,
+                        )
+                    )
+                    if (
+                        step.op in {"IMPORT", "FROM"}
+                        and not step.function_local
+                        and not step.class_local
+                    ):
+                        namespaces[module][step.binding] = (
+                            "\x00ASSUMED_EXTERNAL:"
+                            + target
+                            + (
+                                ":" + step.symbol
+                                if step.op == "FROM"
+                                else ""
+                            )
+                        )
+                    frames[-1] = (module, index + 1)
+                    continue
                 blocker = (
                     ReachedUnmodeledImport(
                         importer=module,
@@ -1868,6 +1933,7 @@ class ConditionalNamespaceModelAssessment:
         "NOT_RUNTIME_OR_LIVE_PROOF"
     )
     target_python_version: tuple[int, int] | None = None
+    external_import_policy: str = "STOP_AT_UNMODELED"
 
 
 def _conditional_annotation_mode_for_target(
@@ -2067,6 +2133,7 @@ def evaluate_conditional_namespace_import_order(
     portions: tuple[SearchPortion, ...],
     *,
     target_python_version: tuple[int, int] | None = None,
+    assume_passive_external_imports: bool = False,
 ) -> ConditionalNamespaceModelAssessment:
     """Evaluate a supplied closed PEP 420 inventory conditionally.
 
@@ -2087,6 +2154,11 @@ def evaluate_conditional_namespace_import_order(
             target_python_version
         )
     )
+    external_import_policy = (
+        "ASSUME_PASSIVE_EXTERNAL_SUCCESS"
+        if assume_passive_external_imports is True
+        else "STOP_AT_UNMODELED"
+    )
 
     def reject(
         reason: str,
@@ -2103,7 +2175,11 @@ def evaluate_conditional_namespace_import_order(
                 if version_error is None
                 else None
             ),
+            external_import_policy=external_import_policy,
         )
+
+    if type(assume_passive_external_imports) is not bool:
+        return reject("INVALID_EXTERNAL_IMPORT_ASSUMPTION")
 
     if version_error is not None:
         return reject(version_error)
@@ -2318,6 +2394,9 @@ def evaluate_conditional_namespace_import_order(
         entry_module,
         annotation_semantics=annotation_mode,
         _compile_on_first_import=True,
+        _assume_passive_external_imports=(
+            assume_passive_external_imports
+        ),
     )
 
     conditional_outcomes = {
@@ -2344,4 +2423,5 @@ def evaluate_conditional_namespace_import_order(
         model_assessment=model,
         namespace_parents=namespace_parents,
         target_python_version=target_python_version,
+        external_import_policy=external_import_policy,
     )

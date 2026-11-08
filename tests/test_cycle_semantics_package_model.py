@@ -21,6 +21,96 @@ def _model(source, entry):
     )
 
 
+def test_external_assumption_normal_model_still_unknown():
+    result = _model({"pkg.__init__": "import os\n"}, "pkg")
+    assert result.outcome == "UNKNOWN"
+    assert result.target_module == "os"
+    assert result.assumed_external_imports == ()
+    assert result.evidence_scope == "RESTRICTED_REGULAR_PACKAGE_MODEL"
+    assert not any(
+        event.operation == "ASSUMED_EXTERNAL_IMPORT"
+        for event in result.events
+    )
+
+
+def test_external_assumption_refused_without_lazy_compilation():
+    result = evaluate_package_import_order(
+        {"pkg.__init__": ast.parse("import os\n")}, "pkg",
+        _assume_passive_external_imports=True,
+    )
+    assert result.outcome == "UNKNOWN"
+    assert result.assumed_external_imports == ()
+
+
+def test_external_assumption_direct_conditional_scope():
+    result = evaluate_package_import_order(
+        {"pkg.__init__": ast.parse("import os\nvalue=1\n")},
+        "pkg",
+        _compile_on_first_import=True,
+        _assume_passive_external_imports=True,
+    )
+    assert result.outcome == "MODEL_PASS"
+    assert result.evidence_scope == (
+        "CONDITIONAL_PASSIVE_EXTERNAL_IMPORT_"
+        "ASSUMPTION_NOT_RUNTIME_PROOF"
+    )
+    assert tuple(x.target for x in result.assumed_external_imports) == ("os",)
+    assert result.reached_unmodeled_import is None
+
+
+def test_external_assumption_normal_pass_has_no_record():
+    result = _model({"pkg.__init__": "value=1\n"}, "pkg")
+    assert result.outcome == "MODEL_PASS"
+    assert result.assumed_external_imports == ()
+
+
+def test_external_assumption_does_not_skip_indexed_import():
+    result = evaluate_package_import_order(
+        {
+            "pkg.__init__": ast.parse("from .child import value\n"),
+            "pkg.child": ast.parse("value=7\n"),
+        },
+        "pkg",
+        _compile_on_first_import=True,
+        _assume_passive_external_imports=True,
+    )
+    assert result.outcome == "MODEL_PASS"
+    assert result.assumed_external_imports == ()
+    assert any(event.target == "pkg.child" for event in result.events)
+
+
+def test_external_assumption_called_local_import_keeps_location():
+    result = evaluate_package_import_order(
+        {
+            "pkg.__init__": ast.parse(
+                "def activate():\n    import os\nactivate()\n"
+            )
+        },
+        "pkg",
+        _compile_on_first_import=True,
+        _assume_passive_external_imports=True,
+    )
+    assert result.outcome == "MODEL_PASS"
+    assert len(result.assumed_external_imports) == 1
+    row = result.assumed_external_imports[0]
+    assert (row.importer, row.operation, row.target) == (
+        "pkg", "IMPORT", "os"
+    )
+    assert (row.line, row.column) == (2, 4)
+    assert "CALL_FUNCTION" in (event.operation for event in result.events)
+
+
+def test_external_assumption_uncalled_function_has_no_record():
+    result = evaluate_package_import_order(
+        {"pkg.__init__": ast.parse("def activate():\n    import os\nvalue=1\n")},
+        "pkg",
+        _compile_on_first_import=True,
+        _assume_passive_external_imports=True,
+    )
+    assert result.outcome == "MODEL_PASS"
+    assert result.assumed_external_imports == ()
+
+
 def test_reached_unmodeled_import_direct_import():
     result = _model({"pkg.__init__": "import os\nvalue=1\n"}, "pkg")
 

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import hashlib
+import json
+from dataclasses import asdict
 
 from contextor.core.source import SourceSnapshot
 from contextor.core.cycle_semantics.namespace_bound_model import (
@@ -91,6 +93,181 @@ def _evaluate(
         entry,
         standard_finder_assumed=finder,
     )
+
+
+def _external_case(source, *, child=None):
+    roots, bindings, hashes, snapshots = _case()
+    snapshots["pkg.ns.a"] = _snapshot(source)
+    hashes["pkg.ns.a"] = snapshots["pkg.ns.a"].source_fingerprint
+    if child is not None:
+        snapshots["pkg.ns.b"] = _snapshot(child)
+        hashes["pkg.ns.b"] = snapshots["pkg.ns.b"].source_fingerprint
+    return roots, bindings, hashes, snapshots
+
+
+def _external_result(source, *, assume=False, child=None):
+    return evaluate_source_bound_conditional_namespace_import_order(
+        *_external_case(source, child=child),
+        "pkg.ns.a",
+        standard_finder_assumed=True,
+        assume_passive_external_imports=assume,
+    )
+
+
+def test_external_policy_t01_default_still_unknown():
+    result = _external_result("import os\nvalue=1\nimport pkg.ns.b\n")
+    model = result.conditional_assessment.model_assessment
+    assert (result.outcome, result.reason) == (
+        "UNKNOWN", "RESTRICTED_MODEL_UNKNOWN"
+    )
+    assert result.external_import_policy == "STOP_AT_UNMODELED"
+    assert result.conditional_assessment.external_import_policy == "STOP_AT_UNMODELED"
+    assert model.outcome == "UNKNOWN"
+    assert model.reached_unmodeled_import.target == "os"
+    assert model.assumed_external_imports == ()
+
+
+def test_external_policy_t02_opt_in_safe_order():
+    result = _external_result(
+        "import os\nvalue=1\nimport pkg.ns.b\n", assume=True
+    )
+    model = result.conditional_assessment.model_assessment
+    assert result.outcome == "CONDITIONAL_MODEL_PASS"
+    assert result.external_import_policy == "ASSUME_PASSIVE_EXTERNAL_SUCCESS"
+    assert result.conditional_assessment.external_import_policy == "ASSUME_PASSIVE_EXTERNAL_SUCCESS"
+    assert model.outcome == "MODEL_PASS"
+    assert model.evidence_scope == (
+        "CONDITIONAL_PASSIVE_EXTERNAL_IMPORT_"
+        "ASSUMPTION_NOT_RUNTIME_PROOF"
+    )
+    assert model.reached_unmodeled_import is None
+    assert len(model.assumed_external_imports) == 1
+    blocker = model.assumed_external_imports[0]
+    assert (
+        blocker.importer, blocker.operation, blocker.target,
+        blocker.symbol, blocker.line, blocker.column,
+    ) == ("pkg.ns.a", "IMPORT", "os", None, 1, 0)
+    assert "ASSUMED_EXTERNAL_IMPORT" in (
+        event.operation for event in model.events
+    )
+
+
+def test_external_policy_t03_early_hazard_remains_conditional():
+    source = "import os\nimport pkg.ns.b\nvalue=1\n"
+    default = _external_result(source)
+    result = _external_result(source, assume=True)
+    model = result.conditional_assessment.model_assessment
+    assert default.outcome == "UNKNOWN"
+    assert default.conditional_assessment.model_assessment.target_module == "os"
+    assert result.outcome == "CONDITIONAL_EARLY_BINDING_HAZARD"
+    assert model.outcome == "EARLY_BINDING_HAZARD"
+    assert model.target_module == "pkg.ns.a"
+    assert model.symbol == "value"
+    assert len(model.assumed_external_imports) == 1
+    assert model.assumed_external_imports[0].target == "os"
+
+
+def test_external_policy_t04_internal_missing_not_skipped():
+    result = _external_result(
+        "import pkg.ns.missing\nvalue=1\n", assume=True
+    )
+    assert result.outcome == "UNKNOWN"
+    if result.conditional_assessment is not None:
+        model = result.conditional_assessment.model_assessment
+        assert model.outcome == "UNKNOWN"
+        assert model.target_module == "pkg.ns.missing"
+        assert model.assumed_external_imports == ()
+
+
+def test_external_policy_t05_opaque_use_unknown():
+    result = _external_result(
+        "import os\nvalue = os.path\nimport pkg.ns.b\n",
+        assume=True,
+    )
+    model = result.conditional_assessment.model_assessment
+    assert result.outcome == "UNKNOWN"
+    assert tuple(x.target for x in model.assumed_external_imports) == ("os",)
+
+
+def test_external_policy_t06_earlier_unsupported_effect_stops():
+    result = _external_result(
+        "import os\nunknown_function()\nimport pkg.ns.b\n",
+        assume=True,
+    )
+    model = result.conditional_assessment.model_assessment
+    assert result.outcome == "UNKNOWN"
+    assert tuple(x.target for x in model.assumed_external_imports) == ("os",)
+    assert not any(
+        event.target == "pkg.ns.b" and event.operation == "START_IMPORT"
+        for event in model.events
+    )
+
+
+def test_external_policy_t07_from_import():
+    result = _external_result(
+        "from dataclasses import dataclass\nvalue=1\nimport pkg.ns.b\n",
+        assume=True,
+    )
+    model = result.conditional_assessment.model_assessment
+    assert result.outcome == "CONDITIONAL_MODEL_PASS"
+    assert model.outcome == "MODEL_PASS"
+    assert len(model.assumed_external_imports) == 1
+    blocker = model.assumed_external_imports[0]
+    assert (
+        blocker.operation, blocker.target, blocker.symbol,
+        blocker.line, blocker.column,
+    ) == ("FROM", "dataclasses", "dataclass", 1, 0)
+
+
+def test_external_policy_t08_invalid_policy():
+    args = _external_case("import os\nvalue=1\nimport pkg.ns.b\n")
+    result = evaluate_source_bound_conditional_namespace_import_order(
+        *args, "pkg.ns.a", standard_finder_assumed=True,
+        assume_passive_external_imports="yes",
+    )
+    assert (result.outcome, result.reason) == (
+        "UNKNOWN", "INVALID_EXTERNAL_IMPORT_ASSUMPTION"
+    )
+    assert result.external_import_policy == "STOP_AT_UNMODELED"
+
+
+def test_external_policy_t09_fingerprint_retained():
+    roots, bindings, hashes, snapshots = _external_case(
+        "import os\nvalue=1\nimport pkg.ns.b\n"
+    )
+    snapshots["pkg.ns.a"] = _snapshot("import os\nvalue=2\nimport pkg.ns.b\n")
+    result = evaluate_source_bound_conditional_namespace_import_order(
+        roots, bindings, hashes, snapshots, "pkg.ns.a",
+        standard_finder_assumed=True,
+        assume_passive_external_imports=True,
+    )
+    assert result.outcome == "UNKNOWN"
+    assert result.reason == "SOURCE_FINGERPRINT_MISMATCH"
+    assert result.conditional_assessment is None
+
+
+def test_external_policy_t10_deterministic_and_unmutated():
+    args = _external_case("import os\nvalue=1\nimport pkg.ns.b\n")
+    before = dict(args[3])
+    first = evaluate_source_bound_conditional_namespace_import_order(
+        *args, "pkg.ns.a", standard_finder_assumed=True,
+        assume_passive_external_imports=True,
+    )
+    second = evaluate_source_bound_conditional_namespace_import_order(
+        *args, "pkg.ns.a", standard_finder_assumed=True,
+        assume_passive_external_imports=True,
+    )
+    assert first == second
+    assert first.conditional_assessment.model_assessment.events == (
+        second.conditional_assessment.model_assessment.events
+    )
+    assert first.conditional_assessment.model_assessment.assumed_external_imports == (
+        second.conditional_assessment.model_assessment.assumed_external_imports
+    )
+    assert json.dumps(asdict(first), sort_keys=True) == json.dumps(
+        asdict(second), sort_keys=True
+    )
+    assert args[3] == before
 
 
 def test_p6_source_bound_conditional_pass():
