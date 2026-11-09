@@ -59,10 +59,12 @@ class _ClassFact:
 
     identity: str
     origin: str
-    direct_base: str | None
+    direct_bases: tuple[str, ...]
+    linear_mro: tuple[str, ...]
     metaclass_identity: str
     defines_init_subclass: bool
     safe_to_subclass: bool
+    passive_metaclass_creation: bool = False
 
 
 def _safe_class_namespace_value(value: object) -> bool:
@@ -76,23 +78,102 @@ def _safe_class_namespace_value(value: object) -> bool:
 
 _BUILTIN_TYPE_ID = "builtins.type"
 _BUILTIN_CLASS_FACTS = {
+    "type": _ClassFact(
+        identity=_BUILTIN_TYPE_ID,
+        origin="BUILTIN",
+        direct_bases=("builtins.object",),
+        linear_mro=(_BUILTIN_TYPE_ID, "builtins.object"),
+        metaclass_identity=_BUILTIN_TYPE_ID,
+        defines_init_subclass=False,
+        safe_to_subclass=True,
+        passive_metaclass_creation=True,
+    ),
     "object": _ClassFact(
-        "builtins.object", "BUILTIN", None,
-        _BUILTIN_TYPE_ID, False, True,
+        identity="builtins.object",
+        origin="BUILTIN",
+        direct_bases=(),
+        linear_mro=("builtins.object",),
+        metaclass_identity=_BUILTIN_TYPE_ID,
+        defines_init_subclass=False,
+        safe_to_subclass=True,
     ),
     "BaseException": _ClassFact(
-        "builtins.BaseException", "BUILTIN", "builtins.object",
-        _BUILTIN_TYPE_ID, False, True,
+        identity="builtins.BaseException",
+        origin="BUILTIN",
+        direct_bases=("builtins.object",),
+        linear_mro=("builtins.BaseException", "builtins.object"),
+        metaclass_identity=_BUILTIN_TYPE_ID,
+        defines_init_subclass=False,
+        safe_to_subclass=True,
     ),
     "Exception": _ClassFact(
-        "builtins.Exception", "BUILTIN", "builtins.BaseException",
-        _BUILTIN_TYPE_ID, False, True,
+        identity="builtins.Exception",
+        origin="BUILTIN",
+        direct_bases=("builtins.BaseException",),
+        linear_mro=(
+            "builtins.Exception",
+            "builtins.BaseException",
+            "builtins.object",
+        ),
+        metaclass_identity=_BUILTIN_TYPE_ID,
+        defines_init_subclass=False,
+        safe_to_subclass=True,
     ),
     "ValueError": _ClassFact(
-        "builtins.ValueError", "BUILTIN", "builtins.Exception",
-        _BUILTIN_TYPE_ID, False, True,
+        identity="builtins.ValueError",
+        origin="BUILTIN",
+        direct_bases=("builtins.Exception",),
+        linear_mro=(
+            "builtins.ValueError",
+            "builtins.Exception",
+            "builtins.BaseException",
+            "builtins.object",
+        ),
+        metaclass_identity=_BUILTIN_TYPE_ID,
+        defines_init_subclass=False,
+        safe_to_subclass=True,
     ),
 }
+_BUILTIN_EXCEPTION_CLASS_IDENTITIES = frozenset({
+    _BUILTIN_CLASS_FACTS[name].identity
+    for name in ("BaseException", "Exception", "ValueError")
+})
+
+
+def _merge_class_mros(
+    bases: tuple[_ClassFact, ...],
+) -> tuple[str, ...] | None:
+    """Return the C3 merge of proven base MROs, or None if inconsistent."""
+    sequences = [list(base.linear_mro) for base in bases]
+    sequences.append([base.identity for base in bases])
+    merged: list[str] = []
+
+    while any(sequences):
+        candidate = next(
+            (
+                sequence[0]
+                for sequence in sequences
+                if not any(
+                    sequence[0] in other[1:]
+                    for other in sequences
+                    if other
+                )
+            ),
+            None,
+        )
+        if candidate is None:
+            return None
+
+        merged.append(candidate)
+        remaining = []
+        for sequence in sequences:
+            if sequence and sequence[0] == candidate:
+                sequence = sequence[1:]
+            if sequence:
+                remaining.append(sequence)
+        sequences = remaining
+
+    return tuple(merged)
 
 
 @dataclass(frozen=True)
@@ -133,7 +214,9 @@ class _Step:
     annotation_builtin_names: tuple[str, ...] = ()
     definition_id: str | None = None
     defines_init_subclass: bool = False
-    explicit_type_metaclass: bool = False
+    base_names: tuple[str, ...] = ()
+    explicit_metaclass_name: str | None = None
+    passive_metaclass_body: bool = False
 
 
 @dataclass
@@ -362,25 +445,38 @@ def _safe_passive_class_definition(
         )
     )
 
-    explicit_type_metaclass = (
+    explicit_named_metaclass = (
         len(statement.keywords) == 1
         and statement.keywords[0].arg == "metaclass"
         and type(statement.keywords[0].value) is ast.Name
-        and statement.keywords[0].value.id == "type"
     )
 
     if (
         not statement.name.isidentifier()
         or statement.name.startswith("__")
+        or any(
+            isinstance(
+                item,
+                (ast.FunctionDef, ast.AsyncFunctionDef),
+            )
+            and item.name in {
+                "__slots__",
+                "__qualname__",
+                "__classcell__",
+            }
+            for item in statement.body
+        )
         or (
             bool(statement.bases)
             and (
                 conditional_dataclass
-                or len(statement.bases) != 1
-                or type(statement.bases[0]) is not ast.Name
+                or any(
+                    type(base) is not ast.Name
+                    for base in statement.bases
+                )
             )
         )
-        or (bool(statement.keywords) and not explicit_type_metaclass)
+        or (bool(statement.keywords) and not explicit_named_metaclass)
         or (conditional_dataclass and statement.keywords)
         or (
             bool(statement.decorator_list)
@@ -1050,6 +1146,16 @@ def _compile(
                 steps.append(_Step("BIND", binding=stmt.target.id))
 
         elif isinstance(stmt, ast.ClassDef):
+            passive_metaclass_body = all(
+                type(item) is ast.Pass
+                or (
+                    index == 0
+                    and type(item) is ast.Expr
+                    and type(item.value) is ast.Constant
+                    and type(item.value.value) is str
+                )
+                for index, item in enumerate(stmt.body)
+            )
             conditional_dataclass = (
                 assume_frozen_dataclass
                 and bool(stmt.decorator_list)
@@ -1080,11 +1186,19 @@ def _compile(
                         target=(
                             stmt.bases[0].id if stmt.bases else None
                         ),
+                        base_names=tuple(
+                            base.id
+                            for base in stmt.bases
+                        ),
                         binding=stmt.name,
                         source_line=stmt.lineno,
                         source_column=stmt.col_offset,
                         definition_id=definition_id,
-                        explicit_type_metaclass=bool(stmt.keywords),
+                        explicit_metaclass_name=(
+                            stmt.keywords[0].value.id
+                            if stmt.keywords else None
+                        ),
+                        passive_metaclass_body=passive_metaclass_body,
                     )
                 )
 
@@ -1204,6 +1318,7 @@ def _compile(
                             f"{logical}:{stmt.lineno}:{stmt.col_offset}"
                         ),
                         defines_init_subclass=has_init_subclass,
+                        passive_metaclass_body=passive_metaclass_body,
                     )
                 )
 
@@ -1731,7 +1846,12 @@ def evaluate_package_import_order(
         name: {}
         for name in programs
     }
-    prepared_class_bases: dict[str, _ClassFact] = {}
+    prepared_class_bases: dict[
+        str, tuple[tuple[_ClassFact, ...], _ClassFact]
+    ] = {}
+    class_facts_by_identity: dict[str, _ClassFact] = {
+        fact.identity: fact for fact in _BUILTIN_CLASS_FACTS.values()
+    }
 
     function_definitions: dict[
         str,
@@ -2298,39 +2418,118 @@ def evaluate_package_import_order(
                 return result("UNKNOWN", module, step.binding)
 
             if (
-                step.explicit_type_metaclass
+                step.explicit_metaclass_name == "type"
                 and "type" in namespaces[module]
             ):
                 return result("UNKNOWN", module, "type")
 
-            if step.target is None:
-                base_fact = _BUILTIN_CLASS_FACTS["object"]
-            elif step.target in namespaces[module]:
-                base_fact = namespaces[module][step.target]
+            base_names = step.base_names or (
+                (step.target,) if step.target is not None else ()
+            )
+            if not base_names:
+                base_facts = (_BUILTIN_CLASS_FACTS["object"],)
             else:
-                base_fact = _BUILTIN_CLASS_FACTS.get(step.target)
+                resolved_base_facts = []
+                for base_name in base_names:
+                    if base_name in namespaces[module]:
+                        base_fact = namespaces[module][base_name]
+                    else:
+                        base_fact = _BUILTIN_CLASS_FACTS.get(base_name)
 
-            if (
-                not isinstance(base_fact, _ClassFact)
-                or base_fact.metaclass_identity != _BUILTIN_TYPE_ID
-            ):
-                return result(
-                    "UNKNOWN",
-                    module,
-                    step.target,
+                    if (
+                        not isinstance(base_fact, _ClassFact)
+                        or type(base_fact.linear_mro) is not tuple
+                        or not base_fact.linear_mro
+                        or base_fact.linear_mro[0]
+                        != base_fact.identity
+                        or base_fact.linear_mro[-1]
+                        != _BUILTIN_CLASS_FACTS["object"].identity
+                        or any(
+                            type(identity) is not str
+                            for identity in base_fact.linear_mro
+                        )
+                        or len(set(base_fact.linear_mro))
+                        != len(base_fact.linear_mro)
+                    ):
+                        return result(
+                            "UNKNOWN",
+                            module,
+                            base_name,
+                        )
+
+                    resolved_base_facts.append(base_fact)
+
+                base_facts = tuple(resolved_base_facts)
+
+            candidate_ids = [base.metaclass_identity for base in base_facts]
+            if step.explicit_metaclass_name is not None:
+                name = step.explicit_metaclass_name
+                explicit = (
+                    namespaces[module][name]
+                    if name in namespaces[module]
+                    else _BUILTIN_CLASS_FACTS.get(name)
                 )
+                if not isinstance(explicit, _ClassFact):
+                    return result("UNKNOWN", module, name)
+                candidate_ids.insert(0, explicit.identity)
+            if not candidate_ids:
+                candidate_ids = [_BUILTIN_TYPE_ID]
 
-            prepared_class_bases[step.definition_id] = base_fact
+            candidates = [
+                class_facts_by_identity.get(identity)
+                for identity in candidate_ids
+            ]
+            if any(not isinstance(candidate, _ClassFact) for candidate in candidates):
+                return result("UNKNOWN", module, step.binding)
+            winners = [
+                candidate for candidate in candidates
+                if all(
+                    other.identity in candidate.linear_mro
+                    for other in candidates
+                )
+            ]
+            winner_ids = {candidate.identity for candidate in winners}
+            if len(winner_ids) != 1:
+                return result("UNKNOWN", module, step.binding)
+            selected = winners[0]
+            if not selected.passive_metaclass_creation:
+                return result("UNKNOWN", module, step.binding)
+            prepared_class_bases[step.definition_id] = (base_facts, selected)
 
         elif step.op == "DEFINE_PASSIVE_CLASS":
-            base_fact = prepared_class_bases.pop(
+            prepared = prepared_class_bases.pop(
                 step.definition_id or "",
                 None,
             )
-            if not isinstance(base_fact, _ClassFact):
+            if (
+                not isinstance(prepared, tuple)
+                or len(prepared) != 2
+                or not isinstance(prepared[0], tuple)
+                or not prepared[0]
+                or not isinstance(prepared[1], _ClassFact)
+                or any(
+                    not isinstance(base_fact, _ClassFact)
+                    for base_fact in prepared[0]
+                )
+            ):
+                return result("UNKNOWN", module, step.binding)
+            base_facts, selected_metaclass = prepared
+
+            if len({base.identity for base in base_facts}) != len(base_facts):
                 return result("UNKNOWN", module, step.binding)
 
-            if not base_fact.safe_to_subclass:
+            if any(not base.safe_to_subclass for base in base_facts):
+                return result("UNKNOWN", module, step.binding)
+
+            if len(base_facts) > 1 and any(
+                identity in _BUILTIN_EXCEPTION_CLASS_IDENTITIES
+                for base in base_facts
+                for identity in base.linear_mro
+            ):
+                return result("UNKNOWN", module, step.binding)
+
+            inherited_mro = _merge_class_mros(base_facts)
+            if inherited_mro is None:
                 return result("UNKNOWN", module, step.binding)
 
             identity = step.definition_id
@@ -2340,11 +2539,21 @@ def evaluate_package_import_order(
             class_fact = _ClassFact(
                 identity=identity,
                 origin="INDEXED_SOURCE",
-                direct_base=base_fact.identity,
-                metaclass_identity=_BUILTIN_TYPE_ID,
+                direct_bases=tuple(
+                    base.identity for base in base_facts
+                ),
+                linear_mro=(identity, *inherited_mro),
+                metaclass_identity=selected_metaclass.identity,
                 defines_init_subclass=step.defines_init_subclass,
                 safe_to_subclass=not step.defines_init_subclass,
+                passive_metaclass_creation=(
+                    len(base_facts) == 1
+                    and _BUILTIN_TYPE_ID in base_facts[0].linear_mro
+                    and base_facts[0].passive_metaclass_creation
+                    and step.passive_metaclass_body
+                ),
             )
+            class_facts_by_identity[identity] = class_fact
             namespaces[module][step.binding] = (
                 class_fact
             )
