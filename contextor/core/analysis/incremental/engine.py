@@ -333,6 +333,10 @@ class IncrementalAnalysisEngine:
         self.state.cycle_semantics_invalidation_reason = (
             candidate.cycle_semantics_invalidation_reason
         )
+        if invalidate_cycle_semantics_reason is not None:
+            self.state.cycle_source_publication = candidate.cycle_source_publication
+            self.state.cycle_partial_source_publication = candidate.cycle_partial_source_publication
+            self.state.cycle_optional_source_publication = candidate.cycle_optional_source_publication
 
     def _update_candidate_lineage_slice(
         self,
@@ -1152,6 +1156,9 @@ class IncrementalAnalysisEngine:
         self.state.cycle_semantics_invalidation_reason = (
             candidate.cycle_semantics_invalidation_reason
         )
+        self.state.cycle_source_publication = candidate.cycle_source_publication
+        self.state.cycle_partial_source_publication = candidate.cycle_partial_source_publication
+        self.state.cycle_optional_source_publication = candidate.cycle_optional_source_publication
         self.state.collision_facts = candidate.collision_facts
         self.state.collisions = candidate.collisions
         self.state.collisions_state = candidate.collisions_state

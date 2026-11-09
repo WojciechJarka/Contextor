@@ -102,6 +102,100 @@ def _assert_stale(engine: IncrementalAnalysisEngine, evidence: CycleSemanticsSna
     assert engine.state.cycle_semantics_invalidation_reason == reason
 
 
+_RECEIPT_FIELDS = (
+    "cycle_source_publication",
+    "cycle_partial_source_publication",
+    "cycle_optional_source_publication",
+)
+
+
+def _seed_receipt_markers(engine: IncrementalAnalysisEngine) -> tuple[object, ...]:
+    markers = tuple(object() for _ in _RECEIPT_FIELDS)
+    for name, marker in zip(_RECEIPT_FIELDS, markers):
+        setattr(engine.state, name, marker)
+    return markers
+
+
+@pytest.mark.parametrize(
+    ("changed_source", "expected_status", "expected_reason", "plan_empty"),
+    (
+        ("def broken(:\n", "SYNTAX_ERROR", "SOURCE_PARSE_FAILED", None),
+        ("import pkg.b\ndef fa():\n    return 1\n# changed\n", "UNCHANGED", "SOURCE_CHANGED", True),
+        ("def fa():\n    return 1\n", "UPDATED", "SOURCE_CHANGED", False),
+    ),
+)
+def test_incremental_invalidation_clears_all_receipts(
+    cyclic_engine, changed_source, expected_status, expected_reason, plan_empty,
+) -> None:
+    engine, a, _ = cyclic_engine
+    _seed_receipt_markers(engine)
+    state = engine.state
+    a.write_text(changed_source, encoding="utf-8")
+
+    result = engine.update_file(str(a))
+
+    assert result.status == expected_status
+    if plan_empty is not None:
+        assert result.shadow_plan is not None
+        assert result.shadow_plan.is_empty is plan_empty
+    assert engine.state is state
+    assert engine.state.cycle_semantics_state == "stale"
+    assert engine.state.cycle_semantics_invalidation_reason == expected_reason
+    assert all(getattr(engine.state, name) is None for name in _RECEIPT_FIELDS)
+
+
+def test_true_noop_preserves_all_receipts(cyclic_engine) -> None:
+    engine, a, _ = cyclic_engine
+    markers = _seed_receipt_markers(engine)
+    state = engine.state
+
+    result = engine.update_file(str(a))
+
+    assert result.status == "UNCHANGED"
+    assert engine.state is state
+    assert engine.state.cycle_semantics_state == "fresh"
+    assert engine.state.cycle_semantics_invalidation_reason is None
+    assert all(
+        getattr(engine.state, name) is marker
+        for name, marker in zip(_RECEIPT_FIELDS, markers)
+    )
+
+
+@pytest.mark.parametrize(
+    "changed_source",
+    (
+        "import pkg.b\ndef fa():\n    return 1\n# changed\n",
+        "def fa():\n    return 1\n",
+    ),
+)
+def test_failed_incremental_commit_restores_all_receipts(
+    cyclic_engine, monkeypatch, changed_source,
+) -> None:
+    engine, a, _ = cyclic_engine
+    markers = _seed_receipt_markers(engine)
+    state = engine.state
+    syntax_before = engine.state.syntax_diagnostics_by_path.copy()
+    lineage_before = engine.state.lineage_facts_by_source.copy()
+    a.write_text(changed_source, encoding="utf-8")
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("controlled acknowledgement failure")
+
+    monkeypatch.setattr(engine.state_manager, "update_state", fail)
+    with pytest.raises(RuntimeError, match="controlled acknowledgement failure"):
+        engine.update_file(str(a))
+
+    assert engine.state is state
+    assert engine.state.cycle_semantics_state == "fresh"
+    assert engine.state.cycle_semantics_invalidation_reason is None
+    assert engine.state.syntax_diagnostics_by_path == syntax_before
+    assert engine.state.lineage_facts_by_source == lineage_before
+    assert all(
+        getattr(engine.state, name) is marker
+        for name, marker in zip(_RECEIPT_FIELDS, markers)
+    )
+
+
 def test_d2_invalidation_preserves_evidence_identity(cyclic_engine) -> None:
     engine, _, _ = cyclic_engine
     evidence = engine.state.cycle_semantics
