@@ -436,8 +436,26 @@ def test_r9_simple_builtin_exception_subclass():
 @pytest.mark.parametrize(
     "declaration",
     [
-        "class CustomError(Exception):",
-        "class CustomError(BaseException):",
+        "class BuiltinObjectSubclass(object):",
+        "class BuiltinExceptionSubclass(Exception):",
+        "class BuiltinBaseExceptionSubclass(BaseException):",
+        "class ExplicitType(metaclass=type):",
+    ],
+)
+def test_r9_supported_builtin_class_origins(declaration):
+    result = _r9_builtin_base_result(declaration + "\n    pass\n")
+
+    assert result.outcome == "MODEL_PASS"
+    assert any(
+        event.operation == "DEFINE_PASSIVE_CLASS"
+        and event.symbol == declaration.split()[1].split("(")[0]
+        for event in result.events
+    )
+
+
+@pytest.mark.parametrize(
+    "declaration",
+    [
         "class CustomError(UnknownBase):",
         "class CustomError(pkg.ValueError):",
         "class CustomError(ValueError, Exception):",

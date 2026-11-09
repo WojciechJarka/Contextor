@@ -54,6 +54,48 @@ class AssumedFrozenDataclassDecoration:
 
 
 @dataclass(frozen=True)
+class _ClassFact:
+    """Provenance and creation facts for one passive class definition."""
+
+    identity: str
+    origin: str
+    direct_base: str | None
+    metaclass_identity: str
+    defines_init_subclass: bool
+    safe_to_subclass: bool
+
+
+def _safe_class_namespace_value(value: object) -> bool:
+    """Values admitted in a passive class namespace cannot be descriptors."""
+    if isinstance(value, _ClassFact) or value is None:
+        return True
+    if type(value) is str:
+        return not value.startswith("\x00ASSUMED_EXTERNAL:")
+    return False
+
+
+_BUILTIN_TYPE_ID = "builtins.type"
+_BUILTIN_CLASS_FACTS = {
+    "object": _ClassFact(
+        "builtins.object", "BUILTIN", None,
+        _BUILTIN_TYPE_ID, False, True,
+    ),
+    "BaseException": _ClassFact(
+        "builtins.BaseException", "BUILTIN", "builtins.object",
+        _BUILTIN_TYPE_ID, False, True,
+    ),
+    "Exception": _ClassFact(
+        "builtins.Exception", "BUILTIN", "builtins.BaseException",
+        _BUILTIN_TYPE_ID, False, True,
+    ),
+    "ValueError": _ClassFact(
+        "builtins.ValueError", "BUILTIN", "builtins.Exception",
+        _BUILTIN_TYPE_ID, False, True,
+    ),
+}
+
+
+@dataclass(frozen=True)
 class PackageImportAssessment:
     entry_module: str
     outcome: str
@@ -89,6 +131,9 @@ class _Step:
     source_line: int | None = None
     source_column: int | None = None
     annotation_builtin_names: tuple[str, ...] = ()
+    definition_id: str | None = None
+    defines_init_subclass: bool = False
+    explicit_type_metaclass: bool = False
 
 
 @dataclass
@@ -316,6 +361,14 @@ def _safe_passive_class_definition(
             statement.decorator_list[0]
         )
     )
+
+    explicit_type_metaclass = (
+        len(statement.keywords) == 1
+        and statement.keywords[0].arg == "metaclass"
+        and type(statement.keywords[0].value) is ast.Name
+        and statement.keywords[0].value.id == "type"
+    )
+
     if (
         not statement.name.isidentifier()
         or statement.name.startswith("__")
@@ -325,10 +378,10 @@ def _safe_passive_class_definition(
                 conditional_dataclass
                 or len(statement.bases) != 1
                 or type(statement.bases[0]) is not ast.Name
-                or statement.bases[0].id != "ValueError"
             )
         )
-        or statement.keywords
+        or (bool(statement.keywords) and not explicit_type_metaclass)
+        or (conditional_dataclass and statement.keywords)
         or (
             bool(statement.decorator_list)
             and not conditional_dataclass
@@ -1009,13 +1062,37 @@ def _compile(
             ):
                 return None
 
-            if stmt.bases:
+            if not conditional_dataclass:
+                if (
+                    type(stmt.lineno) is not int
+                    or stmt.lineno < 1
+                    or type(stmt.col_offset) is not int
+                    or stmt.col_offset < 0
+                ):
+                    return None
+
+                definition_id = (
+                    f"{logical}:{stmt.lineno}:{stmt.col_offset}"
+                )
                 steps.append(
                     _Step(
-                        "CHECK_BUILTIN_CLASS_BASE",
-                        target="ValueError",
+                        "PREPARE_PASSIVE_CLASS",
+                        target=(
+                            stmt.bases[0].id if stmt.bases else None
+                        ),
+                        binding=stmt.name,
+                        source_line=stmt.lineno,
+                        source_column=stmt.col_offset,
+                        definition_id=definition_id,
+                        explicit_type_metaclass=bool(stmt.keywords),
                     )
                 )
+
+            has_init_subclass = any(
+                isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and item.name == "__init_subclass__"
+                for item in stmt.body
+            )
 
             for body_statement in stmt.body:
                 if isinstance(body_statement, ast.Assign):
@@ -1121,6 +1198,12 @@ def _compile(
                     _Step(
                         "DEFINE_PASSIVE_CLASS",
                         binding=stmt.name,
+                        source_line=stmt.lineno,
+                        source_column=stmt.col_offset,
+                        definition_id=(
+                            f"{logical}:{stmt.lineno}:{stmt.col_offset}"
+                        ),
+                        defines_init_subclass=has_init_subclass,
                     )
                 )
 
@@ -1644,10 +1727,11 @@ def evaluate_package_import_order(
         for name in programs
     }
 
-    namespaces: dict[str, dict[str, str | None]] = {
+    namespaces: dict[str, dict[str, object | None]] = {
         name: {}
         for name in programs
     }
+    prepared_class_bases: dict[str, _ClassFact] = {}
 
     function_definitions: dict[
         str,
@@ -1824,6 +1908,9 @@ def evaluate_package_import_order(
                     and target.split(".", 1)[0]
                     not in indexed_roots
                 ):
+                    if step.class_local:
+                        return result("UNKNOWN", module, target)
+
                     assumed_external_imports.append(
                         ReachedUnmodeledImport(
                             importer=module,
@@ -2053,8 +2140,15 @@ def evaluate_package_import_order(
 
                     return result(outcome, target, member)
 
+                imported_value = namespaces[target][member]
+                if (
+                    step.class_local
+                    and not _safe_class_namespace_value(imported_value)
+                ):
+                    return result("UNKNOWN", target, member)
+
                 if not step.function_local and not step.class_local:
-                    namespaces[module][step.binding] = namespaces[target][member]
+                    namespaces[module][step.binding] = imported_value
 
                 events.append(
                     PackageModelEvent(
@@ -2150,10 +2244,16 @@ def evaluate_package_import_order(
                                 "tuple",
                             }
                             else not (
-                                type(namespaces[module].get(name))
-                                is str
-                                and namespaces[module][name].startswith(
-                                    "\x00PASSIVE_CLASS:"
+                                isinstance(
+                                    namespaces[module].get(name),
+                                    _ClassFact,
+                                )
+                                or (
+                                    type(namespaces[module].get(name))
+                                    is str
+                                    and namespaces[module][name].startswith(
+                                        "\x00PASSIVE_CLASS:"
+                                    )
                                 )
                             )
                         )
@@ -2193,10 +2293,26 @@ def evaluate_package_import_order(
                 )
             )
 
-        elif step.op == "CHECK_BUILTIN_CLASS_BASE":
+        elif step.op == "PREPARE_PASSIVE_CLASS":
+            if not step.binding or not step.definition_id:
+                return result("UNKNOWN", module, step.binding)
+
             if (
-                step.target != "ValueError"
-                or "ValueError" in namespaces[module]
+                step.explicit_type_metaclass
+                and "type" in namespaces[module]
+            ):
+                return result("UNKNOWN", module, "type")
+
+            if step.target is None:
+                base_fact = _BUILTIN_CLASS_FACTS["object"]
+            elif step.target in namespaces[module]:
+                base_fact = namespaces[module][step.target]
+            else:
+                base_fact = _BUILTIN_CLASS_FACTS.get(step.target)
+
+            if (
+                not isinstance(base_fact, _ClassFact)
+                or base_fact.metaclass_identity != _BUILTIN_TYPE_ID
             ):
                 return result(
                     "UNKNOWN",
@@ -2204,12 +2320,33 @@ def evaluate_package_import_order(
                     step.target,
                 )
 
+            prepared_class_bases[step.definition_id] = base_fact
+
         elif step.op == "DEFINE_PASSIVE_CLASS":
+            base_fact = prepared_class_bases.pop(
+                step.definition_id or "",
+                None,
+            )
+            if not isinstance(base_fact, _ClassFact):
+                return result("UNKNOWN", module, step.binding)
+
+            if not base_fact.safe_to_subclass:
+                return result("UNKNOWN", module, step.binding)
+
+            identity = step.definition_id
+            if not identity:
+                return result("UNKNOWN", module, step.binding)
+
+            class_fact = _ClassFact(
+                identity=identity,
+                origin="INDEXED_SOURCE",
+                direct_base=base_fact.identity,
+                metaclass_identity=_BUILTIN_TYPE_ID,
+                defines_init_subclass=step.defines_init_subclass,
+                safe_to_subclass=not step.defines_init_subclass,
+            )
             namespaces[module][step.binding] = (
-                "\x00PASSIVE_CLASS:"
-                + module
-                + ":"
-                + step.binding
+                class_fact
             )
 
             events.append(

@@ -64,6 +64,22 @@ Kept actual CPython execution safety outside the claims of the restricted static
 
 Current status: The external-import side-effects correction is completed and runtime adoption verified. The semantic cycle diagnostics infrastructure is operational, while full semantic classification and evidence-based suppression remain dependent on fresh, authenticated model assessments.
 
+### Fixed — Name Provenance, Shadowing & Builtin Environment Authority (P2)
+
+- Audited name binding, alias propagation, import ordering, and shadowing behavior across the restricted Python cycle models.
+- Verified existing safeguards for `ValueError`, `property`, `field`, `dataclass`, `ast`, builtin annotation names, and supported class-local bindings.
+- Confirmed that modeled reassignments and shadowing are evaluated in execution order, with ambiguous or unsupported operations producing `UNKNOWN` rather than unjustified `MODEL_PASS`.
+- Identified an implicit environmental dependency: ordinary `MODEL_PASS` assumes conventional Python builtin bindings without verifying their runtime identities.
+- Reproduced the limitation in isolated CPython 3.15.2 processes, demonstrating import failures when `builtins.ValueError` or `builtins.property` was replaced or removed.
+- Introduced the shared `CONVENTIONAL_BUILTINS_ASSUMED_NOT_RUNTIME_ATTESTED` contract to explicitly declare this precondition.
+- Exposed the builtin environment precondition through `PackageImportAssessment`, LIVE diagnostic summaries, and MCP `get_live_events` warning views.
+- Preserved existing model outcomes, SCC classifications, evidence scopes, fingerprints, publication receipts, and warning-suppression eligibility.
+- Added targeted regression coverage for builtin shadowing, conditional assessment boundaries, diagnostic metadata, and unavailable-state behavior.
+- Verified deployment of the updated contract in both the active MCP backend and the authenticated LIVE owner process.
+- Confirmed no new structural cycles; the repository retained 16 structural cycle paths and one soft-dependent potential SCC.
+
+**Status:** Completed and runtime adoption verified. The model remains explicitly limited to supported static semantics and does not certify arbitrary Python runtime environments or object identities.
+
 
 ## 2026-10-26 Patch — Canonical Analysis Parity, Cycle Semantics and LIVE Publication Integration
 

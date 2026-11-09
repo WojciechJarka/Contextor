@@ -385,3 +385,195 @@ def test_c24_determinism_and_ast_immutability():
     }
 
     json.dumps(asdict(first))
+
+
+@pytest.mark.parametrize(
+    ("source", "extra"),
+    [
+        ("class Child(object): pass", {}),
+        ("class Child(Exception): pass", {}),
+        ("class Child(BaseException): pass", {}),
+        ("class Child(ValueError): pass", {}),
+        ("class Base: pass\nclass Child(Base): pass", {}),
+        (
+            "class Base: pass\nBaseAlias = Base\n"
+            "class Child(BaseAlias): pass",
+            {},
+        ),
+        (
+            "from pkg.base import Base\nclass Child(Base): pass",
+            {"pkg.base": "class Base: pass"},
+        ),
+        ("class Child(metaclass=type): pass", {}),
+        (
+            "class Base: pass\nOldBase = Base\nclass Base: pass\n"
+            "class Child(OldBase): pass",
+            {},
+        ),
+    ],
+)
+def test_p3_d1_proven_class_bases_match_cpython(
+    tmp_path, source, extra,
+):
+    sources = {"pkg.__init__": "pass", "pkg.a": source, **extra}
+
+    result = _model(sources, "pkg.a")
+
+    assert result.outcome == "MODEL_PASS"
+    assert _actual(tmp_path, sources, "pkg.a").returncode == 0
+
+
+@pytest.mark.parametrize(
+    ("source", "runtime_succeeds"),
+    [
+        ("object = 1\nclass Child(object): pass", False),
+        ("Exception = 1\nclass Child(Exception): pass", False),
+        ("ValueError = 1\nclass Child(ValueError): pass", False),
+        ("type = 1\nclass Child(metaclass=type): pass", False),
+        ("class Child(MissingBase): pass", False),
+        ("Base = 1\nclass Child(Base): pass", False),
+        (
+            "class Base:\n"
+            "    def __init_subclass__(cls):\n"
+            "        raise RuntimeError('hook')\n"
+            "class Child(Base): pass",
+            False,
+        ),
+        (
+            "class Meta(type): pass\n"
+            "class Child(metaclass=Meta): pass",
+            True,
+        ),
+        (
+            "class Left: pass\nclass Right: pass\n"
+            "class Child(Left, Right): pass",
+            True,
+        ),
+        (
+            "class A: pass\nclass B: pass\nclass C(A, B): pass\n"
+            "class D(B, A): pass\nclass E(C, D): pass",
+            False,
+        ),
+        (
+            "class MetaA(type): pass\nclass MetaB(type): pass\n"
+            "class A(metaclass=MetaA): pass\n"
+            "class B(metaclass=MetaB): pass\n"
+            "class C(A, B): pass",
+            False,
+        ),
+        (
+            "class Proxy:\n"
+            "    def __mro_entries__(self, bases):\n"
+            "        return (object,)\n"
+            "proxy = Proxy()\nclass Child(proxy): pass",
+            True,
+        ),
+    ],
+)
+def test_p3_d1_unproven_class_mechanisms_stay_unknown(
+    tmp_path, source, runtime_succeeds,
+):
+    sources = {"pkg.__init__": "pass", "pkg.a": source}
+
+    assert _model(sources, "pkg.a").outcome == "UNKNOWN"
+    process = _actual(tmp_path, sources, "pkg.a")
+    assert (process.returncode == 0) is runtime_succeeds
+
+
+def test_p3_d1_old_alias_keeps_redefined_class_identity(tmp_path):
+    sources = {
+        "pkg.__init__": "pass",
+        "pkg.a": (
+            "class Base:\n"
+            "    def __init_subclass__(cls):\n"
+            "        raise RuntimeError('old hook')\n"
+            "OldBase = Base\n"
+            "class Base: pass\n"
+            "class Child(OldBase): pass"
+        ),
+    }
+
+    assert _model(sources, "pkg.a").outcome == "UNKNOWN"
+    process = _actual(tmp_path, sources, "pkg.a")
+    assert process.returncode != 0
+    assert "old hook" in process.stderr
+
+
+def test_p3_d1_reentrant_import_sees_class_unbound(tmp_path):
+    sources = {
+        "pkg.__init__": "pass",
+        "pkg.a": (
+            "class Base: pass\n"
+            "class Child(Base):\n"
+            "    import pkg.b"
+        ),
+        "pkg.b": "from pkg.a import Child",
+    }
+
+    result = _model(sources, "pkg.a")
+
+    assert result.outcome == "EARLY_BINDING_HAZARD"
+    assert result.symbol == "Child"
+    process = _actual(tmp_path, sources, "pkg.a")
+    assert process.returncode != 0
+    assert "ImportError" in process.stderr
+
+
+@pytest.mark.parametrize("name", ["object", "Exception", "ValueError"])
+def test_p3_d1_shadowed_builtin_base_is_unknown(tmp_path, name):
+    sources = {
+        "pkg.__init__": "pass",
+        "pkg.a": f"{name} = 1\nclass Child({name}): pass",
+    }
+
+    assert _model(sources, "pkg.a").outcome == "UNKNOWN"
+    assert _actual(tmp_path, sources, "pkg.a").returncode != 0
+
+
+def test_p3_d1_class_body_import_remains_supported(tmp_path):
+    sources = {
+        "pkg.__init__": "pass",
+        "pkg.a": "class Child(object):\n    import pkg.b",
+        "pkg.b": "value = 1",
+    }
+
+    result = _model(sources, "pkg.a")
+
+    assert result.outcome == "MODEL_PASS"
+    assert _actual(tmp_path, sources, "pkg.a").returncode == 0
+
+
+def test_p3_d1_conditional_dataclass_is_not_a_proven_base(tmp_path):
+    source = (
+        "from dataclasses import dataclass\n"
+        "@dataclass(frozen=True)\n"
+        "class Base: pass\n"
+        "class Child(Base): pass"
+    )
+    sources = {"pkg.__init__": "pass", "pkg.a": source}
+    result = evaluate_package_import_order(
+        {name: ast.parse(value) for name, value in sources.items()},
+        "pkg.a",
+        annotation_semantics="DEFERRED",
+        _assume_passive_external_imports=True,
+        _assume_frozen_dataclass_decoration=True,
+    )
+
+    assert result.outcome == "UNKNOWN"
+    assert _actual(tmp_path, sources, "pkg.a").returncode == 0
+
+
+def test_p3_d1_unknown_set_name_descriptor_stays_unknown(tmp_path):
+    source = (
+        "class Descriptor:\n"
+        "    def __set_name__(self, owner, name):\n"
+        "        raise RuntimeError('descriptor hook')\n"
+        "class Subject:\n"
+        "    value = Descriptor()"
+    )
+    sources = {"pkg.__init__": "pass", "pkg.a": source}
+
+    assert _model(sources, "pkg.a").outcome == "UNKNOWN"
+    process = _actual(tmp_path, sources, "pkg.a")
+    assert process.returncode != 0
+    assert "descriptor hook" in process.stderr
