@@ -1,268 +1,365 @@
-# CONTEXTOR_C16_P15_EXTERNAL_IMPORT_EFFECTS_F1 — etap implementacji
+# CONTEXTOR_C16_P15_EXTERNAL_IMPORT_EFFECTS_F1B
 
 ## PREFLIGHT
-Globalne `C:\Users\DafoO\.codex\AGENTS.md` odczytane i stosowane w bieżącym łańcuchu E1. HEAD `4cad8cb2a7dd9cbbf4d4d277ac1ca3cb3070bf49`; początkowy worktree `M walkthrough.md`, `?? 0.17.0`, bez diffów source/test. Contextor MCP `get_file_edit_context` przed zmianą: `package_graph_consistency.py` i `package_model.py` status available, per-file `workspace_sync=verified`, LIVE rev 1158, cycle_semantics stale. Exact anchors potwierdzone lokalnym `rg` i odczytem źródła. Kanoniczny owner zewnętrznego gate: `package_graph_consistency.assess_package_graph_consistency`; owner wykonania: `package_model.evaluate_package_import_order`; consumer `scenarios.analyze_cycle_scenarios`. Nie zmieniono indexera.
+DIRECT_EVIDENCE: obowiązujące globalne `C:\Users\DafoO\.codex\AGENTS.md` zostało odczytane w łańcuchu E1/F1 i jest stosowane. Zadana baza `4cad8cb2…` uległa zmianie przed tym etapem: aktualny HEAD `9f5ca896ea3ed40942c221dc9e32ae0d416e6c3b` (`Auto-commit: Cleanup and update`), początkowy worktree czysty, również bez zastanego `0.17.0`. Wszystkie zadane anchory testu nadal pasowały; produkcja F1 była już w HEAD. Contextor MCP first: `tests/test_p1d3_package_cycle_integration.py` i `package_model.py` przed zmianą `workspace_sync=verified`, LIVE rev 1161, syntax fresh/zero, `cycle_semantics=stale`. Nie modyfikowano produkcji ani indexera.
 
-## CONFIRMED_ROOT_CAUSE
-`typing_guard.py` rozpoznaje składnię markera, lecz nie ustala runtime resolution ani pasywności importu. Przed zmianą `package_graph_consistency.py:443-448` pomijał taki import w gate, a `package_model.py:737-754,1819-1835` podstawiał bezefektowy `TYPING_MARKER_IMPORT`. Poprzedni niezależny syntetyczny CPython 3.15.2 witness: `typing.py` wykonywał `raise RuntimeError`, podczas gdy zwykły package evaluator dawał `MODEL_PASS` i SCC `MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS`. Zatem to zwykła luka autorytetu, a nie tylko ograniczenie conditional API.
+## REGRESSION_ROOT_CAUSE
+Poprzednie testy przyjmowały, że leksykalnie rozpoznany `typing.TYPE_CHECKING` usuwa efekt wykonania samego `import typing`. Niezależny CPython witness z E1 pokazał, że taki import uruchamia kod zewnętrznego modułu; bez source/environment proof zwykły model musi zwrócić `UNKNOWN`. F1 usunęło shortcut wykonania, więc dotychczasowe `CONSISTENT`, `MODEL_PASS`, prepared manifest i receipt dla tych fixture'ów nie są uprawnione. To nie zmienia indeksowania `type_only` ani strukturalnego grafu.
 
-## EXACT_IMPLEMENTATION
-Usunięto pomijanie markera w `package_graph_consistency.py`. AST `Import` / `ImportFrom` przechodzi zwykły gate, z dotychczasowym provenance site. W `package_model.py` usunięto kompilację `TYPING_MARKER_IMPORT` i jego gałąź wykonania; underlying AST import jest teraz kompilowany i wykonywany według zwykłych reguł. Syntaktyczne rozpoznanie guard nadal służy do rozpoznania samego warunku, ale osiągnięty import `typing` zatrzymuje zwykły model `UNKNOWN` przed założeniem wartości markera. Conditional API, flagi i scope pozostały bez zmian.
+## TWELVE_TEST_CLASSIFICATION
+- Grupa A: `d2b_name_guard_inactive`, `d2b_attribute_guard_inactive`: brak hard SCC i pozytywne CPython execution nadal obowiązują; zwykły model dla obu wejść daje `UNKNOWN` z `reached_unmodeled_import.target=typing`, a nie hazard.
+- Grupa B: `d2b_else_activates_import`, `d2b_else_reordered_safe`, `d2b2_active_import_dominates_type_only`, `d2b3_name_typed_side_import`, `d2b3_attribute_typed_side_import`, `d2b3_forged_hard_graph_rejected`: graf/closure i CPython observations pozostają; consistency ma `EXTERNAL_IMPORT_EXECUTION_UNMODELED`; scenariusz ma `INDETERMINATE`, `coverage=NONE`, bez entry assessments, ponieważ gate zatrzymuje ocenę przed agregacją. Bezpośrednie ordinary assessments pokazują `UNKNOWN`/typing. P0 ma `INCOMPLETE_EVIDENCE`, P1B `UNAVAILABLE/INCOMPLETE_MEMBER_ENTRY_ASSESSMENTS`; to nie twierdzi, że source bytes są niespójne.
+- Grupa C: `d2b_original_worker_prepares_v2`, `d2b_official_isolated_full_receipt`, `d2b3_official_isolated_full_receipt`: typing-based fixture nie otrzymuje zwykłego manifestu ani co-published receipt. Pozytywny wariant wewnętrznego cyklu F1/F2 i D2A pozostaje w tym samym pliku i został uruchomiony.
+- Grupa D: `d2b_forged_marker_event_rejected` przemianowano na `d2b_forged_internal_import_event_rejected`; F2 daje autentyczny dodatni model, fałszowany jest jego rzeczywisty `FROM` event, token przeliczony jak wcześniej, replay zwraca `MODEL_REPLAY_MISMATCH`.
 
-## REMOVED_UNSOUND_SPECIAL_CASES
-Usunięto import `recognize_typing_guard` z `package_graph_consistency.py`, gdy nie jest już tam używany. Nie usunięto mechanizmu syntaktycznego `typing_guard.py` ani jego kontraktu indexera. W `package_model.py` nadal jest syntaktyczne rozpoznanie guard w kompilatorze, ale nie ma już wykonawczej ścieżki gwarantowanego importu. Żadnej nowej allowlisty ani wyjątku dla `typing` nie dodano.
+## EXACT_TEST_CORRECTIONS
+Każda zmiana expectation wynika z jednego mechanizmu: osiągnięty import `typing` ma nieznane efekty. `package_graph_consistency.py` rejestruje site i zwraca `EXTERNAL_IMPORT_EXECUTION_UNMODELED`; `package_model.py` kończy osiągnięty import `UNKNOWN`; `scenarios.py` zatrzymuje SCC przed entry assessments. `evidence.py`/`source_proof.py` odmawiają dodatniego claim z niepełnych assessments. Dla F2, który zawiera wyłącznie wewnętrzne importy, autentyczny `FROM` jest właściwym zdarzeniem do testu replay-integrity. Dodatkowe jawne porównania `SourceSnapshot.raw` z plikiem, fingerprintu z indeksem i `ast.dump(..., include_attributes=True)` z parserem CPython chronią byte/AST identity niezależnie od niedostępnego positive model claim.
 
-## REGRESSION_TESTS
-Nowy `tests/test_cycle_semantics_external_import_authority.py` zawiera cztery celowane testy: (A) ordinary evaluator, graph consistency i SCC odrzucają osiągnięty marker oraz CPython uruchamia syntetyczny `typing.py` z wyjątkiem; (B) metamorficzny inny opaque import ma tę samą granicę; (C) niepowołana funkcja z importem zachowuje model-relative PASS bez założenia; (D) conditional API zachowuje `CONDITIONAL_MODEL_PASS` i assumption scope. `4 passed`. Starszy focused subset `package_graph_external_boundary.py`/`package_model.py -k 'external or typing'`: `39 passed, 195 deselected`.
+## PRESERVED_INDEXER_CONTRACTS
+Testy nadal sprawdzają pierwotne `hard_edges`, `soft_edges`, `type_only`, `is_from_import`, closure membership, captured import facts i ponownie zbudowany captured graph. `typing_guard` nadal rozpoznaje składnię tam, gdzie oczekiwano. Nie zmieniono source inventory ani produkcyjnego indexera. CPython success/failure dla oryginalnych fixture'ów pozostaje osobną obserwacją, nie powodem do MODEL_PASS.
 
-Istniejący `tests/test_p1d3_package_cycle_integration.py -k 'typing_guard or d2b'`: `58 passed, 12 failed, 61 deselected`. Nie jest to wynik PASS. Osiem niepowodzeń bezpośrednio lub przez helper zakłada `CONSISTENT`, `MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS`, `PREPARED_UNPUBLISHED_NON_ATOMIC` albo marker event po osiągniętym `typing` import; to historyczne oczekiwania sprzeczne z niezależnym CPython witness. Pozostałe failures są kaskadami tych założeń w fixture/receipt paths; jeden test fałszuje nieistniejący już event markera. Wśród wykonanych były oznaczone `@pytest.mark.live` testy z izolowanym syntetycznym LIVE; nie dotknęły produkcyjnego LIVE repo. Nie zmieniono starych expectation mechanicznie. Wymagają osobnej świadomej migracji asercji z zachowaniem kontraktów indexera i strukturalnego grafu. Wskazane failing tests: `d2b3_name_typed_side_import`, `d2b3_attribute_typed_side_import`, `d2b3_forged_hard_graph_rejected`, `d2b_name_guard_inactive`, `d2b_attribute_guard_inactive`, `d2b_else_activates_import`, `d2b_else_reordered_safe`, `d2b_original_worker_prepares_v2`, `d2b_forged_marker_event_rejected`, `d2b_official_isolated_full_receipt`, `d2b2_active_import_dominates_type_only`, `d2b3_official_isolated_full_receipt`.
+## PRESERVED_POSITIVE_RECEIPT_COVERAGE
+Istniejące dodatnie testy `test_package_closure_and_prepared_v2` (F1/F2), `test_p1d3_d2a_original_worker_prepares_v2` i `test_p1d3_d2a_official_isolated_full_receipt` pozostały bez zmian i przeszły w celowanym uruchomieniu. Nadal sprawdzają wersję manifestu, source/evidence digest, model classification, canonical generation identity, seal/replay, isolated LIVE publication oraz accepted receipt dla internal-only package cycles. Nowy forged-event test używa F2 jako autentycznej dodatniej bazy. Nie wnioskuje stąd o bezpieczeństwie importu `typing`.
 
-## INDEPENDENT_CPYTHON_ORACLE
-Nowy test tworzy poza repo syntetyczne `pkg/__init__.py`, `pkg/a.py`, `pkg/b.py`, `typing.py`. `typing.py` zawiera `TYPE_CHECKING = False\nraise RuntimeError("typing import executed")\n`. CPython 3.15.2 uruchomiony świeżo z `-I -S`, `sys.path` ustawiony na ten katalog; exit != 0, stderr zawiera `RuntimeError: typing import executed`. To potwierdza, że import markera jest rzeczywiście wykonywany. Test nie dowodzi runtime safety dla innych środowisk.
+## NEGATIVE_AUTHORITY_TESTS
+Typing-based manifest preview: `UNAVAILABLE`, manifest `None`, SCC `INDETERMINATE/EXTERNAL_IMPORT_EXECUTION_UNMODELED`. W dwóch izolowanych LIVE testach zapisany `cycle_source_publication is None` i `verify_co_published_cycle_manifest(...)` zwraca false mimo ukończonej zwykłej publikacji globalnego stanu. To odróżnia odmowę claim od powodzenia analizy projektu.
 
-## POST_CHANGE_INVARIANT_PROOF
-CODE_PATH_PROVED dla sprawdzonego ordinary package path: import markera nie jest pomijany w `package_graph_consistency`; unresolved external trafia do `unmodeled_external_imports` i statusu INDETERMINATE, chyba że spełni lexical-deferred gate. Sam lexical gate nie daje PASS, tylko przechodzi do ordinary simulator w `scenarios.py:282-337`. `package_model.py` kompiluje marker jako zwykły import; jeśli jest osiągnięty i target nie należy do programów, `:1836-1902` zwraca UNKNOWN przy domyślnych flagach. `scenarios.py:355-358` wymaga wszystkich ordinary `MODEL_PASS`. Flat model `initialization_model.py:152-156` również zwraca UNKNOWN dla missing target. Conditional simulator zachowuje osobne scope i zewnętrzny outcome `CONDITIONAL_MODEL_PASS`. Dowód obejmuje te gałęzie źródłowe, nie wszelką semantykę CPython. Stare testy integracyjne pozostają nieprzeniesione, więc pełny kontrakt regresji nie jest zamknięty.
+## TARGETED_TEST_RESULTS
+- 8/8 wybranych Group A/B testów przeszło po świadomej migracji.
+- 8/8 wybranych Group C/D oraz niezależnych dodatnich F1/F2/D2A testów przeszło.
+- Wskazany typing/D2B integration subset: `70 passed, 61 deselected`.
+- F1 authority tests: `4 passed` (uruchomione osobno, ponieważ `-k typing_guard or d2b` je wykluczał).
+- `git diff --check`: brak błędów. Nie uruchomiono pełnego pytest.
 
 ## MCP_POST_CHANGE_AUDIT
-Contextor `get_live_events(after_revision=1158)` dał ciągłość `continuous`, bez resync: desktop_watcher `UPDATED` rev 1159 (`package_graph_consistency.py`), 1160 (`package_model.py`), 1161 (nowy test). `get_file_edit_context` po zmianie: oba production files per-file `workspace_sync=verified`, rev 1161, syntax `checked_and_none`, graph/topology/cycles fresh, cycle_semantics **stale**. `get_live_events` bieżąca warning view: structural 16, model_pass 0, active 16. Brak nieoczekiwanej zmiany liczby strukturalnych ścieżek względem preflight. To nie certyfikuje nowej semantyki w LIVE ani adopcji kodu przez MCP process. Nie wykonywano resync/FULL/restartu; kod serwera MCP nie zmieniony.
+Contextor `get_live_events(after_revision=1161)`: watcher `UPDATED` dla testowego pliku w rev 1162–1167, `continuity=continuous`, `resync_required=false`. `get_file_edit_context` po zmianie: test i niezmieniony `package_model.py` per-file `workspace_sync=verified`, rev 1167; syntax diagnostics `checked_and_none`, graph/topology/cycles fresh, `cycle_semantics=stale`. Warning view: 16 structural paths, 0 model pass, 16 active warnings, jak wcześniej. Żadnych zmian import-edge w produkcji; w pliku testu nie zmieniono import statements. LIVE structural count pozostaje 16. Nie przedstawiono stale semantics jako fresh ani nie wykonano mutacji LIVE/FULL/restartu.
 
-## REMAINING_UNVERIFIED
-12 starych focused regressions nie przechodzi i wymaga semantycznej migracji; z tego powodu FINAL PASS zabroniony. Pełny suite celowo niewykonany. Canonical LIVE cycle_semantics pozostaje stale; runtime adoption, source/graph semantic parity i runtime-safety niecertyfikowane. Istniejące structural graph 16 jest fresh, lecz nie wystarcza do semantycznej certyfikacji. Nie ma dowodu rzeczywistej accepted receipt po zmianie.
+## REMAINING_DEFECTS_OR_PROOF_GAPS
+Brak znanych niepowodzeń w wymaganym focused subset. Globalny suite zgodnie z instrukcją nieuruchomiony. Bieżący LIVE `cycle_semantics=stale`; test-only source sync nie dowodzi adopcji runtime ani runtime safety. GitHub HEAD nie jest osobną zweryfikowaną władzą. F1B nie zmienia produkcji; pełna certyfikacja globalna poza scope.
 
 ## FILES_CHANGED
-`contextor/core/cycle_semantics/package_graph_consistency.py`
-`contextor/core/cycle_semantics/package_model.py`
-`tests/test_cycle_semantics_external_import_authority.py`
-`walkthrough.md` (raport; poza listą production/test/docs diffs).
+`tests/test_p1d3_package_cycle_integration.py` (jedyny source/test/docs file). `walkthrough.md` jest tylko raportem.
 
 ## FULL_DIFFS
 
 ```diff
-diff --git a/contextor/core/cycle_semantics/package_graph_consistency.py b/contextor/core/cycle_semantics/package_graph_consistency.py
-index b49eef3..e974797 100644
---- a/contextor/core/cycle_semantics/package_graph_consistency.py
-+++ b/contextor/core/cycle_semantics/package_graph_consistency.py
-@@ -10,7 +10,6 @@ from .model_identity import indexed_to_logical_module, logical_to_indexed_module
- from .typing_guard import (
-     _typing_guard_parent_initializers,
-     _typing_guard_passive_initializer,
--    recognize_typing_guard,
-     type_only_candidate_statement_ids,
- )
+diff --git a/tests/test_p1d3_package_cycle_integration.py b/tests/test_p1d3_package_cycle_integration.py
+index fa61627..e149079 100644
+--- a/tests/test_p1d3_package_cycle_integration.py
++++ b/tests/test_p1d3_package_cycle_integration.py
+@@ -1146,6 +1146,12 @@ def _d2a_source_evidence(root):
  
-@@ -404,10 +403,6 @@ def assess_package_graph_consistency(
+ def _assert_d2b3_typed_side_evidence(root):
+     index, graph, captured, parsed, evidence, snapshot = _d2a_source_evidence(root)
++    for module_id, source in captured.original_worker_source_snapshots.items():
++        assert source.raw == Path(root, index.modules[module_id].path).read_bytes()
++        assert source.source_fingerprint == index.source_fingerprints_by_module[module_id]
++        assert ast.dump(parsed[module_id].tree, include_attributes=True) == ast.dump(
++            ast.parse(source.raw), include_attributes=True,
++        )
+     assert graph.hard_edges == {
+         "pkg.__init__": set(),
+         "pkg.a": {"pkg.b"},
+@@ -1195,19 +1201,23 @@ def _assert_d2b3_typed_side_evidence(root):
+         {module_id: source.tree for module_id, source in parsed.items()},
+         closure[0].evidence_source_modules,
+     )
+-    assert consistency.status == "CONSISTENT"
+-    assert consistency.reason is None
++    assert consistency.status == "INDETERMINATE"
++    assert consistency.reason == "EXTERNAL_IMPORT_EXECUTION_UNMODELED"
++    assert any(site[3] == "typing" for site in consistency.unmodeled_external_imports)
  
-     for module_id in evidence_source_modules:
-         expected: set[str] = set()
--        typing_guard = recognize_typing_guard(
--            sources[module_id],
--            indexed,
+     scenario = evidence.scenarios.components[0]
+     assert scenario.members == ("pkg.a", "pkg.b")
+     assert scenario.model_kind == "REGULAR_PACKAGE"
+-    assert scenario.classification == "MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS"
+-    assert scenario.coverage == "COMPLETE_FRESH_MEMBER_ENTRIES"
+-    assert not any(
+-        event.operation == "START_IMPORT" and event.target == "pkg.c"
+-        for assessment in scenario.entry_assessments
+-        for event in assessment.events
+-    )
++    assert scenario.classification == "INDETERMINATE"
++    assert scenario.coverage == "NONE"
++    assert scenario.reason == "EXTERNAL_IMPORT_EXECUTION_UNMODELED"
++    for entry in scenario.members:
++        assessment = evaluate_package_import_order(
++            {module_id: source.tree for module_id, source in parsed.items()},
++            entry,
++        )
++        assert assessment.outcome == "UNKNOWN"
++        assert assessment.reached_unmodeled_import.target == "typing"
+     for entry in ("pkg.a", "pkg.b"):
+         assert run_synthetic_import(root, entry).returncode == 0
+ 
+@@ -1218,7 +1228,7 @@ def _assert_d2b3_typed_side_evidence(root):
+         evidence,
+     )
+     assert len(p0) == 1
+-    assert p0[0].evidence_state == "DECLARED_INPUTS_CONSISTENT"
++    assert p0[0].evidence_state == "INCOMPLETE_EVIDENCE"
+     p1b = assess_scc_source_bytes(
+         graph.hard_edges,
+         captured.source_fingerprints_by_module,
+@@ -1227,7 +1237,8 @@ def _assert_d2b3_typed_side_evidence(root):
+         captured.original_worker_source_snapshots,
+     )
+     assert len(p1b) == 1
+-    assert p1b[0].bytes_state == "BYTE_AST_CONSISTENT_NON_ATOMIC"
++    assert p1b[0].bytes_state == "UNAVAILABLE"
++    assert p1b[0].reason == "INCOMPLETE_MEMBER_ENTRY_ASSESSMENTS"
+ 
+     captured_facts = materialize_reexport_facts_by_module(
+         captured.modules,
+@@ -1911,10 +1922,11 @@ def _assert_d2b2_inactive_no_hard_scc(
+     for entry, succeeds in expected.items():
+         modeled = evaluate_package_import_order(source_trees, entry)
+         actual = run_synthetic_import(root, entry)
+-        assert (modeled.outcome == "MODEL_PASS") is succeeds
++        assert modeled.outcome == "UNKNOWN"
++        assert modeled.reached_unmodeled_import.target == "typing"
+         assert (actual.returncode == 0) is succeeds
+         if entry == "pkg.a":
+-            assert any(
++            assert not any(
+                 event.operation == "TYPING_MARKER_IMPORT"
+                 for event in modeled.events
+             )
+@@ -2363,6 +2375,12 @@ def _assert_p1d3_d2b_supported_fixture(
+ 
+     root = write_synthetic_repository(tmp_path / "repo", fixture)
+     index, graph, captured, parsed, evidence, snapshot = _d2a_source_evidence(root)
++    for module_id, source in captured.original_worker_source_snapshots.items():
++        assert source.raw == Path(root, index.modules[module_id].path).read_bytes()
++        assert source.source_fingerprint == index.source_fingerprints_by_module[module_id]
++        assert ast.dump(parsed[module_id].tree, include_attributes=True) == ast.dump(
++            ast.parse(source.raw), include_attributes=True,
++        )
+     assert graph.hard_edges == {
+         "pkg.__init__": set(),
+         "pkg.a": {"pkg.b"},
+@@ -2388,55 +2406,35 @@ def _assert_p1d3_d2b_supported_fixture(
+     assert set(evidence.scenarios.components[0].members) == {"pkg.a", "pkg.b"}
+     scenario = evidence.scenarios.components[0]
+     assert scenario.model_kind == "REGULAR_PACKAGE"
+-    assert scenario.coverage == "COMPLETE_FRESH_MEMBER_ENTRIES"
+-    if fixture is D2B_ELSE_HAZARD:
+-        assert scenario.classification == "MODEL_INTERNAL_EARLY_BINDING_HAZARD"
+-    else:
+-        assert scenario.classification == "MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS"
++    assert scenario.coverage == "NONE"
++    assert scenario.classification == "INDETERMINATE"
++    assert scenario.reason == "EXTERNAL_IMPORT_EXECUTION_UNMODELED"
++    assert scenario.entry_assessments == ()
+     guard = recognize_typing_guard(
+         parsed["pkg.a"].tree,
+         frozenset(index.modules),
+     )
+     assert guard is not None
+-    assert any(
+-        event.operation == "TYPING_MARKER_IMPORT"
+-        and event.target == "typing"
+-        and event.symbol == "TYPE_CHECKING"
+-        for assessment in scenario.entry_assessments
+-        for event in assessment.events
+-    )
+-    assessment_a = next(
+-        item for item in scenario.entry_assessments
+-        if item.entry_module == "pkg.a"
+-    )
+-    starts_b = any(
+-        event.operation == "START_IMPORT" and event.target == "pkg.b"
+-        for event in assessment_a.events
+-    )
+-    assert starts_b is any(
+-        fixture is candidate
+-        for candidate in (D2B_ELSE_HAZARD, D2B_ELSE_SAFE)
+-    )
++    trees = {module_id: source.tree for module_id, source in parsed.items()}
+     for entry, succeeds in expected.items():
+         actual = run_synthetic_import(root, entry)
+         assert (actual.returncode == 0) is succeeds
+-        modeled = next(
+-            item for item in scenario.entry_assessments
+-            if item.entry_module == entry
 -        )
-         type_only_ids = (
-             type_only_candidate_statement_ids(
-                 sources[module_id],
-@@ -441,12 +436,6 @@ def assess_package_graph_consistency(
+-        assert (modeled.outcome == "MODEL_PASS") is succeeds
++        modeled = evaluate_package_import_order(trees, entry)
++        assert modeled.outcome == "UNKNOWN"
++        assert modeled.reached_unmodeled_import.target == "typing"
+         if fixture is D2B_ELSE_HAZARD and entry == "pkg.a":
+             assert "partially initialized module" in actual.stderr
+     p0 = assess_index_bound_scc_models(
+         graph.hard_edges, captured.source_fingerprints_by_module,
+         snapshot, evidence,
+     )
+-    assert p0[0].evidence_state == "DECLARED_INPUTS_CONSISTENT"
++    assert p0[0].evidence_state == "INCOMPLETE_EVIDENCE"
+     p1b = assess_scc_source_bytes(
+         graph.hard_edges, captured.source_fingerprints_by_module,
+         snapshot, evidence, captured.original_worker_source_snapshots,
+     )
+-    assert p1b[0].bytes_state == "BYTE_AST_CONSISTENT_NON_ATOMIC"
++    assert p1b[0].bytes_state == "UNAVAILABLE"
++    assert p1b[0].reason == "INCOMPLETE_MEMBER_ENTRY_ASSESSMENTS"
+ 
+ 
+ def test_p1d3_d2b_name_guard_inactive(tmp_path, isolated_dirs):
+@@ -2530,35 +2528,33 @@ def test_p1d3_d2b_original_worker_prepares_v2(tmp_path, isolated_dirs):
+     prepared = prepare_original_worker_cycle_manifest(
+         captured, graph.hard_edges, snapshot,
+     )
+-    assert prepared.status == "PREPARED_UNPUBLISHED_NON_ATOMIC"
+-    assert prepared.manifest.version == "cycle-source-manifest/2"
+-    component = prepared.manifest.components[0]
+-    assert component.model_kind == "REGULAR_PACKAGE"
+-    assert component.model_classification == "MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS"
+-    assert tuple(row[0] for row in component.source_signatures) == (
+-        "pkg.__init__", "pkg.a", "pkg.b",
++    assert prepared.status == "UNAVAILABLE"
++    assert prepared.manifest is None
++    assert evidence.scenarios.components[0].classification == "INDETERMINATE"
++    assert evidence.scenarios.components[0].reason == (
++        "EXTERNAL_IMPORT_EXECUTION_UNMODELED"
+     )
+-    assert component.model_evidence_sha256
+ 
+ 
+-def test_p1d3_d2b_forged_marker_event_rejected(
++def test_p1d3_d2b_forged_internal_import_event_rejected(
+     tmp_path, isolated_dirs,
+ ):
+-    root = write_synthetic_repository(tmp_path / "repo", D2B_ELSE_SAFE)
++    root = write_synthetic_repository(tmp_path / "repo", F2)
+     _, graph, captured, _, evidence, snapshot = _d2a_source_evidence(root)
+     scenario = evidence.scenarios.components[0]
++    assert scenario.classification == "MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS"
+     assessment = next(
+         item for item in scenario.entry_assessments
+-        if any(event.operation == "TYPING_MARKER_IMPORT" for event in item.events)
++        if any(event.operation == "FROM" for event in item.events)
+     )
+     event = next(
+         item for item in assessment.events
+-        if item.operation == "TYPING_MARKER_IMPORT"
++        if item.operation == "FROM"
+     )
+     forged_assessment = replace(
+         assessment,
+         events=tuple(
+-            replace(item, operation="FORGED_TYPING_MARKER_IMPORT")
++            replace(item, operation="FORGED_INTERNAL_IMPORT")
+             if item is event else item
+             for item in assessment.events
+         ),
+@@ -2609,17 +2605,10 @@ def test_p1d3_d2b_official_isolated_full_receipt(
+             str(root), cycle_source_preparation_preview=True,
+             cycle_source_publication_opt_in=True,
          )
- 
-         for node in ast.walk(sources[module_id]):
--            if (
--                typing_guard is not None
--                and node is typing_guard.marker_statement
--            ):
--                continue
--
-             if isinstance(node, ast.Import):
-                 for alias_ordinal, alias in enumerate(node.names):
-                     if not all(part.isidentifier() for part in alias.name.split(".")):
-diff --git a/contextor/core/cycle_semantics/package_model.py b/contextor/core/cycle_semantics/package_model.py
-index d01ac09..16fb3f9 100644
---- a/contextor/core/cycle_semantics/package_model.py
-+++ b/contextor/core/cycle_semantics/package_model.py
-@@ -734,25 +734,6 @@ def _compile(
-             # supported attribute/import operations.
-             continue
- 
--        if (
--            _depth == 0
--            and typing_guard is not None
--            and stmt is typing_guard.marker_statement
--        ):
--            steps.append(
--                _Step(
--                    "TYPING_MARKER_IMPORT",
--                    target="typing",
--                    symbol="TYPE_CHECKING",
--                    binding=(
--                        "TYPE_CHECKING"
--                        if typing_guard.form == "NAME"
--                        else "typing"
--                    ),
--                )
--            )
--            continue
--
-         if isinstance(stmt, ast.Import):
-             if getattr(stmt, "is_lazy", False):
-                 return None
-@@ -1816,24 +1797,7 @@ def evaluate_package_import_order(
- 
-         step = steps[index]
- 
--        if step.op == "TYPING_MARKER_IMPORT":
--            if not step.binding:
--                return result("UNKNOWN")
--
--            namespaces[module][step.binding] = (
--                "\x00TYPING_MARKER:" + module + ":" + step.binding
--            )
--
--            events.append(
--                PackageModelEvent(
--                    module,
--                    "TYPING_MARKER_IMPORT",
--                    target="typing",
--                    symbol="TYPE_CHECKING",
--                )
--            )
--
--        elif step.op in {
-+        if step.op in {
-             "IMPORT",
-             "FROM",
-             "PREPARE_FROM_MEMBER",
-```
-
-```diff
-diff --git a/tests/test_cycle_semantics_external_import_authority.py b/tests/test_cycle_semantics_external_import_authority.py
-new file mode 100644
-index 0000000..d177e9e
---- /dev/null
-+++ b/tests/test_cycle_semantics_external_import_authority.py
-@@ -0,0 +1,123 @@
-+"""External import effects are not ordinary execution evidence."""
-+
-+import ast
-+import subprocess
-+import sys
-+
-+from contextor.core.cycle_semantics.namespace_path_model import SearchPortion
-+from contextor.core.cycle_semantics.package_graph_consistency import (
-+    assess_package_graph_consistency,
-+)
-+from contextor.core.cycle_semantics.package_model import (
-+    evaluate_conditional_namespace_import_order,
-+    evaluate_package_import_order,
-+)
-+from contextor.core.cycle_semantics.scenarios import analyze_cycle_scenarios
-+
-+
-+def _cycle(import_line):
-+    sources = {
-+        "pkg.__init__": "pass\n",
-+        "pkg.a": (
-+            import_line
-+            + "if False:\n    import pkg.b\n"
-+            + "value = 1\nimport pkg.b\n"
-+        ),
-+        "pkg.b": "from pkg.a import value\n",
-+    }
-+    trees = {name: ast.parse(source) for name, source in sources.items()}
-+    edges = {
-+        "pkg.__init__": set(),
-+        "pkg.a": {"pkg.b"},
-+        "pkg.b": {"pkg.a"},
-+    }
-+    return sources, trees, edges
-+
-+
-+def test_reached_typing_import_is_not_ordinary_evidence(tmp_path):
-+    sources, trees, edges = _cycle("from typing import TYPE_CHECKING\n")
-+    ordinary = evaluate_package_import_order(trees, "pkg.a")
-+    consistency = assess_package_graph_consistency(
-+        edges, trees, tuple(sorted(trees)),
-+    )
-+    scenarios = analyze_cycle_scenarios(edges, trees)
-+
-+    assert ordinary.outcome == "UNKNOWN"
-+    assert ordinary.reached_unmodeled_import.target == "typing"
-+    assert ordinary.evidence_scope == "RESTRICTED_REGULAR_PACKAGE_MODEL"
+-        assert result.cycle_source_preparation_preview.status == (
+-            "PREPARED_UNPUBLISHED_NON_ATOMIC"
+-        )
++        assert result.cycle_source_preparation_preview.status == "UNAVAILABLE"
+         state, metadata = _persisted(root)
+-        receipt = state.cycle_source_publication
+-        assert receipt.version == PUBLICATION_BINDING_VERSION
+-        assert receipt.prepared_manifest.version == MANIFEST_VERSION
+-        component = receipt.prepared_manifest.components[0]
+-        assert component.model_kind == "REGULAR_PACKAGE"
+-        assert component.model_classification == "MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS"
+-        assert verify_co_published_cycle_manifest(
++        assert state.cycle_source_publication is None
++        assert not verify_co_published_cycle_manifest(
+             state, revision=metadata.revision,
+             state_id=metadata.state_id, repo_id=metadata.repo_id,
+             root_path=metadata.root_path,
+@@ -2672,8 +2661,9 @@ def test_p1d3_d2b2_active_import_dominates_type_only(
+         {module_id: source.tree for module_id, source in parsed.items()},
+         closure[0].evidence_source_modules,
+     )
+-    assert consistency.status == "CONSISTENT"
+-    assert consistency.reason is None
++    assert consistency.status == "INDETERMINATE"
 +    assert consistency.reason == "EXTERNAL_IMPORT_EXECUTION_UNMODELED"
-+    assert consistency.unmodeled_external_imports == (
-+        ("pkg.a", 1, "from", "typing"),
-+    )
-+    assert scenarios.components[0].classification == "INDETERMINATE"
-+
-+    package = tmp_path / "pkg"
-+    package.mkdir()
-+    (package / "__init__.py").write_bytes(sources["pkg.__init__"].encode())
-+    (package / "a.py").write_bytes(sources["pkg.a"].encode())
-+    (package / "b.py").write_bytes(sources["pkg.b"].encode())
-+    (tmp_path / "typing.py").write_bytes(
-+        b'TYPE_CHECKING = False\nraise RuntimeError("typing import executed")\n'
-+    )
-+    run = subprocess.run(
-+        [
-+            sys.executable, "-I", "-S", "-c",
-+            "import sys;sys.path.insert(0,sys.argv[1]);import pkg.a",
-+            str(tmp_path),
-+        ],
-+        capture_output=True, text=True, timeout=10,
-+    )
-+    assert run.returncode != 0
-+    assert "RuntimeError: typing import executed" in run.stderr
-+
-+
-+def test_other_reached_external_import_has_same_boundary():
-+    _, trees, edges = _cycle("import opaque_dependency\n")
-+    ordinary = evaluate_package_import_order(trees, "pkg.a")
-+    consistency = assess_package_graph_consistency(
-+        edges, trees, tuple(sorted(trees)),
-+    )
-+    scenarios = analyze_cycle_scenarios(edges, trees)
-+
-+    assert ordinary.outcome == "UNKNOWN"
-+    assert ordinary.reached_unmodeled_import.target == "opaque_dependency"
-+    assert consistency.reason == "EXTERNAL_IMPORT_EXECUTION_UNMODELED"
-+    assert scenarios.components[0].classification == "INDETERMINATE"
-+
-+
-+def test_unreached_external_import_keeps_restricted_pass():
-+    trees = {
-+        "pkg.__init__": ast.parse("pass\n"),
-+        "pkg.a": ast.parse(
-+            "def later():\n    import opaque_dependency\nvalue = 1\n"
-+        ),
-+    }
-+    ordinary = evaluate_package_import_order(trees, "pkg.a")
-+
-+    assert ordinary.outcome == "MODEL_PASS"
-+    assert ordinary.reached_unmodeled_import is None
-+    assert ordinary.assumed_external_imports == ()
-+
-+
-+def test_conditional_external_assumption_stays_conditional():
-+    trees = {
-+        "pkg.__init__": ast.parse("pass\n"),
-+        "pkg.ns.a": ast.parse("import opaque_dependency\nvalue = 1\n"),
-+    }
-+    roots = (SearchPortion(
-+        "root", frozenset({"pkg/__init__.py", "pkg/ns/a.py"}),
-+    ),)
-+    result = evaluate_conditional_namespace_import_order(
-+        trees, "pkg.ns.a", roots,
-+        target_python_version=(3, 15),
-+        assume_passive_external_imports=True,
-+    )
-+
-+    assert result.outcome == "CONDITIONAL_MODEL_PASS"
-+    assert result.model_assessment.outcome == "MODEL_PASS"
-+    assert result.model_assessment.evidence_scope == (
-+        "CONDITIONAL_PASSIVE_EXTERNAL_IMPORT_ASSUMPTION_NOT_RUNTIME_PROOF"
-+    )
-+    assert result.model_assessment.assumed_external_imports[0].target == (
-+        "opaque_dependency"
-+    )
++    assert any(site[3] == "typing" for site in consistency.unmodeled_external_imports)
+     assert captured.original_worker_capture_status == (
+         "ALL_SELECTED_CAPTURED_NON_ATOMIC"
+     )
+@@ -2698,18 +2688,14 @@ def test_p1d3_d2b2_active_import_dominates_type_only(
+     assert captured.modules["pkg.a"].imports == index.modules["pkg.a"].imports
+ 
+     scenario = evidence.scenarios.components[0]
+-    assert scenario.classification == "MODEL_INTERNAL_EARLY_BINDING_HAZARD"
+-    assert scenario.coverage == "COMPLETE_FRESH_MEMBER_ENTRIES"
+-    assessment_a = next(
+-        item for item in scenario.entry_assessments
+-        if item.entry_module == "pkg.a"
+-    )
+-    assessment_b = next(
+-        item for item in scenario.entry_assessments
+-        if item.entry_module == "pkg.b"
+-    )
+-    assert assessment_a.outcome == "EARLY_BINDING_HAZARD"
+-    assert assessment_b.outcome == "MODEL_PASS"
++    assert scenario.classification == "INDETERMINATE"
++    assert scenario.coverage == "NONE"
++    assert scenario.reason == "EXTERNAL_IMPORT_EXECUTION_UNMODELED"
++    trees = {module_id: source.tree for module_id, source in parsed.items()}
++    for entry in scenario.members:
++        assessment = evaluate_package_import_order(trees, entry)
++        assert assessment.outcome == "UNKNOWN"
++        assert assessment.reached_unmodeled_import.target == "typing"
+     actual_a = run_synthetic_import(root, "pkg.a")
+     actual_b = run_synthetic_import(root, "pkg.b")
+     assert actual_a.returncode != 0
+@@ -2723,7 +2709,7 @@ def test_p1d3_d2b2_active_import_dominates_type_only(
+         evidence,
+     )
+     assert len(p0) == 1
+-    assert p0[0].evidence_state == "DECLARED_INPUTS_CONSISTENT"
++    assert p0[0].evidence_state == "INCOMPLETE_EVIDENCE"
+     p1b = assess_scc_source_bytes(
+         graph.hard_edges,
+         captured.source_fingerprints_by_module,
+@@ -2732,7 +2718,8 @@ def test_p1d3_d2b2_active_import_dominates_type_only(
+         captured.original_worker_source_snapshots,
+     )
+     assert len(p1b) == 1
+-    assert p1b[0].bytes_state == "BYTE_AST_CONSISTENT_NON_ATOMIC"
++    assert p1b[0].bytes_state == "UNAVAILABLE"
++    assert p1b[0].reason == "INCOMPLETE_MEMBER_ENTRY_ASSESSMENTS"
+ 
+ 
+ @pytest.mark.live
+@@ -2773,23 +2760,10 @@ def test_p1d3_d2b3_official_isolated_full_receipt(
+             str(root), cycle_source_preparation_preview=True,
+             cycle_source_publication_opt_in=True,
+         )
+-        assert result.cycle_source_preparation_preview.status == (
+-            "PREPARED_UNPUBLISHED_NON_ATOMIC"
+-        )
++        assert result.cycle_source_preparation_preview.status == "UNAVAILABLE"
+         state, metadata = _persisted(root)
+-        receipt = state.cycle_source_publication
+-        assert receipt.version == PUBLICATION_BINDING_VERSION == (
+-            "cycle-prepared-co-publication/2"
+-        )
+-        assert receipt.prepared_manifest.version == MANIFEST_VERSION == (
+-            "cycle-source-manifest/2"
+-        )
+-        component = receipt.prepared_manifest.components[0]
+-        assert component.model_kind == "REGULAR_PACKAGE"
+-        assert component.model_classification == (
+-            "MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS"
+-        )
+-        assert verify_co_published_cycle_manifest(
++        assert state.cycle_source_publication is None
++        assert not verify_co_published_cycle_manifest(
+             state, revision=metadata.revision,
+             state_id=metadata.state_id, repo_id=metadata.repo_id,
+             root_path=metadata.root_path,
 ```
 
 ## FINAL_VERDICT
-PARTIAL / NOT FINAL PASS. Potwierdzona luka w produkcyjnych gałęziach została usunięta i nowe testy przechodzą. 12 istniejących focused integration tests utrwala poprzednią, semantycznie nieuprawnioną akceptację i nie zostało jeszcze świadomie zmigrowanych. Zgodnie z `AGENTS.md` kończę ten istotny etap, pozostawiając dokładny stan i diff do przeglądu; oczekiwanie na `proceduj`.
+F1B focused regression repair: PASS dla wymaganego kontraktu testowego i źródłowego. Nie ogłaszam globalnej certyfikacji ani runtime safety; `cycle_semantics` w LIVE jest stale. STOP, oczekiwanie na przegląd audytora.
