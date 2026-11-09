@@ -29,9 +29,10 @@ def _soft_dependent_cycle_diagnostic(state: Any) -> dict[str, Any]:
     }
     if state is None:
         return unavailable
-    if getattr(state, "resync_required", None) is True:
+    resync_required = getattr(state, "resync_required", False)
+    if resync_required is True:
         return {**unavailable, "availability": "stale"}
-    if getattr(state, "resync_required", None) is not False:
+    if resync_required is not False:
         return unavailable
     cycle_state = getattr(state, "cycles_state", None)
     if cycle_state != "fresh":

@@ -44,6 +44,17 @@ _FIELDS = frozenset({
     "authority",
 })
 
+_POTENTIAL_DIAGNOSTIC_FIELDS = frozenset({
+    "count",
+    "components",
+    "availability",
+    "evidence_scope",
+    "runtime_execution_proven",
+})
+_POTENTIAL_EVIDENCE_SCOPE = (
+    "RESTRICTED_HARD_UNION_SOFT_IMPORT_GRAPH_POTENTIAL_ONLY"
+)
+
 
 def _accepted_paths(
     result: Any,
@@ -222,3 +233,148 @@ def filter_installed_desktop_cycle_errors(
     except Exception:
         # A presentation query must not hide diagnostics or fail analysis.
         return errors
+
+
+def read_authenticated_soft_dependent_cycle_diagnostic(
+    analysis_result: Any,
+    repo_path: str,
+    *,
+    sample_limit: int = 3,
+) -> dict[str, Any]:
+    """Read a fresh potential-cycle result bound to the published LIVE graph.
+
+    Call from the analysis worker. Any missing or mismatched authority returns
+    unavailable, never a verified zero count.
+    """
+    unavailable = {
+        "availability": "unavailable",
+        "count": None,
+        "components": (),
+    }
+    if type(sample_limit) is not int or sample_limit < 0:
+        return unavailable
+    if getattr(analysis_result, "live_publish_status", None) != "success":
+        return unavailable
+
+    try:
+        from contextor.core.live_state import connect
+
+        client = connect(Path(repo_path))
+        if client is None:
+            return unavailable
+        response = client.canonical_query(
+            "diagnostics_summary", payload={},
+        )
+        if type(response) is not dict or response.get("status") != "ok":
+            return unavailable
+        revision = response.get("revision")
+        if type(revision) is not int or revision < 1:
+            return unavailable
+        summary = response.get("result")
+        if type(summary) is not dict:
+            return unavailable
+        diagnostic = summary.get("soft_dependent_potential_cycles")
+        availability = summary.get("availability")
+        if (
+            type(diagnostic) is not dict
+            or set(diagnostic) != _POTENTIAL_DIAGNOSTIC_FIELDS
+            or diagnostic.get("availability") != "fresh"
+            or type(diagnostic.get("count")) is not int
+            or diagnostic["count"] < 0
+            or diagnostic.get("evidence_scope") != _POTENTIAL_EVIDENCE_SCOPE
+            or diagnostic.get("runtime_execution_proven") is not False
+            or type(diagnostic.get("components")) is not tuple
+            or len(diagnostic["components"]) != diagnostic["count"]
+            or type(availability) is not dict
+            or availability.get("soft_dependent_potential_cycles") != "fresh"
+        ):
+            return unavailable
+
+        report = client.request(
+            "get_installed_cycle_warning_projection", timeout=2.0,
+        )
+        if _accepted_paths(analysis_result, repo_path, report) is None:
+            return unavailable
+        if report.get("revision") != revision:
+            return unavailable
+
+        components = diagnostic["components"]
+        validated = []
+        for component in components:
+            if type(component) is not dict or set(component) != {
+                "kind", "members", "soft_only_internal_edges",
+            }:
+                return unavailable
+            members = component.get("members")
+            edges = component.get("soft_only_internal_edges")
+            if (
+                component.get("kind") != "SOFT_DEPENDENT_POTENTIAL_CYCLE"
+                or type(members) is not tuple
+                or not members
+                or any(type(item) is not str or not item for item in members)
+                or tuple(sorted(set(members))) != members
+                or type(edges) is not tuple
+                or not edges
+                or any(
+                    type(edge) is not tuple
+                    or len(edge) != 2
+                    or any(type(item) is not str or not item for item in edge)
+                    or edge[0] not in members
+                    or edge[1] not in members
+                    for edge in edges
+                )
+                or tuple(sorted(set(edges))) != edges
+            ):
+                return unavailable
+            validated.append({
+                "members": members[:8],
+                "member_count": len(members),
+                "soft_only_internal_edges": edges[:8],
+                "soft_only_internal_edge_count": len(edges),
+            })
+
+        return {
+            "availability": "fresh",
+            "count": diagnostic["count"],
+            "components": tuple(validated[:sample_limit]),
+            "revision": revision,
+        }
+    except Exception:
+        return unavailable
+
+
+def format_soft_dependent_cycle_diagnostic(
+    diagnostic: Any,
+) -> str:
+    """Bound a potential-cycle diagnostic for a Desktop message box."""
+    if (
+        type(diagnostic) is not dict
+        or diagnostic.get("availability") != "fresh"
+        or type(diagnostic.get("count")) is not int
+    ):
+        return (
+            "Potential cycle diagnostic is unavailable or unverified; "
+            "absence of potential cycles was not established."
+        )
+    count = diagnostic["count"]
+    if count == 0:
+        return "No POTENTIAL cycles involving uncertain dependencies were detected in the verified LIVE graph."
+    lines = [
+        f"POTENTIAL cycle involving uncertain dependencies: {count} component(s).",
+    ]
+    for index, component in enumerate(diagnostic.get("components", ()), 1):
+        members = ", ".join(component["members"])
+        edges = ", ".join(
+            f"{source} -> {target}"
+            for source, target in component["soft_only_internal_edges"]
+        )
+        member_count = component["member_count"]
+        edge_count = component["soft_only_internal_edge_count"]
+        more_members = f", … ({member_count} modules)" if member_count > len(component["members"]) else ""
+        more_edges = f"; showing {len(component['soft_only_internal_edges'])} of {edge_count} edges" if edge_count > len(component["soft_only_internal_edges"]) else ""
+        lines.append(
+            f"Sample {index}: [{members}{more_members}]; uncertain edges: "
+            f"{edges}{more_edges}"
+        )
+    lines.append("This does not prove CPython will execute the cycle.")
+    return "\n".join(lines)

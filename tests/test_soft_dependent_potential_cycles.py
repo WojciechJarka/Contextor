@@ -49,7 +49,7 @@ def test_acyclic_soft_edge_and_duplicate_hard_edge_do_not_create_potential():
 
 def test_freshness_gate_never_asserts_zero_for_missing_or_stale_graph():
     state = SimpleNamespace(
-        resync_required=False, cycles_state="fresh", cycles=[],
+        cycles_state="fresh", cycles=[],
         collisions_state="fresh", collisions=[],
         syntax_diagnostics_state="fresh", syntax_diagnostics_by_path={},
         dependency_graph=SimpleNamespace(

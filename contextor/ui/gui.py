@@ -1296,38 +1296,18 @@ class ContextorGUI:
             )
 
         pre_seq = 0
-        try:
-            from contextor.core.live_state import connect
-            live_client = connect(Path(path))
-            if live_client is not None:
-                resp = live_client.get_events(limit=1)
-                pre_seq = int(resp.get("latest_seq", 0))
-        except Exception:
-            pre_seq = 0
 
-        def task(log=None, progress_callback=None):
-            errors, analysis_result = run_full_analysis_exclusive(
-                path,
-                owner="desktop_analysis",
-                log=log,
-                progress_callback=progress_callback,
-                is_cancelled=lambda: getattr(self.progress_bar, "is_cancelled", False),
-                cycle_source_preparation_preview=True,
-                cycle_partial_source_publication_opt_in=True,
-            )
-            from contextor.ui.cycle_warning_presentation import (
-                filter_installed_desktop_cycle_errors,
-            )
-            errors = filter_installed_desktop_cycle_errors(
-                errors,
-                analysis_result,
-                path,
-            )
-            return errors, analysis_result
+        potential_diagnostic = {
+            "availability": "unavailable",
+            "count": None,
+            "components": (),
+        }
+        recovery_outcome = {"status": "not_required"}
 
-        def on_success(outcome):
-            errors, analysis_result = outcome
-            incident_before_publish_result = self._live_recovery_incident(path)
+        def verify_recovery_on_worker(
+            analysis_result,
+            incident_before_publish_result,
+        ):
             analysis_recovery_generation = None
             if getattr(analysis_result, "live_publish_status", None) == "recovery_required":
                 analysis_recovery_generation = self._request_full_analysis_recovery(
@@ -1342,15 +1322,8 @@ class ContextorGUI:
                 )
             current_incident = self._live_recovery_incident(path)
             if current_incident is None:
-                self._start_live_watcher(path, initial_seq=pre_seq)
-                if not errors:
-                    messagebox.showinfo("OK", "No issues found. Repository is healthy!")
-                    return
-                msg = "\n".join([f"{e.kind}: {e.message}" for e in errors])
-                messagebox.showwarning("Issues Detected", msg)
-                return
+                return {"status": "not_required"}
 
-            self._start_live_watcher(path, initial_seq=pre_seq)
             generation = None
             if (
                 analysis_recovery_generation is not None
@@ -1375,26 +1348,15 @@ class ContextorGUI:
             ):
                 generation = starting_generation
             if generation is None:
-                self._set_live_status(
-                    "LIVE recovery verification failed; full repository analysis may be required."
-                )
-                if errors:
-                    msg = "\n".join([f"{e.kind}: {e.message}" for e in errors])
-                    messagebox.showwarning("Issues Detected", msg)
-                else:
-                    messagebox.showinfo(
-                        "Analysis complete",
-                        "No static issues found. LIVE recovery verification failed; "
-                        "full repository analysis may be required.",
-                    )
-                return
+                return {"status": "generation_unavailable"}
 
             self._set_live_recovery_verification_state(
                 path, generation, "verifying"
             )
-
             verification_client = None
             try:
+                from contextor.core.live_state import connect
+
                 verification_client = connect(Path(path))
                 if verification_client is None:
                     verification = {"status": "error", "error": "recovery_live_missing"}
@@ -1452,15 +1414,7 @@ class ContextorGUI:
                             cleared = True
 
             if cleared:
-                self._set_live_status(
-                    "LIVE recovery verified; incremental updates resumed."
-                )
-                if not errors:
-                    messagebox.showinfo("OK", "LIVE recovery verified; incremental updates resumed.")
-                else:
-                    msg = "\n".join([f"{e.kind}: {e.message}" for e in errors])
-                    messagebox.showwarning("Issues Detected", msg)
-                return
+                return {"status": "cleared"}
 
             if (
                 isinstance(certificate, dict)
@@ -1476,6 +1430,122 @@ class ContextorGUI:
             self._set_live_recovery_verification_state(
                 path, generation, "failed"
             )
+            return {"status": "failed"}
+
+        def task(log=None, progress_callback=None):
+            nonlocal pre_seq
+            try:
+                from contextor.core.live_state import connect
+
+                live_client = connect(Path(path))
+                if live_client is not None:
+                    response = live_client.get_events(limit=1)
+                    pre_seq = int(response.get("latest_seq", 0))
+            except Exception:
+                pre_seq = 0
+
+            errors, analysis_result = run_full_analysis_exclusive(
+                path,
+                owner="desktop_analysis",
+                log=log,
+                progress_callback=progress_callback,
+                is_cancelled=lambda: getattr(self.progress_bar, "is_cancelled", False),
+                cycle_source_preparation_preview=True,
+                cycle_partial_source_publication_opt_in=True,
+            )
+            incident_before_publish_result = self._live_recovery_incident(path)
+            from contextor.ui.cycle_warning_presentation import (
+                filter_installed_desktop_cycle_errors,
+            )
+            errors = filter_installed_desktop_cycle_errors(
+                errors,
+                analysis_result,
+                path,
+            )
+            from contextor.ui.cycle_warning_presentation import (
+                read_authenticated_soft_dependent_cycle_diagnostic,
+            )
+            potential_diagnostic.update(
+                read_authenticated_soft_dependent_cycle_diagnostic(
+                    analysis_result,
+                    path,
+                )
+            )
+            recovery_outcome.update(
+                verify_recovery_on_worker(
+                    analysis_result,
+                    incident_before_publish_result,
+                )
+            )
+            return errors, analysis_result
+
+        def on_success(outcome):
+            errors, analysis_result = outcome
+            from contextor.ui.cycle_warning_presentation import (
+                format_soft_dependent_cycle_diagnostic,
+            )
+            potential_message = format_soft_dependent_cycle_diagnostic(
+                potential_diagnostic
+            )
+            detail_lines = [
+                f"{error.kind}: {error.message}"
+                for error in errors
+            ]
+            if (
+                potential_diagnostic.get("availability") != "fresh"
+                or potential_diagnostic.get("count", 0) > 0
+            ):
+                detail_lines.append(potential_message)
+            elif not errors:
+                potential_message = ""
+            details = "\n".join(detail_lines)
+            current_incident = self._live_recovery_incident(path)
+            recovery_status = recovery_outcome.get("status")
+            if recovery_status == "not_required" and current_incident is None:
+                self._start_live_watcher(path, initial_seq=pre_seq)
+                if (
+                    not errors
+                    and potential_diagnostic.get("availability") == "fresh"
+                    and potential_diagnostic.get("count") == 0
+                ):
+                    messagebox.showinfo("OK", "No issues found. Repository is healthy!")
+                    return
+                messagebox.showwarning(
+                    "Issues Detected" if errors or potential_diagnostic.get("count", 0) else "Analysis complete",
+                    details or potential_message,
+                )
+                return
+
+            self._start_live_watcher(path, initial_seq=pre_seq)
+            if recovery_status == "generation_unavailable" or (
+                recovery_status == "not_required" and current_incident is not None
+            ):
+                self._set_live_status(
+                    "LIVE recovery verification failed; full repository analysis may be required."
+                )
+                if errors:
+                    messagebox.showwarning("Issues Detected", details)
+                else:
+                    messagebox.showinfo(
+                        "Analysis complete",
+                        "No static issues found. LIVE recovery verification failed; "
+                        "full repository analysis may be required.\n\n"
+                        + potential_message,
+                    )
+                return
+            if recovery_status == "cleared":
+                self._set_live_status(
+                    "LIVE recovery verified; incremental updates resumed."
+                )
+                if not errors:
+                    messagebox.showinfo(
+                        "OK",
+                        "LIVE recovery verified; incremental updates resumed.\n\n"
+                        + potential_message,
+                    )
+                else:
+                    messagebox.showwarning("Issues Detected", details)
+                return
 
             self._set_live_status(
                 "LIVE recovery verification failed; full repository analysis may be required."
@@ -1484,11 +1554,11 @@ class ContextorGUI:
                 messagebox.showinfo(
                     "Analysis complete",
                     "No static issues found. LIVE recovery verification failed; "
-                    "full repository analysis may be required.",
+                    "full repository analysis may be required.\n\n"
+                    + potential_message,
                 )
             else:
-                msg = "\n".join([f"{e.kind}: {e.message}" for e in errors])
-                messagebox.showwarning("Issues Detected", msg)
+                messagebox.showwarning("Issues Detected", details)
 
         def on_error(exc):
             if recovery_generation is not None:
