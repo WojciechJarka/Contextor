@@ -1,3 +1,70 @@
+## 2026-11--09 Patch - Semantic Cycle Diagnostics & External Import Safety
+
+Added — Semantic Cycle Diagnostics Layer
+
+Introduced a semantic analysis layer for Python circular imports, extending structural dependency detection with import-order evaluation, initialization-state tracking, and early-binding hazard identification.
+
+Added strongly connected component (SCC) analysis and deterministic cycle classification, distinguishing structural cycles from semantically evaluated execution scenarios.
+
+Implemented restricted Python execution models to analyze module initialization, import ordering, symbol availability, and partially initialized modules without executing analyzed application code.
+
+Added support for regular packages, selected namespace-package (PEP 420) scenarios, relative imports, package re-exports, deferred execution contexts, and other Python import mechanisms within explicitly defined modeling boundaries.
+
+Introduced source-bound evidence verification, AST consistency checks, reproducible model assessments, and generation-aware publication contracts.
+
+Integrated semantic cycle evidence with canonical LIVE state, MCP diagnostics, Desktop presentation, and authenticated warning projections.
+
+Established evidence-based warning eligibility: structurally detected cycles remain available in the dependency graph, while suppression requires verified semantic evidence rather than assumptions.
+
+Added regression coverage for distinct import and cycle mechanisms, including positive, negative, and ambiguous cases.
+
+Added — Potential Cycle Detection
+
+Introduced SOFT_DEPENDENT_POTENTIAL_CYCLE diagnostics for strongly connected components formed by the union of hard and soft import dependencies.
+
+Added deterministic reporting of potential cycle members and uncertain internal edges.
+
+Kept potential cycles separate from confirmed structural cycles and semantically validated model results.
+
+Exposed potential-cycle diagnostics through canonical LIVE and Desktop, including revision-bound verification and explicit evidence scopes.
+
+Prevented positive potential-cycle diagnostics from being hidden behind successful structural validation or misleading repository-health messages.
+
+Fixed — External Import Side Effects (R1–R2, F1–F1M)
+
+Removed unjustified assumptions that external imports are passive or that successful import execution can be inferred from source syntax alone.
+
+Ensured unresolved external imports reached during ordinary model execution produce UNKNOWN rather than unsupported MODEL_PASS results.
+
+Corrected typing.TYPE_CHECKING and from typing import TYPE_CHECKING handling: syntactic recognition no longer establishes the imported value as False.
+
+Preserved import provenance and execution ordering while stopping at unsupported conditional evaluations.
+
+Restricted external-import assumptions to explicitly conditional assessments, keeping CONDITIONAL_MODEL_PASS separate from authoritative MODEL_PASS.
+
+Verified that conditional assessments cannot qualify for ordinary cycle acceptance, generation receipts, or warning suppression through the audited publication paths.
+
+Added independent CPython regression witnesses demonstrating external import side effects, including mutation of builtins.property, manipulation of sys.modules, and exceptions during module initialization.
+
+Corrected Desktop success and recovery messages to distinguish verified static diagnostics from actual Python runtime safety.
+
+Added an opt-in runtime attestation mechanism for verifying that the Desktop process has loaded the corrected cycle-model implementation.
+
+Successfully verified F1H adoption in the running Desktop interpreter using matching loaded/source code fingerprints and both TYPE_CHECKING regression scenarios.
+
+Validation and Safety Boundaries
+
+Preserved the canonical hard/soft dependency graph and structural cycle inventory throughout the external-import corrections.
+
+Verified that potential cycles are reported independently without being promoted to confirmed execution hazards or successful semantic assessments.
+
+Maintained fail-closed behavior where source evidence, import effects, execution conditions, or canonical authority cannot be established.
+
+Kept actual CPython execution safety outside the claims of the restricted static model.
+
+Current status: The external-import side-effects correction is completed and runtime adoption verified. The semantic cycle diagnostics infrastructure is operational, while full semantic classification and evidence-based suppression remain dependent on fresh, authenticated model assessments.
+
+
 ## 2026-10-26 Patch — Canonical Analysis Parity, Cycle Semantics and LIVE Publication Integration
 
 Consolidated the October 10–26 development work covering canonical FULL/LIVE consistency, incremental analysis correctness, Python cycle-semantics evidence, source-bound publication, MCP diagnostics and bounded profiling.
