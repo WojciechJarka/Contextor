@@ -4,6 +4,8 @@ import ast
 import subprocess
 import sys
 
+import pytest
+
 from contextor.core.cycle_semantics.namespace_path_model import SearchPortion
 from contextor.core.cycle_semantics.package_graph_consistency import (
     assess_package_graph_consistency,
@@ -121,3 +123,49 @@ def test_conditional_external_assumption_stays_conditional():
     assert result.model_assessment.assumed_external_imports[0].target == (
         "opaque_dependency"
     )
+
+
+@pytest.mark.parametrize(
+    "marker, guard",
+    [
+        ("from typing import TYPE_CHECKING", "TYPE_CHECKING"),
+        ("import typing", "typing.TYPE_CHECKING"),
+    ],
+    ids=("name", "attribute"),
+)
+def test_unproved_typing_guard_stops_ordinary_and_conditional_models(
+    marker, guard,
+):
+    trees = {
+        "pkg.__init__": ast.parse("pass\n"),
+        "pkg.ns.a": ast.parse(
+            f"{marker}\nif {guard}:\n    import pkg.ns.b\nvalue = 1\n"
+        ),
+        "pkg.ns.b": ast.parse("from pkg.ns.a import value\n"),
+    }
+    roots = (SearchPortion(
+        "root", frozenset({
+            "pkg/__init__.py", "pkg/ns/a.py", "pkg/ns/b.py",
+        }),
+    ),)
+
+    ordinary_trees = dict(trees)
+    ordinary_trees["pkg.ns.__init__"] = ast.parse("pass\n")
+    ordinary = evaluate_package_import_order(ordinary_trees, "pkg.ns.a")
+    conditional = evaluate_conditional_namespace_import_order(
+        trees, "pkg.ns.a", roots,
+        target_python_version=(3, 15),
+        assume_passive_external_imports=True,
+    )
+
+    assert ordinary.outcome == "UNKNOWN"
+    assert ordinary.reached_unmodeled_import is not None
+    assert ordinary.reached_unmodeled_import.target == "typing"
+    assert conditional.outcome == "UNKNOWN"
+    assert conditional.model_assessment is not None
+    assert conditional.model_assessment.outcome == "UNKNOWN"
+    assert "typing" in {
+        item.target for item in conditional.model_assessment.assumed_external_imports
+    }
+    assert conditional.outcome != "CONDITIONAL_MODEL_PASS"
+    assert ordinary.outcome != "MODEL_PASS"

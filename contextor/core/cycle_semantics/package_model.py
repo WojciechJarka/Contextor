@@ -870,7 +870,8 @@ def _compile(
                     typing_guard.form,
                 )
             ):
-                selected = stmt.orelse
+                steps.append(_Step("UNMODELED_STATEMENT"))
+                return tuple(steps)
             else:
                 if (
                     not isinstance(condition, ast.Compare)
