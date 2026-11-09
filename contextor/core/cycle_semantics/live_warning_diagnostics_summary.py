@@ -120,6 +120,7 @@ def project_locked_warning_diagnostics_summary(
         cycles = summary.get("cycles")
         syntax = summary.get("syntax_errors")
         collisions = summary.get("name_collisions")
+        potential = summary.get("soft_dependent_potential_cycles")
 
         if (
             type(cycles) is not dict
@@ -182,6 +183,8 @@ def project_locked_warning_diagnostics_summary(
                 syntax["count"],
                 collisions["count"],
                 active_count,
+                potential.get("count") if type(potential) is dict
+                and potential.get("availability") == "fresh" else None,
             )
         )
         return result

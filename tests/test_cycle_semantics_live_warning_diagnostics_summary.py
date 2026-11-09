@@ -289,7 +289,41 @@ def test_t14_narrow_mcp_transport_uses_owner_summary(
         assert result.summary["cycles"]["count"] == 2
         assert result.summary["cycles"]["model_pass_count"] == 2
         assert result.summary["cycles"]["active_warning_count"] == 0
+        assert "soft_dependent_potential_cycles" in result.summary
         assert result.summary["attention_required"] is False
+
+
+def test_soft_uncertainty_survives_accepted_hard_cycle_receipt(
+    tmp_path, isolated_dirs,
+):
+    _, state, metadata = _fixture(tmp_path, TWO_PASS)
+
+    with _owner(state, metadata) as (server, client):
+        with server._lock:
+            raw = diagnostics_summary_for_state(state)
+            report = server._owner_cycle_warning_report_locked()
+            raw["soft_dependent_potential_cycles"] = {
+                "count": 1,
+                "components": ({
+                    "kind": "SOFT_DEPENDENT_POTENTIAL_CYCLE",
+                    "members": ("independent.a", "independent.b"),
+                    "soft_only_internal_edges": (("independent.b", "independent.a"),),
+                },),
+                "availability": "fresh",
+                "evidence_scope": "RESTRICTED_HARD_UNION_SOFT_IMPORT_GRAPH_POTENTIAL_ONLY",
+                "runtime_execution_proven": False,
+            }
+            result = project_locked_warning_diagnostics_summary(
+                raw, report,
+                canonical_revision=server._revision,
+                activity_epoch=server._activity_epoch,
+                authority_identity=server._authority_identity,
+            )
+
+        assert result["cycles"]["active_warning_count"] == 0
+        assert result["cycles"]["model_pass_count"] == 2
+        assert result["soft_dependent_potential_cycles"] == raw["soft_dependent_potential_cycles"]
+        assert result["attention_required"] is True
 
 
 def test_t15_repeated_query_is_read_only(

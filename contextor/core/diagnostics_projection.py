@@ -4,10 +4,61 @@ from __future__ import annotations
 
 from typing import Any
 
+from collections.abc import Mapping
+
+from contextor.core.cycle_semantics.scc import (
+    analyze_soft_dependent_potential_cycles,
+)
+
 
 _CYCLE_COUNT_SEMANTICS = (
     "DFS_BACK_EDGE_PATHS_DEDUP_ROTATION_NOT_ALL_SIMPLE_CYCLES"
 )
+_POTENTIAL_CYCLE_SCOPE = (
+    "RESTRICTED_HARD_UNION_SOFT_IMPORT_GRAPH_POTENTIAL_ONLY"
+)
+
+
+def _soft_dependent_cycle_diagnostic(state: Any) -> dict[str, Any]:
+    unavailable = {
+        "count": None,
+        "components": None,
+        "availability": "unavailable",
+        "evidence_scope": _POTENTIAL_CYCLE_SCOPE,
+        "runtime_execution_proven": False,
+    }
+    if state is None:
+        return unavailable
+    if getattr(state, "resync_required", None) is True:
+        return {**unavailable, "availability": "stale"}
+    if getattr(state, "resync_required", None) is not False:
+        return unavailable
+    cycle_state = getattr(state, "cycles_state", None)
+    if cycle_state != "fresh":
+        availability = cycle_state if cycle_state in {
+            "stale", "deferred", "unavailable",
+        } else "unavailable"
+        return {**unavailable, "availability": availability}
+    graph = getattr(state, "dependency_graph", None)
+    hard = getattr(graph, "hard_edges", None)
+    soft = getattr(graph, "soft_edges", None)
+    if not isinstance(hard, Mapping) or not isinstance(soft, Mapping):
+        return unavailable
+    try:
+        result = analyze_soft_dependent_potential_cycles(hard, soft)
+    except (TypeError, ValueError):
+        return unavailable
+    return {
+        "count": result.component_count,
+        "components": tuple({
+            "kind": component.kind,
+            "members": component.members,
+            "soft_only_internal_edges": component.soft_only_internal_edges,
+        } for component in result.components),
+        "availability": "fresh",
+        "evidence_scope": result.evidence_scope,
+        "runtime_execution_proven": False,
+    }
 
 
 def _availability(
@@ -40,6 +91,7 @@ def diagnostics_summary_for_state(
     """Return canonical diagnostic counts plus freshness."""
 
     if state is None:
+        potential = _soft_dependent_cycle_diagnostic(None)
         unavailable = {
             "count": None,
             "availability": "unavailable",
@@ -59,15 +111,18 @@ def diagnostics_summary_for_state(
                 "availability": "unavailable",
             },
             "cycles": unavailable_cycles,
+            "soft_dependent_potential_cycles": potential,
             "attention_required": False,
             "availability": {
                 "syntax_errors": "unavailable",
                 "name_collisions": "unavailable",
                 "cycles": "unavailable",
+                "soft_dependent_potential_cycles": potential["availability"],
             },
         }
 
     if getattr(state, "resync_required", False):
+        potential = _soft_dependent_cycle_diagnostic(state)
         unavailable = {
             "count": None,
             "availability": "stale",
@@ -86,11 +141,13 @@ def diagnostics_summary_for_state(
                 "availability": "stale",
             },
             "cycles": unavailable_cycles,
+            "soft_dependent_potential_cycles": potential,
             "attention_required": False,
             "availability": {
                 "syntax_errors": "stale",
                 "name_collisions": "stale",
                 "cycles": "stale",
+                "soft_dependent_potential_cycles": potential["availability"],
             },
         }
 
@@ -170,6 +227,7 @@ def diagnostics_summary_for_state(
         if cycle_availability == "fresh"
         else None
     )
+    potential = _soft_dependent_cycle_diagnostic(state)
 
     syntax_issue = (
         syntax_values
@@ -183,6 +241,7 @@ def diagnostics_summary_for_state(
             syntax_issue,
             collision_count,
             cycle_count,
+            potential["count"],
         )
     )
 
@@ -203,11 +262,13 @@ def diagnostics_summary_for_state(
             "availability": cycle_availability,
             "count_semantics": _CYCLE_COUNT_SEMANTICS,
         },
+        "soft_dependent_potential_cycles": potential,
         "attention_required": bool(attention),
         "availability": {
             "syntax_errors": syntax_availability,
             "name_collisions": collision_availability,
             "cycles": cycle_availability,
+            "soft_dependent_potential_cycles": potential["availability"],
         },
     }
 

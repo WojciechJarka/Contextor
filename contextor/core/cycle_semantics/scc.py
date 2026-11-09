@@ -25,6 +25,20 @@ class ImportCycleTopology:
     evidence_scope: str = "STRUCTURAL_HARD_IMPORT_GRAPH"
 
 
+@dataclass(frozen=True)
+class SoftDependentPotentialComponent:
+    members: tuple[str, ...]
+    soft_only_internal_edges: tuple[tuple[str, str], ...]
+    kind: str = "SOFT_DEPENDENT_POTENTIAL_CYCLE"
+
+
+@dataclass(frozen=True)
+class SoftDependentPotentialCycles:
+    component_count: int
+    components: tuple[SoftDependentPotentialComponent, ...]
+    evidence_scope: str = "RESTRICTED_HARD_UNION_SOFT_IMPORT_GRAPH_POTENTIAL_ONLY"
+
+
 def analyze_import_cycle_topology(
     hard_edges: Mapping[
         str,
@@ -128,4 +142,55 @@ def analyze_import_cycle_topology(
         hard_edge_count=sum(len(targets) for targets in adjacency.values()),
         total_scc_count=all_scc_count,
         cyclic_components=tuple(sorted(cyclic, key=lambda item: item.members)),
+    )
+
+
+def analyze_soft_dependent_potential_cycles(
+    hard_edges: Mapping[str, set[str] | frozenset[str] | list[str] | tuple[str, ...]],
+    soft_edges: Mapping[str, set[str] | frozenset[str] | list[str] | tuple[str, ...]],
+) -> SoftDependentPotentialCycles:
+    """Find cyclic union components containing internal soft-only edges.
+
+    The result describes graph potential, not import execution. Both inputs
+    remain unchanged and the canonical hard-only topology remains separate.
+    """
+    if not isinstance(hard_edges, Mapping) or not isinstance(soft_edges, Mapping):
+        raise TypeError("hard_edges and soft_edges must be mappings")
+
+    union: dict[str, set[str]] = {}
+    hard: dict[str, set[str]] = {}
+    for edge_map, normalized_map in ((hard_edges, hard), (soft_edges, None)):
+        for source, targets in edge_map.items():
+            if not isinstance(source, str) or not source:
+                raise ValueError("invalid source module")
+            if not isinstance(targets, (set, frozenset, tuple, list)):
+                raise TypeError("targets must be an explicit collection")
+            normalized: set[str] = set()
+            for target in targets:
+                if not isinstance(target, str) or not target:
+                    raise ValueError("invalid target module")
+                normalized.add(target)
+            union.setdefault(source, set()).update(normalized)
+            if normalized_map is not None:
+                normalized_map[source] = normalized
+
+    topology = analyze_import_cycle_topology(union)
+    components: list[SoftDependentPotentialComponent] = []
+    for component in topology.cyclic_components:
+        members = set(component.members)
+        soft_only = tuple(sorted({
+            (source, target)
+            for source in component.members
+            for target in soft_edges.get(source, ())
+            if target in members and target not in hard.get(source, ())
+        }))
+        if soft_only:
+            components.append(SoftDependentPotentialComponent(
+                members=component.members,
+                soft_only_internal_edges=soft_only,
+            ))
+
+    return SoftDependentPotentialCycles(
+        component_count=len(components),
+        components=tuple(components),
     )

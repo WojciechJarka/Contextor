@@ -71,11 +71,19 @@ def _fresh_summary():
             "availability": "fresh",
             "count_semantics": "DFS_BACK_EDGE_PATHS_DEDUP_ROTATION_NOT_ALL_SIMPLE_CYCLES",
         },
+        "soft_dependent_potential_cycles": {
+            "count": None,
+            "components": None,
+            "availability": "unavailable",
+            "evidence_scope": "RESTRICTED_HARD_UNION_SOFT_IMPORT_GRAPH_POTENTIAL_ONLY",
+            "runtime_execution_proven": False,
+        },
         "attention_required": True,
         "availability": {
             "syntax_errors": "fresh",
             "name_collisions": "fresh",
             "cycles": "fresh",
+            "soft_dependent_potential_cycles": "unavailable",
         },
     }
 
@@ -377,6 +385,7 @@ def test_diagnostics_summary_transport_error_fails_closed_without_cache(
         "syntax_errors": "unavailable",
         "name_collisions": "unavailable",
         "cycles": "unavailable",
+        "soft_dependent_potential_cycles": "unavailable",
     }
 
     assert (
