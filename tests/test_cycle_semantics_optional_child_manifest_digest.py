@@ -13,6 +13,9 @@ from contextor.core.cycle_semantics.generation_manifest import (
     prepare_cycle_source_manifest,
     verify_prepared_optional_manifest_digest,
 )
+from contextor.core.cycle_semantics.evidence import (
+    OPTIONAL_EVIDENCE_SEMANTIC_VERSION,
+)
 from contextor.core.cycle_semantics.publication_binding import (
     _validated_claim_digest,
 )
@@ -60,6 +63,32 @@ def test_optional_manifest_digest_replays(tmp_path):
         OptionalManifestEvidenceWitness
     )
     assert verify_prepared_optional_manifest_digest(manifest)
+
+
+def test_p3_v1_optional_epoch_rejects_old_manifest_and_evidence(tmp_path):
+    manifest = _prepare(_fixture(tmp_path))
+    assert manifest.evidence_semantic_version == (
+        OPTIONAL_EVIDENCE_SEMANTIC_VERSION
+    )
+    assert manifest.optional_witness.evidence_semantic_version == (
+        OPTIONAL_EVIDENCE_SEMANTIC_VERSION
+    )
+    for stale in (
+        replace(manifest, evidence_semantic_version=None),
+        replace(
+            manifest,
+            evidence_semantic_version="cycle-semantics-evidence/4",
+        ),
+        replace(manifest, version="cycle-source-manifest/3"),
+        replace(
+            manifest,
+            optional_witness=replace(
+                manifest.optional_witness,
+                evidence_semantic_version="cycle-semantics-evidence/4",
+            ),
+        ),
+    ):
+        assert not verify_prepared_optional_manifest_digest(stale)
     assert verify_prepared_optional_manifest_digest(manifest)
 
 

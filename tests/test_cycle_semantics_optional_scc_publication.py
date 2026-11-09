@@ -82,6 +82,34 @@ def _verify(state, metadata):
     )
 
 
+def test_p3_v1_old_optional_receipt_and_manifest_cannot_revalidate(
+    tmp_path, isolated_dirs,
+):
+    _, preparation, state, origin = _case(tmp_path)
+    cache = tmp_path / "optional-v1-store"
+    _save(cache, state, origin, preparation=preparation)
+    loaded, metadata = _load(cache, origin)
+    assert _verify(loaded, metadata)
+    receipt = loaded.cycle_optional_source_publication
+    loaded.cycle_optional_source_publication = replace(
+        receipt, version="cycle-optional-scc-co-publication/1",
+    )
+    assert not _verify(loaded, metadata)
+    stale_preparation = replace(
+        preparation,
+        manifest=replace(
+            preparation.manifest,
+            evidence_semantic_version="cycle-semantics-evidence/4",
+        ),
+    )
+    with pytest.raises(ValueError):
+        seal_optional_scc_preparation(
+            loaded, stale_preparation,
+            revision=metadata.revision, state_id=metadata.state_id,
+            repo_id=metadata.repo_id, root_path=metadata.root_path,
+        )
+
+
 def test_t01_canonical_writer_seals_and_loader_verifies(
     tmp_path, isolated_dirs,
 ):

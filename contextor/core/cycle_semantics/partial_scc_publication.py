@@ -19,7 +19,7 @@ from .partial_scc_claims import (
 )
 
 
-PARTIAL_SCC_PUBLICATION_VERSION = "cycle-partial-scc-co-publication/1"
+PARTIAL_SCC_PUBLICATION_VERSION = "cycle-partial-scc-co-publication/2"
 PARTIAL_SCC_PUBLICATION_AUTHORITY = (
     "COMMITTED_PARTIAL_SCC_DECLARATIONS_NOT_SOURCE_CERTIFIED"
 )

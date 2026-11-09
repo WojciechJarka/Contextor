@@ -11,14 +11,19 @@ from contextor.core.analysis.state_manager import (
     RepositoryAnalysisState,
 )
 from contextor.core.cycle_semantics.generation_manifest import (
+    MANIFEST_VERSION,
     prepare_cycle_source_manifest,
+    verify_prepared_hard_manifest_digest,
 )
+from contextor.core.cycle_semantics.evidence import EVIDENCE_SEMANTIC_VERSION
 from contextor.core.cycle_semantics.lifecycle import (
     invalidate_cycle_semantics,
 )
 from contextor.core.cycle_semantics.publication_binding import (
     PUBLICATION_AUTHORITY,
+    PUBLICATION_BINDING_VERSION,
     CanonicalCycleManifestReceipt,
+    _validated_claim_digest,
     verify_co_published_cycle_manifest,
 )
 from contextor.core.domain.graph import ProjectGraph
@@ -54,6 +59,38 @@ def _case():
         cycles_state="fresh",
     )
     return state, prepared
+
+
+def test_p3_v1_hard_epoch_rejects_old_manifest_and_resealing():
+    state, current = _case()
+    assert current.version == MANIFEST_VERSION
+    assert current.evidence_semantic_version == EVIDENCE_SEMANTIC_VERSION
+    assert verify_prepared_hard_manifest_digest(current)
+    for stale in (
+        replace(current, evidence_semantic_version=None),
+        replace(current, evidence_semantic_version="cycle-semantics-evidence/3"),
+        replace(current, version="cycle-source-manifest/2"),
+    ):
+        assert not verify_prepared_hard_manifest_digest(stale)
+        with pytest.raises(ValueError, match="incomplete or unsupported"):
+            _validated_claim_digest(state, stale)
+
+
+def test_p3_v1_old_publication_binding_is_not_warning_authority(
+    tmp_path, isolated_dirs,
+):
+    state, prepared = _case()
+    _save(state, tmp_path, 1, prepared)
+    loaded, metadata = load_snapshot(tmp_path, "cycle-state")
+    receipt = loaded.cycle_source_publication
+    assert receipt.version == PUBLICATION_BINDING_VERSION
+    loaded.cycle_source_publication = replace(
+        receipt, version="cycle-prepared-co-publication/2",
+    )
+    assert not verify_co_published_cycle_manifest(
+        loaded, revision=metadata.revision, state_id=metadata.state_id,
+        repo_id=metadata.repo_id, root_path=metadata.root_path,
+    )
 
 
 def _save(state, root, revision, prepared=None):

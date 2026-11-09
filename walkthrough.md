@@ -1,1008 +1,577 @@
-# P3-D3-CONT — semantic metaclass selection
+# P3-V1 — evaluator semantic version and receipt invalidation
 
 ## FILES_CHANGED
 
-- `contextor/core/cycle_semantics/package_model.py`
-- `tests/test_cycle_semantics_passive_classes.py`
+- `contextor/core/cycle_semantics/evidence.py`
+- `contextor/core/cycle_semantics/generation_manifest.py`
+- `contextor/core/cycle_semantics/partial_scc_claims.py`
+- `contextor/core/cycle_semantics/partial_scc_publication.py`
+- `contextor/core/cycle_semantics/optional_scc_publication.py`
+- `contextor/core/cycle_semantics/publication_binding.py`
+- `tests/test_cycle_semantics_evidence.py`
+- `tests/test_cycle_semantics_optional_child_manifest_digest.py`
+- `tests/test_cycle_semantics_partial_scc_publication.py`
+- `tests/test_cycle_semantics_optional_scc_publication.py`
+- `tests/test_cycle_semantics_publication_binding.py`
 
-`walkthrough.md` jest raportem, bez CHANGELOG, FULL, restartu, commitu, push ani zmiany historii Git. HEAD: `f309f10f4665f6c44c0c19727378c033f2a62769`. Przed tym etapem oba pliki source/test zawierały niezapisane w commicie P3-D1F/D2; zachowane. FULL_DIFFS poniżej obejmuje całe aktualne różnice względem HEAD, wraz z tym stanem wejściowym.
+`walkthrough.md` jest raportem, nie plikiem produkcyjnym/testowym. HEAD przed/po `09b3c97d8106220f24763575cf35a31fa5e8609f`; worktree początkowo czysty. Bez zmian CHANGELOG, FULL, restartu, commitu, push lub historii Git.
 
-## PREVIOUS_PREFLIGHT_REUSED
+## PREVIOUS_VERSION_CONTRACT
 
-P3-D3 preflight w poprzednim etapie: canonical owner `package_model.py`, Contextor revision 1236, `_ClassFact` i PREPARE/DEFINE przejrzane. Kontynuowano od tego punktu. Lokalnego `AGENTS.md` w katalogu repo brak; obowiązują dostarczone w rozmowie zasady, szczególnie pkt 15. Poza wcześniejszym discovery pobrano Contextor symbol lineage, implementację i blast radius. Statyczny consumer `_ClassFact` to moduł testowy; dynamiczne użycia nie są kompletnie reprezentowane przez graf.
+DIRECT_EVIDENCE: przed zmianą hard evidence=/3, optional evidence=/4; hard manifest=/2, optional manifest=/3; partial receipt=/1, optional receipt=/1, prepared binding=/2. Hard manifest nie zawierał własnego semantic epoch, a weryfikacja partial claims sprawdzała głównie kształt SHA-256. `publication_binding` odtwarzał digest hard manifestu, lecz bez epoch. Optional manifest posiadał witness z wersją i odtwarzalny digest. `partial_scc_publication` re-seal historycznej preparation sprawdzał deklaracje, ale bez nowej bariery epoch. Legacy prepared binding /1 pozostawał czytelny przez verifier; `warning_eligibility` wymaga aktualnej wersji publikacji i manifestu.
 
-## TYPE_BASE_CLASS_FACT
+## NEW_SEMANTIC_EPOCH
 
-CODE_PATH_PROVED: dodano `builtins.type` do istniejącego katalogu `_ClassFact`: identity, bezpośrednią bazę object, MRO type/object, metaclass_identity type i dodatni dowód standardowego tworzenia. PREPARE rozwiązuje `type` zwykłą ścieżką baz. Lokalnie przesłonięte `type` pozostaje UNKNOWN. CPython 3.15.2 witness A potwierdza `class Meta(type): pass`, `type(Meta) is type` i MRO Meta/type/object.
+CODE_PATH_PROVED: `evidence.py` ma hard `cycle-semantics-evidence/4` oraz optional `cycle-semantics-evidence/5`. Existing component token nadal zawiera semantic_version, bez zmiany source fingerprint. Stary hard evidence /3 z identycznym grafem i source manifest fingerprint daje `EVIDENCE_SEMANTIC_VERSION_MISMATCH` i INDETERMINATE; nowy dowód nadal daje MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS.
 
-## METACLASS_PASSIVITY_PROOF
+## HARD_MANIFEST_BINDING
 
-CODE_PATH_PROVED: nowe frozen pole `passive_metaclass_creation` ma domyślnie False; True ma builtin type oraz źródłowa klasa z jedną bazą, udowodnionym łańcuchem do type, pasywną bazą metaklasową i ciałem ograniczonym do pass/pierwszego literalnego docstring. Kontrakt `_safe_passive_class_definition` nadal wyklucza niedozwolone dekoratory, type params i keywordy. Bezpieczna zwykła metoda w ciele nie daje metaklasowego dowodu. `safe_to_subclass` pozostaje osobnym faktem. Nieznane własne `__prepare__`, `__new__`, `__init__`, `__call__`, `__getattribute__` i inne metody/atrybuty blokują użycie jako metaklasy; `__call__` nie jest wywoływane przez samą definicję klasy.
+Hard manifest ma wersję `cycle-source-manifest/3` oraz nowe `evidence_semantic_version`, domyślnie None dla historycznych/niekompletnych obiektów, nigdy interpretowane jako aktualne. Nowy digest obejmuje wersję manifestu, epoch, graf, claims i źródła. `verify_prepared_hard_manifest_digest` odtwarza digest oraz sprawdza typy, selekcję HARD_ONLY, authority, kompletne deklaracje i zgodność podpisów źródeł. Jest używany w `validate_partial_scc_claims` i `publication_binding._validated_claim_digest`. Nie uruchamia evaluatora. Stary hard manifest /2, epoch /3 lub brak epoch nie przechodzą; próba re-seal starej preparation kończy się ValueError.
 
-## METACLASS_SELECTION
+## OPTIONAL_MANIFEST_BINDING
 
-CODE_PATH_PROVED: PREPARE bierze snapshot baz, rozwiązuje jawne `metaclass=Name` z aktualnego namespace lub dopuszczonego builtin katalogu, pobiera metaclass_identity baz, wymaga faktów po identity, wybiera jedyną najbardziej pochodną kandydaturę na podstawie MRO i wymaga jej pasywnego dowodu. Konflikt lub brak faktu daje UNKNOWN przed DEFINE. Wybrana metaklasa jest w snapshot przed ciałem klasy. DEFINE sprawdza snapshot, safe_to_subclass, ograniczenia baz wyjątku i C3, zapisuje rzeczywistą tożsamość metaklasy i wiąże klasę dopiero na końcu. Pasywna metaklasa nie omija innych bramek.
+Optional manifest ma wersję `cycle-source-manifest/4`. Nowe pole epoch to `cycle-semantics-evidence/5`, identyczne z optional witness. Digest wiąże nowy epoch; verifier wymaga aktualnych wersji obu pól, ich równości i odtwarza cały digest. Stary optional evidence /4, manifest /3 lub brak epoch nie przechodzą. Dotychczasowe component evidence tokens i witness pozostały.
 
-## IDENTITY_AND_REBINDING
+## RECEIPT_INVALIDATION
 
-Lokalny rejestr faktów według identity żyje wyłącznie w jednej ewaluacji. ALIAS, FROM i obsługiwany ATTR przenoszą sam obiekt faktu; redefinicja nazwy tworzy nowe identity bez utraty starego faktu. Świadki F/G/H weryfikują alias, FROM i stary alias po redefinicji. Brak globalnego cache i importowania analizowanego kodu przez evaluator.
+Wersje: partial co-publication /2, optional co-publication /2, prepared binding /3. Istniejące seal/verify sprawdzają aktualną wersję, a re-seal przechodzi przez nowe manifest gates. Testy zmieniają wyłącznie wersję lub epoch w świeżym, poprawnym receipt/preparation, zachowując source SHA, graph SHA, revision, state_id i repo_id; stare dokumenty nie przechodzą weryfikacji. Świeże receipt nadal przechodzą seal/load/verify. Brak zmian strukturalnych SCC.
 
-## REENTRANT_K_L_WITNESSES
+## LEGACY_AUTHORITY_BOUNDARY
 
-Naprawiono błędne cytowanie z R2 poprzez dwa syntetyczne pakiety w testach. Każdy runtime witness uruchamia osobny CPython 3.15.2 `-I -B` subprocess. K: import FROM podczas ciała C, przed końcowym związaniem, zwraca `EARLY_BINDING_HAZARD` w modelu; CPython zgłasza `cannot import name 'C'`; nie ma zdarzenia DEFINE dla C. L: import FROM po związaniu C, MODEL_PASS; CPython widzi ten sam obiekt C i `type(C) is Meta`. Events modelu zawierają DEFINE Meta i C przed importem L.
+`publication_binding.verify_co_published_cycle_manifest` nadal może diagnostycznie weryfikować legacy /1 według wcześniejszego kontraktu. `warning_eligibility._verified_model_pass_cycle_paths` wymaga dokładnie aktualnego `PUBLICATION_BINDING_VERSION` oraz `MANIFEST_VERSION`; legacy nie może nadać warning authority. Partial/optional installed claims korzystają z aktualnych receipt version w seal/verify i sprawdzają świeżość, generację oraz authority.
 
-## CPYTHON315_DIFFERENTIAL
+## OLD_EVIDENCE_NEGATIVE_TESTS
 
-12 pozytywnych przypadków A-L ma po jednym syntetycznym pakiecie, ordinary MODEL_PASS, osobnym izolowanym subprocess CPython 3.15.2 i asercjach rzeczywistego typu/MRO tam, gdzie dotyczy. A: Meta(type); B: jawna Meta; C: dziedziczenie C; D: N(Meta); E: użycie N; F: alias; G: FROM; H: stary alias po redefinicji; I: jawne type z bazą o metaklasie Meta; J: wspólna Meta; K: wybór N ponad Meta; L: jawna Meta zgodna z bazą. Wszystkie przeszły. Wynik subprocess to bezpośredni CPython witness, a MODEL_PASS to wynik osobnego evaluatora.
+- Hard evidence /3 przy identycznym źródle/grafie: INDETERMINATE.
+- Hard manifest /2, epoch /3 i brak epoch: digest verifier false; publication binding odrzuca.
+- Optional manifest /3, epoch /4, brak epoch i stary optional witness /4: digest verifier false.
+- Partial receipt /1 i optional receipt /1: verify false przy niezmienionej generacji.
+- Prepared binding /2: verify false przy niezmienionej generacji.
+- Re-seal starej partial i optional preparation: ValueError.
 
-## NEGATIVE_REGRESSIONS
+## FRESH_EVIDENCE_POSITIVE_TESTS
 
-7 nowych przypadków metod/atrybutów metaklasy: UNKNOWN przed DEFINE C. Wcześniejsze P3-D1/D1F/D2 obejmują konflikt metaklas, dynamiczne bazy, `__mro_entries__`, shadowed type, `__set_name__`, `__init_subclass__`, nazwy specjalne i C3. Jeden wcześniejszy przypadek `class Meta(type): pass; class Child(metaclass=Meta): pass` przeniesiono z oczekiwanego UNKNOWN do pozytywnego P3-D3, zgodnie z nowym kontraktem. Nie promowano conditional dataclass do ordinary MODEL_PASS.
+Świeżo przygotowany hard/optional manifest przechodzi digest verification. Istniejące celowane testy potwierdzają source evidence, preparation validation, receipt seal/load/verify, installed claims i warning eligibility, w tym realną ścieżkę pozytywnego MODEL_PASS. Nie wyłączono suppression bezwarunkowo. Conditional evidence nie jest promowane do ordinary MODEL_PASS.
 
 ## TARGETED_TESTS
 
-- `tests/test_cycle_semantics_passive_classes.py`: 87 passed.
-- `tests/test_cycle_semantics_package_model.py -k 'r8 or r9 or r10 or r11'`: 94 passed, 113 deselected.
-- `git diff --check`: bez błędów.
+Końcowy zestaw 15 bezpośrednio związanych modułów: **427 passed w 104.75 s**. Obejmuje evidence, optional manifest/worker, partial claims/publication, optional publication, publication binding, installed partial/optional, warning eligibility oraz P3-D1/D1F/D2/D3 passive classes. Wcześniejsze podzestawy 136, 183, 39 oraz pięć nowych p3_v1 również przeszły; nie powtarzano ich po końcowym przejściu. `git diff --check` ograniczone do 11 plików source/test: exit 0. Pełny raport zawiera literalny diff, którego puste linie z prefiksem `+` Git traktuje jako trailing whitespace raportu. Bez pełnego pytest.
 
 ## MCP_POST_CHANGE_AUDIT
 
-Contextor po zmianach: canonical revision 1241, `workspace_sync=verified` osobno dla production i test, syntax errors=0, 16 structural DFS paths, 1 soft-dependent potential SCC. Liczby są takie same jak w preflight, ale nie przeprowadzono porównania tożsamości wszystkich ścieżek; brak nowego cyklu nie jest osobno udowodniony. `cycle_semantics=stale`; nie wykonano FULL, więc runtime adoption i świeża projekcja ostrzeżeń pozostają UNKNOWN. Nie użyto `update_file`.
-
-## REMAINING_UNKNOWN_BOUNDARIES
-
-Niestandardowe lub zewnętrzne metaklasy, wiele baz bez dodatniego dowodu, dynamiczne `__mro_entries__`, modyfikacje metaklas poza obsługiwanym modelem, class decorators poza istniejącym warunkowym kontraktem, zmienione `__build_class__` i runtime builtins. Statyczny MODEL_PASS jest zależny od istniejącego P2 conventional-builtins precondition, a nie runtime attestation. Nie certyfikowano persistent MCP process adoption.
+Contextor canonical revision 1252; wszystkie sześć zmienionych plików produkcyjnych i pięć testowych mają osobno `workspace_sync=verified`. Syntax errors=0; hard structural DFS paths=16; soft-dependent potential SCC=1. Nie dodano nowej krawędzi importu modułów (nowe importy symboli pozostają we wcześniej zależnych modułach). `cycle_semantics=stale`, bez FULL. SOURCE_PASS jest potwierdzone, RUNTIME_ADOPTED=UNKNOWN; bieżący persistent LIVE/MCP nie był restartowany i sam watcher revision nie dowodzi adopcji.
 
 ## FULL_DIFFS
 
-Poniżej pełne `git diff --no-ext-diff -- contextor/core/cycle_semantics/package_model.py tests/test_cycle_semantics_passive_classes.py` względem HEAD. Uwzględnia poprzednie niezatwierdzone P3-D1F/D2.
+Pełny `git diff --no-ext-diff` względem HEAD dla każdego pliku z FILES_CHANGED:
 
 ```diff
-diff --git a/contextor/core/cycle_semantics/package_model.py b/contextor/core/cycle_semantics/package_model.py
-index 8cb970b..78a68ab 100644
---- a/contextor/core/cycle_semantics/package_model.py
-+++ b/contextor/core/cycle_semantics/package_model.py
-@@ -59,10 +59,12 @@ class _ClassFact:
- 
-     identity: str
-     origin: str
--    direct_base: str | None
-+    direct_bases: tuple[str, ...]
-+    linear_mro: tuple[str, ...]
-     metaclass_identity: str
-     defines_init_subclass: bool
-     safe_to_subclass: bool
-+    passive_metaclass_creation: bool = False
- 
- 
- def _safe_class_namespace_value(value: object) -> bool:
-@@ -76,23 +78,102 @@ def _safe_class_namespace_value(value: object) -> bool:
- 
- _BUILTIN_TYPE_ID = "builtins.type"
- _BUILTIN_CLASS_FACTS = {
-+    "type": _ClassFact(
-+        identity=_BUILTIN_TYPE_ID,
-+        origin="BUILTIN",
-+        direct_bases=("builtins.object",),
-+        linear_mro=(_BUILTIN_TYPE_ID, "builtins.object"),
-+        metaclass_identity=_BUILTIN_TYPE_ID,
-+        defines_init_subclass=False,
-+        safe_to_subclass=True,
-+        passive_metaclass_creation=True,
-+    ),
-     "object": _ClassFact(
--        "builtins.object", "BUILTIN", None,
--        _BUILTIN_TYPE_ID, False, True,
-+        identity="builtins.object",
-+        origin="BUILTIN",
-+        direct_bases=(),
-+        linear_mro=("builtins.object",),
-+        metaclass_identity=_BUILTIN_TYPE_ID,
-+        defines_init_subclass=False,
-+        safe_to_subclass=True,
-     ),
-     "BaseException": _ClassFact(
--        "builtins.BaseException", "BUILTIN", "builtins.object",
--        _BUILTIN_TYPE_ID, False, True,
-+        identity="builtins.BaseException",
-+        origin="BUILTIN",
-+        direct_bases=("builtins.object",),
-+        linear_mro=("builtins.BaseException", "builtins.object"),
-+        metaclass_identity=_BUILTIN_TYPE_ID,
-+        defines_init_subclass=False,
-+        safe_to_subclass=True,
-     ),
-     "Exception": _ClassFact(
--        "builtins.Exception", "BUILTIN", "builtins.BaseException",
--        _BUILTIN_TYPE_ID, False, True,
-+        identity="builtins.Exception",
-+        origin="BUILTIN",
-+        direct_bases=("builtins.BaseException",),
-+        linear_mro=(
-+            "builtins.Exception",
-+            "builtins.BaseException",
-+            "builtins.object",
-+        ),
-+        metaclass_identity=_BUILTIN_TYPE_ID,
-+        defines_init_subclass=False,
-+        safe_to_subclass=True,
-     ),
-     "ValueError": _ClassFact(
--        "builtins.ValueError", "BUILTIN", "builtins.Exception",
--        _BUILTIN_TYPE_ID, False, True,
-+        identity="builtins.ValueError",
-+        origin="BUILTIN",
-+        direct_bases=("builtins.Exception",),
-+        linear_mro=(
-+            "builtins.ValueError",
-+            "builtins.Exception",
-+            "builtins.BaseException",
-+            "builtins.object",
-+        ),
-+        metaclass_identity=_BUILTIN_TYPE_ID,
-+        defines_init_subclass=False,
-+        safe_to_subclass=True,
-     ),
- }
-+_BUILTIN_EXCEPTION_CLASS_IDENTITIES = frozenset({
-+    _BUILTIN_CLASS_FACTS[name].identity
-+    for name in ("BaseException", "Exception", "ValueError")
-+})
-+
-+
-+def _merge_class_mros(
-+    bases: tuple[_ClassFact, ...],
-+) -> tuple[str, ...] | None:
-+    """Return the C3 merge of proven base MROs, or None if inconsistent."""
-+    sequences = [list(base.linear_mro) for base in bases]
-+    sequences.append([base.identity for base in bases])
-+    merged: list[str] = []
-+
-+    while any(sequences):
-+        candidate = next(
-+            (
-+                sequence[0]
-+                for sequence in sequences
-+                if not any(
-+                    sequence[0] in other[1:]
-+                    for other in sequences
-+                    if other
-+                )
-+            ),
-+            None,
-+        )
-+        if candidate is None:
-+            return None
-+
-+        merged.append(candidate)
-+        remaining = []
-+        for sequence in sequences:
-+            if sequence and sequence[0] == candidate:
-+                sequence = sequence[1:]
-+            if sequence:
-+                remaining.append(sequence)
-+        sequences = remaining
-+
-+    return tuple(merged)
- 
- 
- @dataclass(frozen=True)
-@@ -133,7 +214,9 @@ class _Step:
-     annotation_builtin_names: tuple[str, ...] = ()
-     definition_id: str | None = None
-     defines_init_subclass: bool = False
--    explicit_type_metaclass: bool = False
-+    base_names: tuple[str, ...] = ()
-+    explicit_metaclass_name: str | None = None
-+    passive_metaclass_body: bool = False
- 
- 
- @dataclass
-@@ -362,25 +445,38 @@ def _safe_passive_class_definition(
-         )
-     )
- 
--    explicit_type_metaclass = (
-+    explicit_named_metaclass = (
-         len(statement.keywords) == 1
-         and statement.keywords[0].arg == "metaclass"
-         and type(statement.keywords[0].value) is ast.Name
--        and statement.keywords[0].value.id == "type"
-     )
- 
-     if (
-         not statement.name.isidentifier()
-         or statement.name.startswith("__")
-+        or any(
-+            isinstance(
-+                item,
-+                (ast.FunctionDef, ast.AsyncFunctionDef),
-+            )
-+            and item.name in {
-+                "__slots__",
-+                "__qualname__",
-+                "__classcell__",
-+            }
-+            for item in statement.body
-+        )
-         or (
-             bool(statement.bases)
-             and (
-                 conditional_dataclass
--                or len(statement.bases) != 1
--                or type(statement.bases[0]) is not ast.Name
-+                or any(
-+                    type(base) is not ast.Name
-+                    for base in statement.bases
-+                )
-             )
-         )
--        or (bool(statement.keywords) and not explicit_type_metaclass)
-+        or (bool(statement.keywords) and not explicit_named_metaclass)
-         or (conditional_dataclass and statement.keywords)
-         or (
-             bool(statement.decorator_list)
-@@ -1050,6 +1146,16 @@ def _compile(
-                 steps.append(_Step("BIND", binding=stmt.target.id))
- 
-         elif isinstance(stmt, ast.ClassDef):
-+            passive_metaclass_body = all(
-+                type(item) is ast.Pass
-+                or (
-+                    index == 0
-+                    and type(item) is ast.Expr
-+                    and type(item.value) is ast.Constant
-+                    and type(item.value.value) is str
-+                )
-+                for index, item in enumerate(stmt.body)
-+            )
-             conditional_dataclass = (
-                 assume_frozen_dataclass
-                 and bool(stmt.decorator_list)
-@@ -1080,11 +1186,19 @@ def _compile(
-                         target=(
-                             stmt.bases[0].id if stmt.bases else None
-                         ),
-+                        base_names=tuple(
-+                            base.id
-+                            for base in stmt.bases
-+                        ),
-                         binding=stmt.name,
-                         source_line=stmt.lineno,
-                         source_column=stmt.col_offset,
-                         definition_id=definition_id,
--                        explicit_type_metaclass=bool(stmt.keywords),
-+                        explicit_metaclass_name=(
-+                            stmt.keywords[0].value.id
-+                            if stmt.keywords else None
-+                        ),
-+                        passive_metaclass_body=passive_metaclass_body,
-                     )
-                 )
- 
-@@ -1204,6 +1318,7 @@ def _compile(
-                             f"{logical}:{stmt.lineno}:{stmt.col_offset}"
-                         ),
-                         defines_init_subclass=has_init_subclass,
-+                        passive_metaclass_body=passive_metaclass_body,
-                     )
-                 )
- 
-@@ -1731,7 +1846,12 @@ def evaluate_package_import_order(
-         name: {}
-         for name in programs
-     }
--    prepared_class_bases: dict[str, _ClassFact] = {}
-+    prepared_class_bases: dict[
-+        str, tuple[tuple[_ClassFact, ...], _ClassFact]
-+    ] = {}
-+    class_facts_by_identity: dict[str, _ClassFact] = {
-+        fact.identity: fact for fact in _BUILTIN_CLASS_FACTS.values()
-+    }
- 
-     function_definitions: dict[
-         str,
-@@ -2298,39 +2418,118 @@ def evaluate_package_import_order(
-                 return result("UNKNOWN", module, step.binding)
- 
-             if (
--                step.explicit_type_metaclass
-+                step.explicit_metaclass_name == "type"
-                 and "type" in namespaces[module]
-             ):
-                 return result("UNKNOWN", module, "type")
- 
--            if step.target is None:
--                base_fact = _BUILTIN_CLASS_FACTS["object"]
--            elif step.target in namespaces[module]:
--                base_fact = namespaces[module][step.target]
-+            base_names = step.base_names or (
-+                (step.target,) if step.target is not None else ()
-+            )
-+            if not base_names:
-+                base_facts = (_BUILTIN_CLASS_FACTS["object"],)
-             else:
--                base_fact = _BUILTIN_CLASS_FACTS.get(step.target)
-+                resolved_base_facts = []
-+                for base_name in base_names:
-+                    if base_name in namespaces[module]:
-+                        base_fact = namespaces[module][base_name]
-+                    else:
-+                        base_fact = _BUILTIN_CLASS_FACTS.get(base_name)
- 
--            if (
--                not isinstance(base_fact, _ClassFact)
--                or base_fact.metaclass_identity != _BUILTIN_TYPE_ID
--            ):
--                return result(
--                    "UNKNOWN",
--                    module,
--                    step.target,
--                )
-+                    if (
-+                        not isinstance(base_fact, _ClassFact)
-+                        or type(base_fact.linear_mro) is not tuple
-+                        or not base_fact.linear_mro
-+                        or base_fact.linear_mro[0]
-+                        != base_fact.identity
-+                        or base_fact.linear_mro[-1]
-+                        != _BUILTIN_CLASS_FACTS["object"].identity
-+                        or any(
-+                            type(identity) is not str
-+                            for identity in base_fact.linear_mro
-+                        )
-+                        or len(set(base_fact.linear_mro))
-+                        != len(base_fact.linear_mro)
-+                    ):
-+                        return result(
-+                            "UNKNOWN",
-+                            module,
-+                            base_name,
-+                        )
-+
-+                    resolved_base_facts.append(base_fact)
- 
--            prepared_class_bases[step.definition_id] = base_fact
-+                base_facts = tuple(resolved_base_facts)
-+
-+            candidate_ids = [base.metaclass_identity for base in base_facts]
-+            if step.explicit_metaclass_name is not None:
-+                name = step.explicit_metaclass_name
-+                explicit = (
-+                    namespaces[module][name]
-+                    if name in namespaces[module]
-+                    else _BUILTIN_CLASS_FACTS.get(name)
-+                )
-+                if not isinstance(explicit, _ClassFact):
-+                    return result("UNKNOWN", module, name)
-+                candidate_ids.insert(0, explicit.identity)
-+            if not candidate_ids:
-+                candidate_ids = [_BUILTIN_TYPE_ID]
-+
-+            candidates = [
-+                class_facts_by_identity.get(identity)
-+                for identity in candidate_ids
-+            ]
-+            if any(not isinstance(candidate, _ClassFact) for candidate in candidates):
-+                return result("UNKNOWN", module, step.binding)
-+            winners = [
-+                candidate for candidate in candidates
-+                if all(
-+                    other.identity in candidate.linear_mro
-+                    for other in candidates
-+                )
-+            ]
-+            winner_ids = {candidate.identity for candidate in winners}
-+            if len(winner_ids) != 1:
-+                return result("UNKNOWN", module, step.binding)
-+            selected = winners[0]
-+            if not selected.passive_metaclass_creation:
-+                return result("UNKNOWN", module, step.binding)
-+            prepared_class_bases[step.definition_id] = (base_facts, selected)
- 
-         elif step.op == "DEFINE_PASSIVE_CLASS":
--            base_fact = prepared_class_bases.pop(
-+            prepared = prepared_class_bases.pop(
-                 step.definition_id or "",
-                 None,
-             )
--            if not isinstance(base_fact, _ClassFact):
-+            if (
-+                not isinstance(prepared, tuple)
-+                or len(prepared) != 2
-+                or not isinstance(prepared[0], tuple)
-+                or not prepared[0]
-+                or not isinstance(prepared[1], _ClassFact)
-+                or any(
-+                    not isinstance(base_fact, _ClassFact)
-+                    for base_fact in prepared[0]
-+                )
-+            ):
-+                return result("UNKNOWN", module, step.binding)
-+            base_facts, selected_metaclass = prepared
-+
-+            if len({base.identity for base in base_facts}) != len(base_facts):
-                 return result("UNKNOWN", module, step.binding)
- 
--            if not base_fact.safe_to_subclass:
-+            if any(not base.safe_to_subclass for base in base_facts):
-+                return result("UNKNOWN", module, step.binding)
-+
-+            if len(base_facts) > 1 and any(
-+                identity in _BUILTIN_EXCEPTION_CLASS_IDENTITIES
-+                for base in base_facts
-+                for identity in base.linear_mro
-+            ):
-+                return result("UNKNOWN", module, step.binding)
-+
-+            inherited_mro = _merge_class_mros(base_facts)
-+            if inherited_mro is None:
-                 return result("UNKNOWN", module, step.binding)
- 
-             identity = step.definition_id
-@@ -2340,11 +2539,21 @@ def evaluate_package_import_order(
-             class_fact = _ClassFact(
-                 identity=identity,
-                 origin="INDEXED_SOURCE",
--                direct_base=base_fact.identity,
--                metaclass_identity=_BUILTIN_TYPE_ID,
-+                direct_bases=tuple(
-+                    base.identity for base in base_facts
-+                ),
-+                linear_mro=(identity, *inherited_mro),
-+                metaclass_identity=selected_metaclass.identity,
-                 defines_init_subclass=step.defines_init_subclass,
-                 safe_to_subclass=not step.defines_init_subclass,
-+                passive_metaclass_creation=(
-+                    len(base_facts) == 1
-+                    and _BUILTIN_TYPE_ID in base_facts[0].linear_mro
-+                    and base_facts[0].passive_metaclass_creation
-+                    and step.passive_metaclass_body
-+                ),
-             )
-+            class_facts_by_identity[identity] = class_fact
-             namespaces[module][step.binding] = (
-                 class_fact
-             )
-diff --git a/tests/test_cycle_semantics_passive_classes.py b/tests/test_cycle_semantics_passive_classes.py
-index 979dbf2..c59c20e 100644
---- a/tests/test_cycle_semantics_passive_classes.py
-+++ b/tests/test_cycle_semantics_passive_classes.py
-@@ -9,6 +9,8 @@ from dataclasses import asdict
- import pytest
- 
- from contextor.core.cycle_semantics.package_model import (
-+    _ClassFact,
-+    _merge_class_mros,
-     evaluate_package_import_order,
+diff --git a/contextor/core/cycle_semantics/evidence.py b/contextor/core/cycle_semantics/evidence.py
+index 608d60e..ceba439 100644
+--- a/contextor/core/cycle_semantics/evidence.py
++++ b/contextor/core/cycle_semantics/evidence.py
+@@ -29,8 +29,8 @@ from .scenarios import (
+     CycleComponentScenarios, CycleScenarioReport, analyze_cycle_scenarios,
  )
  
-@@ -23,7 +25,7 @@ def _model(sources, entry):
+-EVIDENCE_SEMANTIC_VERSION = "cycle-semantics-evidence/3"
+-OPTIONAL_EVIDENCE_SEMANTIC_VERSION = "cycle-semantics-evidence/4"
++EVIDENCE_SEMANTIC_VERSION = "cycle-semantics-evidence/4"
++OPTIONAL_EVIDENCE_SEMANTIC_VERSION = "cycle-semantics-evidence/5"
+ _MISSING = "MISSING"
+ 
+ 
+diff --git a/contextor/core/cycle_semantics/generation_manifest.py b/contextor/core/cycle_semantics/generation_manifest.py
+index 7805f93..f9c6c92 100644
+--- a/contextor/core/cycle_semantics/generation_manifest.py
++++ b/contextor/core/cycle_semantics/generation_manifest.py
+@@ -18,7 +18,11 @@ from .contracts import (
+     CycleSemanticsSnapshot,
+     fingerprint_hard_edges,
+ )
+-from .evidence import OPTIONAL_EVIDENCE_SEMANTIC_VERSION, SourceBoundCycleEvidence
++from .evidence import (
++    EVIDENCE_SEMANTIC_VERSION,
++    OPTIONAL_EVIDENCE_SEMANTIC_VERSION,
++    SourceBoundCycleEvidence,
++)
+ from .source_proof import (
+     assess_scc_source_bytes,
+     assess_optional_scc_source_bytes,
+@@ -27,8 +31,8 @@ from .model_source_closure import CycleModelSourceClosure
+ from .evidence import _scenario_fingerprint
+ 
+ 
+-MANIFEST_VERSION = "cycle-source-manifest/2"
+-OPTIONAL_MANIFEST_VERSION = "cycle-source-manifest/3"
++MANIFEST_VERSION = "cycle-source-manifest/3"
++OPTIONAL_MANIFEST_VERSION = "cycle-source-manifest/4"
+ _AUTHORITY = "PREPARED_ONLY_NOT_CANONICALLY_PUBLISHED"
+ 
+ 
+@@ -69,6 +73,7 @@ class PreparedCycleSourceManifest:
+     authority: str = _AUTHORITY
+     source_selection: str = "HARD_ONLY"
+     optional_witness: OptionalManifestEvidenceWitness | None = None
++    evidence_semantic_version: str | None = None
+ 
+ 
+ def prepare_cycle_source_manifest(
+@@ -230,6 +235,7 @@ def prepare_cycle_source_manifest(
+         if source_selection == "HARD_ONLY":
+             manifest_hash: str | None = _digest((
+                 MANIFEST_VERSION,
++                EVIDENCE_SEMANTIC_VERSION,
+                 graph_hash,
+                 tuple((
+                     component.members,
+@@ -254,7 +260,7 @@ def prepare_cycle_source_manifest(
+             manifest_hash = _digest((
+                 OPTIONAL_MANIFEST_VERSION,
+                 "OPTIONAL_NAMED_CHILDREN",
+-                optional_witness.evidence_semantic_version,
++                OPTIONAL_EVIDENCE_SEMANTIC_VERSION,
+                 graph_hash,
+                 optional_witness.source_manifest_fingerprint,
+                 tuple((
+@@ -277,6 +283,11 @@ def prepare_cycle_source_manifest(
+         version=manifest_version,
+         source_selection=source_selection,
+         optional_witness=optional_witness,
++        evidence_semantic_version=(
++            EVIDENCE_SEMANTIC_VERSION
++            if source_selection == "HARD_ONLY"
++            else OPTIONAL_EVIDENCE_SEMANTIC_VERSION
++        ),
      )
  
  
--def _actual(tmp_path, sources, entry):
-+def _actual(tmp_path, sources, entry, probe=""):
-     for module, source in sources.items():
-         parts = module.split(".")
-         path = tmp_path.joinpath(
-@@ -50,7 +52,8 @@ def _actual(tmp_path, sources, entry):
-             (
-                 "import importlib,sys;"
-                 "sys.path.insert(0,sys.argv[1]);"
--                "importlib.import_module(sys.argv[2])"
-+                "m=importlib.import_module(sys.argv[2]);"
-+                + probe
-             ),
-             str(tmp_path),
-             entry,
-@@ -439,16 +442,6 @@ def test_p3_d1_proven_class_bases_match_cpython(
-             "class Child(Base): pass",
-             False,
-         ),
+@@ -288,10 +299,82 @@ def _is_sha256(value: object) -> bool:
+     )
+ 
+ 
++def verify_prepared_hard_manifest_digest(manifest: object) -> bool:
++    """Replay the current hard-only declaration digest."""
++    if type(manifest) is not PreparedCycleSourceManifest:
++        return False
++    if (
++        manifest.version != MANIFEST_VERSION
++        or manifest.evidence_semantic_version != EVIDENCE_SEMANTIC_VERSION
++        or manifest.source_selection != "HARD_ONLY"
++        or manifest.optional_witness is not None
++        or manifest.authority != _AUTHORITY
++        or not _is_sha256(manifest.graph_sha256)
++        or not _is_sha256(manifest.source_manifest_sha256)
++        or type(manifest.components) is not tuple
++        or not manifest.components
++    ):
++        return False
++    accepted: dict[str, tuple[str, str]] = {}
++    for component in manifest.components:
++        if (
++            type(component) is not PreparedSCCSourceBinding
++            or type(component.members) is not tuple
++            or not component.members
++            or component.members != tuple(sorted(set(component.members)))
++            or component.preparation_state != "PREPARED_UNPUBLISHED"
++            or component.reason is not None
++            or component.model_classification not in {
++                "MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS",
++                "MODEL_INTERNAL_EARLY_BINDING_HAZARD",
++            }
++            or component.model_kind not in {"FLAT_MODULE", "REGULAR_PACKAGE"}
++            or not _is_sha256(component.model_evidence_sha256)
++            or type(component.source_signatures) is not tuple
++            or not component.source_signatures
++        ):
++            return False
++        names = []
++        for row in component.source_signatures:
++            if (
++                type(row) is not tuple
++                or len(row) != 3
++                or type(row[0]) is not str
++                or not row[0]
++                or not _is_sha256(row[1])
++                or not _is_sha256(row[2])
++            ):
++                return False
++            names.append(row[0])
++            signature = (row[1], row[2])
++            if row[0] in accepted and accepted[row[0]] != signature:
++                return False
++            accepted[row[0]] = signature
++        if tuple(names) != tuple(sorted(set(names))):
++            return False
++    ordered_sources = tuple(
++        (module, *accepted[module]) for module in sorted(accepted)
++    )
++    expected = _digest((
++        MANIFEST_VERSION,
++        EVIDENCE_SEMANTIC_VERSION,
++        manifest.graph_sha256,
++        tuple((
++            component.members,
++            component.model_classification,
++            component.model_kind,
++            component.model_evidence_sha256,
++            component.source_signatures,
++        ) for component in manifest.components),
++        ordered_sources,
++    ))
++    return expected == manifest.source_manifest_sha256
++
++
+ def verify_prepared_optional_manifest_digest(
+     manifest: object,
+ ) -> bool:
+-    """Replay a v3 declaration digest without certifying source origin.
++    """Replay the current optional declaration digest without source origin.
+ 
+     The witness makes the digest reproducible from the manifest.
+     This validates internal consistency of caller-supplied declarations.
+@@ -305,6 +388,8 @@ def verify_prepared_optional_manifest_digest(
+ 
+     if (
+         manifest.version != OPTIONAL_MANIFEST_VERSION
++        or manifest.evidence_semantic_version
++        != OPTIONAL_EVIDENCE_SEMANTIC_VERSION
+         or manifest.source_selection != "OPTIONAL_NAMED_CHILDREN"
+         or manifest.authority != _AUTHORITY
+         or not _is_sha256(manifest.graph_sha256)
+@@ -312,6 +397,8 @@ def verify_prepared_optional_manifest_digest(
+         or type(witness) is not OptionalManifestEvidenceWitness
+         or witness.evidence_semantic_version
+         != OPTIONAL_EVIDENCE_SEMANTIC_VERSION
++        or witness.evidence_semantic_version
++        != manifest.evidence_semantic_version
+         or not _is_sha256(witness.source_manifest_fingerprint)
+         or type(components) is not tuple
+         or not components
+diff --git a/contextor/core/cycle_semantics/optional_scc_publication.py b/contextor/core/cycle_semantics/optional_scc_publication.py
+index 17410d6..55fdca4 100644
+--- a/contextor/core/cycle_semantics/optional_scc_publication.py
++++ b/contextor/core/cycle_semantics/optional_scc_publication.py
+@@ -30,7 +30,7 @@ from .partial_scc_claims import (
+ 
+ 
+ OPTIONAL_SCC_PUBLICATION_VERSION = (
+-    "cycle-optional-scc-co-publication/1"
++    "cycle-optional-scc-co-publication/2"
+ )
+ 
+ OPTIONAL_SCC_PUBLICATION_AUTHORITY = (
+diff --git a/contextor/core/cycle_semantics/partial_scc_claims.py b/contextor/core/cycle_semantics/partial_scc_claims.py
+index 1cd17a4..7a9bd30 100644
+--- a/contextor/core/cycle_semantics/partial_scc_claims.py
++++ b/contextor/core/cycle_semantics/partial_scc_claims.py
+@@ -16,6 +16,7 @@ from .generation_manifest import (
+     PreparedCycleSourceManifest,
+     PreparedSCCSourceBinding,
+     verify_prepared_optional_manifest_digest,
++    verify_prepared_hard_manifest_digest,
+ )
+ from .model_source_closure import (
+     compute_cycle_model_source_closures,
+@@ -130,6 +131,7 @@ def validate_partial_scc_claims(
+                 or manifest.source_selection != "HARD_ONLY"
+                 or manifest.components != declarations
+                 or manifest.version != MANIFEST_VERSION
++                or not verify_prepared_hard_manifest_digest(manifest)
+                 or manifest.optional_witness is not None
+                 or manifest.authority
+                 != "PREPARED_ONLY_NOT_CANONICALLY_PUBLISHED"
+diff --git a/contextor/core/cycle_semantics/partial_scc_publication.py b/contextor/core/cycle_semantics/partial_scc_publication.py
+index 9ee5c21..8a574fd 100644
+--- a/contextor/core/cycle_semantics/partial_scc_publication.py
++++ b/contextor/core/cycle_semantics/partial_scc_publication.py
+@@ -19,7 +19,7 @@ from .partial_scc_claims import (
+ )
+ 
+ 
+-PARTIAL_SCC_PUBLICATION_VERSION = "cycle-partial-scc-co-publication/1"
++PARTIAL_SCC_PUBLICATION_VERSION = "cycle-partial-scc-co-publication/2"
+ PARTIAL_SCC_PUBLICATION_AUTHORITY = (
+     "COMMITTED_PARTIAL_SCC_DECLARATIONS_NOT_SOURCE_CERTIFIED"
+ )
+diff --git a/contextor/core/cycle_semantics/publication_binding.py b/contextor/core/cycle_semantics/publication_binding.py
+index d267f34..e02a354 100644
+--- a/contextor/core/cycle_semantics/publication_binding.py
++++ b/contextor/core/cycle_semantics/publication_binding.py
+@@ -19,12 +19,13 @@ from .generation_manifest import (
+     PreparedCycleSourceManifest,
+     PreparedSCCSourceBinding,
+     _digest,
++    verify_prepared_hard_manifest_digest,
+ )
+ from .scc import analyze_import_cycle_topology
+ from .model_source_closure import compute_cycle_model_source_closures
+ 
+ 
+-PUBLICATION_BINDING_VERSION = "cycle-prepared-co-publication/2"
++PUBLICATION_BINDING_VERSION = "cycle-prepared-co-publication/3"
+ _LEGACY_MANIFEST_VERSION = "cycle-source-manifest/1"
+ _LEGACY_BINDING_VERSION = "cycle-prepared-co-publication/1"
+ PUBLICATION_AUTHORITY = (
+@@ -57,6 +58,8 @@ def _validated_claim_digest(
+     """Validate declarations, not source-byte authenticity."""
+     if type(manifest) is not PreparedCycleSourceManifest:
+         raise ValueError("prepared manifest contract missing")
++    if not legacy and not verify_prepared_hard_manifest_digest(manifest):
++        raise ValueError("prepared manifest is incomplete or unsupported")
+     if (
+         manifest.version != (
+             _LEGACY_MANIFEST_VERSION if legacy else MANIFEST_VERSION
+@@ -231,15 +234,22 @@ def _validated_claim_digest(
+         (name, *accepted[name])
+         for name in sorted(accepted)
+     )
+-    expected_manifest_hash = _digest((
+-        _LEGACY_MANIFEST_VERSION if legacy else MANIFEST_VERSION,
+-        graph_hash,
 -        (
--            "class Meta(type): pass\n"
--            "class Child(metaclass=Meta): pass",
--            True,
+-            tuple(component.members for component in cyclic)
+-            if legacy else tuple(claims)
 -        ),
--        (
--            "class Left: pass\nclass Right: pass\n"
--            "class Child(Left, Right): pass",
--            True,
--        ),
-         (
-             "class A: pass\nclass B: pass\nclass C(A, B): pass\n"
-             "class D(B, A): pass\nclass E(C, D): pass",
-@@ -577,3 +570,487 @@ def test_p3_d1_unknown_set_name_descriptor_stays_unknown(tmp_path):
-     process = _actual(tmp_path, sources, "pkg.a")
-     assert process.returncode != 0
-     assert "descriptor hook" in process.stderr
+-        ordered_sources,
+-    ))
++    expected_manifest_hash = (
++        _digest((
++            _LEGACY_MANIFEST_VERSION,
++            graph_hash,
++            tuple(component.members for component in cyclic),
++            ordered_sources,
++        ))
++        if legacy
++        else _digest((
++            MANIFEST_VERSION,
++            manifest.evidence_semantic_version,
++            graph_hash,
++            tuple(claims),
++            ordered_sources,
++        ))
++    )
+     if manifest.source_manifest_sha256 != expected_manifest_hash:
+         raise ValueError(
+             "prepared source manifest digest mismatch"
+diff --git a/tests/test_cycle_semantics_evidence.py b/tests/test_cycle_semantics_evidence.py
+index 09bbcc6..d9bcb46 100644
+--- a/tests/test_cycle_semantics_evidence.py
++++ b/tests/test_cycle_semantics_evidence.py
+@@ -222,6 +222,24 @@ def _one(edges=PAIR, sources=PASS):
+     return result, index, snapshot, evidence
+ 
+ 
++def test_p3_v1_old_hard_evidence_epoch_rejected_with_same_source():
++    index, snapshot, current = _bound(PAIR, PASS)
++    assert current.semantic_version == EVIDENCE_SEMANTIC_VERSION
++    assert assess(PAIR, index, snapshot, current)[0].model_classification == (
++        "MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS"
++    )
++    stale = replace(
++        current, semantic_version="cycle-semantics-evidence/3",
++    )
++    assert stale.graph_fingerprint == current.graph_fingerprint
++    assert stale.source_manifest_fingerprint == (
++        current.source_manifest_fingerprint
++    )
++    verdict = assess(PAIR, index, snapshot, stale)
++    assert verdict[0].reason == "EVIDENCE_SEMANTIC_VERSION_MISMATCH"
++    assert verdict[0].model_classification == "INDETERMINATE"
 +
 +
-+@pytest.mark.parametrize(
-+    ("name", "terminal_error"),
-+    [
-+        ("__slots__", "TypeError: 'function' object is not iterable"),
-+        (
-+            "__qualname__",
-+            "TypeError: type __qualname__ must be a str, not function",
-+        ),
-+        (
-+            "__classcell__",
-+            "TypeError: __classcell__ must be a nonlocal cell, "
-+            "not <class 'function'>",
-+        ),
-+    ],
+ def test_p0_t01_mutual_import_all_entries_pass():
+     result, _, _, _ = _one()
+     assert result == (SCCModelEvidenceAssessment(
+diff --git a/tests/test_cycle_semantics_optional_child_manifest_digest.py b/tests/test_cycle_semantics_optional_child_manifest_digest.py
+index 125c39a..ea36620 100644
+--- a/tests/test_cycle_semantics_optional_child_manifest_digest.py
++++ b/tests/test_cycle_semantics_optional_child_manifest_digest.py
+@@ -13,6 +13,9 @@ from contextor.core.cycle_semantics.generation_manifest import (
+     prepare_cycle_source_manifest,
+     verify_prepared_optional_manifest_digest,
+ )
++from contextor.core.cycle_semantics.evidence import (
++    OPTIONAL_EVIDENCE_SEMANTIC_VERSION,
 +)
-+def test_p3_d1f_type_new_reserved_method_names_are_unknown(
-+    tmp_path, name, terminal_error,
+ from contextor.core.cycle_semantics.publication_binding import (
+     _validated_claim_digest,
+ )
+@@ -60,6 +63,32 @@ def test_optional_manifest_digest_replays(tmp_path):
+         OptionalManifestEvidenceWitness
+     )
+     assert verify_prepared_optional_manifest_digest(manifest)
++
++
++def test_p3_v1_optional_epoch_rejects_old_manifest_and_evidence(tmp_path):
++    manifest = _prepare(_fixture(tmp_path))
++    assert manifest.evidence_semantic_version == (
++        OPTIONAL_EVIDENCE_SEMANTIC_VERSION
++    )
++    assert manifest.optional_witness.evidence_semantic_version == (
++        OPTIONAL_EVIDENCE_SEMANTIC_VERSION
++    )
++    for stale in (
++        replace(manifest, evidence_semantic_version=None),
++        replace(
++            manifest,
++            evidence_semantic_version="cycle-semantics-evidence/4",
++        ),
++        replace(manifest, version="cycle-source-manifest/3"),
++        replace(
++            manifest,
++            optional_witness=replace(
++                manifest.optional_witness,
++                evidence_semantic_version="cycle-semantics-evidence/4",
++            ),
++        ),
++    ):
++        assert not verify_prepared_optional_manifest_digest(stale)
+     assert verify_prepared_optional_manifest_digest(manifest)
+ 
+ 
+diff --git a/tests/test_cycle_semantics_optional_scc_publication.py b/tests/test_cycle_semantics_optional_scc_publication.py
+index 3001733..dd996e6 100644
+--- a/tests/test_cycle_semantics_optional_scc_publication.py
++++ b/tests/test_cycle_semantics_optional_scc_publication.py
+@@ -82,6 +82,34 @@ def _verify(state, metadata):
+     )
+ 
+ 
++def test_p3_v1_old_optional_receipt_and_manifest_cannot_revalidate(
++    tmp_path, isolated_dirs,
 +):
-+    class_name = {
-+        "__slots__": "A",
-+        "__qualname__": "B",
-+        "__classcell__": "C",
-+    }[name]
-+    sources = {
-+        "pkg.__init__": "pass",
-+        "pkg.a": (
-+            f"class {class_name}:\n"
-+            f"    def {name}(self):\n"
-+            "        pass"
-+        ),
-+    }
-+
-+    result = _model(sources, "pkg.a")
-+
-+    assert result.outcome == "UNKNOWN"
-+    assert result.evidence_scope == "RESTRICTED_REGULAR_PACKAGE_MODEL"
-+    assert not any(
-+        event.operation == "DEFINE_PASSIVE_CLASS"
-+        and event.symbol == class_name
-+        for event in result.events
++    _, preparation, state, origin = _case(tmp_path)
++    cache = tmp_path / "optional-v1-store"
++    _save(cache, state, origin, preparation=preparation)
++    loaded, metadata = _load(cache, origin)
++    assert _verify(loaded, metadata)
++    receipt = loaded.cycle_optional_source_publication
++    loaded.cycle_optional_source_publication = replace(
++        receipt, version="cycle-optional-scc-co-publication/1",
 +    )
++    assert not _verify(loaded, metadata)
++    stale_preparation = replace(
++        preparation,
++        manifest=replace(
++            preparation.manifest,
++            evidence_semantic_version="cycle-semantics-evidence/4",
++        ),
++    )
++    with pytest.raises(ValueError):
++        seal_optional_scc_preparation(
++            loaded, stale_preparation,
++            revision=metadata.revision, state_id=metadata.state_id,
++            repo_id=metadata.repo_id, root_path=metadata.root_path,
++        )
 +
-+    process = _actual(tmp_path, sources, "pkg.a")
 +
-+    assert process.returncode != 0
-+    assert terminal_error in process.stderr
-+
-+
-+def test_p3_d1f_reserved_method_name_cycle_does_not_export_class(
-+    tmp_path,
+ def test_t01_canonical_writer_seals_and_loader_verifies(
+     tmp_path, isolated_dirs,
+ ):
+diff --git a/tests/test_cycle_semantics_partial_scc_publication.py b/tests/test_cycle_semantics_partial_scc_publication.py
+index 97df07b..a967102 100644
+--- a/tests/test_cycle_semantics_partial_scc_publication.py
++++ b/tests/test_cycle_semantics_partial_scc_publication.py
+@@ -79,6 +79,33 @@ def _verify(state, metadata):
+     )
+ 
+ 
++def test_p3_v1_old_partial_receipt_cannot_revalidate(
++    tmp_path, isolated_dirs,
 +):
-+    sources = {
-+        "pkg.__init__": "pass",
-+        "pkg.a": (
-+            "class A:\n"
-+            "    def __slots__(self):\n"
-+            "        pass\n"
-+            "from pkg.b import B"
++    state, preparation = _case(tmp_path, TWO_PASS)
++    _save(state, tmp_path, partial=preparation)
++    loaded, metadata = load_snapshot(tmp_path, "partial-state")
++    assert _verify(loaded, metadata)
++    receipt = loaded.cycle_partial_source_publication
++    loaded.cycle_partial_source_publication = replace(
++        receipt, version="cycle-partial-scc-co-publication/1",
++    )
++    assert not _verify(loaded, metadata)
++    stale_preparation = replace(
++        preparation,
++        manifest=replace(
++            preparation.manifest,
++            evidence_semantic_version="cycle-semantics-evidence/3",
 +        ),
-+        "pkg.b": "from pkg.a import A\nclass B: pass",
-+    }
-+
-+    result = _model(sources, "pkg.a")
-+
-+    assert result.outcome == "UNKNOWN"
-+    assert result.evidence_scope == "RESTRICTED_REGULAR_PACKAGE_MODEL"
-+    assert not any(
-+        event.operation == "DEFINE_PASSIVE_CLASS"
-+        and event.symbol == "A"
-+        for event in result.events
 +    )
-+    assert not any(
-+        event.operation == "FROM"
-+        and event.module == "pkg.b"
-+        and event.symbol == "A"
-+        for event in result.events
-+    )
-+
-+    process = _actual(tmp_path, sources, "pkg.a")
-+
-+    assert process.returncode != 0
-+    assert "TypeError: 'function' object is not iterable" in process.stderr
++    with pytest.raises(ValueError):
++        seal_partial_scc_preparation(
++            loaded, stale_preparation,
++            revision=metadata.revision, state_id=metadata.state_id,
++            repo_id=metadata.repo_id, root_path=metadata.root_path,
++        )
 +
 +
-+@pytest.mark.parametrize(
-+    ("method", "body"),
-+    [("__init__", "pass"), ("__repr__", 'return "C"')],
-+)
-+def test_p3_d1f_regular_dunder_methods_remain_passive(
-+    tmp_path, method, body,
+ def _tamper(root, metadata, mutate):
+     path = root / metadata.state_file
+     payload = pickle.loads(path.read_bytes())
+diff --git a/tests/test_cycle_semantics_publication_binding.py b/tests/test_cycle_semantics_publication_binding.py
+index 43037cb..df45738 100644
+--- a/tests/test_cycle_semantics_publication_binding.py
++++ b/tests/test_cycle_semantics_publication_binding.py
+@@ -11,14 +11,19 @@ from contextor.core.analysis.state_manager import (
+     RepositoryAnalysisState,
+ )
+ from contextor.core.cycle_semantics.generation_manifest import (
++    MANIFEST_VERSION,
+     prepare_cycle_source_manifest,
++    verify_prepared_hard_manifest_digest,
+ )
++from contextor.core.cycle_semantics.evidence import EVIDENCE_SEMANTIC_VERSION
+ from contextor.core.cycle_semantics.lifecycle import (
+     invalidate_cycle_semantics,
+ )
+ from contextor.core.cycle_semantics.publication_binding import (
+     PUBLICATION_AUTHORITY,
++    PUBLICATION_BINDING_VERSION,
+     CanonicalCycleManifestReceipt,
++    _validated_claim_digest,
+     verify_co_published_cycle_manifest,
+ )
+ from contextor.core.domain.graph import ProjectGraph
+@@ -56,6 +61,38 @@ def _case():
+     return state, prepared
+ 
+ 
++def test_p3_v1_hard_epoch_rejects_old_manifest_and_resealing():
++    state, current = _case()
++    assert current.version == MANIFEST_VERSION
++    assert current.evidence_semantic_version == EVIDENCE_SEMANTIC_VERSION
++    assert verify_prepared_hard_manifest_digest(current)
++    for stale in (
++        replace(current, evidence_semantic_version=None),
++        replace(current, evidence_semantic_version="cycle-semantics-evidence/3"),
++        replace(current, version="cycle-source-manifest/2"),
++    ):
++        assert not verify_prepared_hard_manifest_digest(stale)
++        with pytest.raises(ValueError, match="incomplete or unsupported"):
++            _validated_claim_digest(state, stale)
++
++
++def test_p3_v1_old_publication_binding_is_not_warning_authority(
++    tmp_path, isolated_dirs,
 +):
-+    sources = {
-+        "pkg.__init__": "pass",
-+        "pkg.a": (
-+            "class C:\n"
-+            f"    def {method}(self):\n"
-+            f"        {body}"
-+        ),
-+    }
-+
-+    result = _model(sources, "pkg.a")
-+
-+    assert result.outcome == "MODEL_PASS"
-+    assert any(
-+        event.operation == "DEFINE_PASSIVE_CLASS"
-+        and event.symbol == "C"
-+        for event in result.events
++    state, prepared = _case()
++    _save(state, tmp_path, 1, prepared)
++    loaded, metadata = load_snapshot(tmp_path, "cycle-state")
++    receipt = loaded.cycle_source_publication
++    assert receipt.version == PUBLICATION_BINDING_VERSION
++    loaded.cycle_source_publication = replace(
++        receipt, version="cycle-prepared-co-publication/2",
 +    )
-+    assert _actual(tmp_path, sources, "pkg.a").returncode == 0
-+
-+
-+@pytest.mark.parametrize(
-+    ("entry", "source", "extra", "class_symbol"),
-+    [
-+        (
-+            "pkg.a",
-+            "class Left: pass\nclass Right: pass\n"
-+            "class Child(Left, Right): pass",
-+            {},
-+            "Child",
-+        ),
-+        (
-+            "pkg.a",
-+            "class Left: pass\nclass Right: pass\n"
-+            "class Child(Left, Right, metaclass=type): pass",
-+            {},
-+            "Child",
-+        ),
-+        (
-+            "pkg.a",
-+            "class First: pass\nclass Second: pass\n"
-+            "class Third: pass\n"
-+            "class Child(First, Second, Third): pass",
-+            {},
-+            "Child",
-+        ),
-+        (
-+            "pkg.a",
-+            "class Root: pass\nclass Left(Root): pass\n"
-+            "class Right(Root): pass\n"
-+            "class Diamond(Left, Right): pass",
-+            {},
-+            "Diamond",
-+        ),
-+        (
-+            "pkg.a",
-+            "class First: pass\nclass Second: pass\n"
-+            "AliasFirst = First\nAliasSecond = Second\n"
-+            "class Child(AliasFirst, AliasSecond): pass",
-+            {},
-+            "Child",
-+        ),
-+        (
-+            "pkg.use",
-+            "from pkg.base import First, Second\n"
-+            "class Child(First, Second): pass",
-+            {"pkg.base": "class First: pass\nclass Second: pass"},
-+            "Child",
-+        ),
-+        (
-+            "pkg.a",
-+            "class Base: pass\nclass Child(Base, object): pass",
-+            {},
-+            "Child",
-+        ),
-+        (
-+            "pkg.a",
-+            "class Base: pass\nOldBase = Base\n"
-+            "class Base: pass\nclass Child(OldBase, Base): pass",
-+            {},
-+            "Child",
-+        ),
-+        (
-+            "pkg.a",
-+            "class Left: pass\nfrom pkg.b import Right\n"
-+            "class Child(Left, Right): pass",
-+            {
-+                "pkg.b": (
-+                    "from pkg.a import Left\nclass Right: pass"
-+                ),
-+            },
-+            "Child",
-+        ),
-+    ],
-+)
-+def test_p3_d2_supported_multiple_inheritance_matches_cpython(
-+    tmp_path, entry, source, extra, class_symbol,
-+):
-+    sources = {"pkg.__init__": "pass", entry: source, **extra}
-+
-+    result = _model(sources, entry)
-+
-+    assert result.outcome == "MODEL_PASS"
-+    assert result.evidence_scope == "RESTRICTED_REGULAR_PACKAGE_MODEL"
-+    assert any(
-+        event.operation == "DEFINE_PASSIVE_CLASS"
-+        and event.symbol == class_symbol
-+        for event in result.events
-+    )
-+    assert _actual(tmp_path, sources, entry).returncode == 0
-+
-+
-+@pytest.mark.parametrize(
-+    ("source", "extra", "failed_class", "runtime_error"),
-+    [
-+        (
-+            "class Base: pass\nclass Child(Base): pass\n"
-+            "class Broken(object, Child): pass",
-+            {},
-+            "Broken",
-+            None,
-+        ),
-+        (
-+            "class Base: pass\nAlias = Base\n"
-+            "class Broken(Base, Alias): pass",
-+            {},
-+            "Broken",
-+            None,
-+        ),
-+        (
-+            "from pkg.base import Base as Left\n"
-+            "from pkg.base import Base as Right\n"
-+            "class Broken(Left, Right): pass",
-+            {"pkg.base": "class Base: pass"},
-+            "Broken",
-+            None,
-+        ),
-+        (
-+            "class Root: pass\nclass Left(Root): pass\n"
-+            "class Right(Root): pass\n"
-+            "class First(Left, Right): pass\n"
-+            "class Second(Right, Left): pass\n"
-+            "class Broken(First, Second): pass",
-+            {},
-+            "Broken",
-+            None,
-+        ),
-+        (
-+            "Base = 7\nclass Broken(Base, object): pass",
-+            {},
-+            "Broken",
-+            None,
-+        ),
-+        (
-+            "class Broken(SyntaxError, OSError): pass",
-+            {},
-+            "Broken",
-+            "multiple bases have instance lay-out conflict",
-+        ),
-+    ],
-+)
-+def test_p3_d2_unproven_or_invalid_multiple_inheritance_stays_unknown(
-+    tmp_path, source, extra, failed_class, runtime_error,
-+):
-+    sources = {"pkg.__init__": "pass", "pkg.a": source, **extra}
-+
-+    result = _model(sources, "pkg.a")
-+
-+    assert result.outcome == "UNKNOWN"
-+    assert result.evidence_scope == "RESTRICTED_REGULAR_PACKAGE_MODEL"
-+    assert not any(
-+        event.operation == "DEFINE_PASSIVE_CLASS"
-+        and event.symbol == failed_class
-+        for event in result.events
-+    )
-+
-+    process = _actual(tmp_path, sources, "pkg.a")
-+    assert process.returncode != 0
-+    if runtime_error is not None:
-+        assert runtime_error in process.stderr
-+
-+
-+def test_p3_d2_multiple_exception_bases_remain_conservatively_unknown(
-+    tmp_path,
-+):
-+    sources = {
-+        "pkg.__init__": "pass",
-+        "pkg.a": "class CustomError(ValueError, Exception): pass",
-+    }
-+
-+    result = _model(sources, "pkg.a")
-+
-+    assert result.outcome == "UNKNOWN"
-+    assert not any(
-+        event.operation == "DEFINE_PASSIVE_CLASS"
-+        and event.symbol == "CustomError"
-+        for event in result.events
-+    )
-+    assert _actual(tmp_path, sources, "pkg.a").returncode == 0
-+
-+
-+def test_p3_d2_c3_merge_preserves_order_and_common_ancestor():
-+    object_fact = _ClassFact(
-+        identity="builtins.object",
-+        origin="BUILTIN",
-+        direct_bases=(),
-+        linear_mro=("builtins.object",),
-+        metaclass_identity="builtins.type",
-+        defines_init_subclass=False,
-+        safe_to_subclass=True,
-+    )
-+    root = _ClassFact(
-+        identity="pkg.root:1:0",
-+        origin="INDEXED_SOURCE",
-+        direct_bases=("builtins.object",),
-+        linear_mro=("pkg.root:1:0", "builtins.object"),
-+        metaclass_identity="builtins.type",
-+        defines_init_subclass=False,
-+        safe_to_subclass=True,
-+    )
-+    left_identity = "pkg.left:1:0"
-+    left = _ClassFact(
-+        identity=left_identity,
-+        origin="INDEXED_SOURCE",
-+        direct_bases=(root.identity,),
-+        linear_mro=(left_identity, root.identity, "builtins.object"),
-+        metaclass_identity="builtins.type",
-+        defines_init_subclass=False,
-+        safe_to_subclass=True,
-+    )
-+    right = _ClassFact(
-+        identity="pkg.right:1:0",
-+        origin="INDEXED_SOURCE",
-+        direct_bases=(root.identity,),
-+        linear_mro=("pkg.right:1:0", root.identity, "builtins.object"),
-+        metaclass_identity="builtins.type",
-+        defines_init_subclass=False,
-+        safe_to_subclass=True,
-+    )
-+
-+    assert _merge_class_mros((left, right)) == (
-+        left.identity,
-+        right.identity,
-+        root.identity,
-+        "builtins.object",
-+    )
-+    assert _merge_class_mros((root, object_fact)) == (
-+        root.identity,
-+        "builtins.object",
++    assert not verify_co_published_cycle_manifest(
++        loaded, revision=metadata.revision, state_id=metadata.state_id,
++        repo_id=metadata.repo_id, root_path=metadata.root_path,
 +    )
 +
 +
-+def test_p3_d2_c3_merge_rejects_conflicting_parent_order():
-+    first = _ClassFact(
-+        identity="pkg.first:1:0",
-+        origin="INDEXED_SOURCE",
-+        direct_bases=("builtins.object",),
-+        linear_mro=("pkg.first:1:0", "builtins.object"),
-+        metaclass_identity="builtins.type",
-+        defines_init_subclass=False,
-+        safe_to_subclass=True,
-+    )
-+    second = _ClassFact(
-+        identity="pkg.second:1:0",
-+        origin="INDEXED_SOURCE",
-+        direct_bases=("builtins.object",),
-+        linear_mro=("pkg.second:1:0", "builtins.object"),
-+        metaclass_identity="builtins.type",
-+        defines_init_subclass=False,
-+        safe_to_subclass=True,
-+    )
-+    left_order = _ClassFact(
-+        identity="pkg.left_order:1:0",
-+        origin="INDEXED_SOURCE",
-+        direct_bases=(first.identity, second.identity),
-+        linear_mro=(
-+            "pkg.left_order:1:0",
-+            first.identity,
-+            second.identity,
-+            "builtins.object",
-+        ),
-+        metaclass_identity="builtins.type",
-+        defines_init_subclass=False,
-+        safe_to_subclass=True,
-+    )
-+    right_order = _ClassFact(
-+        identity="pkg.right_order:1:0",
-+        origin="INDEXED_SOURCE",
-+        direct_bases=(second.identity, first.identity),
-+        linear_mro=(
-+            "pkg.right_order:1:0",
-+            second.identity,
-+            first.identity,
-+            "builtins.object",
-+        ),
-+        metaclass_identity="builtins.type",
-+        defines_init_subclass=False,
-+        safe_to_subclass=True,
-+    )
-+
-+    assert _merge_class_mros((left_order, right_order)) is None
-+
-+
-+@pytest.mark.parametrize(
-+    ("source", "extra", "probe"),
-+    [
-+        ("class Meta(type): pass", {}, "assert type(m.Meta) is type;assert m.Meta.__mro__==(m.Meta,type,object)"),
-+        ("class Meta(type): pass\nclass C(metaclass=Meta): pass", {}, "assert type(m.C) is m.Meta;assert m.C.__mro__==(m.C,object)"),
-+        ("class Meta(type): pass\nclass C(metaclass=Meta): pass\nclass D(C): pass", {}, "assert type(m.D) is m.Meta;assert m.D.__mro__==(m.D,m.C,object)"),
-+        ("class Meta(type): pass\nclass N(Meta): pass", {}, "assert m.N.__mro__==(m.N,m.Meta,type,object)"),
-+        ("class Meta(type): pass\nclass N(Meta): pass\nclass C(metaclass=N): pass", {}, "assert type(m.C) is m.N"),
-+        ("class Meta(type): pass\nAlias=Meta\nclass C(metaclass=Alias): pass", {}, "assert type(m.C) is m.Meta"),
-+        ("from pkg.meta import Meta\nclass C(metaclass=Meta): pass", {"pkg.meta": "class Meta(type): pass"}, "assert type(m.C) is __import__('pkg.meta',fromlist=['Meta']).Meta"),
-+        ("class Meta(type): pass\nOld=Meta\nclass Meta(type): pass\nclass C(metaclass=Old): pass", {}, "assert type(m.C) is m.Old and m.Old is not m.Meta"),
-+        ("class Meta(type): pass\nclass A(metaclass=Meta): pass\nclass C(A,metaclass=type): pass", {}, "assert type(m.C) is m.Meta"),
-+        ("class Meta(type): pass\nclass A(metaclass=Meta): pass\nclass B(metaclass=Meta): pass\nclass C(A,B): pass", {}, "assert type(m.C) is m.Meta;assert m.C.__mro__==(m.C,m.A,m.B,object)"),
-+        ("class Meta(type): pass\nclass N(Meta): pass\nclass A(metaclass=Meta): pass\nclass B(metaclass=N): pass\nclass C(A,B): pass", {}, "assert type(m.C) is m.N"),
-+        ("class Meta(type): pass\nclass A(metaclass=Meta): pass\nclass C(A,metaclass=Meta): pass", {}, "assert type(m.C) is m.Meta"),
-+    ],
-+)
-+def test_p3_d3_semantic_metaclass_selection(tmp_path, source, extra, probe):
-+    sources = {"pkg.__init__": "pass", "pkg.a": source, **extra}
-+    result = _model(sources, "pkg.a")
-+    assert result.outcome == "MODEL_PASS", result
-+    actual = _actual(tmp_path, sources, "pkg.a", probe)
-+    assert actual.returncode == 0, actual.stderr
-+
-+
-+@pytest.mark.parametrize(
-+    "body",
-+    [
-+        "def __prepare__(cls,*args): return {}",
-+        "def __new__(cls,*args): return super().__new__(cls,*args)",
-+        "def __init__(cls,*args): pass",
-+        "def __call__(cls,*args): return super().__call__(*args)",
-+        "def __getattribute__(cls,name): return super().__getattribute__(name)",
-+        "def method(cls): pass",
-+        "flag = 1",
-+    ],
-+)
-+def test_p3_d3_unproved_metaclass_effects_are_unknown(body):
-+    source = "class Meta(type):\n    " + body.replace("\n", "\n    ") + "\nclass C(metaclass=Meta): pass"
-+    result = _model({"pkg.__init__": "pass", "pkg.a": source}, "pkg.a")
-+    assert result.outcome == "UNKNOWN"
-+    assert not any(
-+        event.operation == "DEFINE_PASSIVE_CLASS" and event.symbol == "C"
-+        for event in result.events
-+    )
-+
-+
-+def test_p3_d3_reentrant_before_class_binding(tmp_path):
-+    sources = {
-+        "pkg.__init__": "pass",
-+        "pkg.a": (
-+            "class Meta(type): pass\n"
-+            "class C(metaclass=Meta):\n"
-+            "    from pkg.b import Seen"
-+        ),
-+        "pkg.b": "from pkg.a import C as Seen",
-+    }
-+    modeled = _model(sources, "pkg.a")
-+    assert modeled.outcome == "EARLY_BINDING_HAZARD"
-+    assert not any(
-+        event.operation == "DEFINE_PASSIVE_CLASS" and event.symbol == "C"
-+        for event in modeled.events
-+    )
-+    actual = _actual(tmp_path, sources, "pkg.a")
-+    assert actual.returncode != 0
-+    assert "cannot import name 'C'" in actual.stderr
-+
-+
-+def test_p3_d3_import_after_class_binding(tmp_path):
-+    sources = {
-+        "pkg.__init__": "pass",
-+        "pkg.a": (
-+            "class Meta(type): pass\n"
-+            "class C(metaclass=Meta): pass\n"
-+            "from pkg.b import Seen"
-+        ),
-+        "pkg.b": "from pkg.a import C as Seen",
-+    }
-+    modeled = _model(sources, "pkg.a")
-+    assert modeled.outcome == "MODEL_PASS"
-+    assert [
-+        event.operation for event in modeled.events
-+        if event.operation == "DEFINE_PASSIVE_CLASS"
-+    ] == ["DEFINE_PASSIVE_CLASS", "DEFINE_PASSIVE_CLASS"]
-+    actual = _actual(
-+        tmp_path, sources, "pkg.a",
-+        "assert m.Seen is m.C;assert type(m.C) is m.Meta",
-+    )
-+    assert actual.returncode == 0, actual.stderr
+ def _save(state, root, revision, prepared=None):
+     return save_snapshot(
+         state,
 ```
 
 ## FINAL_VERDICT
 
-SOURCE_AND_FOCUSED_REGRESSION_PASS. Semantyczny wybór pasywnej metaklasy jest udowodniony w ograniczonym ordinary modelu przez źródło, negatywne bramki i osobne CPython 3.15.2 witnesses. Nie deklaruje się runtime adoption ani świeżej cycle_semantics bez FULL. STOP.
+SOURCE_PASS / RUNTIME_ADOPTED_UNKNOWN. Nowy semantic epoch odrzuca stare hard/optional manifesty i receipts w ścieżkach warning eligibility; świeża klasyfikacja MODEL_PASS pozostaje możliwa. Bez FULL/restartu nie ma certyfikacji bieżącej publikacji LIVE. STOP.

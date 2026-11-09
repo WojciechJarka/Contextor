@@ -29,8 +29,8 @@ from .scenarios import (
     CycleComponentScenarios, CycleScenarioReport, analyze_cycle_scenarios,
 )
 
-EVIDENCE_SEMANTIC_VERSION = "cycle-semantics-evidence/3"
-OPTIONAL_EVIDENCE_SEMANTIC_VERSION = "cycle-semantics-evidence/4"
+EVIDENCE_SEMANTIC_VERSION = "cycle-semantics-evidence/4"
+OPTIONAL_EVIDENCE_SEMANTIC_VERSION = "cycle-semantics-evidence/5"
 _MISSING = "MISSING"
 
 

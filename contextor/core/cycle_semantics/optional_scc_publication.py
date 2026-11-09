@@ -30,7 +30,7 @@ from .partial_scc_claims import (
 
 
 OPTIONAL_SCC_PUBLICATION_VERSION = (
-    "cycle-optional-scc-co-publication/1"
+    "cycle-optional-scc-co-publication/2"
 )
 
 OPTIONAL_SCC_PUBLICATION_AUTHORITY = (

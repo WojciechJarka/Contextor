@@ -79,6 +79,33 @@ def _verify(state, metadata):
     )
 
 
+def test_p3_v1_old_partial_receipt_cannot_revalidate(
+    tmp_path, isolated_dirs,
+):
+    state, preparation = _case(tmp_path, TWO_PASS)
+    _save(state, tmp_path, partial=preparation)
+    loaded, metadata = load_snapshot(tmp_path, "partial-state")
+    assert _verify(loaded, metadata)
+    receipt = loaded.cycle_partial_source_publication
+    loaded.cycle_partial_source_publication = replace(
+        receipt, version="cycle-partial-scc-co-publication/1",
+    )
+    assert not _verify(loaded, metadata)
+    stale_preparation = replace(
+        preparation,
+        manifest=replace(
+            preparation.manifest,
+            evidence_semantic_version="cycle-semantics-evidence/3",
+        ),
+    )
+    with pytest.raises(ValueError):
+        seal_partial_scc_preparation(
+            loaded, stale_preparation,
+            revision=metadata.revision, state_id=metadata.state_id,
+            repo_id=metadata.repo_id, root_path=metadata.root_path,
+        )
+
+
 def _tamper(root, metadata, mutate):
     path = root / metadata.state_file
     payload = pickle.loads(path.read_bytes())

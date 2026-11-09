@@ -16,6 +16,7 @@ from .generation_manifest import (
     PreparedCycleSourceManifest,
     PreparedSCCSourceBinding,
     verify_prepared_optional_manifest_digest,
+    verify_prepared_hard_manifest_digest,
 )
 from .model_source_closure import (
     compute_cycle_model_source_closures,
@@ -130,6 +131,7 @@ def validate_partial_scc_claims(
                 or manifest.source_selection != "HARD_ONLY"
                 or manifest.components != declarations
                 or manifest.version != MANIFEST_VERSION
+                or not verify_prepared_hard_manifest_digest(manifest)
                 or manifest.optional_witness is not None
                 or manifest.authority
                 != "PREPARED_ONLY_NOT_CANONICALLY_PUBLISHED"

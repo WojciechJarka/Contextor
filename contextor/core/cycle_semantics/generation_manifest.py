@@ -18,7 +18,11 @@ from .contracts import (
     CycleSemanticsSnapshot,
     fingerprint_hard_edges,
 )
-from .evidence import OPTIONAL_EVIDENCE_SEMANTIC_VERSION, SourceBoundCycleEvidence
+from .evidence import (
+    EVIDENCE_SEMANTIC_VERSION,
+    OPTIONAL_EVIDENCE_SEMANTIC_VERSION,
+    SourceBoundCycleEvidence,
+)
 from .source_proof import (
     assess_scc_source_bytes,
     assess_optional_scc_source_bytes,
@@ -27,8 +31,8 @@ from .model_source_closure import CycleModelSourceClosure
 from .evidence import _scenario_fingerprint
 
 
-MANIFEST_VERSION = "cycle-source-manifest/2"
-OPTIONAL_MANIFEST_VERSION = "cycle-source-manifest/3"
+MANIFEST_VERSION = "cycle-source-manifest/3"
+OPTIONAL_MANIFEST_VERSION = "cycle-source-manifest/4"
 _AUTHORITY = "PREPARED_ONLY_NOT_CANONICALLY_PUBLISHED"
 
 
@@ -69,6 +73,7 @@ class PreparedCycleSourceManifest:
     authority: str = _AUTHORITY
     source_selection: str = "HARD_ONLY"
     optional_witness: OptionalManifestEvidenceWitness | None = None
+    evidence_semantic_version: str | None = None
 
 
 def prepare_cycle_source_manifest(
@@ -230,6 +235,7 @@ def prepare_cycle_source_manifest(
         if source_selection == "HARD_ONLY":
             manifest_hash: str | None = _digest((
                 MANIFEST_VERSION,
+                EVIDENCE_SEMANTIC_VERSION,
                 graph_hash,
                 tuple((
                     component.members,
@@ -254,7 +260,7 @@ def prepare_cycle_source_manifest(
             manifest_hash = _digest((
                 OPTIONAL_MANIFEST_VERSION,
                 "OPTIONAL_NAMED_CHILDREN",
-                optional_witness.evidence_semantic_version,
+                OPTIONAL_EVIDENCE_SEMANTIC_VERSION,
                 graph_hash,
                 optional_witness.source_manifest_fingerprint,
                 tuple((
@@ -277,6 +283,11 @@ def prepare_cycle_source_manifest(
         version=manifest_version,
         source_selection=source_selection,
         optional_witness=optional_witness,
+        evidence_semantic_version=(
+            EVIDENCE_SEMANTIC_VERSION
+            if source_selection == "HARD_ONLY"
+            else OPTIONAL_EVIDENCE_SEMANTIC_VERSION
+        ),
     )
 
 
@@ -288,10 +299,82 @@ def _is_sha256(value: object) -> bool:
     )
 
 
+def verify_prepared_hard_manifest_digest(manifest: object) -> bool:
+    """Replay the current hard-only declaration digest."""
+    if type(manifest) is not PreparedCycleSourceManifest:
+        return False
+    if (
+        manifest.version != MANIFEST_VERSION
+        or manifest.evidence_semantic_version != EVIDENCE_SEMANTIC_VERSION
+        or manifest.source_selection != "HARD_ONLY"
+        or manifest.optional_witness is not None
+        or manifest.authority != _AUTHORITY
+        or not _is_sha256(manifest.graph_sha256)
+        or not _is_sha256(manifest.source_manifest_sha256)
+        or type(manifest.components) is not tuple
+        or not manifest.components
+    ):
+        return False
+    accepted: dict[str, tuple[str, str]] = {}
+    for component in manifest.components:
+        if (
+            type(component) is not PreparedSCCSourceBinding
+            or type(component.members) is not tuple
+            or not component.members
+            or component.members != tuple(sorted(set(component.members)))
+            or component.preparation_state != "PREPARED_UNPUBLISHED"
+            or component.reason is not None
+            or component.model_classification not in {
+                "MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS",
+                "MODEL_INTERNAL_EARLY_BINDING_HAZARD",
+            }
+            or component.model_kind not in {"FLAT_MODULE", "REGULAR_PACKAGE"}
+            or not _is_sha256(component.model_evidence_sha256)
+            or type(component.source_signatures) is not tuple
+            or not component.source_signatures
+        ):
+            return False
+        names = []
+        for row in component.source_signatures:
+            if (
+                type(row) is not tuple
+                or len(row) != 3
+                or type(row[0]) is not str
+                or not row[0]
+                or not _is_sha256(row[1])
+                or not _is_sha256(row[2])
+            ):
+                return False
+            names.append(row[0])
+            signature = (row[1], row[2])
+            if row[0] in accepted and accepted[row[0]] != signature:
+                return False
+            accepted[row[0]] = signature
+        if tuple(names) != tuple(sorted(set(names))):
+            return False
+    ordered_sources = tuple(
+        (module, *accepted[module]) for module in sorted(accepted)
+    )
+    expected = _digest((
+        MANIFEST_VERSION,
+        EVIDENCE_SEMANTIC_VERSION,
+        manifest.graph_sha256,
+        tuple((
+            component.members,
+            component.model_classification,
+            component.model_kind,
+            component.model_evidence_sha256,
+            component.source_signatures,
+        ) for component in manifest.components),
+        ordered_sources,
+    ))
+    return expected == manifest.source_manifest_sha256
+
+
 def verify_prepared_optional_manifest_digest(
     manifest: object,
 ) -> bool:
-    """Replay a v3 declaration digest without certifying source origin.
+    """Replay the current optional declaration digest without source origin.
 
     The witness makes the digest reproducible from the manifest.
     This validates internal consistency of caller-supplied declarations.
@@ -305,6 +388,8 @@ def verify_prepared_optional_manifest_digest(
 
     if (
         manifest.version != OPTIONAL_MANIFEST_VERSION
+        or manifest.evidence_semantic_version
+        != OPTIONAL_EVIDENCE_SEMANTIC_VERSION
         or manifest.source_selection != "OPTIONAL_NAMED_CHILDREN"
         or manifest.authority != _AUTHORITY
         or not _is_sha256(manifest.graph_sha256)
@@ -312,6 +397,8 @@ def verify_prepared_optional_manifest_digest(
         or type(witness) is not OptionalManifestEvidenceWitness
         or witness.evidence_semantic_version
         != OPTIONAL_EVIDENCE_SEMANTIC_VERSION
+        or witness.evidence_semantic_version
+        != manifest.evidence_semantic_version
         or not _is_sha256(witness.source_manifest_fingerprint)
         or type(components) is not tuple
         or not components

@@ -19,12 +19,13 @@ from .generation_manifest import (
     PreparedCycleSourceManifest,
     PreparedSCCSourceBinding,
     _digest,
+    verify_prepared_hard_manifest_digest,
 )
 from .scc import analyze_import_cycle_topology
 from .model_source_closure import compute_cycle_model_source_closures
 
 
-PUBLICATION_BINDING_VERSION = "cycle-prepared-co-publication/2"
+PUBLICATION_BINDING_VERSION = "cycle-prepared-co-publication/3"
 _LEGACY_MANIFEST_VERSION = "cycle-source-manifest/1"
 _LEGACY_BINDING_VERSION = "cycle-prepared-co-publication/1"
 PUBLICATION_AUTHORITY = (
@@ -57,6 +58,8 @@ def _validated_claim_digest(
     """Validate declarations, not source-byte authenticity."""
     if type(manifest) is not PreparedCycleSourceManifest:
         raise ValueError("prepared manifest contract missing")
+    if not legacy and not verify_prepared_hard_manifest_digest(manifest):
+        raise ValueError("prepared manifest is incomplete or unsupported")
     if (
         manifest.version != (
             _LEGACY_MANIFEST_VERSION if legacy else MANIFEST_VERSION
@@ -231,15 +234,22 @@ def _validated_claim_digest(
         (name, *accepted[name])
         for name in sorted(accepted)
     )
-    expected_manifest_hash = _digest((
-        _LEGACY_MANIFEST_VERSION if legacy else MANIFEST_VERSION,
-        graph_hash,
-        (
-            tuple(component.members for component in cyclic)
-            if legacy else tuple(claims)
-        ),
-        ordered_sources,
-    ))
+    expected_manifest_hash = (
+        _digest((
+            _LEGACY_MANIFEST_VERSION,
+            graph_hash,
+            tuple(component.members for component in cyclic),
+            ordered_sources,
+        ))
+        if legacy
+        else _digest((
+            MANIFEST_VERSION,
+            manifest.evidence_semantic_version,
+            graph_hash,
+            tuple(claims),
+            ordered_sources,
+        ))
+    )
     if manifest.source_manifest_sha256 != expected_manifest_hash:
         raise ValueError(
             "prepared source manifest digest mismatch"

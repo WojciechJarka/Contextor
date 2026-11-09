@@ -222,6 +222,24 @@ def _one(edges=PAIR, sources=PASS):
     return result, index, snapshot, evidence
 
 
+def test_p3_v1_old_hard_evidence_epoch_rejected_with_same_source():
+    index, snapshot, current = _bound(PAIR, PASS)
+    assert current.semantic_version == EVIDENCE_SEMANTIC_VERSION
+    assert assess(PAIR, index, snapshot, current)[0].model_classification == (
+        "MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS"
+    )
+    stale = replace(
+        current, semantic_version="cycle-semantics-evidence/3",
+    )
+    assert stale.graph_fingerprint == current.graph_fingerprint
+    assert stale.source_manifest_fingerprint == (
+        current.source_manifest_fingerprint
+    )
+    verdict = assess(PAIR, index, snapshot, stale)
+    assert verdict[0].reason == "EVIDENCE_SEMANTIC_VERSION_MISMATCH"
+    assert verdict[0].model_classification == "INDETERMINATE"
+
+
 def test_p0_t01_mutual_import_all_entries_pass():
     result, _, _, _ = _one()
     assert result == (SCCModelEvidenceAssessment(
