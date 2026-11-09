@@ -9,6 +9,9 @@ import pytest
 from contextor.core.cycle_semantics.package_model import (
     evaluate_package_import_order,
 )
+from contextor.core.cycle_semantics.model_environment import (
+    STANDARD_BUILTINS_PRECONDITION,
+)
 
 
 def _model(source, entry):
@@ -19,6 +22,71 @@ def _model(source, entry):
         },
         entry,
     )
+
+
+def test_builtin_environment_precondition_is_metadata_not_dataclass_field():
+    sources = {
+        "pkg.__init__": ast.parse(
+            "class E(ValueError):\n"
+            "    pass\n"
+            "from .child import token\n"
+        ),
+        "pkg.child": ast.parse("from . import E\ntoken = 7\n"),
+    }
+    options = {
+        "annotation_semantics": "DEFERRED",
+        "_compile_on_first_import": True,
+    }
+    ordinary = evaluate_package_import_order(sources, "pkg", **options)
+    assert ordinary.outcome == "MODEL_PASS"
+    assert ordinary.evidence_scope == "RESTRICTED_REGULAR_PACKAGE_MODEL"
+    assert (
+        ordinary.builtin_environment_precondition
+        == STANDARD_BUILTINS_PRECONDITION
+    )
+    assert "builtin_environment_precondition" not in asdict(ordinary)
+
+    shadowed = dict(sources)
+    shadowed["pkg.__init__"] = ast.parse(
+        "ValueError = 1\n"
+        "class E(ValueError):\n"
+        "    pass\n"
+        "from .child import token\n"
+    )
+    assert (
+        evaluate_package_import_order(shadowed, "pkg", **options).outcome
+        == "UNKNOWN"
+    )
+
+    conditional_sources = {
+        "pkg.__init__": ast.parse(
+            "from dataclasses import dataclass\n"
+            "@dataclass(frozen=True)\n"
+            "class D:\n"
+            "    @property\n"
+            "    def value(self):\n"
+            "        return 1\n"
+            "from .child import token\n"
+        ),
+        "pkg.child": ast.parse("from . import D\ntoken = 7\n"),
+    }
+    conditional = evaluate_package_import_order(
+        conditional_sources, "pkg", **options,
+        _assume_passive_external_imports=True,
+        _assume_frozen_dataclass_decoration=True,
+    )
+    assert conditional.outcome == "MODEL_PASS"
+    assert conditional.evidence_scope == (
+        "CONDITIONAL_EXTERNAL_AND_FROZEN_DATACLASS_"
+        "ASSUMPTIONS_NOT_RUNTIME_PROOF"
+    )
+    assert (
+        conditional.builtin_environment_precondition
+        == STANDARD_BUILTINS_PRECONDITION
+    )
+    assert len(conditional.assumed_external_imports) == 1
+    assert len(conditional.assumed_dataclass_decorations) == 1
+    assert "builtin_environment_precondition" not in asdict(conditional)
 
 
 def test_frozen_dataclass_default_model_unknown():

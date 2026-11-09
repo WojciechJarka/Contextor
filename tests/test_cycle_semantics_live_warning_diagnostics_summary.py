@@ -16,6 +16,9 @@ from contextor.core.live_state.runtime import (
 from contextor.core.cycle_semantics.live_warning_diagnostics_summary import (
     project_locked_warning_diagnostics_summary,
 )
+from contextor.core.cycle_semantics.model_environment import (
+    STANDARD_BUILTINS_PRECONDITION,
+)
 from tests.test_cycle_semantics_live_installed_partial_claims import (
     _fixture,
     _owner,
@@ -68,6 +71,10 @@ def test_t01_t03_installed_partial_scc_controls_attention(
         assert summary["cycles"]["model_pass_count"] == accepted
         assert summary["cycles"]["active_warning_count"] == active
         assert summary["cycles"]["warning_availability"] == "fresh"
+        assert (
+            summary["cycles"]["builtin_environment_precondition"]
+            == STANDARD_BUILTINS_PRECONDITION
+        )
         assert summary["attention_required"] is (active > 0)
 
         assert original["cycles"]["count"] == 2
@@ -165,6 +172,7 @@ def test_t08_stale_structural_inventory_never_claims_zero(
 
         assert summary["cycles"]["count"] is None
         assert "active_warning_count" not in summary["cycles"]
+        assert "builtin_environment_precondition" not in summary["cycles"]
         assert summary["cycles"]["availability"] == "stale"
 
 
@@ -239,6 +247,7 @@ def test_t12_pure_projection_rejects_wrong_revision(
         assert result is raw
         assert raw == original
         assert "active_warning_count" not in result["cycles"]
+        assert "builtin_environment_precondition" not in result["cycles"]
 
 
 def test_t13_pure_projection_rejects_count_mismatch(

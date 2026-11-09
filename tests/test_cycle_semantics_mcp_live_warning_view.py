@@ -8,6 +8,9 @@ import json
 import pytest
 
 from contextor.mcp.tools.get_live_events import get_live_events
+from contextor.core.cycle_semantics.model_environment import (
+    STANDARD_BUILTINS_PRECONDITION,
+)
 from tests.test_cycle_semantics_live_installed_partial_claims import (
     _fixture, _owner,
 )
@@ -54,6 +57,10 @@ def test_t01_t03_real_installed_partial_warning_view(
 
         view = result["cycle_warning_view"]
         assert view["status"] == "fresh"
+        assert (
+            view["builtin_environment_precondition"]
+            == STANDARD_BUILTINS_PRECONDITION
+        )
         assert view["revision"] == metadata.revision
         assert view["activity_epoch"] == server._activity_epoch
         assert view["structural_count"] == 2
@@ -104,6 +111,7 @@ def test_t05_stale_cycles_never_become_false_zero_warnings(
         )["cycle_warning_view"]
 
         assert view["status"] == "unavailable"
+        assert "builtin_environment_precondition" not in view
         assert "active_warning_count" not in view
         assert "active_warning_paths" not in view
 

@@ -11,6 +11,9 @@ import sys
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 
+from contextor.core.cycle_semantics.model_environment import (
+    STANDARD_BUILTINS_PRECONDITION,
+)
 from contextor.core.cycle_semantics.package_layout import build_package_layout
 from contextor.core.cycle_semantics.namespace_path_model import (
     SearchPortion,
@@ -67,6 +70,10 @@ class PackageImportAssessment:
     assumed_dataclass_decorations: (
         tuple[AssumedFrozenDataclassDecoration, ...]
     ) = ()
+
+    @property
+    def builtin_environment_precondition(self) -> str:
+        return STANDARD_BUILTINS_PRECONDITION
 
 
 @dataclass(frozen=True)
@@ -1336,7 +1343,10 @@ def evaluate_package_import_order(
     Indexed package __init__ IDs are translated to logical package names.
     The operation budget prevents unbounded model execution.
 
-    Results cannot certify general Python import safety.
+    MODEL_PASS assesses the restricted model assuming conventional builtin
+    bindings. The evaluator does not attest the actual contents of
+    __builtins__, builtins, or the import environment, and cannot certify
+    general Python import safety.
     """
     events: list[PackageModelEvent] = []
     assumed_external_imports: list[ReachedUnmodeledImport] = []

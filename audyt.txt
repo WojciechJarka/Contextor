@@ -1,0 +1,691 @@
+1. Agent wykonuje discovery przez Contextor MCP, kiedy brakuje mi dowodów potrzebnych do podjęcia bezpiecznej decyzji. Może badać kod, zależności, przepływy danych, historię i zachowanie mechanizmów. Ma dostarczać fakty, nie projektować rozwiązania.
+2. Ja podejmuję decyzje projektowe. Na podstawie dostępnego kodu i wyników discovery ustalam przyczynę błędu, właściwą semantykę, zakres zmian i kryteria poprawności.
+3. Agent implementuje dokładnie zatwierdzone rozwiązanie. Nie wybiera własnej architektury, nie wymyśla alternatywnych mechanizmów i nie rozszerza implementacji bez mojego polecenia.
+4. Ja audytuję rezultat. Nie wystarczą zielone testy ani brak znalezionego błędu. Wymagam dowodów poprawności właściwego mechanizmu, bez hardkodowania pod Contextora i bez encyklopedycznych testów.
+Discovery nie jest ani zabronione, ani obowiązkowe. Jest narzędziem do uzupełniania konkretnej luki w wiedzy. Jeśli mam wystarczający kontekst, projektuję zmianę bez kolejnego discovery. Jeśli go nie mam, zlecam agentowi precyzyjne discovery i dopiero po otrzymaniu wyników decyduję o implementacji.
+
+Najważniejsze:
+
+Priorytetem jest poprawność i uniwersalność rozwiązania, nie szybkość, liczba promptów ani liczba zaliczonych testów.
+
+*************************************************************
+
+
+
+2Pochodzenie i przesłanianie nazwNiepełna weryfikacjaModel musi odróżniać nazwy od rzeczywistych obiektów: ValueError, property, field, dataclass, ast i inne symbole mogą zostać przesłonięte. Niektóre kontrole już istnieją, ale pełna spójność wiązań i zmian builtins jest niezweryfikowana.
+
+
+
+3Tworzenie klas, bazy i metaklasyWybór specyficzny dla projektu_safe_passive_class_definition akceptuje szczególny przypadek ValueError, lecz odrzuca Exception, object i własne klasy bazowe. Trzeba modelować ocenę baz, wybór metaklasy oraz skutki tworzenia klasy zamiast rozpoznawać jedną nazwę.
+
+
+
+4Kolejność wykonania ciała klasy i wiązania jej nazwyUogólnienie i regresjeImporty wykonywane w ciele klasy, lokalna przestrzeń nazw, odczyty częściowo inicjalizowanych modułów i moment związania nazwy klasy. K09 wykazał prawidłowy hazard zależny od entry; nie wolno go wyeliminować przez rozszerzanie PASS.
+
+
+
+5Dekoratory funkcji i klasZachowawcze ograniczenieD02, D03 i D05: lru_cache, dekoratory z efektami ubocznymi i dekorowanie klas. Obecne UNKNOWN jest zachowawcze, ale brakuje ogólnego rozpoznawania skutków podczas definicji.
+
+
+
+6Wyrażenia wartości domyślnych funkcjiZachowawcze ograniczenieD04: wywołanie g() w wartości domyślnej wykonuje się przy definicji. Model akceptuje wybrane literały, lecz nie rozróżnia szerzej wyrażeń bezpiecznych od tych z efektami. Trzeba zachować kolejność i moment ewaluacji.
+
+
+
+7Dekoracja dataclass(frozen=True)Założenie warunkoweD06, D07, D09 i D11: warunkowa akceptacja oparta na założeniu działania dekoratora. Należy oddzielić rzeczywiste operacje dataclasses od samego kształtu AST i nie promować warunkowego sukcesu do produkcyjnego PASS.
+
+
+
+8Semantyka dataclasses.fieldWybór specyficzny dla projektuSpecjalnie rozpoznawane field(hash=False), ale field(compare=False) z D08 pozostaje UNKNOWN mimo udanego wykonania w fixture. Trzeba badać wywołanie, wiązanie field, argumenty oraz skutki dekoracji.
+
+
+
+9Mechanizm dekoratora @propertyWybór specyficzny dla projektuD09/D10: rozpoznawanie @property po nazwie, przy częściowej kontroli przesłonięcia. Potrzebny jest niezależny kontrakt wiązania dekoratora i jego wykonania, także przy zmianach środowiska.
+
+
+
+10Adnotacje Python 3.15 i odroczona ewaluacjaWybór specyficzny dla projektu i luka pokryciaD11/D12: specjalne ast.AST, odmowa pathlib.Path oraz różnica między utworzeniem klasy a późniejszym odczytem adnotacji. Dekorator dataclass może zmienić moment konsumpcji. Trzeba rozdzielić te zdarzenia.
+
+
+
+11Złożone odczyty atrybutówLuka pokryciaB03: p.a.value zatrzymuje kompilację ograniczonego modelu, ponieważ AST zawiera zagnieżdżony Attribute. CPython wykazał rzeczywisty błąd cyklicznej inicjalizacji, a model zwraca UNKNOWN zamiast rozpoznania hazardu.
+
+
+
+12Pozostałe formy importów i częściowej inicjalizacjiNiepełna weryfikacja
+
+13Guardy, odroczone funkcje i wywołaniaNiepełna weryfikacjaB04–B06 potwierdzają poprawne zachowanie badanych prostych przypadków, lecz inne warunki, ich efekty i bardziej złożone przejścia wykonania pozostają poza zweryfikowanym zakresem.
+
+
+
+14Niezależny audyt evaluate_flat_import_orderNiepełna weryfikacjaR1 szczegółowo badał ścieżkę package, ale nie wszystkie reguły odrębnego modelu flat. Trzeba sprawdzić jego kontrakty i przypadki, w których scenariusz wybiera inny evaluator.
+
+
+
+15Autorytet środowiska importów i namespace packagesGranica założeń warunkowychModel warunkowy korzysta z określonego SearchPortion i inwentarza źródeł, ale nie certyfikuje rzeczywistego sys.path, sys.modules, finderów ani import hooks. Trzeba precyzyjnie określić, co może być dowiedzione statycznie.
+
+
+
+16Niezależność kontraktów testowychBrak pełnego pokrycia dowodowegoR1/R2 wykazały testy wzorowane na konstrukcjach Contextora. Należy uzupełnić mechanizmowe testy pozytywne i negatywne, przypadki przesłonięć, zmienionej kolejności, różnych nazw i testy rozbieżności z CPython.
+
+
+
+17Lokalna autoryzacja IPC i uprawnienia środowiskaGranica zaufania do oceny przed dystrybucjąR6 wykazał brak osobnego per-operation owner check dla uwierzytelnionego publish. Standardowy committed reader chroni instalację arbitralnego request.state, ale ACL pliku authkey i zapisu committed store nie zostały zbadane. To nie jest potwierdzona podatność.
+
+
+
+18Pozostałe kontrole optional/legacy i adopcji kodu LIVEResztkowe luki weryfikacji, nie potwierdzone defektyOddzielne API optional/legacy nie zasilają sprawdzonej projekcji ostrzeżeń, ale dynamiczni konsumenci poza nią nie zostali zinwentaryzowani globalnie. Po restarcie LIVE brak bezpośredniego fingerprintu klasy w RAM, choć nowy PID i czas startu mocno wskazują na adopcję aktualnego kodu.
+
+19 czy nadal istnieją problemy z lukami w łańcuchach publikacji?
+
+****************************************************************************************************************************************************************************************
+
+
+CPA_GET_LIVE_EVENTS_BACKEND_RUNTIME_DISCOVERY
+
+DISCOVERY ONLY.
+
+AGENT NIE PROJEKTUJE.
+NIE implementuj.
+NIE modyfikuj plików.
+NIE uruchamiaj pytest.
+NIE restartuj Desktopu, backendu, MCP ani Codexa.
+NIE wywołuj stop_backend().
+NIE wywołuj start_backend() ręcznie.
+
+O3 backend ownership/lifecycle = FINAL PASS runtime end-to-end.
+
+Cel:
+zebrać dokładne evidence potrzebne do zaprojektowania
+top-level `backend_runtime` w `get_live_events`.
+
+`backend_runtime` ma opisywać GLOBALNY persistent MCP backend,
+nie repo-scoped LIVE state.
+
+==================================================
+1. CONTEXTOR FIRST
+==================================================
+
+Discovery przede wszystkim przez Contextor MCP.
+
+Odpowiednie narzędzia mogą być deferred:
+aktywnie ich szukaj i używaj.
+
+grep/search dopiero po Contextorze,
+wyłącznie do literalnego potwierdzenia.
+
+Zacznij od:
+
+C:\Temp\Contextor_Repo\contextor\mcp\tools\get_live_events.py
+
+oraz rzeczywistych producerów/consumerów i runtime primitives
+odkrytych przez Contextor.
+
+==================================================
+2. GET_LIVE_EVENTS CALL PATH
+==================================================
+
+Ustal dokładnie:
+
+- publiczny MCP entrypoint;
+- implementation owner;
+- wszystkie istotne callees;
+- skąd pobierane są events;
+- skąd pochodzą:
+  revision
+  continuity
+  resync_required
+  status
+  pagination/truncation metadata;
+- czy request wykonuje disk I/O;
+- czy używa locków;
+- czy wykonuje process probes;
+- czy wykonuje network/HTTP readiness probe.
+
+Podaj dokładne absolutne ścieżki i symbole.
+
+==================================================
+3. DESKTOP POLLING
+==================================================
+
+Ustal, czy Desktop cyklicznie wywołuje `get_live_events`
+lub równoważny underlying API.
+
+Jeżeli tak, ustal dokładnie:
+
+- symbol odpowiedzialny za polling;
+- interwał;
+- czy polling trwa stale;
+- czy interwał zmienia się zależnie od stanu;
+- czy istnieje więcej niż jeden poller;
+- czy każdy poll przechodzi przez publiczne MCP `get_live_events`,
+  czy przez lokalny LIVE client/API;
+- ile wywołań na minutę daje normalny steady-state.
+
+Nie zgaduj.
+Jeśli częstotliwości nie można ustalić ze źródła,
+oznacz UNKNOWN.
+
+==================================================
+4. CURRENT RESPONSE CONTRACT
+==================================================
+
+Pobierz dokładną obecną strukturę odpowiedzi `get_live_events`.
+
+Ustal:
+
+- top-level fields;
+- event list field;
+- error/status variants;
+- zachowanie przy:
+  no events
+  stale revision
+  truncation
+  resync_required;
+- testy, które utrwalają ten contract.
+
+Nie proponuj jeszcze nowego schema.
+
+==================================================
+5. BACKEND RUNTIME READ PRIMITIVES
+==================================================
+
+Znajdź najtańsze istniejące READ-ONLY primitives dla:
+
+A. persistent backend record
+
+B. backend process identity/liveness:
+   PID
+   executable
+   creation_time
+   alive/dead/unknown
+
+C. backend owner claim:
+   backend_instance_id
+   host_kind
+   host_pid
+   host_executable
+   host_creation_time
+   host_owner_identity
+   claimed_at
+
+D. owner process classification:
+   match
+   stale
+   unknown
+
+E. exact:
+   claim.backend_instance_id == backend.instance_id
+
+Dla każdego podaj:
+
+- absolutna ścieżka;
+- symbol;
+- disk I/O;
+- OS process handle/probe;
+- lock usage;
+- możliwe blocking;
+- side effects;
+- możliwe UNKNOWN;
+- czy primitive jest publiczne/internal.
+
+==================================================
+6. READINESS
+==================================================
+
+Ustal dokładnie koszt i call path obecnego:
+
+get_backend_status()
+
+W szczególności ustal:
+
+- czy wykonuje authenticated HTTP readiness probe;
+- timeouty;
+- network/socket operations;
+- process probe;
+- disk reads;
+- locks.
+
+Nie używaj ciężkiego readiness probe jako elementu
+kandydackiego taniego snapshotu.
+
+Ustal tylko, czy można semantycznie rozdzielić:
+
+PROCESS/RECORD STATUS
+
+od
+
+AUTHENTICATED READINESS.
+
+==================================================
+7. BENCHMARK — GET_LIVE_EVENTS
+==================================================
+
+W aktualnym runtime wykonaj serię READ-ONLY pomiarów
+obecnego `get_live_events`.
+
+Nie zmieniaj stanu.
+
+Minimum:
+N = 50 kolejnych pomiarów.
+
+Jeżeli narzut środowiska pozwala, wykonaj N = 100.
+
+Użyj time.perf_counter().
+
+Raportuj w MILISEKUNDACH:
+
+COUNT
+MIN
+MEDIAN
+MEAN
+P95
+MAX
+
+Oddziel, jeśli możliwe:
+
+- lokalny underlying call;
+- pełny MCP call.
+
+Nie restartuj niczego pomiędzy pomiarami.
+
+==================================================
+8. BENCHMARK — CANDIDATE CHEAP SNAPSHOT
+==================================================
+
+Bez implementowania `backend_runtime`,
+zbuduj tylko jednorazowy benchmark harness/read-only snippet
+korzystający z obecnych primitives.
+
+Zmierz koszt logicznego snapshotu:
+
+- read backend record;
+- read owner claim;
+- backend process identity/liveness;
+- owner process classification;
+- exact backend-instance match.
+
+BEZ authenticated HTTP readiness probe.
+
+Minimum:
+N = 100.
+
+Raportuj w ms:
+
+COUNT
+MIN
+MEDIAN
+MEAN
+P95
+MAX
+
+Jeśli można, osobno podaj koszt:
+
+BACKEND_RECORD_READ
+OWNER_CLAIM_READ
+BACKEND_PROCESS_PROBE
+OWNER_PROCESS_PROBE_OR_CLASSIFICATION
+FULL_CHEAP_SNAPSHOT
+
+Benchmark harness NIE może zostać zapisany do repo.
+
+==================================================
+9. PROCESS PROBE COST / BEHAVIOR
+==================================================
+
+Ustal dla Windows:
+
+- czy probe otwiera process handle;
+- jakie prawa dostępu;
+- czy handle zawsze jest zamykany;
+- jakie przypadki dają alive/dead/unknown;
+- czy creation-time comparison wymaga dodatkowego syscall;
+- czy koszt może się zauważalnie kumulować przy częstym pollingu.
+
+Podaj evidence z aktualnej implementacji.
+
+==================================================
+10. CACHE-RELEVANT FACTS — BEZ PROJEKTOWANIA
+==================================================
+
+Nie wybieraj TTL.
+
+Zamiast tego policz:
+
+A.
+normalna liczba polls/minute Desktopu
+
+B.
+median i p95 cheap snapshot
+
+C.
+szacowany dodatkowy koszt CPU/wall time na minutę:
+
+polls_per_minute * snapshot_cost
+
+dla median i p95.
+
+Jeśli Desktop NIE używa publicznego get_live_events,
+podaj osobno:
+
+- frequency public MCP usage: UNKNOWN / agent-driven
+- frequency Desktop underlying polling: exact measured/derived value.
+
+==================================================
+11. SNAPSHOT FRESHNESS SEMANTICS
+==================================================
+
+Ustal jedynie fakty potrzebne później do projektu:
+
+- czy backend record ma timestamp;
+- czy owner claim ma claimed_at;
+- czy process probe ma własny observation timestamp;
+- czy istnieje obecnie helper/time source,
+  którego można użyć do `observed_at`;
+- czy monotonic time nadaje się do serializowanego timestampu;
+- czy istnieje już w projekcie canonical format UTC timestamp
+  dla runtime observations.
+
+Nie projektuj fields.
+
+==================================================
+12. TEST SURFACE
+==================================================
+
+Zidentyfikuj istniejące testy dotyczące:
+
+- get_live_events contract;
+- Desktop LIVE polling;
+- backend state read;
+- owner claim read;
+- process identity/classification;
+- MCP response schema/backward compatibility.
+
+Podaj tylko listę relewantnych plików i konkretne testy/symbole.
+
+NIE uruchamiaj pytest.
+
+==================================================
+13. CONTEXTOR POST-DISCOVERY
+==================================================
+
+To jest read-only discovery.
+
+NIE wywołuj update_file.
+
+Na końcu potwierdź:
+
+canonical_state
+workspace_sync
+canonical_revision
+LIVE continuity
+resync_required
+
+==================================================
+14. REPORT
+==================================================
+
+Raport wyłącznie:
+
+C:\Temp\Contextor_Repo\walkthrough.md
+
+Wymagane sekcje:
+
+STATUS
+HEAD
+
+GET_LIVE_EVENTS_OWNER
+GET_LIVE_EVENTS_CALL_PATH
+CURRENT_RESPONSE_CONTRACT
+
+DESKTOP_POLL_OWNER
+DESKTOP_POLL_INTERVAL
+DESKTOP_POLLS_PER_MINUTE
+DESKTOP_USES_PUBLIC_MCP_TOOL
+
+BACKEND_RECORD_PRIMITIVE
+OWNER_CLAIM_PRIMITIVE
+BACKEND_PROCESS_PROBE
+OWNER_PROCESS_CLASSIFIER
+GET_BACKEND_STATUS_COST_PATH
+READINESS_REQUIRES_HTTP_PROBE
+
+GET_LIVE_EVENTS_BENCHMARK
+CHEAP_SNAPSHOT_BENCHMARK
+PROCESS_PROBE_BENCHMARK
+
+CHEAP_SNAPSHOT_DISK_IO
+CHEAP_SNAPSHOT_LOCKS
+CHEAP_SNAPSHOT_PROCESS_HANDLES
+CHEAP_SNAPSHOT_SIDE_EFFECTS
+CHEAP_SNAPSHOT_CAN_RETURN_UNKNOWN
+
+ESTIMATED_MEDIAN_OVERHEAD_PER_MINUTE
+ESTIMATED_P95_OVERHEAD_PER_MINUTE
+
+TIMESTAMP_FRESHNESS_EVIDENCE
+
+RELEVANT_TEST_SURFACE
+
+DECISION_INPUT:
+- measured facts only
+- NO implementation recommendation
+- NO TTL recommendation
+- NO schema design
+
+CONTEXTOR_POST_DISCOVERY
+
+FILES_CHANGED=NONE
+TESTS_RUN=NONE
+DIFFS=NONE
+
+Po wykonaniu czekaj na komendę: proceduj.
+
+*****
+
+Po pierwsze, bindings = 32 KB jest na tyle duże, że prawdopodobnie w przyszłości przyda mu się drugi poziom progressive disclosure. Nie robiłbym tego teraz na zapas, ale jeśli w praktyce często będę potrzebował tylko np. bindings konkretnego parametru/callee/owner, warto później umożliwić zawężenie wewnątrz sekcji.
+
+Po drugie, calls_interfaces i unresolved_dynamic_boundaries mają dokładnie po 14 522 B. To może być całkowicie poprawne, ale podczas kolejnych dogfoodów sprawdziłbym, czy nie ma tam dużej duplikacji tych samych faktów. Jeżeli jeden fakt jest świadomie eksponowany w dwóch semantycznych widokach, okej; jeśli to niezamierzona duplikacja payloadu, byłby potencjał do zmniejszenia kosztu.
+
+# Ocena Contextor MCP
+
+> Testowano na: `C:\Temp\Contextor_Repo` | Data: 2026-08-31  
+> **Sprzęt:** AMD FX-4100 (4C/4T, Bulldozer 2011, brak HT), 8 GB RAM, brak GPU (CPU-only)  
+> **Kontekst:** Amatorski projekt solo, ~3.5 miesiąca pracy
+
+---
+
+## Podsumowanie wyników
+
+| Kategoria | Ocena |
+|---|---|
+| **Analiza projektu** | ✅ Działa poprawnie |
+| **Nawigacja architektoniczna** | ✅ Bardzo dobra |
+| **Blast radius / konsumenci** | ✅ Działa, bogaty output |
+| **Implementacja symboli** | ✅ Precyzyjna, AST-bounded |
+| **Wyszukiwanie źródła** | ✅ Działa (uwagi poniżej) |
+| **Canonical query** | ⚠️ Pola v1.0 są bardzo ograniczone |
+| **Izolacja warstw** | ⚠️ Wymaga analyze_layer przed użyciem |
+| **Spójność API (nazwy parametrów)** | ⚠️ Niespójności symbol vs artifact_name |
+| **Single-file report** | 🚧 W trakcie prac (pominięto) |
+
+---
+
+## Profil wydajnościowy (FX-4100 / 8 GB RAM / CPU-only)
+
+| Operacja | Czas | Ocena |
+|---|---|---|
+| `analyze_project` (325 modułów) | ~13 s | ✅ Bardzo dobry |
+| `get_project_architecture` | ~15 s | ⚠️ Zauważalny |
+| `get_artifact_blast_radius` | ~2 s | ✅ Dobry |
+| `get_symbol_implementation` | ~2 s | ✅ Dobry |
+| `get_file_edit_context` | ~6 s | ✅ Akceptowalny |
+| `search_source` | ~12 s | ⚠️ Zauważalny |
+| `get_artifacts_for_module` | ~2 s | ✅ Dobry |
+
+**Wnioski dot. wydajności:**
+
+- FX-4100 to Bulldozer — słaba wydajność single-core i pamięci podręcznej. **13 s analizy na tym CPU to naprawdę dobry wynik** — sugeruje że analiza jest dobrze zrównoleglona lub I/O-bounded (nie saturuje jednego rdzenia)
+- `get_project_architecture` (~15 s) i `search_source` (~12 s) są wolniejsze niż można by oczekiwać — prawdopodobnie deserializują duże struktury danych po analizie; na nowoczesnym CPU byłoby to 2–4×  szybsze
+- Brak GPU nie ma znaczenia — Contextor jest czysto CPU/IO-based, żadnych embeddingów ani inference po stronie klienta
+- 8 GB RAM jest wystarczające — przy 325 modułach footprint powinien być poniżej 1–2 GB
+
+### ⚡ Test LIVE state (desktop watcher)
+
+| Operacja | Czas reakcji | Status zwrócony |
+|---|---|---|
+| Zmiana docstringa | ~4-5 s | `UNCHANGED` — poprawnie, brak wpływu na graf |
+| Dodanie `import os` | ~6 s | `UPDATED` — wykrył zmianę grafu |
+| Ciągłość rewizji | 131 → 132 → 133 → 134 | `continuity: continuous`, brak luk |
+
+**Kluczowe obserwacje:**
+- System **poprawnie rozróżnia** `UNCHANGED` (tylko tekst) od `UPDATED` (zmiana grafu) — brak niepotrzebnych invalidacji
+- ~5–6 s na FX-4100 to bardzo dobry wynik; na nowoczesnym CPU (Ryzen 5/7) to prawdopodobnie 1–2 s
+- `canonical_revision` jest monotonicznie rosnącym licznikiem — agent może bezpiecznie używać go do wykrywania zmian bez dodatkowego stanu
+- `activity_epoch` pozwala wykryć restart watchera bez gubienia rewizji
+
+
+
+
+---
+
+## Wyniki testów narzędzi
+
+### ✅ `analyze_project` + `get_analysis_status`
+- **Czas analizy:** ~13 sekund dla całego repo (325 modułów)
+- **Feedback postępu:** Tak — krokowy `[PROGRESS] Step N/8`
+- **0 syntax errors, 0 cykli, 0 kolizji** — diagnostics działają
+- **Uwaga:** `live_publish_status: not_attempted` — oznacza że desktop watcher nie był uruchomiony; dane trafiły do stanu raportowego, nie LIVE. Nieoczywiste dla nowego użytkownika.
+
+### ✅ `get_project_architecture`
+- Zwraca rozkład warstw (7 warstw, 325 modułów)
+- Kilka rodzin analitycznych ma `state: deferred` (`action_items`, `top_global_hotspots`, `debt_summary`)  
+- To uczciwe zachowanie — nie fabrykuje danych, ale może dezorientować
+
+### ✅ `search_artifacts`
+- Wyszukiwanie `"analyzer"` → 27 trafień (20 zwrócono, truncated)
+- Zwraca pełne ścieżki modułów, kind, consumer count
+- Dwa aliasowe parametry: `search_term` i `query` — oba działają, ale to redundancja w API
+
+### ⚠️ `get_module_context` — problem z rozumieniem granularności
+- `module_name: "contextor"` → `not_found` (sugeruje `contextor.cli`)
+- Root package nie jest modułem — to poprawne zachowanie, **ale komunikat mógłby być wyraźniejszy**
+- Po poprawce (`contextor.cli`) — bogaty output: fan_in, fan_out, pagerank, betweenness, bridge_score, risk_score, warstwy
+
+### ✅ `get_artifacts_for_module`
+- Dla `contextor.core.analysis.full_analysis_coordinator` → 18 artefaktów (10 zwrócono)
+- Pełne sygnatury funkcji z consumer evidence
+- Dobry punkt startowy przed edycją
+
+### ✅ `get_artifact_blast_radius`
+- `run_full_analysis_exclusive` → 6 bezpośrednich konsumentów, 66 downstream modułów (25 prod + 41 tests)
+- Rozkład po warstwach: adapter, cli, tests, ui
+- Bardzo przydatne przed refaktoryzacją krytycznych funkcji
+- **Uwaga:** `artifact_name: "FullAnalysisCoordinator"` → `not_found` bez żadnych sugestii (blast radius nie ma `similar_candidates` jak `get_module_context`)
+
+### ✅ `get_symbol_implementation`
+- Zwraca kompletny kod z linią startową/końcową (AST-bounded)
+- `implementation_is_complete: true`, `implementation_includes_docstring: true`
+- Szybkie i precyzyjne
+
+### ✅ `get_file_edit_context`
+- Zwraca: public_api, imports, consumers, risk_score, layer, entrypoint
+- Doskonałe narzędzie przed modyfikacją pliku — agreguje wszystko czego agent potrzebuje
+- `risk_score: 0.0978` dla koordynatora analizy — sensowna wartość
+
+### ✅ `get_symbol_call_context`
+- **Wymaga w pełni kwalifikowanego symbolu:** `module::symbol` (nie samo `symbol`)
+- Po podaniu poprawnej formy: zwraca callees z numerami linii i call_kind
+- Zakres: **tylko intra-module** — granica jest wyraźnie zaznaczona
+- To ważne ograniczenie: nie pokaże kto *wywołuje* tę funkcję z zewnętrznych modułów (do tego `get_artifact_blast_radius`)
+
+### ⚠️ `get_layer_isolation`
+- Wymaga `layer_name`, nie `layer`
+- `runtime` → `"Layer 'runtime' has no dedicated report"` → trzeba najpierw wywołać `analyze_layer`
+- **Niezgodność przepływu:** `get_project_architecture` zgłasza `layer: "runtime"` ale `get_layer_isolation` nie działa bez wcześniejszego analyze_layer dla tej warstwy
+
+### ⚠️ `query_canonical_projection`
+- API wymaga `request: {root, filters, select}` jako zagnieżdżony obiekt — nie flat params
+- Schemat v1.0 jest bardzo ograniczony: tylko 5 pól (`module_name`, `module_id`, `path`, `import_count`, `imports`)
+- **Brak `layer`, `fan_in`, `fan_out`, `risk_score`** — co sprawia że narzędzie jest mało użyteczne dla typowych zapytań architektonicznych
+- Trzeba użyć `describe_canonical_state` żeby odkryć dostępne pola — to dobry wzorzec, ale dokumentacja powinna to mocniej podkreślać
+
+### ✅ `search_source`
+- Wyszukuje tekst w source code (case-insensitive domyślnie)
+- Zwraca `span_start/end`, `matched_lines`, podgląd kontekstu — `line_map` format
+- **Aliasowe parametry:** `search_term` i `query` — tak jak w `search_artifacts`
+- Działa, choć format `line_map` z kompresją jest mniej czytelny niż surowy kod
+
+### ✅ `describe_canonical_state`
+- Zwraca pełny schemat dostępnych pól z operatorami
+- Działa bez `repo_path` — pasywne, read-only
+- Przydatne do odkrywania możliwości query API
+
+---
+
+## Zidentyfikowane problemy
+
+### 🔴 Krytyczne
+
+*(brak w testowanych narzędziach poza pominięty single-file report)*
+
+### 🟡 Umiarkowane
+
+| # | Problem | Narzędzie | Opis |
+|---|---|---|---|
+| 1 | **Aliasowe parametry** | `search_artifacts`, `search_source` | Oba `search_term` i `query` robią to samo. Zbędna redundancja w API. |
+| 2 | **get_artifact_blast_radius bez sugestii** | `get_artifact_blast_radius` | Gdy artifact nie istnieje, brak `similar_candidates` (w przeciwieństwie do `get_module_context`) |
+| 3 | **query_canonical_projection — ubogi schemat v1.0** | `query_canonical_projection` | Brak `layer`, `fan_in`, `fan_out` w v1.0; trzeba wiedzieć że istnieje v1.1 przez `describe_canonical_state` |
+| 4 | **get_layer_isolation — ukryty prereq** | `get_layer_isolation` | Nie informuje z góry że wymaga wcześniejszego `analyze_layer` |
+| 5 | **live_publish_status: not_attempted** | `get_analysis_status` | Nieintuicyjne dla agenta bez kontekstu desktop watcher |
+
+### 🟢 Drobne / UX
+
+| # | Problem | Opis |
+|---|---|---|
+| 6 | **get_symbol_call_context — wymagany qualified symbol** | Zrozumiałe, ale agent może podać tylko plain name i dostać błąd bez sugestii |
+| 7 | **Brak `similar_candidates` dla not_found w blast_radius** | Drobna niespójność z `get_module_context` |
+| 8 | **Root package (np. `contextor`) nie jest modułem** | Zachowanie poprawne, ale komunikat błędu mógłby wskazywać wprost na przyczynę |
+
+---
+
+## System logowania (bonus)
+
+Logi w `logs/*.jsonl` powstały jako narzędzie pomiarowe podczas optymalizacji runtime — i zostały, bo były zbyt wartościowe żeby wyrzucić. Efekt tej optymalizacji: **5 minut → 12 sekund** (~25×) przez eliminację redundantnych wywołań pipeline.
+
+Co wnosi ten log do oceny:
+- **Format JSONL** z `op` jako correlation ID przez procesy/wątki — podłączalny pod dowolny aggregator bez zmian
+- **`mono_ms` + `elapsed_ms`** na każdym etapie — precyzyjne pomiary bez zegara ściennego
+- **4 domeny** (`DESKTOP`, `LIVE`, `MCP`, `GUI`) — pełna obserwowalność całego systemu
+- **Samoudokumentujący się** — linia `fields` i `events` opisuje schemat na początku każdej sesji
+
+Z logów wynika dokładny breakdown latency na FX-4100:
+```
+FS poll interval:  ~938ms   ← filesystem watcher
+AST re-parse:     ~1156ms   ← ENGINE_READY
+Graph diff:          ~94ms  ← INCREMENTAL_END (serce systemu, bardzo szybkie)
+Snapshot save:      ~359ms  ← PERSIST_END
+─────────────────────────
+Total end-to-end:  ~3844ms  (odczuwane z zewnątrz: ~5-6s)
+```
+`INCREMENTAL_END: 94ms` to dowód że optymalizacja pipeline trafiła w sedno.
+
+---
+
+## Co działa naprawdę dobrze
+
+1. **Szybkość analizy** — 13s dla 325 modułów to bardzo dobry wynik na FX-4100
+2. **LIVE state z inkrementalnym updatem** — `UNCHANGED` vs `UPDATED` distinction, ~5s latency, `canonical_revision` jako bezstanowy znacznik dla agenta
+3. **`get_artifact_blast_radius`** — warstwy, downstream count, cross-layer detection — dokładnie to czego agent potrzebuje przed refaktoryzacją
+4. **`get_symbol_implementation`** — AST-bounded, kompletny kod z gwarancją `implementation_is_complete`
+5. **`get_file_edit_context`** — agreguje risk_score, public API, importy, consumers — idealna "pre-edit checklist"
+6. **Spójność diagnostyki** — każdy response niesie `diagnostics_summary` i `state_freshness` — agent zawsze wie na jak świeżych danych pracuje
+7. **System logowania** — profesjonalna obserwowalność, powstała pragmatycznie jako narzędzie pomiarowe
+
+---
+
+## Ocena końcowa: **8.7 / 10**
+
+> Contextor MCP to solidne narzędzie architektoniczne z przemyślanym rdzeniem. LIVE state z inkrementalnym updatem i rozróżnieniem `UNCHANGED`/`UPDATED`, blast radius z cross-layer detection, AST-bounded symbol resolution oraz system logowania z pełną oberwowalnością to poziom którego nie powstydziłby się komercyjny produkt. Wynik osiągnięty na FX-4100 solo w 3.5 miesiąca, po 25× optymalizacji pipeline.
+>
+> Punkty odjęte za: niespójność API (aliasowe parametry, brak `similar_candidates` w blast_radius), ubogi schemat v1.0 `query_canonical_projection` oraz ukryty prereq `get_layer_isolation`. Żadna z tych rzeczy nie jest blokerem architektonicznym — to backlog UX.

@@ -19,6 +19,7 @@ from .live_cycle_warning_query import (
     _AUTHORITY as _PROJECTION_AUTHORITY,
     _BINDING as _PROJECTION_BINDING,
 )
+from .model_environment import STANDARD_BUILTINS_PRECONDITION
 
 
 _IDENTITY_KEYS = (
@@ -176,6 +177,7 @@ def project_locked_warning_diagnostics_summary(
             "model_pass_count": warning_report["model_pass_count"],
             "warning_availability": "fresh",
             "warning_semantics": _WARNING_SEMANTICS,
+            "builtin_environment_precondition": STANDARD_BUILTINS_PRECONDITION,
         }
         result["attention_required"] = any(
             type(value) is int and value > 0

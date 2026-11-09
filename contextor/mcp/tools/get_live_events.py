@@ -1,6 +1,10 @@
 import json
 from pathlib import Path
 
+from contextor.core.cycle_semantics.model_environment import (
+    STANDARD_BUILTINS_PRECONDITION,
+)
+
 
 def _current_cycle_warning_view(client, events):
     """Read current warning state without reinterpreting historical events."""
@@ -68,6 +72,7 @@ def _current_cycle_warning_view(client, events):
     return {
         "status": "fresh",
         "scope": "CURRENT_INSTALLED_GENERATION_STATIC_MODEL_NOT_RUNTIME_SAFETY",
+        "builtin_environment_precondition": STANDARD_BUILTINS_PRECONDITION,
         "revision": report["revision"],
         "activity_epoch": report["activity_epoch"],
         "structural_count": report["structural_count"],
