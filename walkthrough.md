@@ -1,132 +1,287 @@
-# F1H — unproved `TYPE_CHECKING` value
+# F1L — diagnostyczna atestacja F1H w procesie Desktop
 
-## PREFLIGHT
+## PREFLIGHT I KONTRAKT
 
-- Applicable `AGENTS.md` instructions were followed. Contextor MCP was queried before literal source inspection. Both target files were available and source-synchronized at canonical revision 1197, with fresh zero-error syntax diagnostics; `cycle_semantics` was stale.
-- Initial HEAD: `d43867eb53e018e27641d1fb683da45d910f1adb`. The only pre-existing worktree change was the F1G report in `walkthrough.md`; both requested source/test files were clean.
-- Exact anchor in `_compile` was `selected = stmt.orelse` at `package_model.py:873`. The existing `UNMODELED_STATEMENT` step and its UNKNOWN execution handler were already present. No other accepting branch for this recognized typing-guard condition was found on the checked `_compile` path.
+HEAD przed edycją: `bd0638f8381bafbd9b11be0b7a1e3808a12dd7bf`. Zmodyfikowany przed zadaniem był tylko raport `walkthrough.md`; zachowano pozostałe pliki. Discovery rozpoczęto przez Contextor MCP. Potwierdzono canonical owner: `ContextorGUI._start_post_paint_tasks` (`contextor/ui/gui.py:359`) i istniejący `runtime_trace.trace_event` / `capture_trace_events`. Zwykły Desktop analysis wykonuje model w procesie GUI, w osobnym wątku; ta diagnostyka startuje w tym samym interpreterze. Sprawdzono aktualne anchory, użycie `recognize_typing_guard`, `_compile` i bezpieczny kontrakt `trace_event`.
 
-## EXACT_IMPLEMENTATION
+Niezależny semantyczny preflight w osobnym CPython 3.15.2 potwierdził, że kompilacja bieżących bajtów bez wykonania modułu daje identyczny SHA256 `marshal.dumps(code)` dla `_compile`, a NAME/ATTRIBUTE dają dokładnie wymagane operacje. Był to test wykonalności metody, nie atestacja aktualnego Desktop.
 
-- Replaced only the recognized typing-guard `ast.If` branch's `selected = stmt.orelse` with `steps.append(_Step("UNMODELED_STATEMENT")); return tuple(steps)` (two source lines). Constant-bool and `__name__` conditions are unchanged.
-- The earlier import step remains in the returned prefix. In ordinary mode, reaching the unmodeled external `typing` import returns UNKNOWN with `reached_unmodeled_import.target == "typing"`. In conditional mode, the explicit passive-external policy records the assumed import, then the preserved `UNMODELED_STATEMENT` prevents `CONDITIONAL_MODEL_PASS`.
-- No typing recognizer, indexer, hard/soft graph, SCC, receipt, Desktop, or MCP server code was edited.
+## DOKŁADNY KONTRAKT ATESTACJI
 
-## REGRESSION_TESTS
+Prywatna `_emit_f1h_runtime_attestation` pobiera funkcję z `scenarios.evaluate_package_import_order.__globals__["_compile"]` i wymaga identyczności z `package_model._compile`. Weryfikuje `co_filename` względem dokładnego `contextor/core/cycle_semantics/package_model.py`. Kompiluje aktualne bajty przez `compile(..., "exec", dont_inherit=True, optimize=sys.flags.optimize)`, bez wykonania module code; wymaga jednego top-level `CodeType` o `co_name="_compile"`. Porównuje SHA256 marshaled code objects.
 
-- Added one parameterized test with NAME (`from typing import TYPE_CHECKING`) and ATTRIBUTE (`import typing`) forms. Both use the specified `pkg/__init__.py`, `pkg/ns/a.py`, and `pkg/ns/b.py` source bytes in an AST/`SearchPortion` inventory.
-- The ordinary evaluator requires a package initializer before it can reach `pkg.ns.a`. Its test input therefore includes a **model-only** empty `pkg.ns.__init__` AST; this is not a repository source file. The conditional evaluator receives the unaugmented namespace source inventory and its existing `SearchPortion` contract. Initial execution without that model-only initializer stopped at `pkg.ns` with UNKNOWN and no reached-import provenance; the targeted fixture correction made the import-effect assertion meaningful.
-- For each form the test asserts ordinary UNKNOWN, reached target `typing`, conditional UNKNOWN, nested model UNKNOWN, recorded assumed external target `typing`, and absence of ordinary/conditional MODEL_PASS.
-- Existing positive controls remain unchanged: `opaque_dependency` without a typing guard still yields `CONDITIONAL_MODEL_PASS` under the explicit passive-import policy; an uncalled function-local external import still yields ordinary `MODEL_PASS`. UNKNOWN is not classified as a confirmed import hazard.
+Na rzeczywiście pobranej funkcji wykonuje syntetyczne AST NAME i ATTRIBUTE, po `package_model.recognize_typing_guard`. Wymagane operacje: NAME `("FROM","UNMODELED_STATEMENT")`; ATTRIBUTE `("IMPORT","UNMODELED_STATEMENT")`. Nie wykonuje importów analizowanych modułów. Jedno zdarzenie `GUI/F1H_LOADED_CODE_ATTESTATION` ma status `MATCH` tylko przy wszystkich zgodnych kontrolach, `MISMATCH` przy zaobserwowanej niezgodności, `UNAVAILABLE` przy wyjątku/niemożności dowodu. `result` zawiera oba hashe, obie sekwencje, `sys.version` i `sys.executable`; `path` wskazuje badany moduł. `trace_event` dodaje PID/TID/czas. Brak aktywnej sesji trace może oznaczać brak trwałego wpisu mimo wywołania funkcji; capture testowy potwierdza kontrakt zdarzenia.
 
-## TARGETED_TEST_RESULTS
+`_start_post_paint_tasks` tworzy daemon thread wyłącznie przy `CONTEXTOR_F1H_ATTEST=1`. Bez flagi gałąź nie importuje modułu modelu ani nie wykonuje hashowania/AST. GUI nie jest blokowane; analizy repozytorium nie uruchomiono.
 
-- `tests/test_cycle_semantics_external_import_authority.py`: **6 passed** (including both new variants and both controls). The first run had two fixture failures because ordinary evaluation stopped before the external import at an unsupported namespace parent; the model-only initializer resolved this test setup issue. Final run passed.
-- `tests/test_cycle_semantics_package_model.py` selected external-assumption, reached-unmodeled-import, and existing guard-control cases: **11 passed, 195 deselected**. The `-k` filter also deselected two explicitly named integration nodes in that invocation; they were run separately.
-- Direct integration guard controls `test_p1d3_d2b_name_guard_inactive` and `test_p1d3_d2b_attribute_guard_inactive`: **2 passed**.
-- `git diff --check` for both changed source/test files passed. No full pytest suite was run; no existing expectations were changed.
+## TESTY
 
-## POST_CHANGE_MCP_AUDIT
+Celowany command:
+`& .\.venv\Scripts\python.exe -m pytest -q tests/test_f1h_runtime_attestation.py tests/test_gui_live_startup.py::test_post_paint_tasks_do_not_wait_for_cache_cleanup tests/test_gui_backend_owner.py::test_post_paint_starts_backend_claim_before_cleanup_and_live`
 
-- Contextor Desktop watcher recorded `package_model.py` at revision 1198 (`UPDATED`) and the test file at 1199 (`UPDATED`) and 1200 (`UNCHANGED`), with continuous event history and no resync requirement.
-- At canonical revision 1200 both target files have `workspace_sync=verified`, materialized `checked_and_none` syntax diagnostics, zero errors, and no Contextor warnings. Project-wide workspace sync remains `unverified`; that is not relabeled as a verified global source claim.
-- Graph, topology and structural-cycle families remain fresh; structural DFS path count remains 16, current active warning count 16, MODEL_PASS warning count 0. Current potential diagnostic remains count 1, fresh, restricted hard-union-soft potential scope, `runtime_execution_proven=false`. `cycle_semantics` remains stale and is reported as stale.
-- No graph construction source was changed. No MCP server/runtime code was changed; no restart was requested or performed.
+Wynik: **6 passed**, 2 ostrzeżenia deprecation z zależności authlib/fastmcp. Nowe testy: MATCH bieżącego kodu i obu form, brak wykonania `pkg` (import spy), MISMATCH po podstawieniu innego code object, UNAVAILABLE przy błędzie odczytu źródła, brak startu diagnostyki bez flagi. Dwa istniejące testy post-paint przeszły. Bez pełnego pytest.
 
-## INVARIANT_STATUS
+## MCP_POST_CHANGE_AUDIT
 
-**PROVED within the checked restricted model branch:** syntactic recognition of a `TYPE_CHECKING` guard no longer selects its `else` suite as an established runtime value. The compiler preserves prior import steps and emits `UNMODELED_STATEMENT`; the ordinary evaluator stops at the reached unmodeled `typing` import, while the conditional passive-import evaluator records that assumption and then returns UNKNOWN at the unresolved guard. The two syntactic forms and the positive controls exercise distinct sides of this branch. This is model-relative proof, not a claim of CPython runtime safety or global environment identity.
+Po edycji Contextor MCP: `gui.py` `workspace_sync=verified`, canonical revision `1202`, `syntax_diagnostics=checked_and_none`, zero błędów. LIVE project overlay: 16 cykli strukturalnych (bez zmiany względem preflight), graph/cycles fresh, `cycle_semantics=stale`; nie przedstawiono stale jako fresh. Nie zmieniono źródła konstrukcji hard/soft graph ani modelu. Source sync i rewizja nie dowodzą, że obecny Desktop załadował nową funkcję diagnostyczną.
+
+## RUNTIME_ADOPTION_BOUNDARY
+
+Test MATCH wykonał się w osobnym procesie pytest. **Nie certyfikuje aktualnego procesu Desktop**. Nie restartowano Desktop/backendu i nie uzyskano zdarzenia atestacji pochodzącego z aktualnego PID Desktop. Status adopcji w bieżącym Desktop: `NOT_PROVEN`. Mechanizm jest gotowy do opt-in podczas uruchomienia Desktop z `CONTEXTOR_F1H_ATTEST=1`.
 
 ## FILES_CHANGED
 
-- `contextor/core/cycle_semantics/package_model.py`
-- `tests/test_cycle_semantics_external_import_authority.py`
-- `walkthrough.md` is the required report artifact and is excluded from this list under the applicable workflow instructions.
+- `contextor/ui/gui.py`
+- `tests/test_f1h_runtime_attestation.py` (nowy)
 
 ## FULL_DIFFS
 
-Complete actual current-task production and test diffs:
+### contextor/ui/gui.py
 
 ```diff
-diff --git a/contextor/core/cycle_semantics/package_model.py b/contextor/core/cycle_semantics/package_model.py
-index 16fb3f9..6881435 100644
---- a/contextor/core/cycle_semantics/package_model.py
-+++ b/contextor/core/cycle_semantics/package_model.py
-@@ -870,7 +870,8 @@ def _compile(
-                     typing_guard.form,
-                 )
-             ):
--                selected = stmt.orelse
-+                steps.append(_Step("UNMODELED_STATEMENT"))
-+                return tuple(steps)
-             else:
-                 if (
-                     not isinstance(condition, ast.Compare)
-diff --git a/tests/test_cycle_semantics_external_import_authority.py b/tests/test_cycle_semantics_external_import_authority.py
-index d177e9e..a9a3247 100644
---- a/tests/test_cycle_semantics_external_import_authority.py
-+++ b/tests/test_cycle_semantics_external_import_authority.py
-@@ -4,6 +4,8 @@ import ast
- import subprocess
- import sys
+diff --git a/contextor/ui/gui.py b/contextor/ui/gui.py
+index 56bf1e3..b51eb58 100644
+--- a/contextor/ui/gui.py
++++ b/contextor/ui/gui.py
+@@ -6,9 +6,15 @@ state persistence, sub-windows and orchestrates the analysis process.
+ """
  
-+import pytest
+ import os
++import ast
++import hashlib
++import json
++import marshal
++import sys
+ import threading
+ import time
+ import tkinter as tk
++import types
+ import uuid
+ from datetime import datetime
+ from queue import Empty, Queue
+@@ -25,6 +31,7 @@ from contextor.core.analysis.full_analysis_coordinator import (
+ from contextor.core.analysis.process_pool_lifecycle import (
+     terminate_active_process_pools,
+ )
++from contextor.core.runtime_trace import trace_event
+ from contextor.core.api.facade import ContextorFacade
+ from contextor.core.live_state import (
+     DesktopLiveEventFeed,
+@@ -87,6 +94,89 @@ BACKEND_OWNER_CLAIM_RETRY_DELAYS_SECONDS = (
+     1.0,
+ )
+ 
 +
- from contextor.core.cycle_semantics.namespace_path_model import SearchPortion
- from contextor.core.cycle_semantics.package_graph_consistency import (
-     assess_package_graph_consistency,
-@@ -121,3 +123,49 @@ def test_conditional_external_assumption_stays_conditional():
-     assert result.model_assessment.assumed_external_imports[0].target == (
-         "opaque_dependency"
-     )
++def _emit_f1h_runtime_attestation() -> None:
++    module_path = Path(__file__).resolve().parents[1] / (
++        "core/cycle_semantics/package_model.py"
++    )
++    status = "UNAVAILABLE"
++    loaded_hash = None
++    source_hash = None
++    name_ops = None
++    attribute_ops = None
++    try:
++        from contextor.core.cycle_semantics import package_model, scenarios
 +
++        loaded = scenarios.evaluate_package_import_order.__globals__["_compile"]
++        code = loaded.__code__
++        loaded_hash = hashlib.sha256(marshal.dumps(code)).hexdigest()
++        module_code = compile(
++            module_path.read_bytes(),
++            code.co_filename,
++            "exec",
++            dont_inherit=True,
++            optimize=sys.flags.optimize,
++        )
++        candidates = tuple(
++            value
++            for value in module_code.co_consts
++            if isinstance(value, types.CodeType) and value.co_name == "_compile"
++        )
++        if len(candidates) == 1:
++            source_hash = hashlib.sha256(
++                marshal.dumps(candidates[0])
++            ).hexdigest()
 +
-+@pytest.mark.parametrize(
-+    "marker, guard",
-+    [
-+        ("from typing import TYPE_CHECKING", "TYPE_CHECKING"),
-+        ("import typing", "typing.TYPE_CHECKING"),
-+    ],
-+    ids=("name", "attribute"),
-+)
-+def test_unproved_typing_guard_stops_ordinary_and_conditional_models(
-+    marker, guard,
-+):
-+    trees = {
-+        "pkg.__init__": ast.parse("pass\n"),
-+        "pkg.ns.a": ast.parse(
-+            f"{marker}\nif {guard}:\n    import pkg.ns.b\nvalue = 1\n"
++        observed = []
++        for source in (
++            "from typing import TYPE_CHECKING\n"
++            "if TYPE_CHECKING:\n"
++            "    import pkg.b\n"
++            "value = 1\n",
++            "import typing\n"
++            "if typing.TYPE_CHECKING:\n"
++            "    import pkg.b\n"
++            "value = 1\n",
++        ):
++            tree = ast.parse(source)
++            guard = package_model.recognize_typing_guard(
++                tree, frozenset({"pkg.a", "pkg.b"})
++            )
++            steps = loaded(tree, "pkg.a", False, typing_guard=guard)
++            observed.append(
++                tuple(step.op for step in steps) if steps is not None else None
++            )
++        name_ops, attribute_ops = observed
++        status = "MATCH" if (
++            loaded is package_model._compile
++            and module_path.resolve() == Path(code.co_filename).resolve()
++            and source_hash is not None
++            and loaded_hash == source_hash
++            and name_ops == ("FROM", "UNMODELED_STATEMENT")
++            and attribute_ops == ("IMPORT", "UNMODELED_STATEMENT")
++        ) else "MISMATCH"
++    except Exception:
++        status = "UNAVAILABLE"
++
++    trace_event(
++        "GUI",
++        "F1H_LOADED_CODE_ATTESTATION",
++        status=status,
++        path=str(module_path),
++        result=json.dumps(
++            {
++                "loaded_sha256": loaded_hash,
++                "source_sha256": source_hash,
++                "NAME": name_ops,
++                "ATTRIBUTE": attribute_ops,
++                "python": sys.version,
++                "executable": sys.executable,
++            },
++            separators=(",", ":"),
 +        ),
-+        "pkg.ns.b": ast.parse("from pkg.ns.a import value\n"),
-+    }
-+    roots = (SearchPortion(
-+        "root", frozenset({
-+            "pkg/__init__.py", "pkg/ns/a.py", "pkg/ns/b.py",
-+        }),
-+    ),)
-+
-+    ordinary_trees = dict(trees)
-+    ordinary_trees["pkg.ns.__init__"] = ast.parse("pass\n")
-+    ordinary = evaluate_package_import_order(ordinary_trees, "pkg.ns.a")
-+    conditional = evaluate_conditional_namespace_import_order(
-+        trees, "pkg.ns.a", roots,
-+        target_python_version=(3, 15),
-+        assume_passive_external_imports=True,
 +    )
 +
-+    assert ordinary.outcome == "UNKNOWN"
-+    assert ordinary.reached_unmodeled_import is not None
-+    assert ordinary.reached_unmodeled_import.target == "typing"
-+    assert conditional.outcome == "UNKNOWN"
-+    assert conditional.model_assessment is not None
-+    assert conditional.model_assessment.outcome == "UNKNOWN"
-+    assert "typing" in {
-+        item.target for item in conditional.model_assessment.assumed_external_imports
-+    }
-+    assert conditional.outcome != "CONDITIONAL_MODEL_PASS"
-+    assert ordinary.outcome != "MODEL_PASS"
++
+ class ContextorGUI:
+     """
+     Main application controller and view wrapper.
+@@ -359,6 +449,12 @@ class ContextorGUI:
+     def _start_post_paint_tasks(self):
+         if getattr(self, "_closing", False):
+             return
++        if os.environ.get("CONTEXTOR_F1H_ATTEST") == "1":
++            threading.Thread(
++                target=_emit_f1h_runtime_attestation,
++                name="contextor-f1h-attestation",
++                daemon=True,
++            ).start()
+         self._start_backend_owner_claim()
+         self._set_live_status("LIVE: initializing in background")
+         def cleanup_worker():
+```
+
+### tests/test_f1h_runtime_attestation.py
+
+```diff
+diff --git a/tests/test_f1h_runtime_attestation.py b/tests/test_f1h_runtime_attestation.py
+new file mode 100644
+index 0000000..d3d2422
+--- /dev/null
++++ b/tests/test_f1h_runtime_attestation.py
+@@ -0,0 +1,96 @@
++import builtins
++import json
++import threading
++from pathlib import Path
++from types import SimpleNamespace
++from unittest.mock import Mock
++
++from contextor.core.cycle_semantics import package_model
++from contextor.core.runtime_trace import capture_trace_events
++from contextor.ui import gui
++
++
++def _attestation_event():
++    with capture_trace_events() as events:
++        gui._emit_f1h_runtime_attestation()
++    matches = [
++        event for event in events
++        if event["ev"] == "F1H_LOADED_CODE_ATTESTATION"
++    ]
++    assert len(matches) == 1
++    return matches[0], json.loads(matches[0]["result"])
++
++
++def test_current_loaded_code_matches_both_typing_guard_forms_without_importing_pkg(
++    monkeypatch,
++):
++    original_import = builtins.__import__
++    attempted = []
++
++    def guarded_import(name, *args, **kwargs):
++        if name == "pkg" or name.startswith("pkg."):
++            attempted.append(name)
++            raise AssertionError("analyzed import was executed")
++        return original_import(name, *args, **kwargs)
++
++    monkeypatch.setattr(builtins, "__import__", guarded_import)
++    event, result = _attestation_event()
++
++    assert event["d"] == "GUI"
++    assert event["status"] == "MATCH"
++    assert result["loaded_sha256"] == result["source_sha256"]
++    assert len(result["loaded_sha256"]) == 64
++    assert result["NAME"] == ["FROM", "UNMODELED_STATEMENT"]
++    assert result["ATTRIBUTE"] == ["IMPORT", "UNMODELED_STATEMENT"]
++    assert not attempted
++
++
++def test_different_loaded_code_object_is_mismatch(monkeypatch):
++    def substituted(*args, **kwargs):
++        return ()
++
++    monkeypatch.setattr(package_model, "_compile", substituted)
++    event, result = _attestation_event()
++
++    assert event["status"] == "MISMATCH"
++    assert result["loaded_sha256"] != result["source_sha256"]
++
++
++def test_source_read_failure_is_unavailable(monkeypatch):
++    original_read = Path.read_bytes
++
++    def failed_read(path):
++        if path.name == "package_model.py":
++            raise OSError("source unavailable")
++        return original_read(path)
++
++    monkeypatch.setattr(Path, "read_bytes", failed_read)
++    event, result = _attestation_event()
++
++    assert event["status"] == "UNAVAILABLE"
++    assert result["source_sha256"] is None
++
++
++def test_post_paint_does_not_start_attestation_without_flag(monkeypatch, tmp_path):
++    monkeypatch.delenv("CONTEXTOR_F1H_ATTEST", raising=False)
++    attestation = Mock()
++    cleanup_done = threading.Event()
++    monkeypatch.setattr(gui, "_emit_f1h_runtime_attestation", attestation)
++    monkeypatch.setattr(
++        gui,
++        "prune_startup_caches",
++        lambda: cleanup_done.set() or {"cache": {"errors": []}},
++    )
++    controller = SimpleNamespace(
++        _closing=False,
++        _start_backend_owner_claim=Mock(),
++        _set_live_status=Mock(),
++        _check_stale_excludes=Mock(),
++        repo_path_var=SimpleNamespace(get=lambda: str(tmp_path)),
++        _start_live_watcher=Mock(),
++    )
++
++    gui.ContextorGUI._start_post_paint_tasks(controller)
++
++    assert cleanup_done.wait(2)
++    attestation.assert_not_called()
 ```
 
 ## FINAL_VERDICT
 
-**PROVED for the exact F1H contract in the checked ordinary and conditional model paths.** Both requested source and test edits are synchronized in current Contextor LIVE state, focused regressions pass, and all changed production/test files have complete diffs above. No claim is made about actual CPython runtime import safety.
+Implementacja diagnostyczna i celowane testy: `PASS`. Atestacja F1H w aktualnym procesie Desktop: `NOT_PROVEN` do chwili otrzymania zdarzenia od tego procesu. Nie zmieniono modelu, LIVE, MCP ani innych plików produkcyjnych. Bez restartu, FULL, commitów i push.
+
+
+

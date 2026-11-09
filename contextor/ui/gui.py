@@ -6,9 +6,15 @@ state persistence, sub-windows and orchestrates the analysis process.
 """
 
 import os
+import ast
+import hashlib
+import json
+import marshal
+import sys
 import threading
 import time
 import tkinter as tk
+import types
 import uuid
 from datetime import datetime
 from queue import Empty, Queue
@@ -25,6 +31,7 @@ from contextor.core.analysis.full_analysis_coordinator import (
 from contextor.core.analysis.process_pool_lifecycle import (
     terminate_active_process_pools,
 )
+from contextor.core.runtime_trace import trace_event
 from contextor.core.api.facade import ContextorFacade
 from contextor.core.live_state import (
     DesktopLiveEventFeed,
@@ -86,6 +93,89 @@ BACKEND_OWNER_CLAIM_RETRY_DELAYS_SECONDS = (
     0.5,
     1.0,
 )
+
+
+def _emit_f1h_runtime_attestation() -> None:
+    module_path = Path(__file__).resolve().parents[1] / (
+        "core/cycle_semantics/package_model.py"
+    )
+    status = "UNAVAILABLE"
+    loaded_hash = None
+    source_hash = None
+    name_ops = None
+    attribute_ops = None
+    try:
+        from contextor.core.cycle_semantics import package_model, scenarios
+
+        loaded = scenarios.evaluate_package_import_order.__globals__["_compile"]
+        code = loaded.__code__
+        loaded_hash = hashlib.sha256(marshal.dumps(code)).hexdigest()
+        module_code = compile(
+            module_path.read_bytes(),
+            code.co_filename,
+            "exec",
+            dont_inherit=True,
+            optimize=sys.flags.optimize,
+        )
+        candidates = tuple(
+            value
+            for value in module_code.co_consts
+            if isinstance(value, types.CodeType) and value.co_name == "_compile"
+        )
+        if len(candidates) == 1:
+            source_hash = hashlib.sha256(
+                marshal.dumps(candidates[0])
+            ).hexdigest()
+
+        observed = []
+        for source in (
+            "from typing import TYPE_CHECKING\n"
+            "if TYPE_CHECKING:\n"
+            "    import pkg.b\n"
+            "value = 1\n",
+            "import typing\n"
+            "if typing.TYPE_CHECKING:\n"
+            "    import pkg.b\n"
+            "value = 1\n",
+        ):
+            tree = ast.parse(source)
+            guard = package_model.recognize_typing_guard(
+                tree, frozenset({"pkg.a", "pkg.b"})
+            )
+            steps = loaded(tree, "pkg.a", False, typing_guard=guard)
+            observed.append(
+                tuple(step.op for step in steps) if steps is not None else None
+            )
+        name_ops, attribute_ops = observed
+        status = "MATCH" if (
+            loaded is package_model._compile
+            and module_path.resolve() == Path(code.co_filename).resolve()
+            and source_hash is not None
+            and loaded_hash == source_hash
+            and name_ops == ("FROM", "UNMODELED_STATEMENT")
+            and attribute_ops == ("IMPORT", "UNMODELED_STATEMENT")
+        ) else "MISMATCH"
+    except Exception:
+        status = "UNAVAILABLE"
+
+    trace_event(
+        "GUI",
+        "F1H_LOADED_CODE_ATTESTATION",
+        status=status,
+        path=str(module_path),
+        result=json.dumps(
+            {
+                "loaded_sha256": loaded_hash,
+                "source_sha256": source_hash,
+                "NAME": name_ops,
+                "ATTRIBUTE": attribute_ops,
+                "python": sys.version,
+                "executable": sys.executable,
+            },
+            separators=(",", ":"),
+        ),
+    )
+
 
 class ContextorGUI:
     """
@@ -359,6 +449,12 @@ class ContextorGUI:
     def _start_post_paint_tasks(self):
         if getattr(self, "_closing", False):
             return
+        if os.environ.get("CONTEXTOR_F1H_ATTEST") == "1":
+            threading.Thread(
+                target=_emit_f1h_runtime_attestation,
+                name="contextor-f1h-attestation",
+                daemon=True,
+            ).start()
         self._start_backend_owner_claim()
         self._set_live_status("LIVE: initializing in background")
         def cleanup_worker():
