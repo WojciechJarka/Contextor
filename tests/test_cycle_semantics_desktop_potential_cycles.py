@@ -20,6 +20,9 @@ from contextor.ui.cycle_warning_presentation import (
 from contextor.core.live_state.runtime import (
     _repository_canonical_query_handler,
 )
+from contextor.core.reporting_engine.persistent_registry import (
+    PersistentIdentityRegistry,
+)
 from tests.test_cycle_semantics_desktop_warning_presentation import (
     _analysis_result,
 )
@@ -31,6 +34,7 @@ from tests.test_original_worker_official_full_live_publication import (
     _official_live,
 )
 from tests.test_original_worker_partial_scc_preparation import TWO_PASS
+from tests.test_gui_live_startup import _make_analysis_controller
 
 
 @pytest.fixture(autouse=True)
@@ -52,6 +56,21 @@ def _witness_repo(root):
         encoding="utf-8",
     )
     (root / "pkg" / "b.py").write_text(
+        "from pkg.a import value\n", encoding="utf-8",
+    )
+
+
+def _potential_only_repo(root):
+    package = root / "pkg"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("pass\n", encoding="utf-8")
+    (package / "a.py").write_text(
+        "from typing import TYPE_CHECKING\n"
+        "if TYPE_CHECKING:\n    import pkg.b\n"
+        "value = 1\n",
+        encoding="utf-8",
+    )
+    (package / "b.py").write_text(
         "from pkg.a import value\n", encoding="utf-8",
     )
 
@@ -180,8 +199,175 @@ def test_verified_control_reports_zero_and_keeps_healthy_success(tmp_path, isola
         diagnostic = summary["soft_dependent_potential_cycles"]
         assert diagnostic["availability"] == "fresh"
         assert diagnostic["count"] == 0
-        assert "Repository is healthy!" in info.call_args.args[1]
+        assert info.call_args.args[1] == (
+            "No validation errors or soft-dependent potential cycles were "
+            "detected in the verified static analysis. This does not prove "
+            "Python runtime safety."
+        )
         warning.assert_not_called()
+
+
+def test_f1c_potential_only_live_desktop_has_no_hard_cycle_or_model_pass(
+    tmp_path, isolated_dirs, monkeypatch,
+):
+    root = tmp_path / "potential-only"
+    root.mkdir()
+    _potential_only_repo(root)
+    warning = MagicMock()
+    info = MagicMock()
+    monkeypatch.setattr(gui.messagebox, "showwarning", warning)
+    monkeypatch.setattr(gui.messagebox, "showinfo", info)
+    controller = _gui_controller(root, monkeypatch)
+
+    with _official_live(root, monkeypatch) as (client, server, identity, _calls):
+        _install_diagnostics_handler(server)
+        ContextorGUI.analyze(controller)
+        errors, result = controller._full_analysis_done
+        assert result.live_publish_status == "success"
+        assert identity.repo_id
+
+        installed = client.snapshot()
+        graph = installed["state"].dependency_graph
+        assert "pkg.b" not in graph.hard_edges.get("pkg.a", set())
+        assert "pkg.a" in graph.hard_edges["pkg.b"]
+        assert "pkg.b" in graph.soft_edges["pkg.a"]
+
+        response = client.canonical_query("diagnostics_summary", payload={})
+        assert response["status"] == "ok"
+        diagnostic = response["result"]["soft_dependent_potential_cycles"]
+        assert response["revision"] == result.live_publish_revision
+        assert diagnostic["availability"] == "fresh"
+        assert diagnostic["count"] == 1
+
+        report = client.get_installed_cycle_warning_projection()
+        assert report["revision"] == response["revision"]
+        assert report["structural_paths"] == ()
+        assert report["model_pass_paths"] == ()
+        assert report["model_pass_count"] == 0
+        assert not [error for error in errors if error.kind == "ArchitectureCycle"]
+        warning.assert_called_once()
+        assert "POTENTIAL cycle involving uncertain dependencies" in (
+            warning.call_args.args[1]
+        )
+        assert "Repository is healthy!" not in warning.call_args.args[1]
+        info.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "diagnostic,expected_dialog,expected_fragment",
+    [
+        pytest.param(
+            {
+                "availability": "fresh",
+                "count": 1,
+                "components": ({
+                    "members": ("pkg.a", "pkg.b"),
+                    "member_count": 2,
+                    "soft_only_internal_edges": (("pkg.a", "pkg.b"),),
+                    "soft_only_internal_edge_count": 1,
+                },),
+            },
+            "warning",
+            "POTENTIAL cycle involving uncertain dependencies",
+            id="positive",
+        ),
+        pytest.param(
+            {
+                "availability": "fresh",
+                "count": 0,
+                "components": (),
+            },
+            "info",
+            "No validation errors or soft-dependent potential cycles",
+            id="verified-zero",
+        ),
+        pytest.param(
+            {
+                "availability": "unavailable",
+                "count": None,
+                "components": (),
+            },
+            "warning",
+            "absence of potential cycles was not established",
+            id="unavailable",
+        ),
+    ],
+)
+def test_cleared_recovery_presents_potential_diagnostic_honestly(
+    tmp_path, monkeypatch, diagnostic, expected_dialog, expected_fragment,
+):
+    root = tmp_path / "recovery"
+    root.mkdir()
+    identity = PersistentIdentityRegistry(str(root))
+    controller = _make_analysis_controller(root)
+    ContextorGUI._request_full_analysis_recovery(
+        controller, str(root), "previous recovery incident", queue_prompt=False,
+    )
+    certificate = {
+        "certificate_id": "f1f-certificate",
+        "incident_generation": 1,
+        "repo_id": identity.repo_id,
+        "root_path": str(root.resolve()),
+        "state_id": "f1f-state",
+        "revision": 7,
+    }
+
+    class RecoveryClient:
+        def get_events(self, **_kwargs):
+            return {"latest_seq": 0}
+
+        def verify_recovery(self, generation):
+            assert generation == 1
+            return {"status": "ok", "certificate": certificate}
+
+        def complete_recovery_verification(self, certificate_id, generation):
+            return {
+                "status": "ok",
+                "released": True,
+                "certificate_id": certificate_id,
+                "incident_generation": generation,
+            }
+
+        def cancel_recovery_verification(self, *_args, **_kwargs):
+            pytest.fail("valid recovery certificate must not be cancelled")
+
+    client = RecoveryClient()
+    monkeypatch.setattr("contextor.core.live_state.connect", lambda _root: client)
+    monkeypatch.setattr(
+        gui,
+        "run_full_analysis_exclusive",
+        lambda *_args, **_kwargs: (
+            [], SimpleNamespace(live_publish_status="success"),
+        ),
+    )
+    monkeypatch.setattr(
+        "contextor.ui.cycle_warning_presentation.read_authenticated_soft_dependent_cycle_diagnostic",
+        lambda *_args, **_kwargs: diagnostic,
+    )
+    monkeypatch.setattr(
+        gui,
+        "run_with_progress",
+        lambda _root, _progress, task, *, on_success, **_kwargs: on_success(task()),
+    )
+    warning = MagicMock()
+    info = MagicMock()
+    monkeypatch.setattr(gui.messagebox, "showwarning", warning)
+    monkeypatch.setattr(gui.messagebox, "showinfo", info)
+
+    ContextorGUI.analyze(
+        controller,
+        recovery_repository=str(root),
+        recovery_generation=1,
+    )
+
+    selected = warning if expected_dialog == "warning" else info
+    selected.assert_called_once()
+    other = info if expected_dialog == "warning" else warning
+    other.assert_not_called()
+    message = selected.call_args.args[1]
+    assert expected_fragment in message
+    if diagnostic["availability"] != "fresh":
+        assert "No validation errors or soft-dependent potential cycles" not in message
 
 
 def test_stale_or_mismatched_live_authority_is_not_verified_zero(

@@ -1487,13 +1487,22 @@ class ContextorGUI:
             potential_message = format_soft_dependent_cycle_diagnostic(
                 potential_diagnostic
             )
+            potential_count = potential_diagnostic.get("count")
+            potential_positive = (
+                type(potential_count) is int and potential_count > 0
+            )
+            potential_verified_zero = (
+                potential_diagnostic.get("availability") == "fresh"
+                and type(potential_count) is int
+                and potential_count == 0
+            )
             detail_lines = [
                 f"{error.kind}: {error.message}"
                 for error in errors
             ]
             if (
                 potential_diagnostic.get("availability") != "fresh"
-                or potential_diagnostic.get("count", 0) > 0
+                or potential_positive
             ):
                 detail_lines.append(potential_message)
             elif not errors:
@@ -1505,13 +1514,17 @@ class ContextorGUI:
                 self._start_live_watcher(path, initial_seq=pre_seq)
                 if (
                     not errors
-                    and potential_diagnostic.get("availability") == "fresh"
-                    and potential_diagnostic.get("count") == 0
+                    and potential_verified_zero
                 ):
-                    messagebox.showinfo("OK", "No issues found. Repository is healthy!")
+                    messagebox.showinfo(
+                        "OK",
+                        "No validation errors or soft-dependent potential cycles "
+                        "were detected in the verified static analysis. "
+                        "This does not prove Python runtime safety.",
+                    )
                     return
                 messagebox.showwarning(
-                    "Issues Detected" if errors or potential_diagnostic.get("count", 0) else "Analysis complete",
+                    "Issues Detected" if errors or potential_positive else "Analysis incomplete",
                     details or potential_message,
                 )
                 return
@@ -1523,12 +1536,12 @@ class ContextorGUI:
                 self._set_live_status(
                     "LIVE recovery verification failed; full repository analysis may be required."
                 )
-                if errors:
+                if errors or potential_positive:
                     messagebox.showwarning("Issues Detected", details)
                 else:
                     messagebox.showinfo(
                         "Analysis complete",
-                        "No static issues found. LIVE recovery verification failed; "
+                        "LIVE recovery verification failed; "
                         "full repository analysis may be required.\n\n"
                         + potential_message,
                     )
@@ -1537,28 +1550,39 @@ class ContextorGUI:
                 self._set_live_status(
                     "LIVE recovery verified; incremental updates resumed."
                 )
-                if not errors:
+                if not errors and potential_verified_zero:
                     messagebox.showinfo(
                         "OK",
                         "LIVE recovery verified; incremental updates resumed.\n\n"
-                        + potential_message,
+                        "No validation errors or soft-dependent potential cycles "
+                        "were detected in the verified static analysis. "
+                        "This does not prove Python runtime safety.",
                     )
                 else:
-                    messagebox.showwarning("Issues Detected", details)
+                    messagebox.showwarning(
+                        "Issues Detected" if errors or potential_positive else "Analysis incomplete",
+                        "LIVE recovery verified; incremental updates resumed.\n\n"
+                        + (details or potential_message),
+                    )
                 return
 
             self._set_live_status(
                 "LIVE recovery verification failed; full repository analysis may be required."
             )
-            if not errors:
+            if errors or potential_positive:
+                messagebox.showwarning(
+                    "Issues Detected",
+                    "LIVE recovery verification failed; full repository analysis "
+                    "may be required.\n\n"
+                    + (details or potential_message),
+                )
+            else:
                 messagebox.showinfo(
                     "Analysis complete",
-                    "No static issues found. LIVE recovery verification failed; "
+                    "LIVE recovery verification failed; "
                     "full repository analysis may be required.\n\n"
                     + potential_message,
                 )
-            else:
-                messagebox.showwarning("Issues Detected", details)
 
         def on_error(exc):
             if recovery_generation is not None:
