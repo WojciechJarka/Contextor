@@ -10,7 +10,6 @@ from .model_identity import indexed_to_logical_module, logical_to_indexed_module
 from .typing_guard import (
     _typing_guard_parent_initializers,
     _typing_guard_passive_initializer,
-    recognize_typing_guard,
     type_only_candidate_statement_ids,
 )
 
@@ -404,10 +403,6 @@ def assess_package_graph_consistency(
 
     for module_id in evidence_source_modules:
         expected: set[str] = set()
-        typing_guard = recognize_typing_guard(
-            sources[module_id],
-            indexed,
-        )
         type_only_ids = (
             type_only_candidate_statement_ids(
                 sources[module_id],
@@ -441,12 +436,6 @@ def assess_package_graph_consistency(
         )
 
         for node in ast.walk(sources[module_id]):
-            if (
-                typing_guard is not None
-                and node is typing_guard.marker_statement
-            ):
-                continue
-
             if isinstance(node, ast.Import):
                 for alias_ordinal, alias in enumerate(node.names):
                     if not all(part.isidentifier() for part in alias.name.split(".")):
