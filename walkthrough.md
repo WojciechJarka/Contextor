@@ -1,39 +1,39 @@
-# P5-M06-I1 — Import chain resolution extraction
+# P5-M06-I2 — Ready import operation extraction
 
 ## PREFLIGHT
 
-- DIRECT_EVIDENCE: HEAD before and after: `68ec5c5e668440b4af47020a603d60e0c8282b9f`. Initial status: only ` M walkthrough.md` (pre-existing M06-D1 report). No Git index or history mutation was performed.
-- DIRECT_EVIDENCE: Contextor LIVE pre-change revision 1277; `package_model.py` canonical state fresh, workspace_sync verified. Backend interpreter executable: `C:\Temp\Contextor_Repo\.venv\Scripts\python.exe` (active backend PID 14072).
-- DIRECT_EVIDENCE: `execution/imports.py` did not exist. `package_model.py:1466-1482` contained the exact specified nested definitions. The only calls were at old lines 1684, 1714, 1825. Repository search found no other `missing_piece` references in production or tests.
-- CODE_PATH_PROVED: The extracted helper reads the same mutable `states` mapping at each of the same three call sites, in the same order, with the same comparisons and returns. It introduces no Contextor-specific branch or semantic assumption.
+- DIRECT_EVIDENCE: Initial HEAD `e3bd0648a511b8cbce6141189d11a1c8142d812f`; initial worktree clean. No Git index or history mutation by this task.
+- DIRECT_EVIDENCE: Contextor canonical LIVE revision 1279; `package_model.py` fresh, workspace_sync verified. Active backend executable: `C:\Temp\Contextor_Repo\.venv\Scripts\python.exe` (PID 14072).
+- DIRECT_EVIDENCE: `execution/imports.py:1-26` retained the accepted M06-I1 implementation. `package_model.py:1732-1763` matched the specified IMPORT branch verbatim. No source drift.
+- CODE_PATH_PROVED: The extracted operation preserves the same check for dotted explicit aliases, namespace assignment condition, event kind, and UNKNOWN result arguments. The common evaluator target resolution and frame-index advancement remain outside this branch. This extraction adds no semantic rule or Contextor-specific exception.
 
 ## FILES_CHANGED
 
+- `contextor/core/cycle_semantics/execution/imports.py`
 - `contextor/core/cycle_semantics/package_model.py`
-- `contextor/core/cycle_semantics/execution/imports.py` (new)
-- `walkthrough.md` (report only; overwritten as required)
+- `walkthrough.md` (report only; overwritten)
 
 ## EXACT_IMPLEMENTATION
 
-- DIRECT_EVIDENCE: Added `_chain` and `_missing_piece` to `execution/imports.py:1-26` exactly as specified.
-- DIRECT_EVIDENCE: `package_model.py:50` imports `_missing_piece`; deleted only the nested `chain` and `missing_piece` definitions; updated the three calls to pass `states`.
+- DIRECT_EVIDENCE: Added `_ImportControl` and `_execute_ready_import` to `execution/imports.py:31-81`; existing `_chain` and `_missing_piece` remain unchanged.
+- DIRECT_EVIDENCE: `package_model.py:50-53` imports the new helper; the ready IMPORT branch delegates to it, returns UNKNOWN on `RETURN_UNKNOWN`, and appends the same `PackageModelEvent` on advance.
 
-## IMPORT_CHAIN_CHECKS
+## IMPORT_CONTROL_CHECKS
 
-- DIRECT_EVIDENCE: Backend interpreter assertions passed: `package_model._missing_piece is execution.imports._missing_piece`; `_chain("a.b.c") == ("a", "a.b", "a.b.c")`; absent and NEW pieces return their first unresolved segment; INITIALIZING parent advances to child; fully READY chain returns `None`; `_compile` and `evaluate_package_import_order` retain `package_model` as `__module__`.
-- CODE_PATH_PROVED: The helper does not mutate `states`; its only mapping operations are membership and lookup (`execution/imports.py:20-25`).
+- DIRECT_EVIDENCE: All specified backend-venv assertions passed: explicit dotted alias binding, missing parent binding UNKNOWN with no consumer mutation, bootstrap advance with no event, function-local and class-local events without module binding, and unchanged `__module__` for `_compile` and `evaluate_package_import_order`.
+- CODE_PATH_PROVED: `execution/imports.py:49-81` reads the same `step` fields and namespace entries as the old branch; the evaluator appends the event only after the helper returns advance.
 
 ## TARGETED_TEST_RESULTS
 
-- DIRECT_EVIDENCE: Exact requested focused command using backend venv: 393 passed, 2 third-party deprecation warnings, 43.17 s. Files: `test_cycle_semantics_package_model.py`, `test_cycle_semantics_function_local_from.py`, `test_cycle_semantics_namespace_path_model.py`, `test_cycle_semantics_passive_classes.py`, `test_f1h_runtime_attestation.py`.
-- DIRECT_EVIDENCE: `git diff --check` exit 0. Git emitted only an LF/CRLF advisory for `walkthrough.md`.
+- DIRECT_EVIDENCE: Exact requested focused pytest subset passed: 410 passed, 2 third-party deprecation warnings, 43.97 s. No SCC02 or full suite run.
+- DIRECT_EVIDENCE: `git diff --check` exit 0; only an LF/CRLF advisory for `execution/imports.py`.
 
 ## MCP_POST_CHANGE_AUDIT
 
-- DIRECT_EVIDENCE: Canonical LIVE revision 1279. Both changed modules have canonical state fresh and workspace_sync verified; module, graph, topology, cycles and lineage fresh. Project-level workspace_sync is unverified, so file-level verification is the narrower evidence.
-- DIRECT_EVIDENCE: `package_model -> execution.imports` is one hard dependency. `execution.imports` has zero outbound dependencies; specifically no reverse edge to `package_model`.
-- DIRECT_EVIDENCE: Syntax errors 0; structural DFS back-edge cycle count 16; active warning count 16; model pass count 0. Cyclic SCC count unavailable because `cycle_semantics` is stale. No FULL, update_file, or backend restart.
-- UNKNOWN: Runtime process adoption of the changed source was not established by LIVE source freshness; importability was checked in a fresh backend-venv interpreter.
+- DIRECT_EVIDENCE: LIVE revision 1281. Both changed modules have canonical state fresh and workspace_sync verified. Module, graph, topology, cycles and lineage fresh. Project-level workspace_sync remains unverified.
+- DIRECT_EVIDENCE: Hard dependency edges: `package_model -> execution.imports -> execution.steps`. `execution.imports` has no outbound hard edge to `package_model`.
+- DIRECT_EVIDENCE: Syntax errors 0; structural DFS back-edge cycle count 16; active warnings 16. `cycle_semantics` is stale; current cyclic SCC count is unavailable. No FULL, update_file or restart.
+- UNKNOWN: LIVE source freshness does not attest adoption by the already-running backend; importability and behavior were checked in a new backend-venv interpreter.
 
 ## FULL_DIFFS
 
@@ -41,107 +41,144 @@
 
 ```diff
 diff --git a/contextor/core/cycle_semantics/execution/imports.py b/contextor/core/cycle_semantics/execution/imports.py
-new file mode 100644
---- /dev/null
+index c422b8c..b41a624 100644
+--- a/contextor/core/cycle_semantics/execution/imports.py
 +++ b/contextor/core/cycle_semantics/execution/imports.py
-@@ -0,0 +1,26 @@
-+from __future__ import annotations
+@@ -1,6 +1,10 @@
+ from __future__ import annotations
+ 
++from dataclasses import dataclass
+ from typing import Mapping
++from typing import Literal
 +
-+from typing import Mapping
++from .steps import _Step
+ 
+ 
+ def _chain(name: str) -> tuple[str, ...]:
+@@ -24,3 +28,54 @@ def _missing_piece(
+             return piece
+ 
+     return None
 +
 +
-+def _chain(name: str) -> tuple[str, ...]:
-+    parts = name.split(".")
++@dataclass(frozen=True)
++class _ImportControl:
++    action: Literal["ADVANCE", "RETURN_UNKNOWN"]
++    target: str | None = None
++    symbol: str | None = None
++    event_operation: str | None = None
 +
-+    return tuple(
-+        ".".join(parts[:index])
-+        for index in range(1, len(parts) + 1)
++
++def _execute_ready_import(
++    step: _Step,
++    *,
++    module: str,
++    bootstrap: str,
++    namespaces: dict[str, dict[str, object | None]],
++) -> _ImportControl:
++    target = step.target
++
++    if module == bootstrap:
++        return _ImportControl("ADVANCE")
++
++    if step.explicit_alias and "." in target:
++        parent, child = target.rsplit(".", 1)
++
++        if namespaces[parent].get(child) != target:
++            return _ImportControl(
++                "RETURN_UNKNOWN",
++                target=target,
++                symbol=child,
++            )
++
++    binding_target = (
++        target
++        if step.explicit_alias
++        else target.split(".")[0]
 +    )
 +
++    if not step.function_local and not step.class_local:
++        namespaces[module][step.binding] = binding_target
 +
-+def _missing_piece(
-+    name: str,
-+    states: Mapping[str, str],
-+) -> str | None:
-+    for piece in _chain(name):
-+        if piece not in states:
-+            return piece
-+
-+        if states[piece] == "NEW":
-+            return piece
-+
-+    return None
++    return _ImportControl(
++        "ADVANCE",
++        event_operation=(
++            "FUNCTION_LOCAL_IMPORT"
++            if step.function_local
++            else "CLASS_LOCAL_IMPORT"
++            if step.class_local
++            else "IMPORT"
++        ),
++    )
 ```
 
 ### contextor/core/cycle_semantics/package_model.py
 
 ```diff
 diff --git a/contextor/core/cycle_semantics/package_model.py b/contextor/core/cycle_semantics/package_model.py
-index 00eb8df..6804430 100644
+index 6804430..b98dad9 100644
 --- a/contextor/core/cycle_semantics/package_model.py
 +++ b/contextor/core/cycle_semantics/package_model.py
-@@ -47,6 +47,7 @@ from .execution.state import (
+@@ -47,7 +47,10 @@ from .execution.state import (
      _new_execution_cursor,
      _new_definition_state,
  )
-+from .execution.imports import _missing_piece
+-from .execution.imports import _missing_piece
++from .execution.imports import (
++    _missing_piece,
++    _execute_ready_import,
++)
  
  
  @dataclass(frozen=True)
-@@ -1463,24 +1464,6 @@ def evaluate_package_import_order(
-     execution_cursor = _new_execution_cursor(bootstrap)
-     frames = execution_cursor.frames
- 
--    def chain(name: str) -> tuple[str, ...]:
--        parts = name.split(".")
--
--        return tuple(
--            ".".join(parts[:index])
--            for index in range(1, len(parts) + 1)
--        )
--
--    def missing_piece(name: str) -> str | None:
--        for piece in chain(name):
--            if piece not in states:
--                return piece
--
--            if states[piece] == "NEW":
--                return piece
--
--        return None
--
-     indexed_roots = frozenset(
-         name.split(".", 1)[0]
-         for name in programs
-@@ -1681,7 +1664,7 @@ def evaluate_package_import_order(
-                     reached_unmodeled_import=blocker,
+@@ -1730,32 +1733,25 @@ def evaluate_package_import_order(
                  )
  
--            next_piece = missing_piece(target)
-+            next_piece = _missing_piece(target, states)
+             elif step.op == "IMPORT":
+-                if module != bootstrap:
+-                    if step.explicit_alias and "." in target:
+-                        parent, child = target.rsplit(".", 1)
+-
+-                        if namespaces[parent].get(child) != target:
+-                            return result("UNKNOWN", target, child)
++                import_control = _execute_ready_import(
++                    step,
++                    module=module,
++                    bootstrap=bootstrap,
++                    namespaces=namespaces,
++                )
  
-             if next_piece:
-                 if next_piece not in programs:
-@@ -1711,7 +1694,7 @@ def evaluate_package_import_order(
+-                    binding_target = (
+-                        target
+-                        if step.explicit_alias
+-                        else target.split(".")[0]
++                if import_control.action == "RETURN_UNKNOWN":
++                    return result(
++                        "UNKNOWN",
++                        import_control.target,
++                        import_control.symbol,
+                     )
  
-                     if child in programs:
-                         if states[child] == "NEW":
--                            if missing_piece(child) != child:
-+                            if _missing_piece(child, states) != child:
-                                 return result("UNKNOWN", child, member)
- 
-                             states[child] = "INITIALIZING"
-@@ -1822,7 +1805,7 @@ def evaluate_package_import_order(
-                         if states[child] != "NEW":
-                             return result("UNKNOWN", child, member)
- 
--                        next_child = missing_piece(child)
-+                        next_child = _missing_piece(child, states)
- 
-                         if next_child != child:
-                             return result("UNKNOWN", child, member)
+-                    if not step.function_local and not step.class_local:
+-                        namespaces[module][step.binding] = binding_target
+-
++                if import_control.event_operation is not None:
+                     events.append(
+                         PackageModelEvent(
+                             module,
+-                            (
+-                                "FUNCTION_LOCAL_IMPORT"
+-                                if step.function_local
+-                                else "CLASS_LOCAL_IMPORT"
+-                                if step.class_local
+-                                else "IMPORT"
+-                            ),
++                            import_control.event_operation,
+                             target,
+                             step.binding,
+                         )
 ```
 
 ## FINAL_VERDICT
 
-- CONTRACT_PROVED: Literal extraction completed; compatibility assertions, focused regressions, and diff check passed. Source-level LIVE audit is fresh for both changed modules. Cycle semantics remains stale and runtime adoption is UNKNOWN, so neither is claimed as certified.
+- CONTRACT_PROVED: Exact extraction completed; direct compatibility checks, targeted tests and diff check passed. Source-level LIVE audit is fresh for both changed modules. Current cycle semantics and running-backend adoption remain unverified, so no runtime semantic certification is claimed.

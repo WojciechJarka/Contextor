@@ -47,7 +47,10 @@ from .execution.state import (
     _new_execution_cursor,
     _new_definition_state,
 )
-from .execution.imports import _missing_piece
+from .execution.imports import (
+    _missing_piece,
+    _execute_ready_import,
+)
 
 
 @dataclass(frozen=True)
@@ -1730,32 +1733,25 @@ def evaluate_package_import_order(
                 )
 
             elif step.op == "IMPORT":
-                if module != bootstrap:
-                    if step.explicit_alias and "." in target:
-                        parent, child = target.rsplit(".", 1)
+                import_control = _execute_ready_import(
+                    step,
+                    module=module,
+                    bootstrap=bootstrap,
+                    namespaces=namespaces,
+                )
 
-                        if namespaces[parent].get(child) != target:
-                            return result("UNKNOWN", target, child)
-
-                    binding_target = (
-                        target
-                        if step.explicit_alias
-                        else target.split(".")[0]
+                if import_control.action == "RETURN_UNKNOWN":
+                    return result(
+                        "UNKNOWN",
+                        import_control.target,
+                        import_control.symbol,
                     )
 
-                    if not step.function_local and not step.class_local:
-                        namespaces[module][step.binding] = binding_target
-
+                if import_control.event_operation is not None:
                     events.append(
                         PackageModelEvent(
                             module,
-                            (
-                                "FUNCTION_LOCAL_IMPORT"
-                                if step.function_local
-                                else "CLASS_LOCAL_IMPORT"
-                                if step.class_local
-                                else "IMPORT"
-                            ),
+                            import_control.event_operation,
                             target,
                             step.binding,
                         )
