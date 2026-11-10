@@ -59,6 +59,7 @@ from .execution.lifecycle import (
     _complete_module_frame,
     _start_module_frame,
 )
+from .execution.calls import _execute_restricted_call
 
 
 @dataclass(frozen=True)
@@ -2160,31 +2161,17 @@ def evaluate_package_import_order(
             )
 
         elif step.op == "CALL_FUNCTION":
-            expected_binding = (
-                "\x00FUNCTION:" + module + ":" + step.target
+            call_control = _execute_restricted_call(
+                step,
+                module=module,
+                index=index,
+                namespaces=namespaces,
+                function_definitions=function_definitions,
+                programs=programs,
             )
 
-            if (
-                namespaces[module].get(step.target)
-                != expected_binding
-                or step.target
-                not in function_definitions[module]
-            ):
-                return result(
-                    "UNKNOWN",
-                    module,
-                    step.target,
-                )
-
-            # Expand the function's restricted import-only body
-            # at its actual call site. This changes only the
-            # in-memory compiled execution sequence, never
-            # caller AST or source bytes.
-            body_steps = function_definitions[module][step.target]
-
-            programs[module][
-                index + 1:index + 1
-            ] = list(body_steps)
+            if call_control == "RETURN_UNKNOWN":
+                return result("UNKNOWN", module, step.target)
 
             events.append(
                 PackageModelEvent(
