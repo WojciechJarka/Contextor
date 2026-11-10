@@ -1,56 +1,321 @@
-# P3-R2-T1-C1 — remove hardcoded Python version
+# K09 — implementation
 
-## PREFLIGHT
+## FILES_CHANGED
 
-Contextor MCP first: canonical revision `1257`, state_id `20261109_210842`, target test symbol `workspace_sync=verified`. HEAD `f415f793c3bab4f03bf11912c028311772b182e1`; przed edycją brak source/test worktree changes. AST wskazanej funkcji `test_conditional_external_side_effect_is_not_runtime_authority` obejmuje linie 175–278. W niej anchor `assert sys.version_info[:3] == (3, 15, 2)` występował dokładnie raz, a `target_python_version=(3, 15),` dokładnie raz; w całym pliku drugi anchor występował trzy razy, więc zakres funkcji był konieczny. Zmieniono tylko oba wskazane miejsca.
+tests/test_cycle_semantics_passive_classes.py
 
-## ACTIVE_BACKEND_INTERPRETER_EVIDENCE
+## K09_CASE_RESULTS
+- K09-A: pkg.a EARLY_BINDING_HAZARD / CPython ImportError; pkg.b MODEL_PASS / CPython success.
+- K09-B: pkg.a EARLY_BINDING_HAZARD / CPython ImportError; pkg.b MODEL_PASS / CPython success.
+- K09-C: corrected independent pkg.c target; pkg.a EARLY_BINDING_HAZARD / CPython ImportError; pkg.b MISSING_EXPORT / CPython ImportError.
+- K09-D: pkg.a EARLY_BINDING_HAZARD / CPython ImportError; pkg.b MISSING_EXPORT / CPython ImportError.
+- K09-E: MISSING_EXPORT / CPython ImportError.
+- K09-F: MODEL_PASS / CPython success.
+- K09-G: all three unsupported forms UNKNOWN.
+- K09-H: deterministic result and unchanged AST.
 
-Read-only IPC `authority_status`: aktywny LIVE owner PID `13968`, service `c3dbe3bf94ef45ce8d453ba1984fd27d`, process_start_identity `134387828093072108`; `desktop_claim_status` wskazuje tego samego ownera z Desktop PID `12736`. OS Win32_Process: LIVE backend PID 13968 i MCP backend PID 13404 mają command line rozpoczynający się od **`C:\Temp\Contextor_Repo\.venv\Scripts\python.exe`**; Windows pokazuje bazowy obraz wykonywalny `C:\Python315\python.exe` jako child procesu venv launcher. Desktop backend używa tej samej ścieżki venv. Nie wybrano interpretera z PATH ani nazwy katalogu bez powiązania z procesem.
-
-Odczyt uruchomiony dokładnie przez tę zaobserwowaną absolutną ścieżkę zwrócił: `sys.executable=C:\Temp\Contextor_Repo\.venv\Scripts\python.exe`, `sys.prefix=C:\Temp\Contextor_Repo\.venv`, `sys.base_prefix=C:\Python315`, `sys.version_info=(3,15,2,'final',0)`, `sys.prefix != sys.base_prefix=True`. `pyvenv.cfg` wiąże venv z `C:\Python315\python.exe`, version `3.15.2`. Dane `sys.*` pochodzą z nowego procesu uruchomionego przez **ten sam executable path**, gdyż istniejący IPC nie udostępnia introspekcji `sys.*` wewnątrz bieżącego ownera; tożsamość uruchomionego backendu jest potwierdzona OS process command line i IPC service identity.
-
-## EXACT_FILES_CHANGED
-
-FILES_CHANGED: `tests/test_cycle_semantics_external_import_authority.py`. Usunięto jedną asercję stałej wersji; tylko w tej funkcji zmieniono `target_python_version` na `sys.version_info[:2]`. Pozostałe wywołania niezmienione. `walkthrough.md` jest wyłącznie raportem; brak zmian production/config.
+## MODEL_VS_CPYTHON
+- DIRECT_EVIDENCE: each K09-A–F assertion ran the existing `_actual` helper, which starts isolated CPython subprocesses, and all assertions passed.
+- CODE_PATH_PROVED: class-local imports and bindings are recorded separately from module exports; deferred method body import was not started.
+- CONTRACT_PROVED: bounded requested synthetic cases only, via focused tests and CPython subprocess outcomes.
+- INFERENCE: none used to claim broader Python import safety.
+- UNKNOWN: broader class metaclass, descriptor, and dynamic behavior outside bounded model.
 
 ## TARGETED_TEST_RESULTS
-
-Dokładna komenda z aktywnym venv: `& 'C:\Temp\Contextor_Repo\.venv\Scripts\python.exe' -m pytest -q tests/test_cycle_semantics_external_import_authority.py` → **7 passed in 8.80s**, exit code 0. Izolowane subprocessy testu nadal używają `sys.executable`. `git diff --check` → exit code 0. Bez full pytest.
+- Backend process identity (PID 14072) command line and executable identified C:\Temp\Contextor_Repo\.venv\Scripts\python.exe.
+- `-m pytest -q tests/test_cycle_semantics_passive_classes.py`: 101 passed in 17.60s.
+- First `git diff --check` found blank lines at EOF in the target and report. Both were corrected. Final `git diff --check` exited 0.
 
 ## MCP_POST_CHANGE_AUDIT
-
-Watcher zgłosił `UPDATED` docelowego testu w canonical revision `1258`. Po zmianie Contextor symbol ma `workspace_sync=verified`; syntax errors `0`; graph/cycles fresh, 16 structural DFS paths; graph SHA-256 `2b45d940afccdaefb3c0f4a686b83bcbc2687e0d8b167cadc986106b01eedf6f`, niezmieniony. IPC state_id `20261109_210842`, revision `1258`; cycle_semantics **stale**. Warning view: structural `16`, MODEL_PASS `0`, active `16`. Bez FULL, `update_file`, restartu i publikacji.
+- Pre-edit canonical revision 1258; watcher UPDATED event 1259 and UNCHANGED event 1260, continuous journal.
+- Canonical revision 1260; target workspace_sync=verified.
+- Syntax errors: 0 fresh. Structural DFS cycle paths: 16 fresh. Active warnings: 16 fresh.
+- cycle_semantics=stale; runtime execution status UNKNOWN_NOT_EVALUATED.
+- Current canonical state_id: unavailable from queried public overlays. Historical expected state_id 20261108_172727 belongs to publication revision 1128 and is not asserted for revision 1260.
+- Current graph fingerprint: unavailable from queried public overlays; graph family fresh is not substituted for fingerprint.
 
 ## FULL_DIFFS
-
-Pełny rzeczywisty git diff jedynego pliku zmienionego w bieżącym zadaniu:
-
 ```diff
-diff --git a/tests/test_cycle_semantics_external_import_authority.py b/tests/test_cycle_semantics_external_import_authority.py
-index d6cdedc..90723e3 100644
---- a/tests/test_cycle_semantics_external_import_authority.py
-+++ b/tests/test_cycle_semantics_external_import_authority.py
-@@ -173,8 +173,6 @@ def test_unproved_typing_guard_stops_ordinary_and_conditional_models(
- 
- 
- def test_conditional_external_side_effect_is_not_runtime_authority(tmp_path):
--    assert sys.version_info[:3] == (3, 15, 2)
--
-     sources = {
-         "pkg.__init__": "pass\n",
-         "pkg.ns.a": (
-@@ -201,7 +199,7 @@ def test_conditional_external_side_effect_is_not_runtime_authority(tmp_path):
-         trees,
-         "pkg.ns.a",
-         (portion,),
--        target_python_version=(3, 15),
-+        target_python_version=sys.version_info[:2],
-         assume_passive_external_imports=True,
-         assume_frozen_dataclass_decoration=True,
+diff --git a/tests/test_cycle_semantics_passive_classes.py b/tests/test_cycle_semantics_passive_classes.py
+index c59c20e..3d5dfda 100644
+--- a/tests/test_cycle_semantics_passive_classes.py
++++ b/tests/test_cycle_semantics_passive_classes.py
+@@ -1054,3 +1054,274 @@ def test_p3_d3_import_after_class_binding(tmp_path):
+         "assert m.Seen is m.C;assert type(m.C) is m.Meta",
      )
+     assert actual.returncode == 0, actual.stderr
++
++
++@pytest.mark.parametrize(
++    "entry,expected",
++    [
++        ("pkg.a", "EARLY_BINDING_HAZARD"),
++        ("pkg.b", "MODEL_PASS"),
++    ],
++)
++def test_k09_a_class_name_bound_after_body(tmp_path, entry, expected):
++    sources = {
++        "pkg.__init__": "pass",
++        "pkg.a": "class C:\n    import pkg.b",
++        "pkg.b": "from pkg.a import C",
++    }
++
++    result = _model(sources, entry)
++    actual = _actual(tmp_path, sources, entry)
++
++    assert result.outcome == expected
++
++    if expected == "EARLY_BINDING_HAZARD":
++        assert (result.target_module, result.symbol) == ("pkg.a", "C")
++        assert actual.returncode != 0
++        assert "ImportError" in actual.stderr
++        assert not any(
++            e.operation == "DEFINE_PASSIVE_CLASS"
++            and e.module == "pkg.a"
++            and e.symbol == "C"
++            for e in result.events
++        )
++    else:
++        assert actual.returncode == 0, actual.stderr
++        operations = [
++            e.operation for e in result.events
++            if e.module == "pkg.a"
++        ]
++        assert operations.index("CLASS_LOCAL_IMPORT") < (
++            operations.index("DEFINE_PASSIVE_CLASS")
++        )
++
++
++@pytest.mark.parametrize(
++    "entry,expected",
++    [
++        ("pkg.a", "EARLY_BINDING_HAZARD"),
++        ("pkg.b", "MODEL_PASS"),
++    ],
++)
++def test_k09_b_module_binding_after_class(tmp_path, entry, expected):
++    sources = {
++        "pkg.__init__": "pass",
++        "pkg.a": (
++            "class C:\n"
++            "    import pkg.b\n"
++            "value = 1"
++        ),
++        "pkg.b": "from pkg.a import value",
++    }
++
++    result = _model(sources, entry)
++    actual = _actual(tmp_path, sources, entry)
++
++    assert result.outcome == expected
++
++    if expected == "EARLY_BINDING_HAZARD":
++        assert (result.target_module, result.symbol) == (
++            "pkg.a", "value"
++        )
++        assert actual.returncode != 0
++        assert "ImportError" in actual.stderr
++    else:
++        assert actual.returncode == 0, actual.stderr
++        assert any(
++            e.operation == "CLASS_LOCAL_IMPORT"
++            and e.target == "pkg.b"
++            for e in result.events
++        )
++
++
++@pytest.mark.parametrize(
++    "entry,expected",
++    [
++        ("pkg.a", "EARLY_BINDING_HAZARD"),
++        ("pkg.b", "MISSING_EXPORT"),
++    ],
++)
++def test_k09_c_class_local_alias_does_not_escape(
++    tmp_path, entry, expected
++):
++    sources = {
++        "pkg.__init__": "pass",
++        "pkg.a": (
++            "class C:\n"
++            "    import pkg.c as inside\n"
++            "    import pkg.b"
++        ),
++        "pkg.b": "from pkg.a import inside",
++        "pkg.c": "pass",
++    }
++
++    result = _model(sources, entry)
++    actual = _actual(tmp_path, sources, entry)
++
++    assert result.outcome == expected
++    assert (result.target_module, result.symbol) == (
++        "pkg.a", "inside"
++    )
++    assert actual.returncode != 0
++    assert "ImportError" in actual.stderr
++
++    assert not any(
++        e.module == "pkg.a"
++        and e.operation in {"BIND", "ALIAS"}
++        and e.symbol == "inside"
++        for e in result.events
++    )
++
++
++@pytest.mark.parametrize(
++    "entry,expected",
++    [
++        ("pkg.a", "EARLY_BINDING_HAZARD"),
++        ("pkg.b", "MISSING_EXPORT"),
++    ],
++)
++def test_k09_d_class_local_assignment_does_not_escape(
++    tmp_path, entry, expected
++):
++    sources = {
++        "pkg.__init__": "pass",
++        "pkg.a": (
++            "class C:\n"
++            "    local = 1\n"
++            "    import pkg.b"
++        ),
++        "pkg.b": "from pkg.a import local",
++    }
++
++    result = _model(sources, entry)
++    actual = _actual(tmp_path, sources, entry)
++
++    assert result.outcome == expected
++    assert (result.target_module, result.symbol) == (
++        "pkg.a", "local"
++    )
++    assert actual.returncode != 0
++    assert "ImportError" in actual.stderr
++
++    assert any(
++        e.module == "pkg.a"
++        and e.operation == "CLASS_LOCAL_BIND"
++        and e.symbol == "local"
++        for e in result.events
++    )
++    assert not any(
++        e.module == "pkg.a"
++        and e.operation == "BIND"
++        and e.symbol == "local"
++        for e in result.events
++    )
++
++
++def test_k09_e_class_local_from_is_not_module_export(tmp_path):
++    sources = {
++        "pkg.__init__": "pass",
++        "pkg.a": "class C:\n    from pkg.b import token",
++        "pkg.b": "token = 1",
++        "pkg.c": "from pkg.a import token",
++    }
++
++    result = _model(sources, "pkg.c")
++    actual = _actual(tmp_path, sources, "pkg.c")
++
++    assert result.outcome == "MISSING_EXPORT"
++    assert (result.target_module, result.symbol) == (
++        "pkg.a", "token"
++    )
++    assert actual.returncode != 0
++    assert "ImportError" in actual.stderr
++
++    events = result.events
++    class_from = next(
++        i for i, e in enumerate(events)
++        if e.module == "pkg.a"
++        and e.operation == "CLASS_LOCAL_FROM"
++        and e.target == "pkg.b"
++        and e.symbol == "token"
++    )
++    missing = next(
++        i for i, e in enumerate(events)
++        if e.operation == "MISSING_EXPORT"
++        and e.target == "pkg.a"
++        and e.symbol == "token"
++    )
++    assert class_from < missing
++
++
++def test_k09_f_method_body_import_is_deferred(tmp_path):
++    sources = {
++        "pkg.__init__": "pass",
++        "pkg.a": (
++            "class C:\n"
++            "    def later(self):\n"
++            "        import pkg.b\n"
++            "value = 1"
++        ),
++        "pkg.b": "from pkg.a import value",
++    }
++
++    result = _model(sources, "pkg.a")
++    actual = _actual(tmp_path, sources, "pkg.a")
++
++    assert result.outcome == "MODEL_PASS"
++    assert actual.returncode == 0, actual.stderr
++
++    assert not any(
++        e.operation == "START_IMPORT"
++        and e.target == "pkg.b"
++        for e in result.events
++    )
++
++
++@pytest.mark.parametrize(
++    "body",
++    [
++        'class C:\n    exec("import pkg.b")',
++        "class C(factory()):\n    import pkg.b",
++        "@decorator\nclass C:\n    import pkg.b",
++    ],
++)
++def test_k09_g_unmodeled_class_effects_fail_closed(body):
++    sources = {
++        "pkg.__init__": "pass",
++        "pkg.a": body,
++        "pkg.b": "pass",
++    }
++
++    result = _model(sources, "pkg.a")
++
++    assert result.outcome == "UNKNOWN"
++    assert result.outcome != "MODEL_PASS"
++
++
++def test_k09_h_deterministic_without_ast_mutation():
++    sources = {
++        "pkg.__init__": ast.parse("pass"),
++        "pkg.a": ast.parse(
++            "class C:\n"
++            "    import pkg.b"
++        ),
++        "pkg.b": ast.parse("from pkg.a import C"),
++    }
++
++    before = {
++        name: ast.dump(tree, include_attributes=True)
++        for name, tree in sources.items()
++    }
++
++    first = evaluate_package_import_order(sources, "pkg.a")
++    second = evaluate_package_import_order(sources, "pkg.a")
++
++    assert first == second
++    assert first.events == second.events
++    assert first.outcome == "EARLY_BINDING_HAZARD"
++
++    after = {
++        name: ast.dump(tree, include_attributes=True)
++        for name, tree in sources.items()
++    }
++    assert after == before
 ```
 
 ## FINAL_VERDICT
-
-`PASS` dla dokładnej dwulinijkowej zmiany i celowanego testu. Aktywny backend i test korzystają z tej samej zweryfikowanej ścieżki venv; brak nowej stałej wersji w zmienionej funkcji. MCP potwierdził source sync; cycle_semantics pozostaje stale. STOP.
+Focused K09 tests passed. MCP source freshness verified at revision 1260. FINAL_PASS withheld because current state_id and graph fingerprint were not obtained and cycle_semantics remains stale.

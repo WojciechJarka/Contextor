@@ -1,3 +1,40 @@
+## 2026-11-10 Patch - Improved Cycle Semantics Diagnostics and External Import Safety
+
+Enhanced diagnostic precision: Added UNMODELED_STATEMENT events identifying the exact AST statement type and source location where conditional import-order analysis stops. Previously modeled events remain preserved, and unsupported constructs continue to produce UNKNOWN.
+
+Strengthened external import safety validation: Added regression coverage demonstrating that external imports can modify Python built-ins and cause runtime failures despite a conditional MODEL_PASS.
+
+Preserved strict evidence boundaries: Confirmed that hypothetical external-import and frozen-dataclass assumptions cannot be promoted to unconditional MODEL_PASS or used to suppress cycle warnings.
+
+Validated conditional namespace analysis: Verified existing namespace-package and frozen-dataclass modeling against real Contextor source files without executing production imports.
+
+Removed hardcoded Python version dependencies: Updated regression tests to derive the target Python version from the interpreter running in Contextor's active backend virtual environment.
+
+Expanded regression coverage: Added positive and negative tests for diagnostic provenance, execution-order preservation, external side effects, and conditional-model authority.
+
+Maintained structural integrity: Preserved the canonical dependency graph, all 16 existing structural cycle paths, and conservative warning behavior.
+
+Validation: Targeted test suites passed, MCP post-change audits confirmed source synchronization, and no regressions were observed in the verified paths.
+
+### Improved Class Body Execution and Import Cycle Regression Coverage
+
+**Added**
+- Expanded regression coverage for Python class body execution order, class name binding, and circular import hazards.
+- Added entry-dependent tests verifying that the same import cycle can produce `EARLY_BINDING_HAZARD` or `MODEL_PASS` depending on the entry module.
+- Added tests for class-local import aliases, assignments, and `from ... import` bindings to ensure they are not incorrectly exposed as module-level exports.
+- Added negative tests ensuring unsupported class execution effects remain classified as `UNKNOWN`.
+- Added determinism and AST immutability checks.
+
+**Validated**
+- Confirmed that class body imports execute before the class name is bound to its module namespace.
+- Verified that imports inside uncalled methods remain deferred.
+- Confirmed agreement between the semantic model and isolated CPython execution across the tested scenarios.
+- Preserved conservative hazard detection without broadening `MODEL_PASS` eligibility.
+- Passed all **101 targeted tests**, including **14 new regression cases**.
+- Verified MCP source synchronization, zero syntax errors, and preservation of all 16 structural cycle paths.
+
+**Scope:** Test-only changes. No production code modifications or changes to cycle classification behavior.
+
 ## 2026-11--09 Patch - Semantic Cycle Diagnostics & External Import Safety
 
 Added — Semantic Cycle Diagnostics Layer
