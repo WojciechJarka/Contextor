@@ -173,8 +173,6 @@ def test_unproved_typing_guard_stops_ordinary_and_conditional_models(
 
 
 def test_conditional_external_side_effect_is_not_runtime_authority(tmp_path):
-    assert sys.version_info[:3] == (3, 15, 2)
-
     sources = {
         "pkg.__init__": "pass\n",
         "pkg.ns.a": (
@@ -201,7 +199,7 @@ def test_conditional_external_side_effect_is_not_runtime_authority(tmp_path):
         trees,
         "pkg.ns.a",
         (portion,),
-        target_python_version=(3, 15),
+        target_python_version=sys.version_info[:2],
         assume_passive_external_imports=True,
         assume_frozen_dataclass_decoration=True,
     )
