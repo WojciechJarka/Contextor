@@ -1,317 +1,284 @@
-# P5-M03 — EXPRESSION PREDICATES EXTRACTION
+# P5-M04-I1 — Definition predicates extraction
 
 ## PREFLIGHT
 
-DIRECT_EVIDENCE: HEAD `d0e94e0398f31ad9aecc8d847ac25fc85e31e142`; initial `git status --short` clean. Canonical LIVE revision 1266 before edits; Contextor `get_symbol_implementation` returned `_pure_literal_expression` at `package_model.py:641-738` and `_safe_annassign` at 753-768, both workspace_sync=verified. `_bounded_integer_arithmetic` resolved in `execution/expressions.py:6-80`, workspace_sync=verified. Backend MCP PID 14072 executable `C:\Temp\Contextor_Repo\.venv\Scripts\python.exe`.
-
-CODE_PATH_PROVED: source definitions match the preceding P5-M02 discovery content; their line numbers shifted after the bounded helper extraction. Dependency chain verified in current source: `_safe_annassign -> _pure_literal_expression -> _bounded_integer_arithmetic` (`package_model.py:767,677`). The existing `_bounded_integer_arithmetic` implementation was not edited. Before editing, `package_model.py:28` contained exactly `from .execution.expressions import _bounded_integer_arithmetic`. No unrelated worktree modification pre-existed. Positive/negative literal, arithmetic, annotation and class/function regressions were identified in the previous discovery; this is a structural move with no new acceptance path.
+- DIRECT_EVIDENCE: HEAD `0d12c2d6748a0e76c0b262ac990579a247a3b9d5`; initial `git status --short` showed only ` M walkthrough.md` from the previous report. That report was intentionally replaced. No pre-existing source/test changes were overwritten.
+- DIRECT_EVIDENCE: Contextor MCP returned canonical LIVE revision 1268, `canonical_state=fresh`, `workspace_sync=verified` for all three source predicates, and `cycle_semantics=stale`. Backend executable `C:\Temp\Contextor_Repo\.venv\Scripts\python.exe` (PID 14072).
+- DIRECT_EVIDENCE: Current source definitions at `contextor/core/cycle_semantics/package_model.py:310-328,331-344,347-407` matched the supplied bodies exactly. `contextor/core/cycle_semantics/execution/definition_checks.py` did not exist before editing. Direct callers and transitive dependencies were established in the preceding P5-M04-D2 report and rechecked against current source.
+- CODE_PATH_PROVED: Independent semantic-integrity review for this structural move: the three function bodies are copied unchanged; all call sites in `package_model.py` still resolve the same names through its module globals; the recursive annotation predicate now resolves itself within its new module. Supported and rejected AST shapes are unchanged. Existing focused tests include positive, negative and CPython-backed class/decorator cases (`tests/test_cycle_semantics_package_model.py`, `tests/test_cycle_semantics_passive_classes.py`, `tests/test_cycle_semantics_decorator_definition_effects.py`). This establishes refactor compatibility, not general semantic proof of the restricted model.
 
 ## FILES_CHANGED
 
-- `contextor/core/cycle_semantics/execution/expressions.py`
-- `contextor/core/cycle_semantics/package_model.py`
-
-`walkthrough.md` is the overwritten report only. No test or other source file changed.
+- `contextor/core/cycle_semantics/execution/definition_checks.py` — new file.
+- `contextor/core/cycle_semantics/package_model.py` — import of moved predicates; old definitions removed.
+- `walkthrough.md` — this report, exempt from production/test diff accounting under AGENTS.md §10.
 
 ## EXACT_IMPLEMENTATION
 
-DIRECT_EVIDENCE: the complete two existing definitions were copied to `execution/expressions.py` after `_bounded_integer_arithmetic`, in the requested order and with two blank lines between module-level definitions. `package_model.py` now imports all three names in the requested parenthesized form and no longer defines the two relocated predicates. `_pure_all_assignment`, `_safe_passive_class_definition`, `_compile`, evaluator branches, result/event types and public evaluators were not edited. The full actual changed-source diffs are below.
+- DIRECT_EVIDENCE: New module contains only `from __future__ import annotations`, `import ast`, and the three specified predicate bodies, in specified order. `package_model.py` imports those names immediately after its existing `execution.expressions` block. The three old definitions were removed; `_safe_passive_function_definition`, `_safe_passive_class_definition`, `_safe_class_namespace_value`, `_ClassFact`, `_compile`, `_compile_reachable_prefix`, evaluator branches, event/result types and existing imports were left unchanged. Full diffs appear below.
 
 ## COMPATIBILITY_RESULTS
 
-DIRECT_EVIDENCE: backend-venv assertions passed for all three `package_model` aliases being identical to `expressions` functions; `expressions._pure_literal_expression.__globals__["_bounded_integer_arithmetic"]` resolves to the exported helper; `expressions._safe_annassign.__globals__["_pure_literal_expression"]` resolves to the exported predicate. `package_model._compile.__module__` and `evaluate_package_import_order.__module__` remain `contextor.core.cycle_semantics.package_model`.
-
-DIRECT_EVIDENCE: both relocated functions report `__module__ = contextor.core.cycle_semantics.execution.expressions` and `__globals__["__name__"] = contextor.core.cycle_semantics.execution.expressions`. No manual identity or metadata override was applied. UNKNOWN: compatibility of arbitrary external reflection/monkeypatching beyond these checks is not certified.
+- CONTRACT_PROVED: With the actual backend venv interpreter, all three `package_model` attributes were identical by `is` to their `definition_checks` counterparts.
+- CONTRACT_PROVED: `_restricted_dataclass_field_annotation.__globals__["_restricted_dataclass_field_annotation"]` is the relocated function; the three names in `_safe_passive_class_definition.__globals__` are the relocated functions.
+- CONTRACT_PROVED: `package_model._compile.__module__ == "contextor.core.cycle_semantics.package_model"` and its `__code__.co_filename.endswith("package_model.py")`.
+- DIRECT_EVIDENCE: All three relocated `__module__` values are `contextor.core.cycle_semantics.execution.definition_checks`. Compatibility command exited 0.
 
 ## TARGETED_TEST_RESULTS
 
-DIRECT_EVIDENCE: `C:\Temp\Contextor_Repo\.venv\Scripts\python.exe -m pytest -q tests/test_cycle_semantics_package_model_literals.py tests/test_cycle_semantics_package_model.py tests/test_cycle_semantics_passive_functions.py tests/test_cycle_semantics_passive_classes.py tests/test_cycle_semantics_decorator_definition_effects.py tests/test_cycle_semantics_namespace_path_model.py -rs` → **506 passed in 37.08s**. `git diff --check` exited 0; only a Git line-ending advisory appeared. No full pytest.
+- DIRECT_EVIDENCE: Backend venv `python.exe -m pytest -q tests/test_cycle_semantics_package_model.py tests/test_cycle_semantics_package_model_literals.py tests/test_cycle_semantics_package_model_annotations315.py tests/test_cycle_semantics_passive_functions.py tests/test_cycle_semantics_passive_classes.py tests/test_cycle_semantics_decorator_definition_effects.py tests/test_f1h_runtime_attestation.py -rs`: **472 passed, 2 third-party deprecation warnings, 45.14 s**. No full suite was run.
+- DIRECT_EVIDENCE: `git diff --check` produced no whitespace-error output. The combined inspection command returned exit 1 because `git diff --no-index -- NUL <new file>` reports differences with exit 1; this is expected and is not a `git diff --check` failure.
 
 ## MCP_POST_CHANGE_AUDIT
 
-DIRECT_EVIDENCE: desktop_watcher UPDATED `execution/expressions.py` at revision 1267 and `package_model.py` at revision 1268. Contextor `get_module_context` at canonical LIVE revision 1268 reports workspace_sync=verified for both changed files; canonical_state=fresh; syntax errors 0. The existing hard dependency `package_model -> execution.expressions` remains, with package_model outbound total 6 and expressions outbound total 0; no newly distinct module edge was observed. Structural diagnostic count remains 16 normalized DFS paths, active warnings 16, MODEL_PASS paths 0. `cycle_semantics=stale`. Cyclic SCC count was not available in the queried fresh projection. Static freshness does not prove running MCP code adoption. No FULL, update_file, restart, commit or push.
+- DIRECT_EVIDENCE: Contextor canonical LIVE revision advanced 1268 → 1270. `get_module_context` reported `canonical_state=fresh`, `workspace_sync=verified` for both `package_model` and new `execution.definition_checks`; graph/topology/module families fresh, `cycle_semantics=stale`.
+- DIRECT_EVIDENCE: LIVE syntax-error count 0. Hard structural DFS cycle count 16. Active warning count 16, with model-pass count 0 in module diagnostics. The new hard edge is `contextor.core.cycle_semantics.package_model → contextor.core.cycle_semantics.execution.definition_checks`; new module has one inbound and zero outbound hard dependencies.
+- UNKNOWN: Current cyclic SCC count and graph fingerprint were not exposed in the selected current LIVE audit. `cycle_semantics` classification remains stale; historical report data were not used to replace it. Running-backend reload/adoption was not certified, and no restart was performed.
 
 ## FULL_DIFFS
 
-```diff
-warning: in the working copy of 'contextor/core/cycle_semantics/execution/expressions.py', LF will be replaced by CRLF the next time Git touches it
-diff --git a/contextor/core/cycle_semantics/execution/expressions.py b/contextor/core/cycle_semantics/execution/expressions.py
-index 5357893..57daf1f 100644
---- a/contextor/core/cycle_semantics/execution/expressions.py
-+++ b/contextor/core/cycle_semantics/execution/expressions.py
-@@ -78,3 +78,121 @@ def _bounded_integer_arithmetic(
+### `contextor/core/cycle_semantics/package_model.py`
 
-     accepted = calculate(expression, depth) is not None
-     return accepted, used
-+
-+
-+def _pure_literal_expression(expr: ast.AST) -> bool:
-+    pending: list[tuple[ast.AST, int, bool]] = [
-+        (expr, 0, False)
-+    ]
-+    visited = 0
-+
-+    while pending:
-+        node, depth, hashable_required = pending.pop()
-+        visited += 1
-+
-+        if visited > 256 or depth > 16:
-+            return False
-+
-+        if type(node) is ast.Constant:
-+            if type(node.value) not in {
-+                type(None), bool, int, float,
-+                complex, str, bytes,
-+            }:
-+                return False
-+            continue
-+
-+        if type(node) is ast.UnaryOp:
-+            if (
-+                type(node.op) not in (ast.UAdd, ast.USub)
-+                or type(node.operand) is not ast.Constant
-+                or type(node.operand.value)
-+                not in (int, float, complex)
-+            ):
-+                return False
-+
-+            pending.append(
-+                (node.operand, depth + 1, hashable_required)
-+            )
-+            continue
-+
-+        if type(node) is ast.BinOp:
-+            accepted, counted = _bounded_integer_arithmetic(
-+                node,
-+                depth=depth,
-+                node_budget=257 - visited,
-+            )
-+
-+            visited += counted - 1
-+
-+            if not accepted or visited > 256:
-+                return False
-+
-+            continue
-+
-+        if type(node) is ast.Tuple:
-+            pending.extend(
-+                (item, depth + 1, hashable_required)
-+                for item in reversed(node.elts)
-+            )
-+            continue
-+
-+        if type(node) is ast.List:
-+            if hashable_required:
-+                return False
-+
-+            pending.extend(
-+                (item, depth + 1, False)
-+                for item in reversed(node.elts)
-+            )
-+            continue
-+
-+        if type(node) is ast.Set:
-+            if hashable_required:
-+                return False
-+
-+            pending.extend(
-+                (item, depth + 1, True)
-+                for item in reversed(node.elts)
-+            )
-+            continue
-+
-+        if type(node) is ast.Dict:
-+            if (
-+                hashable_required
-+                or len(node.keys) != len(node.values)
-+                or any(key is None for key in node.keys)
-+            ):
-+                return False
-+
-+            for key, value in reversed(
-+                list(zip(node.keys, node.values))
-+            ):
-+                pending.append(
-+                    (value, depth + 1, False)
-+                )
-+                pending.append(
-+                    (key, depth + 1, True)
-+                )
-+            continue
-+
-+        return False
-+
-+    return True
-+
-+
-+def _safe_annassign(
-+    statement: ast.AnnAssign,
-+    annotation_semantics: str | None,
-+) -> bool:
-+    if (
-+        annotation_semantics not in {"DEFERRED", "STRINGIFIED"}
-+        or not isinstance(statement.target, ast.Name)
-+        or statement.simple != 1
-+        or not statement.target.id.isidentifier()
-+        or statement.target.id.startswith("__")
-+    ):
-+        return False
-+    return (
-+        statement.value is None
-+        or _pure_literal_expression(statement.value)
-+    )
+```diff
 diff --git a/contextor/core/cycle_semantics/package_model.py b/contextor/core/cycle_semantics/package_model.py
-index 11d171c..4ab403a 100644
+index 4ab403a..a6acd8b 100644
 --- a/contextor/core/cycle_semantics/package_model.py
 +++ b/contextor/core/cycle_semantics/package_model.py
-@@ -25,7 +25,11 @@ from contextor.core.cycle_semantics.typing_guard import (
-     recognize_typing_guard,
+@@ -30,6 +30,11 @@ from .execution.expressions import (
+     _pure_literal_expression,
+     _safe_annassign,
  )
- from .execution.steps import _Step
--from .execution.expressions import _bounded_integer_arithmetic
-+from .execution.expressions import (
-+    _bounded_integer_arithmetic,
-+    _pure_literal_expression,
-+    _safe_annassign,
++from .execution.definition_checks import (
++    _exact_frozen_dataclass_decorator,
++    _exact_restricted_dataclass_hash_field_call,
++    _restricted_dataclass_field_annotation,
 +)
-
-
+ 
+ 
  @dataclass(frozen=True)
-@@ -638,106 +642,6 @@ def _safe_passive_class_definition(
+@@ -307,106 +312,6 @@ def _safe_passive_function_definition(
      return True
-
-
--def _pure_literal_expression(expr: ast.AST) -> bool:
--    pending: list[tuple[ast.AST, int, bool]] = [
--        (expr, 0, False)
--    ]
--    visited = 0
--
--    while pending:
--        node, depth, hashable_required = pending.pop()
--        visited += 1
--
--        if visited > 256 or depth > 16:
--            return False
--
--        if type(node) is ast.Constant:
--            if type(node.value) not in {
--                type(None), bool, int, float,
--                complex, str, bytes,
--            }:
--                return False
--            continue
--
--        if type(node) is ast.UnaryOp:
--            if (
--                type(node.op) not in (ast.UAdd, ast.USub)
--                or type(node.operand) is not ast.Constant
--                or type(node.operand.value)
--                not in (int, float, complex)
--            ):
--                return False
--
--            pending.append(
--                (node.operand, depth + 1, hashable_required)
--            )
--            continue
--
--        if type(node) is ast.BinOp:
--            accepted, counted = _bounded_integer_arithmetic(
--                node,
--                depth=depth,
--                node_budget=257 - visited,
--            )
--
--            visited += counted - 1
--
--            if not accepted or visited > 256:
--                return False
--
--            continue
--
--        if type(node) is ast.Tuple:
--            pending.extend(
--                (item, depth + 1, hashable_required)
--                for item in reversed(node.elts)
--            )
--            continue
--
--        if type(node) is ast.List:
--            if hashable_required:
--                return False
--
--            pending.extend(
--                (item, depth + 1, False)
--                for item in reversed(node.elts)
--            )
--            continue
--
--        if type(node) is ast.Set:
--            if hashable_required:
--                return False
--
--            pending.extend(
--                (item, depth + 1, True)
--                for item in reversed(node.elts)
--            )
--            continue
--
--        if type(node) is ast.Dict:
--            if (
--                hashable_required
--                or len(node.keys) != len(node.values)
--                or any(key is None for key in node.keys)
--            ):
--                return False
--
--            for key, value in reversed(
--                list(zip(node.keys, node.values))
--            ):
--                pending.append(
--                    (value, depth + 1, False)
--                )
--                pending.append(
--                    (key, depth + 1, True)
--                )
--            continue
--
--        return False
--
--    return True
--
--
- def _pure_all_assignment(value: ast.AST) -> bool:
-     return (
-         type(value) in (ast.List, ast.Tuple)
-@@ -750,24 +654,6 @@ def _pure_all_assignment(value: ast.AST) -> bool:
-     )
-
-
--def _safe_annassign(
--    statement: ast.AnnAssign,
--    annotation_semantics: str | None,
+ 
+ 
+-def _exact_frozen_dataclass_decorator(
+-    decorator: ast.AST,
 -) -> bool:
--    if (
--        annotation_semantics not in {"DEFERRED", "STRINGIFIED"}
--        or not isinstance(statement.target, ast.Name)
--        or statement.simple != 1
--        or not statement.target.id.isidentifier()
--        or statement.target.id.startswith("__")
--    ):
--        return False
 -    return (
--        statement.value is None
--        or _pure_literal_expression(statement.value)
+-        isinstance(decorator, ast.Call)
+-        and isinstance(decorator.func, ast.Name)
+-        and decorator.func.id == "dataclass"
+-        and not decorator.args
+-        and len(decorator.keywords) == 1
+-        and decorator.keywords[0].arg == "frozen"
+-        and isinstance(
+-            decorator.keywords[0].value,
+-            ast.Constant,
+-        )
+-        and decorator.keywords[0].value.value is True
+-        and type(
+-            decorator.keywords[0].value.value
+-        ) is bool
 -    )
 -
 -
- def _compile(
-     tree: ast.Module,
-     logical: str,
+-def _exact_restricted_dataclass_hash_field_call(
+-    node: ast.AST,
+-) -> bool:
+-    return (
+-        type(node) is ast.Call
+-        and type(node.func) is ast.Name
+-        and node.func.id == "field"
+-        and not node.args
+-        and len(node.keywords) == 1
+-        and node.keywords[0].arg == "hash"
+-        and type(node.keywords[0].value) is ast.Constant
+-        and type(node.keywords[0].value.value) is bool
+-        and node.keywords[0].value.value is False
+-    )
+-
+-
+-def _restricted_dataclass_field_annotation(
+-    node: ast.AST,
+-) -> bool:
+-    if isinstance(node, ast.Name):
+-        return (
+-            node.id.isidentifier()
+-            and not node.id.startswith("__")
+-            and node.id != "ast"
+-        )
+-
+-    if type(node) is ast.Attribute:
+-        return (
+-            type(node.value) is ast.Name
+-            and node.value.id == "ast"
+-            and node.attr == "AST"
+-        )
+-
+-    if isinstance(node, ast.Constant):
+-        return type(node.value) is str
+-
+-    if isinstance(node, ast.BinOp):
+-        if not isinstance(node.op, ast.BitOr):
+-            return False
+-
+-        if (
+-            isinstance(node.left, ast.Constant)
+-            and type(node.left.value) is type(None)
+-            and not isinstance(node.right, ast.BinOp)
+-        ):
+-            return _restricted_dataclass_field_annotation(
+-                node.right
+-            )
+-
+-        if (
+-            isinstance(node.right, ast.Constant)
+-            and type(node.right.value) is type(None)
+-            and not isinstance(node.left, ast.BinOp)
+-        ):
+-            return _restricted_dataclass_field_annotation(
+-                node.left
+-            )
+-
+-        return False
+-
+-    if isinstance(node, ast.Tuple):
+-        return all(
+-            _restricted_dataclass_field_annotation(item)
+-            for item in node.elts
+-        )
+-
+-    if isinstance(node, ast.Subscript):
+-        return (
+-            _restricted_dataclass_field_annotation(
+-                node.value
+-            )
+-            and _restricted_dataclass_field_annotation(
+-                node.slice
+-            )
+-        )
+-
+-    return False
+-
+-
+ def _safe_passive_class_definition(
+     statement: ast.ClassDef,
+     *,
+```
+
+### `contextor/core/cycle_semantics/execution/definition_checks.py`
+
+```diff
+diff --git a/contextor/core/cycle_semantics/execution/definition_checks.py b/contextor/core/cycle_semantics/execution/definition_checks.py
+new file mode 100644
+index 0000000..1d470b3
+--- /dev/null
++++ b/contextor/core/cycle_semantics/execution/definition_checks.py
+@@ -0,0 +1,103 @@
++from __future__ import annotations
++
++import ast
++
++
++def _exact_frozen_dataclass_decorator(
++    decorator: ast.AST,
++) -> bool:
++    return (
++        isinstance(decorator, ast.Call)
++        and isinstance(decorator.func, ast.Name)
++        and decorator.func.id == "dataclass"
++        and not decorator.args
++        and len(decorator.keywords) == 1
++        and decorator.keywords[0].arg == "frozen"
++        and isinstance(
++            decorator.keywords[0].value,
++            ast.Constant,
++        )
++        and decorator.keywords[0].value.value is True
++        and type(
++            decorator.keywords[0].value.value
++        ) is bool
++    )
++
++
++def _exact_restricted_dataclass_hash_field_call(
++    node: ast.AST,
++) -> bool:
++    return (
++        type(node) is ast.Call
++        and type(node.func) is ast.Name
++        and node.func.id == "field"
++        and not node.args
++        and len(node.keywords) == 1
++        and node.keywords[0].arg == "hash"
++        and type(node.keywords[0].value) is ast.Constant
++        and type(node.keywords[0].value.value) is bool
++        and node.keywords[0].value.value is False
++    )
++
++
++def _restricted_dataclass_field_annotation(
++    node: ast.AST,
++) -> bool:
++    if isinstance(node, ast.Name):
++        return (
++            node.id.isidentifier()
++            and not node.id.startswith("__")
++            and node.id != "ast"
++        )
++
++    if type(node) is ast.Attribute:
++        return (
++            type(node.value) is ast.Name
++            and node.value.id == "ast"
++            and node.attr == "AST"
++        )
++
++    if isinstance(node, ast.Constant):
++        return type(node.value) is str
++
++    if isinstance(node, ast.BinOp):
++        if not isinstance(node.op, ast.BitOr):
++            return False
++
++        if (
++            isinstance(node.left, ast.Constant)
++            and type(node.left.value) is type(None)
++            and not isinstance(node.right, ast.BinOp)
++        ):
++            return _restricted_dataclass_field_annotation(
++                node.right
++            )
++
++        if (
++            isinstance(node.right, ast.Constant)
++            and type(node.right.value) is type(None)
++            and not isinstance(node.left, ast.BinOp)
++        ):
++            return _restricted_dataclass_field_annotation(
++                node.left
++            )
++
++        return False
++
++    if isinstance(node, ast.Tuple):
++        return all(
++            _restricted_dataclass_field_annotation(item)
++            for item in node.elts
++        )
++
++    if isinstance(node, ast.Subscript):
++        return (
++            _restricted_dataclass_field_annotation(
++                node.value
++            )
++            and _restricted_dataclass_field_annotation(
++                node.slice
++            )
++        )
++
++    return False
 ```
 
 ## FINAL_VERDICT
 
-TARGETED_SOURCE_AND_TEST_PASS. Requested extraction and compatibility checks pass at source/test level; LIVE watcher and file freshness are verified at revision 1268. Fresh cycle semantics and runtime adoption remain unproved, so no broader FINAL PASS claim is made.
+- CONTRACT_PROVED: The exact structural extraction, compatibility checks and requested focused regression set passed. Contextor confirmed fresh source/graph state at revision 1270. `cycle_semantics` remains stale, so no fresh semantic classification or runtime-adoption claim is made. STOP after implementation and audit.
