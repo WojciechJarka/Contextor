@@ -2,12 +2,14 @@ from __future__ import annotations
 
 from typing import Callable
 
+from .state import _FunctionFrame
+
 
 def _complete_module_frame(
     module: str,
     *,
     bootstrap: str,
-    frames: list[tuple[str, int]],
+    frames: list[tuple[str, int] | _FunctionFrame],
     states: dict[str, str],
     namespaces: dict[str, dict[str, object | None]],
     emit_event: Callable[
@@ -37,7 +39,7 @@ def _start_module_frame(
     target: str,
     *,
     importer: str,
-    frames: list[tuple[str, int]],
+    frames: list[tuple[str, int] | _FunctionFrame],
     states: dict[str, str],
     emit_event: Callable[
         [str, str, str | None, str | None],

@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Mapping
 
 from .class_facts import _ClassFact, _BUILTIN_CLASS_FACTS
+from .steps import _Step
 
 
 @dataclass
@@ -27,9 +28,44 @@ def _new_module_initialization_state(
     )
 
 
+@dataclass(frozen=True)
+class _FunctionFrame:
+    module: str
+    index: int
+    steps: tuple[_Step, ...]
+
+
+def _frame_module(
+    frame: tuple[str, int] | _FunctionFrame,
+) -> str:
+    if isinstance(frame, _FunctionFrame):
+        return frame.module
+    return frame[0]
+
+
+def _frame_position(
+    frame: tuple[str, int] | _FunctionFrame,
+) -> tuple[str, int]:
+    if isinstance(frame, _FunctionFrame):
+        return frame.module, frame.index
+    return frame
+
+
+def _advance_frame(
+    frame: tuple[str, int] | _FunctionFrame,
+) -> tuple[str, int] | _FunctionFrame:
+    if isinstance(frame, _FunctionFrame):
+        return _FunctionFrame(
+            frame.module,
+            frame.index + 1,
+            frame.steps,
+        )
+    return (frame[0], frame[1] + 1)
+
+
 @dataclass
 class _ExecutionCursor:
-    frames: list[tuple[str, int]]
+    frames: list[tuple[str, int] | _FunctionFrame]
     step_budget: int
 
 

@@ -6,6 +6,7 @@ from typing import Mapping
 from typing import Literal
 
 from .steps import _Step
+from .state import _FunctionFrame, _frame_module
 
 
 def _chain(name: str) -> tuple[str, ...]:
@@ -96,7 +97,7 @@ def _execute_prepare_from_member(
     programs: Mapping[str, object],
     states: Mapping[str, str],
     namespaces: Mapping[str, dict[str, object | None]],
-    frames: list[tuple[str, int]],
+    frames: list[tuple[str, int] | _FunctionFrame],
 ) -> _ImportControl:
     target = step.target
     member = step.symbol
@@ -123,8 +124,8 @@ def _execute_prepare_from_member(
 
             if states[child] == "INITIALIZING":
                 if not any(
-                    active == child
-                    for active, _ in frames
+                    _frame_module(frame) == child
+                    for frame in frames
                 ):
                     return _ImportControl(
                         "RETURN_UNKNOWN",
@@ -152,7 +153,7 @@ def _resolve_from_child(
     programs: Mapping[str, object],
     states: Mapping[str, str],
     namespaces: Mapping[str, dict[str, object | None]],
-    frames: list[tuple[str, int]],
+    frames: list[tuple[str, int] | _FunctionFrame],
 ) -> _ImportControl:
     target = step.target
     member = step.symbol
@@ -163,8 +164,8 @@ def _resolve_from_child(
         if child in programs:
             if states[child] == "INITIALIZING":
                 if not any(
-                    active == child
-                    for active, _ in frames
+                    _frame_module(frame) == child
+                    for frame in frames
                 ):
                     return _ImportControl(
                         "RETURN_UNKNOWN",

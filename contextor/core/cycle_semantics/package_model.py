@@ -46,6 +46,9 @@ from .execution.state import (
     _new_module_initialization_state,
     _new_execution_cursor,
     _new_definition_state,
+    _FunctionFrame,
+    _frame_position,
+    _advance_frame,
 )
 from .execution.imports import (
     _missing_piece,
@@ -1489,7 +1492,8 @@ def evaluate_package_import_order(
         if execution_cursor.step_budget < 0:
             return result("UNKNOWN")
 
-        module, index = frames[-1]
+        active_frame = frames[-1]
+        module, index = _frame_position(active_frame)
 
         if module in pending_programs:
             tree = logical_sources[module]
@@ -1576,29 +1580,37 @@ def evaluate_package_import_order(
             pending_programs.remove(module)
 
         steps = (
-            (_Step("IMPORT", entry_module, binding=None),)
-            if module == bootstrap
-            else programs[module]
+            active_frame.steps
+            if isinstance(active_frame, _FunctionFrame)
+            else (
+                (_Step("IMPORT", entry_module, binding=None),)
+                if module == bootstrap
+                else programs[module]
+            )
         )
 
         if index >= len(steps):
-            _complete_module_frame(
-                module,
-                bootstrap=bootstrap,
-                frames=frames,
-                states=states,
-                namespaces=namespaces,
-                emit_event=lambda event_module, operation, target, symbol: (
-                    events.append(
-                        PackageModelEvent(
-                            event_module,
-                            operation,
-                            target,
-                            symbol,
+            if isinstance(active_frame, _FunctionFrame):
+                frames.pop()
+                execution_cursor.step_budget += 1
+            else:
+                _complete_module_frame(
+                    module,
+                    bootstrap=bootstrap,
+                    frames=frames,
+                    states=states,
+                    namespaces=namespaces,
+                    emit_event=lambda event_module, operation, target, symbol: (
+                        events.append(
+                            PackageModelEvent(
+                                event_module,
+                                operation,
+                                target,
+                                symbol,
+                            )
                         )
-                    )
-                ),
-            )
+                    ),
+                )
             continue
 
         step = steps[index]
@@ -1658,7 +1670,7 @@ def evaluate_package_import_order(
                                 else ""
                             )
                         )
-                    frames[-1] = (module, index + 1)
+                    frames[-1] = _advance_frame(frames[-1])
                     continue
                 blocker = (
                     ReachedUnmodeledImport(
@@ -1816,7 +1828,7 @@ def evaluate_package_import_order(
                         )
                     )
 
-                    frames[-1] = (module, index + 1)
+                    frames[-1] = _advance_frame(frames[-1])
                     continue
 
                 if from_child_control.action == "START_CHILD":
@@ -2162,15 +2174,13 @@ def evaluate_package_import_order(
             )
 
         elif step.op == "CALL_FUNCTION":
-            call_control = _execute_restricted_call(
+            body = _execute_restricted_call(
                 step,
                 module=module,
-                index=index,
                 namespaces=namespaces,
-                programs=programs,
             )
 
-            if call_control == "RETURN_UNKNOWN":
+            if body is None:
                 return result("UNKNOWN", module, step.target)
 
             events.append(
@@ -2180,6 +2190,10 @@ def evaluate_package_import_order(
                     symbol=step.target,
                 )
             )
+
+            frames[-1] = _advance_frame(frames[-1])
+            frames.append(_FunctionFrame(module, 0, body))
+            continue
 
         elif step.op == "BIND":
             if not step.class_local:
@@ -2279,7 +2293,7 @@ def evaluate_package_import_order(
         else:
             return result("UNKNOWN")
 
-        frames[-1] = (module, index + 1)
+        frames[-1] = _advance_frame(frames[-1])
 
     return result("MODEL_PASS")
 

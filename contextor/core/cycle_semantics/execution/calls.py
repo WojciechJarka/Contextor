@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
 
 from .steps import _Step
 
@@ -26,20 +25,14 @@ def _execute_restricted_call(
     step: _Step,
     *,
     module: str,
-    index: int,
     namespaces: dict[str, dict[str, object | None]],
-    programs: dict[str, list[_Step]],
-) -> Literal["ADVANCE", "RETURN_UNKNOWN"]:
+) -> tuple[_Step, ...] | None:
     value = namespaces[module].get(step.target)
 
     if (
         not isinstance(value, _RestrictedFunction)
         or value.defining_module != module
     ):
-        return "RETURN_UNKNOWN"
+        return None
 
-    programs[module][index + 1:index + 1] = list(
-        value.body
-    )
-
-    return "ADVANCE"
+    return value.body
