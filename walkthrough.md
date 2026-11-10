@@ -1,65 +1,72 @@
-# P5-M08-T2 — Minimal decorator import-effect baseline
+# P5-M08-T3 — Call frame and return semantics baseline
 
 ## PREFLIGHT
 
-- DIRECT_EVIDENCE: Contextor MCP was used first. `evaluate_package_import_order` resolves to `contextor/core/cycle_semantics/package_model.py:1157-2284`; canonical LIVE revision 1304, source fresh, `workspace_sync=verified`, cycle semantics stale. HEAD `6612d5ebef61148c5899dd62055b60efd004a426`; initial `git status --short` clean. Active backend executable: `C:\Temp\Contextor_Repo\.venv\Scripts\python.exe`.
-- DIRECT_EVIDENCE: M08-T1 `tests/test_cycle_semantics_definition_effect_order_cpython.py` and M07-I2B `tests/test_cycle_semantics_function_identity_counterexamples.py` exist. The new target file did not exist. No production source change was present or made.
+- DIRECT_EVIDENCE: Contextor MCP was used first. `_execute_restricted_call` resolves to `contextor/core/cycle_semantics/execution/calls.py:25-45`; canonical LIVE revision 1305, source fresh, `workspace_sync=verified`, cycle semantics stale. HEAD `2ff92eb2f0838c82a1872a43ed91302c7dac956a`; initial status ` M walkthrough.md` only. That pre-existing discovery report was inspected during this task and overwritten as required.
+- DIRECT_EVIDENCE: Active backend venv `C:\Temp\Contextor_Repo\.venv\Scripts\python.exe` reports CPython 3.15.2. M08-D2 anchors remain: `_RestrictedFunction` has only module/body (`execution/calls.py:9-22`); call helper splices body steps (`:25-45`); `_ExecutionCursor.frames` stores module/index tuples (`execution/state.py:30-40`); `_Step` has no parameter or return fields (`execution/steps.py:6-23`); `_compile` excludes argument-bearing calls and decorated functions (`package_model.py:935-955,1031-1048`). Target test did not exist before editing.
 
 ## FILES_CHANGED
 
-- Added `tests/test_cycle_semantics_decorator_import_effect_baseline.py` exactly as specified. Full new-file diff below.
-- Overwrote `walkthrough.md` for this task. No production or existing test file changed.
+- Added `tests/test_cycle_semantics_call_frame_baseline.py` exactly as specified. Complete new-file diff below.
+- Overwrote `walkthrough.md`; no production or existing test file changed.
 
-## CPYTHON_IMPORT_ORDER_MATRIX
+## CPYTHON_CALL_FRAME_MATRIX
 
-DIRECT_EVIDENCE: The isolated CPython runner records calls to `builtins.__import__` whose names begin with `pkg.`; all five exact expected lists passed (`tests/test_cycle_semantics_decorator_import_effect_baseline.py:15-182`). These are observed import attempts in the tested sources, not a general model proof.
+DIRECT_EVIDENCE: The isolated subprocess uses the active Python 3.15.2 interpreter; the test checks the full observed JSON per case (`tests/test_cycle_semantics_call_frame_baseline.py:15-190`). All seven cases passed.
 
-| Case | CPython import order | Error |
+| Case | CPython `error` | CPython `pkg.` import trace |
 |---|---|---|
-| decorated-function-body-deferred | none | none |
-| decorator-import-during-definition | `pkg.child` | none |
-| stacked-decorator-import-order | `pkg.lower`, `pkg.upper` | none |
-| class-body-before-decorator | `pkg.body`, `pkg.decorate` | none |
-| default-before-decorator-application | `pkg.default`, `pkg.decorate` | none |
+| positional-identity-return | null | none |
+| parameter-and-local-binding | null | none |
+| return-skips-later-import | null | none |
+| pass-through-decorator-defers-body | null | none |
+| pass-through-decorator-then-call | null | `pkg.child` |
+| return-callable-and-invoke | null | `pkg.child` |
+| missing-required-argument | `TypeError` | none |
 
-## CURRENT_MODEL_OUTCOME_MATRIX
+## CURRENT_MODEL_BOUNDARY_MATRIX
 
-DIRECT_EVIDENCE: Each corresponding AST input returned `UNKNOWN` with an empty `events` tuple. The new test asserts the outcome (`tests/test_cycle_semantics_decorator_import_effect_baseline.py:170-182`); the event tuples were read separately from the evaluator on the exact CASES.
+DIRECT_EVIDENCE: Each corresponding AST input returns UNKNOWN. Exact event tuples were read from the evaluator on the same CASES; the new test asserts the outcome (`tests/test_cycle_semantics_call_frame_baseline.py:179-190`).
 
-| Case | Current model | Events |
+| Case | Model outcome | Model events |
 |---|---|---|
-| decorated-function-body-deferred | UNKNOWN | none |
-| decorator-import-during-definition | UNKNOWN | none |
-| stacked-decorator-import-order | UNKNOWN | none |
-| class-body-before-decorator | UNKNOWN | none |
-| default-before-decorator-application | UNKNOWN | none |
+| positional-identity-return | UNKNOWN | none |
+| parameter-and-local-binding | UNKNOWN | none |
+| return-skips-later-import | UNKNOWN | none |
+| pass-through-decorator-defers-body | UNKNOWN | none |
+| pass-through-decorator-then-call | UNKNOWN | none |
+| return-callable-and-invoke | UNKNOWN | none |
+| missing-required-argument | UNKNOWN | `START_IMPORT(pkg)`, `DEFINE_OPAQUE_FUNCTION(identity)` |
 
-UNKNOWN does not establish parity or imply absence of CPython effects.
+UNKNOWN does not establish CPython/model parity or passivity.
 
-## DEFERRED_VS_DEFINITION_EFFECTS
+## RETURN_AND_IMPORT_EFFECTS
 
-- DIRECT_EVIDENCE: The first CPython fixture defines a decorated function whose body imports `pkg.child` but does not call the function; the import trace is empty. The second fixture puts that import in the decorator and records `pkg.child` during definition (`tests/test_cycle_semantics_decorator_import_effect_baseline.py:16-37,89-116`).
-- DIRECT_EVIDENCE: The stacked, class-body, and default cases record the specific ordering listed above. Current model UNKNOWN in each case leaves definition-time effects unresolved; no MODEL_PASS is claimed.
+- DIRECT_EVIDENCE: CPython `return 1` prevents the following `import pkg.child` in the same function; the tested source asserts the return value. A pass-through decorator leaves the body deferred until `f()`; that call imports `pkg.child`. Returning a function object and invoking the alias also imports `pkg.child` (`tests/test_cycle_semantics_call_frame_baseline.py:15-93`).
+- CODE_PATH_PROVED: Current compiler stores a parameterized or return-containing body as opaque or rejects later expressions, and the call helper has no return-value representation (`package_model.py:935-1056`; `execution/calls.py:9-45`; `execution/steps.py:6-23`). None of the six successful CPython cases is certified by a MODEL_PASS here.
+
+## NEGATIVE_ARITY_CONTRACT
+
+- DIRECT_EVIDENCE: `identity()` without the required `value` parameter yields CPython `TypeError` and no `pkg.` import (`tests/test_cycle_semantics_call_frame_baseline.py:94-103,129-190`). The model records `DEFINE_OPAQUE_FUNCTION(identity)` then returns UNKNOWN, preserving a conservative boundary. This case must not be reported as MODEL_PASS on the observed source.
 
 ## TARGETED_TEST_RESULTS
 
-- DIRECT_EVIDENCE: Required focused command using the active backend venv across the new file, M08-T1 CPython file, and existing decorator regressions returned `27 passed in 8.75s`.
-- DIRECT_EVIDENCE: `git diff --check` exited 0. No full pytest, FULL, `update_file`, restart, Git add/commit/push, or index/history mutation.
+- DIRECT_EVIDENCE: Required focused run across the four specified files returned `26 passed in 6.06s`.
+- DIRECT_EVIDENCE: An initial `git diff --check` detected trailing whitespace in the pre-existing `walkthrough.md` discovery report at line 335. This report overwrite removes that line. The final `git diff --check` exited 0, with only an LF→CRLF advisory for `walkthrough.md`. No full pytest, SCC02, FULL, `update_file`, restart, Git add/commit/push, or index/history mutation.
 
 ## MCP_POST_TASK_AUDIT
 
-- DIRECT_EVIDENCE: Post-task Contextor query still reported canonical LIVE revision 1304, `package_model.py` source fresh with `workspace_sync=verified`, cycle semantics stale. Git status before report rewrite showed only the new untracked test, confirming no production file changed. No runtime adoption or semantic refresh is claimed.
+- DIRECT_EVIDENCE: Post-task Contextor query remained at canonical LIVE revision 1305, production `execution/calls.py` source fresh, `workspace_sync=verified`, cycle semantics stale. No production file changed; status showed only the pre-existing modified report and the newly untracked test before report overwrite. No runtime adoption or semantic refresh is claimed.
 
 ## FULL_DIFFS
 
-Complete actual new-file diff (`/dev/null` → `tests/test_cycle_semantics_decorator_import_effect_baseline.py`):
+Complete actual new-file diff (`/dev/null` → `tests/test_cycle_semantics_call_frame_baseline.py`):
 
 ```diff
 --- /dev/null
-+++ b/tests/test_cycle_semantics_decorator_import_effect_baseline.py
-@@ -0,0 +1,182 @@
++++ b/tests/test_cycle_semantics_call_frame_baseline.py
+@@ -0,0 +1,190 @@
 +import ast
-+import builtins
 +import json
 +import subprocess
 +import sys
@@ -75,69 +82,84 @@ Complete actual new-file diff (`/dev/null` → `tests/test_cycle_semantics_decor
 +CASES = [
 +    pytest.param(
 +        (
-+            "def deco(fn):\n"
-+            "    return fn\n"
-+            "@deco\n"
-+            "def f():\n"
-+            "    import pkg.child\n"
++            "def identity(value):\n"
++            "    return value\n"
++            "assert identity(7) == 7\n"
 +        ),
++        None,
 +        (),
-+        id="decorated-function-body-deferred",
++        id="positional-identity-return",
 +    ),
 +    pytest.param(
 +        (
-+            "def deco(fn):\n"
++            "def calculate(value):\n"
++            "    local = value\n"
++            "    return local\n"
++            "assert calculate(9) == 9\n"
++            "assert 'local' not in globals()\n"
++        ),
++        None,
++        (),
++        id="parameter-and-local-binding",
++    ),
++    pytest.param(
++        (
++            "def f():\n"
++            "    return 1\n"
 +            "    import pkg.child\n"
-+            "    return fn\n"
-+            "@deco\n"
-+            "def f():\n"
-+            "    pass\n"
++            "assert f() == 1\n"
 +        ),
++        None,
++        (),
++        id="return-skips-later-import",
++    ),
++    pytest.param(
++        (
++            "def identity(fn):\n"
++            "    return fn\n"
++            "@identity\n"
++            "def f():\n"
++            "    import pkg.child\n"
++        ),
++        None,
++        (),
++        id="pass-through-decorator-defers-body",
++    ),
++    pytest.param(
++        (
++            "def identity(fn):\n"
++            "    return fn\n"
++            "@identity\n"
++            "def f():\n"
++            "    import pkg.child\n"
++            "f()\n"
++        ),
++        None,
 +        ("pkg.child",),
-+        id="decorator-import-during-definition",
++        id="pass-through-decorator-then-call",
 +    ),
 +    pytest.param(
 +        (
-+            "def upper(fn):\n"
-+            "    import pkg.upper\n"
-+            "    return fn\n"
-+            "def lower(fn):\n"
-+            "    import pkg.lower\n"
-+            "    return fn\n"
-+            "@upper\n"
-+            "@lower\n"
-+            "def f():\n"
-+            "    pass\n"
++            "def original():\n"
++            "    import pkg.child\n"
++            "def return_callable():\n"
++            "    return original\n"
++            "alias = return_callable()\n"
++            "alias()\n"
 +        ),
-+        ("pkg.lower", "pkg.upper"),
-+        id="stacked-decorator-import-order",
++        None,
++        ("pkg.child",),
++        id="return-callable-and-invoke",
 +    ),
 +    pytest.param(
 +        (
-+            "def deco(cls):\n"
-+            "    import pkg.decorate\n"
-+            "    return cls\n"
-+            "@deco\n"
-+            "class C:\n"
-+            "    import pkg.body\n"
++            "def identity(value):\n"
++            "    return value\n"
++            "identity()\n"
 +        ),
-+        ("pkg.body", "pkg.decorate"),
-+        id="class-body-before-decorator",
-+    ),
-+    pytest.param(
-+        (
-+            "def default():\n"
-+            "    import pkg.default\n"
-+            "    return 7\n"
-+            "def deco(fn):\n"
-+            "    import pkg.decorate\n"
-+            "    return fn\n"
-+            "@deco\n"
-+            "def f(x=default()):\n"
-+            "    pass\n"
-+        ),
-+        ("pkg.default", "pkg.decorate"),
-+        id="default-before-decorator-application",
++        "TypeError",
++        (),
++        id="missing-required-argument",
 +    ),
 +]
 +
@@ -174,10 +196,14 @@ Complete actual new-file diff (`/dev/null` → `tests/test_cycle_semantics_decor
 +"""
 +
 +
-+@pytest.mark.parametrize("source,expected_imports", CASES)
-+def test_minimal_decorator_import_effects(
++@pytest.mark.parametrize(
++    "source,expected_error,expected_imports",
++    CASES,
++)
++def test_call_frame_cpython_and_current_model(
 +    tmp_path: Path,
 +    source: str,
++    expected_error: str | None,
 +    expected_imports: tuple[str, ...],
 +):
 +    package = tmp_path / "pkg"
@@ -187,21 +213,10 @@ Complete actual new-file diff (`/dev/null` → `tests/test_cycle_semantics_decor
 +        source,
 +        encoding="utf-8",
 +    )
-+
-+    child_names = {
-+        "child",
-+        "upper",
-+        "lower",
-+        "body",
-+        "decorate",
-+        "default",
-+    }
-+
-+    for name in child_names:
-+        (package / (name + ".py")).write_text(
-+            "pass\n",
-+            encoding="utf-8",
-+        )
++    (package / "child.py").write_text(
++        "pass\n",
++        encoding="utf-8",
++    )
 +
 +    process = subprocess.run(
 +        [
@@ -222,26 +237,27 @@ Complete actual new-file diff (`/dev/null` → `tests/test_cycle_semantics_decor
 +
 +    observed = json.loads(process.stdout)
 +
-+    assert observed["error"] is None
-+    assert observed["imports"] == list(expected_imports)
-+
-+    sources = {
-+        "pkg.__init__": ast.parse(source),
++    assert observed == {
++        "error": expected_error,
++        "imports": list(expected_imports),
 +    }
 +
-+    for name in child_names:
-+        sources["pkg." + name] = ast.parse("pass\n")
-+
 +    result = evaluate_package_import_order(
-+        sources,
++        {
++            "pkg.__init__": ast.parse(source),
++            "pkg.child": ast.parse("pass\n"),
++        },
 +        "pkg",
 +    )
 +
-+    # Current conservative model boundary.
-+    # Not the target behavior after implementation.
++    # Baseline of the current model, not the target
++    # outcome after call-frame implementation.
 +    assert result.outcome == "UNKNOWN"
++
++    # A conservative UNKNOWN must not be presented
++    # as execution parity or as evidence of passivity.
 ```
 
 ## FINAL_VERDICT
 
-- CONTRACT_PROVED: The exact five-case CPython import-order and current-model UNKNOWN baseline was added and passed. CPython ordering and model uncertainty are explicitly separate. Stop after tests and audit.
+- CONTRACT_PROVED: The exact seven-case CPython and current-model UNKNOWN baseline was added; all requested focused tests passed. The CPython outcomes and model uncertainty remain separate. Stop after this baseline.
