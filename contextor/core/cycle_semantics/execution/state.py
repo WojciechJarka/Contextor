@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Mapping
 
 from .class_facts import _ClassFact, _BUILTIN_CLASS_FACTS
@@ -33,6 +33,11 @@ class _FunctionFrame:
     module: str
     index: int
     steps: tuple[_Step, ...]
+    local_bindings: dict[str, object | None] = field(
+        default_factory=dict,
+        compare=False,
+        repr=False,
+    )
 
 
 def _frame_module(
@@ -59,6 +64,7 @@ def _advance_frame(
             frame.module,
             frame.index + 1,
             frame.steps,
+            frame.local_bindings,
         )
     return (frame[0], frame[1] + 1)
 

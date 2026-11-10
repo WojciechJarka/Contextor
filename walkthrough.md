@@ -1,270 +1,179 @@
-# P5-M08-I2 — Bare return function semantics
+# P5-M08-I3 — Per-call local function environment
 
 ## PREFLIGHT
 
-- DIRECT_EVIDENCE: Contextor MCP was used first. `_compile` resolved to `contextor/core/cycle_semantics/package_model.py:479-1059`, canonical LIVE revision 1311, source fresh, `workspace_sync=verified`; cycle semantics stale. HEAD `fc6f86b7fcd0dcc81ab8145ea51f5aecbe4891bb`; initial `git status --short` clean. Active backend interpreter `C:\Temp\Contextor_Repo\.venv\Scripts\python.exe`.
-- DIRECT_EVIDENCE: M08-I1 frame anchors matched `execution/state.py:31-78` and `package_model.py:1495-1496,1582-1616,2176-2196,2293-2298`. The exact restricted body loop at `package_model.py:960-968` and UNKNOWN fallback/shared advancement at `:2293-2298` matched. The target test did not exist.
+- DIRECT_EVIDENCE: Contextor MCP was used first. `evaluate_package_import_order` resolved to `contextor/core/cycle_semantics/package_model.py:1169-2314`; canonical LIVE revision 1313, source fresh, `workspace_sync=verified`, cycle semantics stale. HEAD `faec99f43420635a6ffd6fab8d0152ac49f95281`; initial `git status --short` clean. Active backend executable: `C:\Temp\Contextor_Repo\.venv\Scripts\python.exe`.
+- DIRECT_EVIDENCE: M08-I1 `_FunctionFrame(module,index,steps)` and `_advance_frame` matched `execution/state.py:31-63`; package_model creates `_FunctionFrame(module,0,body)` at `:2210-2211`; M08-I2 RETURN_FUNCTION pops the active function frame at `:2185-2190`. Repository-wide literal search found only these two production constructors, plus frame-field access in the evaluator. The new test file did not exist. No source drift or extra constructor was found.
 
 ## FILES_CHANGED
 
-- `contextor/core/cycle_semantics/package_model.py`
-- Added `tests/test_cycle_semantics_bare_return_frames.py`
-- `walkthrough.md` (this report). No other source or test change.
+- `contextor/core/cycle_semantics/execution/state.py`
+- Added `tests/test_cycle_semantics_function_frame_locals.py`
+- `walkthrough.md` (this report). No other source or test file changed.
 
-## BARE_RETURN_COMPILER_CONTRACT
+## FRAME_LOCAL_ENVIRONMENT
 
-- DIRECT_EVIDENCE: `package_model.py:960-975` now emits `_Step("RETURN_FUNCTION")` for `ast.Return` with `value is None` inside a restricted zero-argument FunctionDef. The existing loop continues compiling later import steps but execution can stop before reaching them. All other body-statement handling is unchanged.
-- DIRECT_EVIDENCE: Direct assertions showed `def f(): return; import pkg.child` compiles to `DEFINE_FUNCTION` with `function_body` ops `[RETURN_FUNCTION, IMPORT]`, and the import step retains `function_local=True`. `return 7` compiles to `DEFINE_OPAQUE_FUNCTION`; `_Step.__dataclass_fields__` remains the original 16 fields. `_compile.__module__` and evaluator `__module__` remain `contextor.core.cycle_semantics.package_model`.
+- DIRECT_EVIDENCE: `execution/state.py:3,31-40` now gives each default-constructed `_FunctionFrame` a distinct `dict[str, object | None]` via `field(default_factory=dict, compare=False, repr=False)`. `_advance_frame` passes the same dictionary to the next immutable frame object (`:59-68`). Module frames remain `(module,index)` tuples; bootstrap and 10000-step budget are unchanged (`:71-82`).
+- CODE_PATH_PROVED: The new dictionary is currently infrastructure only. `package_model.py:2210-2211` still constructs a function frame without passing a locals mapping. No compiler, `_Step`, namespace import, parameter, assignment, return-value, decorator or foreign-call branch was changed.
 
-## FUNCTION_FRAME_TERMINATION
+## ISOLATION_AND_ADVANCEMENT_CHECKS
 
-- DIRECT_EVIDENCE: `package_model.py:2185-2191` accepts RETURN_FUNCTION only when `active_frame` is `_FunctionFrame`, pops that frame and continues. It does not advance the popped frame, change module state, emit READY/BIND_CHILD or refund the return step's budget charge. The caller was already advanced in CALL_FUNCTION (`package_model.py:2203-2205`), so its next module step resumes after return.
-- CODE_PATH_PROVED: A RETURN_FUNCTION step outside a function frame returns UNKNOWN. Function-frame normal completion still follows M08-I1 at `package_model.py:1592-1614`; the new early return bypasses that completion path.
+- DIRECT_EVIDENCE: The five exact new tests passed: two fresh frames have distinct empty dictionaries; advancement preserves dictionary identity; nested frames have separate dictionaries; a module tuple does not acquire locals; frame equality ignores mutable locals (`tests/test_cycle_semantics_function_frame_locals.py:1-91`).
+- DIRECT_EVIDENCE: Direct backend assertions additionally confirmed a fresh callee dictionary, stable identity after advancement and import suspension, and unchanged `_compile`/evaluator module ownership and `_Step` fields. The returned result was `DIRECT_LOCAL_ENVIRONMENT_PASS`.
 
-## CPYTHON_PARITY_MATRIX
+## IMPORT_SUSPENSION_CONTRACT
 
-DIRECT_EVIDENCE: The exact new tests run isolated CPython and compare `pkg.` import order with the model's START_IMPORT events for MODEL_PASS cases (`tests/test_cycle_semantics_bare_return_frames.py:11-169`).
-
-| Case | CPython imports | Model outcome | Model child START_IMPORT | Status |
-|---|---|---|---|---|
-| return-skips-import | none | MODEL_PASS | none | observed parity |
-| import-before-return-only | `pkg.first` | MODEL_PASS | `pkg.first` | observed parity |
-| alias-return-resumes-module | `pkg.after` | MODEL_PASS | `pkg.after` | observed parity |
-| valued-return-still-unknown | none | UNKNOWN | not asserted as parity | conservative boundary |
-
-- DIRECT_EVIDENCE: An additional direct evaluator assertion for `import pkg.first; return; import pkg.child` followed by module-level `import pkg.after` observed `START_IMPORT(pkg.first)` before `START_IMPORT(pkg.after)`, no `pkg.child` import, exactly one module READY, and no extra BIND_CHILD for function completion. Its complete event operations were `START_IMPORT(pkg), DEFINE_FUNCTION(f), CALL_FUNCTION(f), START_IMPORT(pkg.first), READY(pkg.first), BIND_CHILD(pkg.first), FUNCTION_LOCAL_IMPORT(pkg.first), START_IMPORT(pkg.after), READY(pkg.after), BIND_CHILD(pkg.after), IMPORT(pkg.after), READY(pkg)`.
-
-## NEGATIVE_VALUED_RETURN_CONTRACT
-
-- DIRECT_EVIDENCE: `return 7` remains outside the bare-return condition (`package_model.py:963-971`), so the function is opaque and its call returns UNKNOWN before a CALL_FUNCTION event. The negative test asserts this (`tests/test_cycle_semantics_bare_return_frames.py:46-54,162-169`). CPython succeeds and imports neither child; UNKNOWN is not presented as parity.
+- DIRECT_EVIDENCE: A direct lifecycle check suspended a function frame while `_start_module_frame` pushed `pkg.child`, then `_complete_module_frame` popped that module. The function-frame object and its `local_bindings` dictionary remained the same. Events were `START_IMPORT(pkg.child)`, `READY(pkg.child)`, `BIND_CHILD(pkg.child)`; `pkg` remained INITIALIZING until its own completion. Popping the function frame left the caller module tuple in place. The module namespace acquired only the normal child binding, not the function locals (`execution/lifecycle.py:6-49`; `execution/state.py:31-68`).
+- CODE_PATH_PROVED: M08-I2 RETURN_FUNCTION still pops only the active function frame (`package_model.py:2185-2190`). The new locals mapping is not read by module namespace logic.
 
 ## TARGETED_TEST_RESULTS
 
-- DIRECT_EVIDENCE: Required focused command across nine test files returned `296 passed, 2 warnings in 31.48s`. The two warnings were third-party Authlib deprecations. Direct compiler/frame assertions returned `DIRECT_BARE_RETURN_CONTRACT_PASS`.
-- DIRECT_EVIDENCE: `git diff --check` exited 0 before report rewrite. No full pytest, SCC02, FULL, update_file, restart, Git add/commit/push, or index/history mutation.
+- DIRECT_EVIDENCE: Required focused command across eight specified files returned `255 passed, 2 warnings in 32.39s`. Both warnings were third-party Authlib deprecations.
+- DIRECT_EVIDENCE: `git diff --check` exited 0 before report rewrite, with only an LF→CRLF advisory for `execution/state.py`. No full pytest, SCC02, FULL, update_file, restart, Git add/commit/push, or index/history mutation.
 
 ## MCP_POST_CHANGE_AUDIT
 
-- DIRECT_EVIDENCE: Post-change canonical LIVE revision 1313: changed production module fresh with `workspace_sync=verified`; syntax errors 0; DFS structural cycle count 16; active warnings 16; cycle semantics stale. Module-context dependency evidence was read at revision 1313 and showed package_model's existing hard dependency on `execution.calls`; no new source import was added by this patch. The response was bounded, so a complete edge inventory is not claimed. No current semantic classification or loaded-backend adoption is inferred from source freshness.
+- DIRECT_EVIDENCE: Post-change canonical LIVE revision 1315: changed `execution.state` source fresh, `workspace_sync=verified`, syntax errors 0, DFS structural cycle count 16, active warnings 16, cycle semantics stale. The stale semantic family does not certify current classification or loaded-backend adoption.
+- DIRECT_EVIDENCE: `execution.state` has hard inbound dependencies from `execution.imports`, `execution.lifecycle`, and `package_model`; hard outbound dependencies to `execution.class_facts` and `execution.steps` (Contextor module-context, revision 1315). No new hard dependency edge appeared. Cyclic SCC count was not available in the response.
 
 ## FULL_DIFFS
 
-Complete changed-source diff:
+Complete changed-source diff (blank context lines are represented without trailing spaces in this Markdown report):
 
 ```diff
-diff --git a/contextor/core/cycle_semantics/package_model.py b/contextor/core/cycle_semantics/package_model.py
-index 41cb31a..7b0384b 100644
---- a/contextor/core/cycle_semantics/package_model.py
-+++ b/contextor/core/cycle_semantics/package_model.py
-@@ -960,6 +960,15 @@ def _compile(
-                     if isinstance(body_statement, ast.Pass):
-                         continue
+diff --git a/contextor/core/cycle_semantics/execution/state.py b/contextor/core/cycle_semantics/execution/state.py
+index 4fbece6..17d54aa 100644
+--- a/contextor/core/cycle_semantics/execution/state.py
++++ b/contextor/core/cycle_semantics/execution/state.py
+@@ -1,6 +1,6 @@
+ from __future__ import annotations
 
-+                    if (
-+                        isinstance(body_statement, ast.Return)
-+                        and body_statement.value is None
-+                    ):
-+                        function_steps.append(
-+                            _Step("RETURN_FUNCTION")
-+                        )
-+                        continue
-+
-                     if not isinstance(
-                         body_statement,
-                         (ast.Import, ast.ImportFrom),
-@@ -2173,6 +2182,13 @@ def evaluate_package_import_order(
-                 )
-             )
+-from dataclasses import dataclass
++from dataclasses import dataclass, field
+ from typing import Mapping
 
-+        elif step.op == "RETURN_FUNCTION":
-+            if not isinstance(active_frame, _FunctionFrame):
-+                return result("UNKNOWN", module)
-+
-+            frames.pop()
-+            continue
-+
-         elif step.op == "CALL_FUNCTION":
-             body = _execute_restricted_call(
-                 step,
+ from .class_facts import _ClassFact, _BUILTIN_CLASS_FACTS
+@@ -33,6 +33,11 @@ class _FunctionFrame:
+     module: str
+     index: int
+     steps: tuple[_Step, ...]
++    local_bindings: dict[str, object | None] = field(
++        default_factory=dict,
++        compare=False,
++        repr=False,
++    )
+
+
+ def _frame_module(
+@@ -59,6 +64,7 @@ def _advance_frame(
+             frame.module,
+             frame.index + 1,
+             frame.steps,
++            frame.local_bindings,
+         )
+     return (frame[0], frame[1] + 1)
+
 ```
 
-Complete new-test diff (`/dev/null` → `tests/test_cycle_semantics_bare_return_frames.py`):
+Complete new-test diff (`/dev/null` → `tests/test_cycle_semantics_function_frame_locals.py`):
 
 ```diff
 --- /dev/null
-+++ b/tests/test_cycle_semantics_bare_return_frames.py
-@@ -0,0 +1,169 @@
-+import ast
-+import subprocess
-+import sys
-+
-+import pytest
-+
-+from contextor.core.cycle_semantics.package_model import (
-+    evaluate_package_import_order,
++++ b/tests/test_cycle_semantics_function_frame_locals.py
+@@ -0,0 +1,91 @@
++from contextor.core.cycle_semantics.execution.state import (
++    _FunctionFrame,
++    _advance_frame,
++    _frame_module,
++    _frame_position,
++)
++from contextor.core.cycle_semantics.execution.steps import (
++    _Step,
 +)
 +
 +
-+CASES = [
-+    pytest.param(
-+        (
-+            "def f():\n"
-+            "    return\n"
-+            "    import pkg.child\n"
-+            "f()\n"
-+        ),
-+        (),
-+        "MODEL_PASS",
-+        id="return-skips-import",
-+    ),
-+    pytest.param(
-+        (
-+            "def f():\n"
-+            "    import pkg.first\n"
-+            "    return\n"
-+            "    import pkg.child\n"
-+            "f()\n"
-+        ),
-+        ("pkg.first",),
-+        "MODEL_PASS",
-+        id="import-before-return-only",
-+    ),
-+    pytest.param(
-+        (
-+            "def f():\n"
-+            "    return\n"
-+            "    import pkg.child\n"
-+            "g = f\n"
-+            "g()\n"
-+            "import pkg.after\n"
-+        ),
-+        ("pkg.after",),
-+        "MODEL_PASS",
-+        id="alias-return-resumes-module",
-+    ),
-+    pytest.param(
-+        (
-+            "def f():\n"
-+            "    return 7\n"
-+            "    import pkg.child\n"
-+            "f()\n"
-+        ),
-+        (),
-+        "UNKNOWN",
-+        id="valued-return-still-unknown",
-+    ),
-+]
++def test_each_call_has_independent_local_environment():
++    body = (_Step("PASS"),)
++
++    first = _FunctionFrame("pkg", 0, body)
++    second = _FunctionFrame("pkg", 0, body)
++
++    assert first is not second
++    assert first.local_bindings is not second.local_bindings
++    assert first.local_bindings == {}
++    assert second.local_bindings == {}
++
++    first.local_bindings["value"] = 7
++
++    assert first.local_bindings == {"value": 7}
++    assert second.local_bindings == {}
 +
 +
-+@pytest.mark.parametrize(
-+    "source,expected_imports,expected_outcome",
-+    CASES,
-+)
-+def test_bare_return_frame_and_cpython(
-+    tmp_path,
-+    source,
-+    expected_imports,
-+    expected_outcome,
-+):
-+    package = tmp_path / "pkg"
-+    package.mkdir()
++def test_advancement_preserves_same_local_environment():
++    body = (_Step("PASS"),)
 +
-+    (package / "__init__.py").write_text(
-+        source, encoding="utf-8"
++    initial = _FunctionFrame("pkg", 0, body)
++    initial.local_bindings["argument"] = "item"
++
++    advanced = _advance_frame(initial)
++
++    assert isinstance(advanced, _FunctionFrame)
++    assert advanced is not initial
++    assert advanced.index == 1
++    assert advanced.steps is body
++    assert (
++        advanced.local_bindings
++        is initial.local_bindings
 +    )
 +
-+    for name in ("child", "first", "after"):
-+        (package / (name + ".py")).write_text(
-+            "pass\n", encoding="utf-8"
-+        )
++    advanced.local_bindings["local"] = 12
 +
-+    runner = """
-+import builtins
-+import importlib
-+import json
-+import sys
++    assert initial.local_bindings["local"] == 12
++    assert _frame_module(advanced) == "pkg"
++    assert _frame_position(advanced) == ("pkg", 1)
 +
-+sys.path.insert(0, sys.argv[1])
-+original = builtins.__import__
-+observed = []
 +
-+def traced(name, *args, **kwargs):
-+    if name.startswith("pkg."):
-+        observed.append(name)
-+    return original(name, *args, **kwargs)
++def test_nested_calls_do_not_share_local_environment():
++    body = (_Step("PASS"),)
 +
-+builtins.__import__ = traced
++    outer = _FunctionFrame("pkg", 0, body)
++    inner = _FunctionFrame("pkg", 0, body)
 +
-+error = None
-+try:
-+    importlib.import_module("pkg")
-+except Exception as exc:
-+    error = type(exc).__name__
++    outer.local_bindings["x"] = 1
++    inner.local_bindings["x"] = 2
 +
-+print(json.dumps({
-+    "error": error,
-+    "imports": observed,
-+}))
-+"""
++    assert outer.local_bindings["x"] == 1
++    assert inner.local_bindings["x"] == 2
 +
-+    process = subprocess.run(
-+        [
-+            sys.executable,
-+            "-I",
-+            "-B",
-+            "-c",
-+            runner,
-+            str(tmp_path),
-+        ],
-+        text=True,
-+        capture_output=True,
-+        timeout=20,
-+        check=False,
-+    )
++    resumed = _advance_frame(outer)
 +
-+    assert process.returncode == 0, process.stderr
++    assert resumed.local_bindings is outer.local_bindings
++    assert resumed.local_bindings is not inner.local_bindings
 +
-+    import json
-+    observed = json.loads(process.stdout)
 +
-+    assert observed["error"] is None
-+    assert observed["imports"] == list(expected_imports)
++def test_module_frame_does_not_acquire_function_locals():
++    module_frame = ("pkg", 4)
 +
-+    sources = {
-+        "pkg.__init__": ast.parse(source),
-+    }
++    advanced = _advance_frame(module_frame)
 +
-+    for name in ("child", "first", "after"):
-+        sources["pkg." + name] = ast.parse("pass\n")
++    assert advanced == ("pkg", 5)
++    assert type(advanced) is tuple
 +
-+    result = evaluate_package_import_order(
-+        sources,
-+        "pkg",
-+    )
 +
-+    assert result.outcome == expected_outcome
++def test_frame_equality_does_not_depend_on_mutable_locals():
++    body = (_Step("PASS"),)
 +
-+    if expected_outcome == "MODEL_PASS":
-+        imported = [
-+            event.target
-+            for event in result.events
-+            if event.operation == "START_IMPORT"
-+            and event.target in {
-+                "pkg.child",
-+                "pkg.first",
-+                "pkg.after",
-+            }
-+        ]
++    first = _FunctionFrame("pkg", 0, body)
++    second = _FunctionFrame("pkg", 0, body)
 +
-+        assert imported == list(expected_imports)
++    assert first == second
 +
-+    if expected_outcome == "UNKNOWN":
-+        assert not any(
-+            event.operation == "CALL_FUNCTION"
-+            for event in result.events
-+        )
++    first.local_bindings["x"] = 3
++
++    assert first == second
++    assert first.local_bindings is not second.local_bindings
 ```
 
 ## FINAL_VERDICT
 
-- CONTRACT_PROVED for this bounded change: bare return now ends only its restricted function frame, preserving earlier imports and skipping later body steps. Four CPython-backed cases, the focused regression set and direct compiler/frame checks passed. Cycle semantics and backend loaded-code adoption remain unverified. Stop after implementation and audit.
+- CONTRACT_PROVED for this bounded infrastructure change: each call frame has an independent local dictionary and advancement preserves it. Focused regressions and direct lifecycle assertions passed; no new model semantics were admitted. Canonical source is fresh, while cycle semantics and backend loaded-code adoption remain unverified. Stop after implementation and audit.
