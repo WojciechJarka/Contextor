@@ -53,6 +53,7 @@ from .execution.imports import (
     _execute_prepare_from_member,
     _resolve_from_child,
     _execute_from_binding,
+    _classify_external_import,
 )
 
 
@@ -1607,17 +1608,21 @@ def evaluate_package_import_order(
             target = step.target
 
             if not target or target not in programs:
-                if (
-                    _assume_passive_external_imports
-                    and target
-                    and target not in programs
-                    and module != bootstrap
-                    and target.split(".", 1)[0]
-                    not in indexed_roots
-                ):
-                    if step.class_local:
-                        return result("UNKNOWN", module, target)
+                external_decision = _classify_external_import(
+                    step,
+                    module=module,
+                    bootstrap=bootstrap,
+                    programs=programs,
+                    indexed_roots=indexed_roots,
+                    assume_passive_external_imports=(
+                        _assume_passive_external_imports
+                    ),
+                )
 
+                if external_decision == "UNKNOWN_CLASS_LOCAL":
+                    return result("UNKNOWN", module, target)
+
+                if external_decision == "ASSUME":
                     assumed_external_imports.append(
                         ReachedUnmodeledImport(
                             importer=module,

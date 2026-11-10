@@ -255,3 +255,33 @@ def _execute_from_binding(
             else "FROM"
         ),
     )
+
+
+def _classify_external_import(
+    step: _Step,
+    *,
+    module: str,
+    bootstrap: str,
+    programs: Mapping[str, object],
+    indexed_roots: frozenset[str],
+    assume_passive_external_imports: bool,
+) -> Literal[
+    "ASSUME",
+    "UNKNOWN_CLASS_LOCAL",
+    "UNKNOWN_UNMODELED",
+]:
+    target = step.target
+
+    if (
+        assume_passive_external_imports
+        and target
+        and target not in programs
+        and module != bootstrap
+        and target.split(".", 1)[0] not in indexed_roots
+    ):
+        if step.class_local:
+            return "UNKNOWN_CLASS_LOCAL"
+
+        return "ASSUME"
+
+    return "UNKNOWN_UNMODELED"

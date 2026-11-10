@@ -1,11 +1,11 @@
-# P5-M06-I5 — FROM symbol binding extraction
+# P5-M06-I6 — External import policy extraction
 
 ## PREFLIGHT
 
-- DIRECT_EVIDENCE: Initial HEAD `de99c8431af26cd1efd13c3660654c530f554226`; initial worktree clean. No Git index/history mutation by this task.
-- DIRECT_EVIDENCE: Contextor LIVE revision 1285 before change; both target modules fresh with workspace_sync verified. Active backend venv executable `C:\Temp\Contextor_Repo\.venv\Scripts\python.exe`.
-- DIRECT_EVIDENCE: M06-I4 `_resolve_from_child` present unchanged (`execution/imports.py:145-199`). Ordinary FROM tail matched the exact specified anchor (`package_model.py:1818-1857`). No SOURCE_DRIFT.
-- CODE_PATH_PROVED: The extracted helper retains missing-export classification, class-local admissibility, namespace write and event selection. The caller retains event-before-result ordering for failure and the common program-counter tail for success.
+- DIRECT_EVIDENCE: Initial HEAD `f5980a8dd781e0b8d84e8fa7e1e59a5e349d29cd`; initial worktree clean. No Git index/history mutation by this task.
+- DIRECT_EVIDENCE: Contextor LIVE revision 1287 before change; both target modules fresh with workspace_sync verified. Active backend venv executable `C:\Temp\Contextor_Repo\.venv\Scripts\python.exe`.
+- DIRECT_EVIDENCE: M06-I5 `_execute_from_binding` present unchanged (`execution/imports.py:205-257`). Common external-target branch matched the specified condition and subsequent evidence/binding/blocker flow (`package_model.py:1602-1668`). No SOURCE_DRIFT.
+- CODE_PATH_PROVED: The extracted helper retains the same conjunctive admission condition and class-local rejection. It does not alter the pre-existing optional passive-external assumption; admission remains conditional, with unmodeled targets returning UNKNOWN under the original caller path.
 
 ## FILES_CHANGED
 
@@ -15,24 +15,24 @@
 
 ## EXACT_IMPLEMENTATION
 
-- DIRECT_EVIDENCE: Added `Callable`, `RETURN_OUTCOME`, `outcome` and the exact `_execute_from_binding` function to `execution/imports.py`. Existing functions remain unchanged.
-- DIRECT_EVIDENCE: `package_model.py` imports the helper and replaces only the verified ordinary FROM tail. It passes the existing `_safe_class_namespace_value` predicate by reference.
+- DIRECT_EVIDENCE: Appended exactly `_classify_external_import` in `execution/imports.py`; all existing functions and `_ImportControl` remain unchanged.
+- DIRECT_EVIDENCE: `package_model.py` imports the helper and replaces only the admission conditional. The original assumption recording, event, namespace marker, frame advance, blocker construction and UNKNOWN result remain in place.
 
-## FROM_BINDING_CONTROL_CHECKS
+## EXTERNAL_POLICY_CHECKS
 
-- DIRECT_EVIDENCE: All specified backend-venv assertions passed: EARLY_BINDING_HAZARD, MISSING_EXPORT, ordinary FROM binding, function-local and class-local event selection without module binding, class-local UNKNOWN for inadmissible value, object identity of ordinary binding, and unchanged compiler/evaluator `__module__`.
-- CODE_PATH_PROVED: Failure controls carry the same target/member and event/outcome names as the former branch. The helper writes `namespaces[module][step.binding]` only for ordinary non-local success.
+- DIRECT_EVIDENCE: All specified backend-venv assertions passed: external ASSUME only when enabled and outside bootstrap/indexed roots; class-local UNKNOWN_CLASS_LOCAL; function-local ASSUME; internal and unknown indexed-root UNKNOWN_UNMODELED; empty target UNKNOWN_UNMODELED; external FROM and PREPARE ASSUME; unchanged compiler/evaluator `__module__`.
+- CODE_PATH_PROVED: `_classify_external_import` reads only its inputs and returns a three-way decision. It neither records an assumption nor mutates namespace, frames or events.
 
 ## TARGETED_TEST_RESULTS
 
-- DIRECT_EVIDENCE: Requested focused pytest subset: 407 passed, 2 third-party deprecation warnings, 50.19 s. No SCC02 or full suite.
+- DIRECT_EVIDENCE: Requested focused pytest subset: 407 passed, 2 third-party deprecation warnings, 36.90 s. No SCC02 or full suite.
 - DIRECT_EVIDENCE: `git diff --check` exit 0; only LF/CRLF advisory for `execution/imports.py`.
 
 ## MCP_POST_CHANGE_AUDIT
 
-- DIRECT_EVIDENCE: LIVE revision 1287. Both changed modules canonical fresh, workspace_sync verified; module, graph, topology, cycles and lineage fresh. Project-level workspace_sync unverified.
+- DIRECT_EVIDENCE: LIVE revision 1289. Both changed modules canonical fresh with workspace_sync verified; module, graph, topology, cycles and lineage fresh. Project-level workspace_sync unverified.
 - DIRECT_EVIDENCE: Hard edges remain `package_model -> execution.imports -> execution.steps`; no reverse `execution.imports -> package_model` edge.
-- DIRECT_EVIDENCE: Syntax errors 0; structural DFS back-edge cycle count 16; active warnings 16. `cycle_semantics` stale; current cyclic SCC count unavailable. No FULL, update_file or restart.
+- DIRECT_EVIDENCE: Syntax errors 0; structural DFS back-edge cycle count 16; active warnings 16. `cycle_semantics` stale, so current cyclic SCC count unavailable. No FULL, update_file or restart.
 - UNKNOWN: Running backend adoption not proved by source freshness; direct checks used a new backend-venv interpreter.
 
 ## FULL_DIFFS
@@ -41,176 +41,94 @@
 
 ```diff
 diff --git a/contextor/core/cycle_semantics/execution/imports.py b/contextor/core/cycle_semantics/execution/imports.py
-index 707edf5..fd469f3 100644
+index fd469f3..89f2a27 100644
 --- a/contextor/core/cycle_semantics/execution/imports.py
 +++ b/contextor/core/cycle_semantics/execution/imports.py
-@@ -1,6 +1,7 @@
- from __future__ import annotations
- 
- from dataclasses import dataclass
-+from typing import Callable
- from typing import Mapping
- from typing import Literal
- 
-@@ -37,10 +38,12 @@ class _ImportControl:
-         "RETURN_UNKNOWN",
-         "START_CHILD",
-         "REENTRANT_CHILD",
-+        "RETURN_OUTCOME",
-     ]
-     target: str | None = None
-     symbol: str | None = None
-     event_operation: str | None = None
-+    outcome: str | None = None
- 
- 
- def _execute_ready_import(
-@@ -197,3 +200,58 @@ def _resolve_from_child(
-             )
- 
-     return _ImportControl("ADVANCE")
+@@ -255,3 +255,33 @@ def _execute_from_binding(
+             else "FROM"
+         ),
+     )
 +
 +
-+def _execute_from_binding(
++def _classify_external_import(
 +    step: _Step,
 +    *,
 +    module: str,
-+    states: Mapping[str, str],
-+    namespaces: dict[str, dict[str, object | None]],
-+    class_namespace_admissible: Callable[[object], bool],
-+) -> _ImportControl:
++    bootstrap: str,
++    programs: Mapping[str, object],
++    indexed_roots: frozenset[str],
++    assume_passive_external_imports: bool,
++) -> Literal[
++    "ASSUME",
++    "UNKNOWN_CLASS_LOCAL",
++    "UNKNOWN_UNMODELED",
++]:
 +    target = step.target
-+    member = step.symbol
-+
-+    if member not in namespaces[target]:
-+        outcome = (
-+            "EARLY_BINDING_HAZARD"
-+            if states[target] == "INITIALIZING"
-+            else "MISSING_EXPORT"
-+        )
-+
-+        return _ImportControl(
-+            "RETURN_OUTCOME",
-+            target=target,
-+            symbol=member,
-+            event_operation=outcome,
-+            outcome=outcome,
-+        )
-+
-+    imported_value = namespaces[target][member]
 +
 +    if (
-+        step.class_local
-+        and not class_namespace_admissible(imported_value)
++        assume_passive_external_imports
++        and target
++        and target not in programs
++        and module != bootstrap
++        and target.split(".", 1)[0] not in indexed_roots
 +    ):
-+        return _ImportControl(
-+            "RETURN_UNKNOWN",
-+            target=target,
-+            symbol=member,
-+        )
++        if step.class_local:
++            return "UNKNOWN_CLASS_LOCAL"
 +
-+    if not step.function_local and not step.class_local:
-+        namespaces[module][step.binding] = imported_value
++        return "ASSUME"
 +
-+    return _ImportControl(
-+        "ADVANCE",
-+        target=target,
-+        symbol=member,
-+        event_operation=(
-+            "FUNCTION_LOCAL_FROM"
-+            if step.function_local
-+            else "CLASS_LOCAL_FROM"
-+            if step.class_local
-+            else "FROM"
-+        ),
-+    )
++    return "UNKNOWN_UNMODELED"
 ```
 
 ### contextor/core/cycle_semantics/package_model.py
 
 ```diff
 diff --git a/contextor/core/cycle_semantics/package_model.py b/contextor/core/cycle_semantics/package_model.py
-index ae332e6..fa2124b 100644
+index fa2124b..959db1c 100644
 --- a/contextor/core/cycle_semantics/package_model.py
 +++ b/contextor/core/cycle_semantics/package_model.py
-@@ -52,6 +52,7 @@ from .execution.imports import (
-     _execute_ready_import,
+@@ -53,6 +53,7 @@ from .execution.imports import (
      _execute_prepare_from_member,
      _resolve_from_child,
-+    _execute_from_binding,
+     _execute_from_binding,
++    _classify_external_import,
  )
  
  
-@@ -1815,44 +1816,43 @@ def evaluate_package_import_order(
-                     frames.append((child, 0))
-                     continue
+@@ -1607,17 +1608,21 @@ def evaluate_package_import_order(
+             target = step.target
  
--                if member not in namespaces[target]:
--                    outcome = (
--                        "EARLY_BINDING_HAZARD"
--                        if states[target] == "INITIALIZING"
--                        else "MISSING_EXPORT"
-+                from_binding_control = _execute_from_binding(
+             if not target or target not in programs:
+-                if (
+-                    _assume_passive_external_imports
+-                    and target
+-                    and target not in programs
+-                    and module != bootstrap
+-                    and target.split(".", 1)[0]
+-                    not in indexed_roots
+-                ):
+-                    if step.class_local:
+-                        return result("UNKNOWN", module, target)
++                external_decision = _classify_external_import(
 +                    step,
 +                    module=module,
-+                    states=states,
-+                    namespaces=namespaces,
-+                    class_namespace_admissible=(
-+                        _safe_class_namespace_value
++                    bootstrap=bootstrap,
++                    programs=programs,
++                    indexed_roots=indexed_roots,
++                    assume_passive_external_imports=(
++                        _assume_passive_external_imports
 +                    ),
 +                )
 +
-+                if from_binding_control.action == "RETURN_UNKNOWN":
-+                    return result(
-+                        "UNKNOWN",
-+                        from_binding_control.target,
-+                        from_binding_control.symbol,
-                     )
++                if external_decision == "UNKNOWN_CLASS_LOCAL":
++                    return result("UNKNOWN", module, target)
  
-+                if from_binding_control.action == "RETURN_OUTCOME":
-                     events.append(
-                         PackageModelEvent(
-                             module,
--                            outcome,
-+                            from_binding_control.event_operation,
-                             target,
-                             member,
-                         )
-                     )
- 
--                    return result(outcome, target, member)
--
--                imported_value = namespaces[target][member]
--                if (
--                    step.class_local
--                    and not _safe_class_namespace_value(imported_value)
--                ):
--                    return result("UNKNOWN", target, member)
--
--                if not step.function_local and not step.class_local:
--                    namespaces[module][step.binding] = imported_value
-+                    return result(
-+                        from_binding_control.outcome,
-+                        from_binding_control.target,
-+                        from_binding_control.symbol,
-+                    )
- 
-                 events.append(
-                     PackageModelEvent(
-                         module,
--                        (
--                            "FUNCTION_LOCAL_FROM"
--                            if step.function_local
--                            else "CLASS_LOCAL_FROM"
--                            if step.class_local
--                            else "FROM"
--                        ),
-+                        from_binding_control.event_operation,
-                         target,
-                         member,
-                     )
++                if external_decision == "ASSUME":
+                     assumed_external_imports.append(
+                         ReachedUnmodeledImport(
+                             importer=module,
 ```
 
 ## FINAL_VERDICT
 
-- CONTRACT_PROVED: Exact extraction, direct checks, focused regressions and diff check passed. Changed-file LIVE evidence fresh. Cycle semantics and running-backend adoption remain unverified, so no runtime semantic certification is claimed.
+- CONTRACT_PROVED: Literal extraction, direct controls, focused regressions and diff check passed. Changed-file LIVE evidence fresh. Cycle semantics and running-backend adoption remain unverified; no runtime semantic certification is claimed.
