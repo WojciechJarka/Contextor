@@ -47,6 +47,7 @@ from .execution.state import (
     _new_execution_cursor,
     _new_definition_state,
 )
+from .execution.imports import _missing_piece
 
 
 @dataclass(frozen=True)
@@ -1463,24 +1464,6 @@ def evaluate_package_import_order(
     execution_cursor = _new_execution_cursor(bootstrap)
     frames = execution_cursor.frames
 
-    def chain(name: str) -> tuple[str, ...]:
-        parts = name.split(".")
-
-        return tuple(
-            ".".join(parts[:index])
-            for index in range(1, len(parts) + 1)
-        )
-
-    def missing_piece(name: str) -> str | None:
-        for piece in chain(name):
-            if piece not in states:
-                return piece
-
-            if states[piece] == "NEW":
-                return piece
-
-        return None
-
     indexed_roots = frozenset(
         name.split(".", 1)[0]
         for name in programs
@@ -1681,7 +1664,7 @@ def evaluate_package_import_order(
                     reached_unmodeled_import=blocker,
                 )
 
-            next_piece = missing_piece(target)
+            next_piece = _missing_piece(target, states)
 
             if next_piece:
                 if next_piece not in programs:
@@ -1711,7 +1694,7 @@ def evaluate_package_import_order(
 
                     if child in programs:
                         if states[child] == "NEW":
-                            if missing_piece(child) != child:
+                            if _missing_piece(child, states) != child:
                                 return result("UNKNOWN", child, member)
 
                             states[child] = "INITIALIZING"
@@ -1822,7 +1805,7 @@ def evaluate_package_import_order(
                         if states[child] != "NEW":
                             return result("UNKNOWN", child, member)
 
-                        next_child = missing_piece(child)
+                        next_child = _missing_piece(child, states)
 
                         if next_child != child:
                             return result("UNKNOWN", child, member)

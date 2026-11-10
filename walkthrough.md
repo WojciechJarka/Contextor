@@ -1,407 +1,147 @@
-# P5-M05-I3 — Class facts and definition state extraction
+# P5-M06-I1 — Import chain resolution extraction
 
 ## PREFLIGHT
 
-- DIRECT_EVIDENCE: Initial HEAD `3544ee0ee9523fefca2ff772da80626b9cb53333`; initial `git status --short` showed only ` M walkthrough.md` from D2. That report was replaced. No pre-existing production/test changes were overwritten.
-- DIRECT_EVIDENCE: Contextor MCP pre-change canonical LIVE revision 1274; `package_model.py` and `execution/state.py` `canonical_state=fresh`, `workspace_sync=verified`. Active backend executable `C:\Temp\Contextor_Repo\.venv\Scripts\python.exe` (PID 14072).
-- DIRECT_EVIDENCE: `package_model.py:71-191,1563-1576` matched D2 source and supplied exact blocks; `execution/state.py` contained the two accepted state classes/factories; `execution/class_facts.py` did not exist. `_ClassFact`, builtin constants and `_merge_class_mros` were still defined in `package_model.py`.
-- CODE_PATH_PROVED: Independent semantic check found a literal move of frozen `_ClassFact`, builtin fact instances, C3 helper and per-invocation mapping comprehensions. The supplied phrase “immutable builtin reference data” is imprecise: `_BUILTIN_CLASS_FACTS` remains a mutable dict containing frozen facts. No new policy or Contextor-specific exception was introduced.
+- DIRECT_EVIDENCE: HEAD before and after: `68ec5c5e668440b4af47020a603d60e0c8282b9f`. Initial status: only ` M walkthrough.md` (pre-existing M06-D1 report). No Git index or history mutation was performed.
+- DIRECT_EVIDENCE: Contextor LIVE pre-change revision 1277; `package_model.py` canonical state fresh, workspace_sync verified. Backend interpreter executable: `C:\Temp\Contextor_Repo\.venv\Scripts\python.exe` (active backend PID 14072).
+- DIRECT_EVIDENCE: `execution/imports.py` did not exist. `package_model.py:1466-1482` contained the exact specified nested definitions. The only calls were at old lines 1684, 1714, 1825. Repository search found no other `missing_piece` references in production or tests.
+- CODE_PATH_PROVED: The extracted helper reads the same mutable `states` mapping at each of the same three call sites, in the same order, with the same comparisons and returns. It introduces no Contextor-specific branch or semantic assumption.
 
 ## FILES_CHANGED
 
-- `contextor/core/cycle_semantics/execution/class_facts.py` — new module.
-- `contextor/core/cycle_semantics/execution/state.py` — imports and definition-state class/factory.
-- `contextor/core/cycle_semantics/package_model.py` — imports, old definitions removed and state factory use.
-- `walkthrough.md` — this report, exempt from production/test FULL_DIFF counting.
+- `contextor/core/cycle_semantics/package_model.py`
+- `contextor/core/cycle_semantics/execution/imports.py` (new)
+- `walkthrough.md` (report only; overwritten as required)
 
 ## EXACT_IMPLEMENTATION
 
-- DIRECT_EVIDENCE: New `class_facts.py` contains the specified class, constants and unchanged C3 helper. `state.py` retains previous definitions and adds only the specified imports, dataclass and factory. `package_model.py` re-exports the moved symbols by imports and binds three existing evaluator locals from `_new_definition_state(programs)`. Full task diffs below.
+- DIRECT_EVIDENCE: Added `_chain` and `_missing_piece` to `execution/imports.py:1-26` exactly as specified.
+- DIRECT_EVIDENCE: `package_model.py:50` imports `_missing_piece`; deleted only the nested `chain` and `missing_piece` definitions; updated the three calls to pass `states`.
 
-## CLASS_IDENTITY_CHECKS
+## IMPORT_CHAIN_CHECKS
 
-- CONTRACT_PROVED: Backend venv assertions passed: all five `package_model` names are identical by `is` to `class_facts` names; `_safe_class_namespace_value.__globals__["_ClassFact"]` and evaluator `__globals__["_merge_class_mros"]` resolve the moved identities. `_compile` and evaluator retain `__module__ = contextor.core.cycle_semantics.package_model`.
-- DIRECT_EVIDENCE: Relocated `_ClassFact.__module__` and `_merge_class_mros.__module__` are `contextor.core.cycle_semantics.execution.class_facts`; `_DefinitionState.__module__` and `_new_definition_state.__module__` are `contextor.core.cycle_semantics.execution.state`. Constants have no `__module__` attribute.
-
-## DEFINITION_STATE_ISOLATION
-
-- CONTRACT_PROVED: Backend venv assertions passed: builtin facts retain object identity, while two factory calls return distinct `prepared_class_bases`, `class_facts_by_identity`, outer `function_definitions` and inner per-module maps. Writing `first.function_definitions["pkg"]["f"]` leaves the second instance unchanged. Output: `IDENTITY_AND_ISOLATION=PASS`.
+- DIRECT_EVIDENCE: Backend interpreter assertions passed: `package_model._missing_piece is execution.imports._missing_piece`; `_chain("a.b.c") == ("a", "a.b", "a.b.c")`; absent and NEW pieces return their first unresolved segment; INITIALIZING parent advances to child; fully READY chain returns `None`; `_compile` and `evaluate_package_import_order` retain `package_model` as `__module__`.
+- CODE_PATH_PROVED: The helper does not mutate `states`; its only mapping operations are membership and lookup (`execution/imports.py:20-25`).
 
 ## TARGETED_TEST_RESULTS
 
-- DIRECT_EVIDENCE: Exact seven-file backend venv command `-m pytest -q tests/test_cycle_semantics_package_model.py tests/test_cycle_semantics_passive_classes.py tests/test_cycle_semantics_passive_functions.py tests/test_cycle_semantics_package_model_literals.py tests/test_cycle_semantics_package_model_annotations315.py tests/test_cycle_semantics_decorator_definition_effects.py tests/test_f1h_runtime_attestation.py -rs` → **472 passed, 2 third-party deprecation warnings in 42.11 s**. SCC02 was excluded; its two earlier failures remain unresolved.
-- DIRECT_EVIDENCE: `git diff --check` emitted no whitespace errors. The combined inspection command returned 1 solely because `git diff --no-index -- NUL ...class_facts.py` displayed a new-file difference.
+- DIRECT_EVIDENCE: Exact requested focused command using backend venv: 393 passed, 2 third-party deprecation warnings, 43.17 s. Files: `test_cycle_semantics_package_model.py`, `test_cycle_semantics_function_local_from.py`, `test_cycle_semantics_namespace_path_model.py`, `test_cycle_semantics_passive_classes.py`, `test_f1h_runtime_attestation.py`.
+- DIRECT_EVIDENCE: `git diff --check` exit 0. Git emitted only an LF/CRLF advisory for `walkthrough.md`.
 
 ## MCP_POST_CHANGE_AUDIT
 
-- DIRECT_EVIDENCE: Canonical LIVE revision advanced 1274 → 1277. A transient `package_model.py workspace_sync=out_of_sync` at revision 1276 was followed by `workspace_sync=verified` for all three modules at revision 1277. Source/module/graph/topology families are fresh; syntax errors 0. `cycle_semantics` remains stale.
-- DIRECT_EVIDENCE: Hard edges: `package_model → execution.class_facts`, `package_model → execution.state`; `execution.state → execution.class_facts` and `execution.state → execution.steps`. `execution.class_facts` has zero outbound hard edges. Neither execution module has a hard edge back to `package_model`. Structural cycle count 16 normalized DFS back-edge paths; active warning count 16.
-- UNKNOWN: Current cyclic SCC count was not exposed in the selected LIVE queries. Fresh source/workspace sync does not prove loaded runtime adoption; no backend restart was made.
-- DIRECT_EVIDENCE: During audit, an external `Auto-commit: Cleanup and update` created HEAD `415a12a42425a7be5ecadaaa91f1dcd1ad45483d` containing the `state.py` and `package_model.py` task edits. This agent issued no commit or push. The new `class_facts.py` was still untracked when `git status` was checked after that auto-commit. The full task diff below compares the initial HEAD to resulting source, including the new file.
+- DIRECT_EVIDENCE: Canonical LIVE revision 1279. Both changed modules have canonical state fresh and workspace_sync verified; module, graph, topology, cycles and lineage fresh. Project-level workspace_sync is unverified, so file-level verification is the narrower evidence.
+- DIRECT_EVIDENCE: `package_model -> execution.imports` is one hard dependency. `execution.imports` has zero outbound dependencies; specifically no reverse edge to `package_model`.
+- DIRECT_EVIDENCE: Syntax errors 0; structural DFS back-edge cycle count 16; active warning count 16; model pass count 0. Cyclic SCC count unavailable because `cycle_semantics` is stale. No FULL, update_file, or backend restart.
+- UNKNOWN: Runtime process adoption of the changed source was not established by LIVE source freshness; importability was checked in a fresh backend-venv interpreter.
 
 ## FULL_DIFFS
 
-### `contextor/core/cycle_semantics/execution/class_facts.py`
+### contextor/core/cycle_semantics/execution/imports.py
 
 ```diff
-diff --git a/contextor/core/cycle_semantics/execution/class_facts.py b/contextor/core/cycle_semantics/execution/class_facts.py
+diff --git a/contextor/core/cycle_semantics/execution/imports.py b/contextor/core/cycle_semantics/execution/imports.py
 new file mode 100644
-index 0000000..59f9e1b
 --- /dev/null
-+++ b/contextor/core/cycle_semantics/execution/class_facts.py
-@@ -0,0 +1,119 @@
++++ b/contextor/core/cycle_semantics/execution/imports.py
+@@ -0,0 +1,26 @@
 +from __future__ import annotations
 +
-+from dataclasses import dataclass
++from typing import Mapping
 +
 +
-+@dataclass(frozen=True)
-+class _ClassFact:
-+    """Provenance and creation facts for one passive class definition."""
++def _chain(name: str) -> tuple[str, ...]:
++    parts = name.split(".")
 +
-+    identity: str
-+    origin: str
-+    direct_bases: tuple[str, ...]
-+    linear_mro: tuple[str, ...]
-+    metaclass_identity: str
-+    defines_init_subclass: bool
-+    safe_to_subclass: bool
-+    passive_metaclass_creation: bool = False
-+
-+
-+_BUILTIN_TYPE_ID = "builtins.type"
-+
-+_BUILTIN_CLASS_FACTS = {
-+    "type": _ClassFact(
-+        identity=_BUILTIN_TYPE_ID,
-+        origin="BUILTIN",
-+        direct_bases=("builtins.object",),
-+        linear_mro=(_BUILTIN_TYPE_ID, "builtins.object"),
-+        metaclass_identity=_BUILTIN_TYPE_ID,
-+        defines_init_subclass=False,
-+        safe_to_subclass=True,
-+        passive_metaclass_creation=True,
-+    ),
-+    "object": _ClassFact(
-+        identity="builtins.object",
-+        origin="BUILTIN",
-+        direct_bases=(),
-+        linear_mro=("builtins.object",),
-+        metaclass_identity=_BUILTIN_TYPE_ID,
-+        defines_init_subclass=False,
-+        safe_to_subclass=True,
-+    ),
-+    "BaseException": _ClassFact(
-+        identity="builtins.BaseException",
-+        origin="BUILTIN",
-+        direct_bases=("builtins.object",),
-+        linear_mro=("builtins.BaseException", "builtins.object"),
-+        metaclass_identity=_BUILTIN_TYPE_ID,
-+        defines_init_subclass=False,
-+        safe_to_subclass=True,
-+    ),
-+    "Exception": _ClassFact(
-+        identity="builtins.Exception",
-+        origin="BUILTIN",
-+        direct_bases=("builtins.BaseException",),
-+        linear_mro=(
-+            "builtins.Exception",
-+            "builtins.BaseException",
-+            "builtins.object",
-+        ),
-+        metaclass_identity=_BUILTIN_TYPE_ID,
-+        defines_init_subclass=False,
-+        safe_to_subclass=True,
-+    ),
-+    "ValueError": _ClassFact(
-+        identity="builtins.ValueError",
-+        origin="BUILTIN",
-+        direct_bases=("builtins.Exception",),
-+        linear_mro=(
-+            "builtins.ValueError",
-+            "builtins.Exception",
-+            "builtins.BaseException",
-+            "builtins.object",
-+        ),
-+        metaclass_identity=_BUILTIN_TYPE_ID,
-+        defines_init_subclass=False,
-+        safe_to_subclass=True,
-+    ),
-+}
-+
-+_BUILTIN_EXCEPTION_CLASS_IDENTITIES = frozenset({
-+    _BUILTIN_CLASS_FACTS[name].identity
-+    for name in ("BaseException", "Exception", "ValueError")
-+})
-+
-+
-+def _merge_class_mros(
-+    bases: tuple[_ClassFact, ...],
-+) -> tuple[str, ...] | None:
-+    """Return the C3 merge of proven base MROs, or None if inconsistent."""
-+    sequences = [list(base.linear_mro) for base in bases]
-+    sequences.append([base.identity for base in bases])
-+    merged: list[str] = []
-+
-+    while any(sequences):
-+        candidate = next(
-+            (
-+                sequence[0]
-+                for sequence in sequences
-+                if not any(
-+                    sequence[0] in other[1:]
-+                    for other in sequences
-+                    if other
-+                )
-+            ),
-+            None,
-+        )
-+        if candidate is None:
-+            return None
-+
-+        merged.append(candidate)
-+        remaining = []
-+        for sequence in sequences:
-+            if sequence and sequence[0] == candidate:
-+                sequence = sequence[1:]
-+            if sequence:
-+                remaining.append(sequence)
-+        sequences = remaining
-+
-+    return tuple(merged)
-```
-
-### `contextor/core/cycle_semantics/execution/state.py`
-
-```diff
-diff --git a/contextor/core/cycle_semantics/execution/state.py b/contextor/core/cycle_semantics/execution/state.py
-index fca6811..2e261ce 100644
---- a/contextor/core/cycle_semantics/execution/state.py
-+++ b/contextor/core/cycle_semantics/execution/state.py
-@@ -3,6 +3,9 @@ from __future__ import annotations
- from dataclasses import dataclass
- from typing import Mapping
- 
-+from .class_facts import _ClassFact, _BUILTIN_CLASS_FACTS
-+from .steps import _Step
-+
- 
- @dataclass
- class _ModuleInitializationState:
-@@ -38,3 +41,31 @@ def _new_execution_cursor(
-         frames=[(bootstrap, 0)],
-         step_budget=10000,
-     )
-+
-+
-+@dataclass
-+class _DefinitionState:
-+    prepared_class_bases: dict[
-+        str, tuple[tuple[_ClassFact, ...], _ClassFact]
-+    ]
-+    class_facts_by_identity: dict[str, _ClassFact]
-+    function_definitions: dict[
-+        str,
-+        dict[str, tuple[_Step, ...]],
-+    ]
-+
-+
-+def _new_definition_state(
-+    programs: Mapping[str, object],
-+) -> _DefinitionState:
-+    return _DefinitionState(
-+        prepared_class_bases={},
-+        class_facts_by_identity={
-+            fact.identity: fact
-+            for fact in _BUILTIN_CLASS_FACTS.values()
-+        },
-+        function_definitions={
-+            name: {}
-+            for name in programs
-+        },
++    return tuple(
++        ".".join(parts[:index])
++        for index in range(1, len(parts) + 1)
 +    )
++
++
++def _missing_piece(
++    name: str,
++    states: Mapping[str, str],
++) -> str | None:
++    for piece in _chain(name):
++        if piece not in states:
++            return piece
++
++        if states[piece] == "NEW":
++            return piece
++
++    return None
 ```
 
-### `contextor/core/cycle_semantics/package_model.py`
+### contextor/core/cycle_semantics/package_model.py
 
 ```diff
 diff --git a/contextor/core/cycle_semantics/package_model.py b/contextor/core/cycle_semantics/package_model.py
-index efcd6cd..00eb8df 100644
+index 00eb8df..6804430 100644
 --- a/contextor/core/cycle_semantics/package_model.py
 +++ b/contextor/core/cycle_semantics/package_model.py
-@@ -35,9 +35,17 @@ from .execution.definition_checks import (
-     _exact_restricted_dataclass_hash_field_call,
-     _restricted_dataclass_field_annotation,
- )
-+from .execution.class_facts import (
-+    _ClassFact,
-+    _BUILTIN_TYPE_ID,
-+    _BUILTIN_CLASS_FACTS,
-+    _BUILTIN_EXCEPTION_CLASS_IDENTITIES,
-+    _merge_class_mros,
-+)
- from .execution.state import (
-     _new_module_initialization_state,
+@@ -47,6 +47,7 @@ from .execution.state import (
      _new_execution_cursor,
-+    _new_definition_state,
+     _new_definition_state,
  )
++from .execution.imports import _missing_piece
  
  
-@@ -68,20 +76,6 @@ class AssumedFrozenDataclassDecoration:
-     column: int
- 
- 
--@dataclass(frozen=True)
--class _ClassFact:
--    """Provenance and creation facts for one passive class definition."""
--
--    identity: str
--    origin: str
--    direct_bases: tuple[str, ...]
--    linear_mro: tuple[str, ...]
--    metaclass_identity: str
--    defines_init_subclass: bool
--    safe_to_subclass: bool
--    passive_metaclass_creation: bool = False
--
--
- def _safe_class_namespace_value(value: object) -> bool:
-     """Values admitted in a passive class namespace cannot be descriptors."""
-     if isinstance(value, _ClassFact) or value is None:
-@@ -91,106 +85,6 @@ def _safe_class_namespace_value(value: object) -> bool:
-     return False
- 
- 
--_BUILTIN_TYPE_ID = "builtins.type"
--_BUILTIN_CLASS_FACTS = {
--    "type": _ClassFact(
--        identity=_BUILTIN_TYPE_ID,
--        origin="BUILTIN",
--        direct_bases=("builtins.object",),
--        linear_mro=(_BUILTIN_TYPE_ID, "builtins.object"),
--        metaclass_identity=_BUILTIN_TYPE_ID,
--        defines_init_subclass=False,
--        safe_to_subclass=True,
--        passive_metaclass_creation=True,
--    ),
--    "object": _ClassFact(
--        identity="builtins.object",
--        origin="BUILTIN",
--        direct_bases=(),
--        linear_mro=("builtins.object",),
--        metaclass_identity=_BUILTIN_TYPE_ID,
--        defines_init_subclass=False,
--        safe_to_subclass=True,
--    ),
--    "BaseException": _ClassFact(
--        identity="builtins.BaseException",
--        origin="BUILTIN",
--        direct_bases=("builtins.object",),
--        linear_mro=("builtins.BaseException", "builtins.object"),
--        metaclass_identity=_BUILTIN_TYPE_ID,
--        defines_init_subclass=False,
--        safe_to_subclass=True,
--    ),
--    "Exception": _ClassFact(
--        identity="builtins.Exception",
--        origin="BUILTIN",
--        direct_bases=("builtins.BaseException",),
--        linear_mro=(
--            "builtins.Exception",
--            "builtins.BaseException",
--            "builtins.object",
--        ),
--        metaclass_identity=_BUILTIN_TYPE_ID,
--        defines_init_subclass=False,
--        safe_to_subclass=True,
--    ),
--    "ValueError": _ClassFact(
--        identity="builtins.ValueError",
--        origin="BUILTIN",
--        direct_bases=("builtins.Exception",),
--        linear_mro=(
--            "builtins.ValueError",
--            "builtins.Exception",
--            "builtins.BaseException",
--            "builtins.object",
--        ),
--        metaclass_identity=_BUILTIN_TYPE_ID,
--        defines_init_subclass=False,
--        safe_to_subclass=True,
--    ),
--}
--_BUILTIN_EXCEPTION_CLASS_IDENTITIES = frozenset({
--    _BUILTIN_CLASS_FACTS[name].identity
--    for name in ("BaseException", "Exception", "ValueError")
--})
--
--
--def _merge_class_mros(
--    bases: tuple[_ClassFact, ...],
--) -> tuple[str, ...] | None:
--    """Return the C3 merge of proven base MROs, or None if inconsistent."""
--    sequences = [list(base.linear_mro) for base in bases]
--    sequences.append([base.identity for base in bases])
--    merged: list[str] = []
--
--    while any(sequences):
--        candidate = next(
--            (
--                sequence[0]
--                for sequence in sequences
--                if not any(
--                    sequence[0] in other[1:]
--                    for other in sequences
--                    if other
--                )
--            ),
--            None,
--        )
--        if candidate is None:
--            return None
--
--        merged.append(candidate)
--        remaining = []
--        for sequence in sequences:
--            if sequence and sequence[0] == candidate:
--                sequence = sequence[1:]
--            if sequence:
--                remaining.append(sequence)
--        sequences = remaining
--
--    return tuple(merged)
--
--
  @dataclass(frozen=True)
- class PackageImportAssessment:
-     entry_module: str
-@@ -1560,20 +1454,10 @@ def evaluate_package_import_order(
-     )
-     states = module_initialization_state.states
-     namespaces = module_initialization_state.namespaces
--    prepared_class_bases: dict[
--        str, tuple[tuple[_ClassFact, ...], _ClassFact]
--    ] = {}
--    class_facts_by_identity: dict[str, _ClassFact] = {
--        fact.identity: fact for fact in _BUILTIN_CLASS_FACTS.values()
--    }
--
--    function_definitions: dict[
--        str,
--        dict[str, tuple[_Step, ...]],
--    ] = {
--        name: {}
--        for name in programs
--    }
-+    definition_state = _new_definition_state(programs)
-+    prepared_class_bases = definition_state.prepared_class_bases
-+    class_facts_by_identity = definition_state.class_facts_by_identity
-+    function_definitions = definition_state.function_definitions
- 
-     bootstrap = "\x00ENTRY"
+@@ -1463,24 +1464,6 @@ def evaluate_package_import_order(
      execution_cursor = _new_execution_cursor(bootstrap)
+     frames = execution_cursor.frames
+ 
+-    def chain(name: str) -> tuple[str, ...]:
+-        parts = name.split(".")
+-
+-        return tuple(
+-            ".".join(parts[:index])
+-            for index in range(1, len(parts) + 1)
+-        )
+-
+-    def missing_piece(name: str) -> str | None:
+-        for piece in chain(name):
+-            if piece not in states:
+-                return piece
+-
+-            if states[piece] == "NEW":
+-                return piece
+-
+-        return None
+-
+     indexed_roots = frozenset(
+         name.split(".", 1)[0]
+         for name in programs
+@@ -1681,7 +1664,7 @@ def evaluate_package_import_order(
+                     reached_unmodeled_import=blocker,
+                 )
+ 
+-            next_piece = missing_piece(target)
++            next_piece = _missing_piece(target, states)
+ 
+             if next_piece:
+                 if next_piece not in programs:
+@@ -1711,7 +1694,7 @@ def evaluate_package_import_order(
+ 
+                     if child in programs:
+                         if states[child] == "NEW":
+-                            if missing_piece(child) != child:
++                            if _missing_piece(child, states) != child:
+                                 return result("UNKNOWN", child, member)
+ 
+                             states[child] = "INITIALIZING"
+@@ -1822,7 +1805,7 @@ def evaluate_package_import_order(
+                         if states[child] != "NEW":
+                             return result("UNKNOWN", child, member)
+ 
+-                        next_child = missing_piece(child)
++                        next_child = _missing_piece(child, states)
+ 
+                         if next_child != child:
+                             return result("UNKNOWN", child, member)
 ```
 
 ## FINAL_VERDICT
 
-- CONTRACT_PROVED: Exact source extraction, identity/isolation assertions and focused regressions passed. Contextor confirmed all three sources synchronized by revision 1277, zero syntax errors, no reverse hard import and unchanged structural cycle count. `cycle_semantics` remains stale, so no fresh semantic-classification or runtime-adoption claim is made. STOP after implementation and audit.
+- CONTRACT_PROVED: Literal extraction completed; compatibility assertions, focused regressions, and diff check passed. Source-level LIVE audit is fresh for both changed modules. Cycle semantics remains stale and runtime adoption is UNKNOWN, so neither is claimed as certified.
