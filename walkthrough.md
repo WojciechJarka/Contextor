@@ -1,244 +1,174 @@
-# P3-V10 — generic unmodeled statement provenance
+# P3-R2-T1 — external import side-effect regression
 
 ## PREFLIGHT
 
-Contextor MCP first: HEAD `32ef7fdff069b770d3925f421db305b357e37992`, canonical revision 1253, `cycle_semantics=fresh`, `package_model.py` workspace_sync verified. Git status przed zmianą nie wykazał modyfikacji source/tests. Dokładne anchory w HEAD: `package_model.py:1505–1527` binary search i `accepted + (_Step("UNMODELED_STATEMENT"),)`; `package_model.py:2684–2685` gałąź zwracająca UNKNOWN. Planowany zakres: `contextor/core/cycle_semantics/package_model.py` tylko `_compile_reachable_prefix` i `evaluate_package_import_order`; `tests/test_cycle_semantics_namespace_path_model.py` testy A–H; `walkthrough.md` raport. Anchory zgodne, bez SOURCE_DRIFT.
+Contextor MCP first: HEAD `3cbd8cc471197c54b15cf327d93adcb5797aa874` zgodny z oczekiwanym; canonical revision 1256, cycle_semantics stale; source funkcji `evaluate_conditional_namespace_import_order` i `analyze_cycle_scenarios` workspace_sync verified przed zmianą. Wskazany plik testowy istniał; source/tests poza nim nie były zmienione. Planowany przed edycją zakres diffu: wyłącznie jeden syntetyczny test oraz `import builtins` w `tests/test_cycle_semantics_external_import_authority.py`, bez production patch.
 
-Niezależny warunek integralności: istnieje także sentinel typing guard z `_compile` przy `package_model.py:1029`. Ordinary scenarios wywołują evaluator z domyślnym `_compile_on_first_import=False`. Dlatego emisja eventu jest warunkowana `_compile_on_first_import`; bez tego zmieniłaby ordinary events i potencjalnie scenario fingerprints.
+Preflight na dokładnie wskazanym programie, bez edycji modelu: `CONDITIONAL_MODEL_PASS`, inner `MODEL_PASS`, dwa assumed external records i jeden assumed frozen dataclass record. Warunek wejścia do implementacji regresji został spełniony; nie dopasowywano programu w celu wymuszenia PASS.
 
-## EXACT_FILES_CHANGED
+## FILES_CHANGED
 
-FILES_CHANGED:
-- `contextor/core/cycle_semantics/package_model.py`
-- `tests/test_cycle_semantics_namespace_path_model.py`
+FILES_CHANGED: `tests/test_cycle_semantics_external_import_authority.py`. `walkthrough.md` jest wyłącznie raportem. Brak produkcyjnych zmian.
 
-`walkthrough.md` jest tylko raportem. Innych source/tests/docs nie edytowano.
+## CONTROL_RUNTIME_RESULT
 
-## GENERIC_PROVENANCE_IMPLEMENTATION
+Po adwersarialnym przebiegu uruchomiono osobny `sys.executable -I -S -c` subprocess CPython 3.15.2 z jawnie dodanym `tmp_path` do `sys.path`. `ext_mutator.py` zawierał tylko `pass`; `import pkg.ns.a` zakończył się `returncode=0`. Test wymagał `control.returncode == 0` i potwierdził, że `builtins.property` procesu pytest nadal jest pierwotnym obiektem. To także negatywny świadek braku zanieczyszczenia następnego przebiegu przez adwersarialny subprocess.
 
-`_compile_reachable_prefix` zachowuje binary search i warunki `accepted`/ `compile_prefix(high)`. Po nich wybiera `tree.body[low]` jako pierwszy odrzucony statement. Dla FunctionDef, AsyncFunctionDef i ClassDef z decorator list bierze pierwszy decorator; dla pozostałych sam statement. Odczytuje rzeczywiste `lineno`/`col_offset`, przy niepoprawnych lub niedostępnych wartościach zachowuje `None`. Sentinel ma `target=type(statement).__name__` i współrzędne.
+## ADVERSARIAL_RUNTIME_RESULT
 
-W `evaluate_package_import_order` po faktycznym osiągnięciu `UNMODELED_STATEMENT` w trybie `_compile_on_first_import=True` dodaje jeden `PackageModelEvent(module, "UNMODELED_STATEMENT", step.target, "<line>:<column>")`, albo `symbol=None` przy niekompletnej lokalizacji. Dotychczasowy wynik pozostaje UNKNOWN i model nie kontynuuje po odmowie. Dataclasses assessment/event pozostają nietknięte. Nie dodano obsługi `lru_cache`, importów ani warningów.
+Oddzielny `python -I -S -c` subprocess, ten sam syntetyczny regular `pkg` z namespace child `pkg.ns`, ale `ext_mutator.py` wykonał `import builtins; builtins.property = 1`. `import pkg.ns.a` zakończył się niezerowym kodem. Test bezpośrednio sprawdził traceback: zawiera `a.py`, linię `@property` oraz końcowy typ/komunikat `TypeError: 'int' object is not callable`. Import `ext_mutator` wykonuje efekt przed definicją `Graph.value`; proces pytest nie importował syntetycznego pakietu i jego `builtins.property` pozostało niezmienione.
+
+## CONDITIONAL_MODEL_RESULT
+
+Dokładne AST: `pkg.__init__`, `pkg.ns.a`, `pkg.ns.b`; jedna `SearchPortion(root_id='repo')` z `pkg/__init__.py`, `pkg/ns/a.py`, `pkg/ns/b.py`. Parametry `target_python_version=(3,15)`, `assume_passive_external_imports=True`, `assume_frozen_dataclass_decoration=True`. Wynik: `CONDITIONAL_MODEL_PASS`, `reason=None`, inner `MODEL_PASS`, `authority=CONDITIONAL_ORDERED_INVENTORY_AND_AST_NOT_RUNTIME_OR_LIVE_PROOF`, `evidence_scope=CONDITIONAL_EXTERNAL_AND_FROZEN_DATACLASS_ASSUMPTIONS_NOT_RUNTIME_PROOF`.
+
+Dokładne assumed external records: `(pkg.ns.a, FROM, dataclasses, dataclass, 1:0)`; `(pkg.ns.a, IMPORT, ext_mutator, None, 2:0)`. Assumed frozen dataclass: `(pkg.ns.a, Graph, dataclasses.dataclass(frozen=True), 4:1)`. Te records są nieudowodnionymi założeniami, nie runtime evidence. Wynik warunkowy jest identyczny dla wariantów control/adversarial, ponieważ model nie wykonuje `ext_mutator`.
+
+## ORDINARY_BOUNDARY_RESULT
+
+`analyze_cycle_scenarios` na zadanym hard graph (`pkg.__init__:[]`, `pkg.ns.a:[pkg.ns.b]`, `pkg.ns.b:[pkg.ns.a]`) zwrócił jeden SCC: `classification=INDETERMINATE`, `coverage=NONE`, `reason=NAMESPACE_IMPORT_RESOLUTION_UNMODELED`, `model_kind=REGULAR_PACKAGE`, zero entry assessments. Zwykła ścieżka nie przejmuje `CONDITIONAL_MODEL_PASS` ani założeń zewnętrznych; nie modyfikowano warning eligibility.
+
+## REGRESSION_TESTS
+
+Jeden nowy test tworzy dokładnie podane źródła w `tmp_path`, sprawdza conditional model authority i records, ordinary SCC refusal, a następnie dwa niezależne CPython subprocessy. Adwersarialny uruchamiany jest przed kontrolnym, więc kontrola sprawdza również izolację efektu. Nie importowano syntetycznych modułów w procesie pytest. Nie tworzono LIVE evidence/receipts.
 
 ## TARGETED_TEST_RESULTS
 
-`& .\.venv\Scripts\python.exe -m pytest -q tests/test_cycle_semantics_namespace_path_model.py tests/test_cycle_semantics_namespace_bound_model.py` → **117 passed in 78.50s**, exit code 0. `git diff --check` → exit code 0. Uruchomiono tylko dwie wymagane grupy.
-
-Nowe testy: A dekorator FunctionDef `2:1`; B ClassDef `1:1`; C zwykły Raise `2:0`; D zachowane wcześniejsze BIND i import; E zewnętrzny import zatrzymuje przed provenance event; F wcześniejszy EARLY_BINDING_HAZARD zachowuje priorytet; G CONDITIONAL_MODEL_PASS bez eventu; H deterministyczny wynik i AST bez mutacji.
-
-## NEGATIVE_REGRESSIONS
-
-E/F/G potwierdzają brak fałszywego eventu przy wcześniejszym external stop, hazard oraz PASS. Warunek emisji działa tylko po osiągnięciu sentinela w warunkowej ścieżce. Zmiana nie emituje przy layout/validation rejection, bo te gałęzie wracają przed `evaluate_package_import_order` albo przed obsługą sentinela. Wcześniejszy unresolved internal import zwraca zanim sentinel zostanie osiągnięty. Nieosiągnięty dekorator także nie daje eventu.
-
-## ORDINARY_EVIDENCE_INTEGRITY
-
-CODE_PATH_PROVED: `scenarios.py:332` używa `evaluate_package_import_order` bez `_compile_on_first_import`, czyli domyślne `False`; `_compile_reachable_prefix` jest wywoływana wyłącznie w gałęzi `if _compile_on_first_import` (`package_model.py:1918`). Nowy `events.append` jest jawnie osłonięty tym samym warunkiem. Drugi producent sentinela typing guard pozostaje bez zmian, a ordinary path nie emituje nowego eventu. Ordinary scenario event tuples, fingerprints i serialized evidence są zatem niezmienione w tym code path. `EVIDENCE_SEMANTIC_VERSION=cycle-semantics-evidence/4`, `OPTIONAL_EVIDENCE_SEMANTIC_VERSION=cycle-semantics-evidence/5` pozostały bez zmian; receipt schemas także. Nie ma podstaw do zmiany P3-V1 epoch.
+`& .\.venv\Scripts\python.exe -m pytest -q tests/test_cycle_semantics_external_import_authority.py` → **7 passed in 2.14s**, exit code 0. `git diff --check` → exit code 0. Bez pełnego pytest.
 
 ## MCP_POST_CHANGE_AUDIT
 
-Watcher: revision 1254 `package_model.py UPDATED`; 1255 test file `UNCHANGED`; 1256 test file `UPDATED`. Oba zmienione source/test symbole mają po zmianie `workspace_sync=verified` przy revision 1256. Końcowy LIVE: canonical revision 1256, state_id `20261109_210842`, syntax errors 0, graph/cycles fresh, 16 structural DFS paths, soft-dependent potential SCC 1; cycle_semantics **stale**. Zachowany graph SHA-256 `2b45d940afccdaefb3c0f4a686b83bcbc2687e0d8b167cadc986106b01eedf6f`; source diff nie dodaje import statements/edges. Hard/optional receipts `None`; poprzedni partial receipt po invalidation również `None`. Warning view revision 1256: structural 16, MODEL_PASS 0, active 16. Fresh structural cycles nie oznaczają świeżej semantyki. Nie uruchomiono FULL ani publikacji.
+Po edycji/teście Contextor MCP nadal wskazuje canonical revision `1256`, graph/cycles fresh, cycle_semantics stale, syntax errors 0, structural DFS paths 16, warning view `structural=16, model_pass=0, active=16`. Odczytowy IPC snapshot potwierdził state_id `20261109_210842`, 16 cycles i graph SHA-256 `2b45d940afccdaefb3c0f4a686b83bcbc2687e0d8b167cadc986106b01eedf6f`, zgodny z baseline. `get_live_events(after_revision=1256)` nie zgłosił zdarzenia watcher. Odczyt symbolu nowego testu zwrócił `status=stale_source`, `workspace_sync=out_of_sync`; **synchronizacja indeksu nowego testu nie jest potwierdzona**. Brak FULL, `update_file`, restartu i publikacji.
 
 ## FULL_DIFFS
 
-Pełny rzeczywisty git diff obu plików zmienionych w tym zadaniu:
+Pełny rzeczywisty git diff jedynego pliku zmienionego w zadaniu:
 
 ```diff
-diff --git a/contextor/core/cycle_semantics/package_model.py b/contextor/core/cycle_semantics/package_model.py
-index 78a68ab..3a7a46d 100644
---- a/contextor/core/cycle_semantics/package_model.py
-+++ b/contextor/core/cycle_semantics/package_model.py
-@@ -1521,8 +1521,26 @@ def _compile_reachable_prefix(
-     ):
-         return None
+diff --git a/tests/test_cycle_semantics_external_import_authority.py b/tests/test_cycle_semantics_external_import_authority.py
+index a9a3247..d6cdedc 100644
+--- a/tests/test_cycle_semantics_external_import_authority.py
++++ b/tests/test_cycle_semantics_external_import_authority.py
+@@ -1,6 +1,7 @@
+ """External import effects are not ordinary execution evidence."""
  
-+    statement = tree.body[low]
-+    location = (
-+        statement.decorator_list[0]
-+        if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef,
-+                                  ast.ClassDef))
-+        and statement.decorator_list
-+        else statement
-+    )
-+    line = getattr(location, "lineno", None)
-+    column = getattr(location, "col_offset", None)
+ import ast
++import builtins
+ import subprocess
+ import sys
+ 
+@@ -169,3 +170,109 @@ def test_unproved_typing_guard_stops_ordinary_and_conditional_models(
+     }
+     assert conditional.outcome != "CONDITIONAL_MODEL_PASS"
+     assert ordinary.outcome != "MODEL_PASS"
 +
-     return accepted + (
--        _Step("UNMODELED_STATEMENT"),
-+        _Step(
-+            "UNMODELED_STATEMENT",
-+            target=type(statement).__name__,
-+            source_line=line if type(line) is int and line >= 1 else None,
-+            source_column=(
-+                column if type(column) is int and column >= 0 else None
-+            ),
++
++def test_conditional_external_side_effect_is_not_runtime_authority(tmp_path):
++    assert sys.version_info[:3] == (3, 15, 2)
++
++    sources = {
++        "pkg.__init__": "pass\n",
++        "pkg.ns.a": (
++            "from dataclasses import dataclass\n"
++            "import ext_mutator\n"
++            "\n"
++            "@dataclass(frozen=True)\n"
++            "class Graph:\n"
++            "    @property\n"
++            "    def value(self):\n"
++            "        return 1\n"
++            "\n"
++            "token = 1\n"
++            "import pkg.ns.b\n"
 +        ),
-     )
- 
- 
-@@ -2682,6 +2700,18 @@ def evaluate_package_import_order(
-             )
- 
-         elif step.op == "UNMODELED_STATEMENT":
-+            if _compile_on_first_import:
-+                events.append(PackageModelEvent(
-+                    module,
-+                    "UNMODELED_STATEMENT",
-+                    step.target,
-+                    (
-+                        f"{step.source_line}:{step.source_column}"
-+                        if step.source_line is not None
-+                        and step.source_column is not None
-+                        else None
-+                    ),
-+                ))
-             return result("UNKNOWN", module)
- 
-         else:
-diff --git a/tests/test_cycle_semantics_namespace_path_model.py b/tests/test_cycle_semantics_namespace_path_model.py
-index 442e1fa..a3d875d 100644
---- a/tests/test_cycle_semantics_namespace_path_model.py
-+++ b/tests/test_cycle_semantics_namespace_path_model.py
-@@ -1461,3 +1461,138 @@ def test_g18_p2_p8_no_full_inventory_shortcut():
-     assert result.reason == (
-         "INVENTORY_SOURCE_DOMAIN_MISMATCH"
-     )
-+
-+
-+def _p3_v10_assess(sources, *, assume_external=False):
-+    files = frozenset(
-+        module.replace(".", "/") + ".py"
-+        for module in sources
++        "pkg.ns.b": "from pkg.ns.a import token\n",
++    }
++    trees = {name: ast.parse(source) for name, source in sources.items()}
++    portion = SearchPortion(
++        "repo",
++        frozenset({"pkg/__init__.py", "pkg/ns/a.py", "pkg/ns/b.py"}),
 +    )
-+    return evaluate_conditional_namespace_import_order(
-+        sources,
-+        "ns.a",
-+        (SearchPortion("root", files),),
++    conditional = evaluate_conditional_namespace_import_order(
++        trees,
++        "pkg.ns.a",
++        (portion,),
 +        target_python_version=(3, 15),
-+        assume_passive_external_imports=assume_external,
++        assume_passive_external_imports=True,
++        assume_frozen_dataclass_decoration=True,
 +    )
 +
++    assert conditional.outcome == "CONDITIONAL_MODEL_PASS"
++    assert conditional.reason is None
++    assert conditional.authority == (
++        "CONDITIONAL_ORDERED_INVENTORY_AND_AST_NOT_RUNTIME_OR_LIVE_PROOF"
++    )
++    model = conditional.model_assessment
++    assert model is not None
++    assert model.outcome == "MODEL_PASS"
++    assert model.evidence_scope == (
++        "CONDITIONAL_EXTERNAL_AND_FROZEN_DATACLASS_"
++        "ASSUMPTIONS_NOT_RUNTIME_PROOF"
++    )
++    assert tuple(
++        (item.importer, item.operation, item.target, item.symbol,
++         item.line, item.column)
++        for item in model.assumed_external_imports
++    ) == (
++        ("pkg.ns.a", "FROM", "dataclasses", "dataclass", 1, 0),
++        ("pkg.ns.a", "IMPORT", "ext_mutator", None, 2, 0),
++    )
++    assert tuple(
++        (item.module, item.class_name, item.decorator,
++         item.line, item.column)
++        for item in model.assumed_dataclass_decorations
++    ) == ((
++        "pkg.ns.a", "Graph", "dataclasses.dataclass(frozen=True)", 4, 1,
++    ),)
 +
-+def test_p3_v10_function_decorator_location():
-+    sources = {"ns.a": ast.parse(
-+        "from functools import lru_cache\n"
-+        "@lru_cache(maxsize=1024)\n"
-+        "def parse(value):\n"
-+        "    return value\n"
-+    )}
-+    result = _p3_v10_assess(sources, assume_external=True)
++    edges = {
++        "pkg.__init__": set(),
++        "pkg.ns.a": {"pkg.ns.b"},
++        "pkg.ns.b": {"pkg.ns.a"},
++    }
++    ordinary = analyze_cycle_scenarios(edges, trees)
++    assert len(ordinary.components) == 1
++    assert ordinary.components[0].classification != (
++        "MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS"
++    )
 +
-+    assert result.outcome == "UNKNOWN"
-+    assert result.model_assessment is not None
-+    assert result.model_assessment.events[-1].operation == "UNMODELED_STATEMENT"
-+    assert result.model_assessment.events[-1].target == "FunctionDef"
-+    assert result.model_assessment.events[-1].symbol == "2:1"
++    package = tmp_path / "pkg"
++    namespace = package / "ns"
++    namespace.mkdir(parents=True)
++    (package / "__init__.py").write_text(sources["pkg.__init__"])
++    (namespace / "a.py").write_text(sources["pkg.ns.a"])
++    (namespace / "b.py").write_text(sources["pkg.ns.b"])
++    mutator = tmp_path / "ext_mutator.py"
++    command = [
++        sys.executable, "-I", "-S", "-c",
++        "import sys;sys.path.insert(0,sys.argv[1]);import pkg.ns.a",
++        str(tmp_path),
++    ]
++    original_property = builtins.property
 +
++    mutator.write_text("import builtins\nbuiltins.property = 1\n")
++    adversarial = subprocess.run(
++        command, capture_output=True, text=True, timeout=10,
++    )
++    assert adversarial.returncode != 0
++    assert "TypeError: 'int' object is not callable" in adversarial.stderr
++    assert 'File "' in adversarial.stderr
++    assert "a.py" in adversarial.stderr
++    assert "@property" in adversarial.stderr
++    assert builtins.property is original_property
 +
-+def test_p3_v10_class_decorator_location():
-+    result = _p3_v10_assess({"ns.a": ast.parse(
-+        "@decorator\n"
-+        "class Thing:\n"
-+        "    pass\n"
-+    )})
-+
-+    assert result.outcome == "UNKNOWN"
-+    assert result.model_assessment is not None
-+    assert result.model_assessment.events[-1].operation == "UNMODELED_STATEMENT"
-+    assert result.model_assessment.events[-1].target == "ClassDef"
-+    assert result.model_assessment.events[-1].symbol == "1:1"
-+
-+
-+def test_p3_v10_ordinary_statement_location():
-+    result = _p3_v10_assess({"ns.a": ast.parse(
-+        "value = 1\n"
-+        "raise RuntimeError('stop')\n"
-+    )})
-+
-+    assert result.outcome == "UNKNOWN"
-+    assert result.model_assessment is not None
-+    assert result.model_assessment.events[-1].operation == "UNMODELED_STATEMENT"
-+    assert result.model_assessment.events[-1].target == "Raise"
-+    assert result.model_assessment.events[-1].symbol == "2:0"
-+
-+
-+def test_p3_v10_prior_bind_and_import_retained():
-+    result = _p3_v10_assess({
-+        "ns.a": ast.parse(
-+            "value = 1\n"
-+            "import ns.b\n"
-+            "raise RuntimeError('stop')\n"
-+        ),
-+        "ns.b": ast.parse("pass\n"),
-+    })
-+
-+    assert result.outcome == "UNKNOWN"
-+    assert result.model_assessment is not None
-+    events = result.model_assessment.events
-+    assert events[-1].operation == "UNMODELED_STATEMENT"
-+    assert events[-1].symbol == "3:0"
-+    assert any(event.operation == "BIND" and event.symbol == "value"
-+               for event in events[:-1])
-+    assert any(event.operation == "START_IMPORT" and event.target == "ns.b"
-+               for event in events[:-1])
-+
-+
-+def test_p3_v10_external_stop_has_no_provenance_event():
-+    result = _p3_v10_assess({"ns.a": ast.parse(
-+        "import external_unknown\n"
-+        "raise RuntimeError('unreached')\n"
-+    )})
-+
-+    assert result.outcome == "UNKNOWN"
-+    assert result.model_assessment is not None
-+    assert result.model_assessment.target_module == "external_unknown"
-+    assert not any(event.operation == "UNMODELED_STATEMENT"
-+                   for event in result.model_assessment.events)
-+
-+
-+def test_p3_v10_early_hazard_precedes_unmodeled_statement():
-+    result = _p3_v10_assess({
-+        "ns.a": ast.parse(
-+            "from ns.b import ready\n"
-+            "ready = 1\n"
-+            "raise RuntimeError('unreached')\n"
-+        ),
-+        "ns.b": ast.parse("from ns.a import ready\n"),
-+    })
-+
-+    assert result.outcome == "CONDITIONAL_EARLY_BINDING_HAZARD"
-+    assert result.model_assessment is not None
-+    assert result.model_assessment.events[-1].operation == "EARLY_BINDING_HAZARD"
-+    assert not any(event.operation == "UNMODELED_STATEMENT"
-+                   for event in result.model_assessment.events)
-+
-+
-+def test_p3_v10_model_pass_has_no_provenance_event():
-+    result = _p3_v10_assess({"ns.a": ast.parse("value = 1\n")})
-+
-+    assert result.outcome == "CONDITIONAL_MODEL_PASS"
-+    assert result.model_assessment is not None
-+    assert not any(event.operation == "UNMODELED_STATEMENT"
-+                   for event in result.model_assessment.events)
-+
-+
-+def test_p3_v10_repeatable_without_ast_mutation():
-+    sources = {"ns.a": ast.parse(
-+        "value = 1\n"
-+        "@decorator\n"
-+        "class Thing:\n"
-+        "    pass\n"
-+    )}
-+    before = ast.dump(sources["ns.a"], include_attributes=True)
-+
-+    first = _p3_v10_assess(sources)
-+    second = _p3_v10_assess(sources)
-+
-+    assert first == second
-+    assert first.model_assessment is not None
-+    assert first.model_assessment.events[-1].symbol == "2:1"
-+    assert ast.dump(sources["ns.a"], include_attributes=True) == before
++    mutator.write_text("pass\n")
++    control = subprocess.run(
++        command, capture_output=True, text=True, timeout=10,
++    )
++    assert control.returncode == 0, control.stderr
++    assert builtins.property is original_property
 ```
 
 ## FINAL_VERDICT
 
-Wymagana provenance jest emitowana tylko na faktycznie osiągniętym sentinelu warunkowej ścieżki, z zachowaniem UNKNOWN i ordinary evidence. Focused tests PASS (117). MCP źródło verified, syntax 0; `cycle_semantics=stale` po watcher update i brak warning suppression authority. STOP.
+`CONTRACT_ALREADY_FAIL_CLOSED` dla ordinary authority: warunkowy model daje `CONDITIONAL_MODEL_PASS` wyłącznie przy jawnych, nieudowodnionych założeniach, podczas gdy adwersarialny CPython kończy się `TypeError`, a ordinary SCC pozostaje `INDETERMINATE`. Regresja przechodzi; MCP source sync nowego testu pozostaje `out_of_sync` w obserwowanym post-audicie. STOP.

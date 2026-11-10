@@ -1,6 +1,7 @@
 """External import effects are not ordinary execution evidence."""
 
 import ast
+import builtins
 import subprocess
 import sys
 
@@ -169,3 +170,109 @@ def test_unproved_typing_guard_stops_ordinary_and_conditional_models(
     }
     assert conditional.outcome != "CONDITIONAL_MODEL_PASS"
     assert ordinary.outcome != "MODEL_PASS"
+
+
+def test_conditional_external_side_effect_is_not_runtime_authority(tmp_path):
+    assert sys.version_info[:3] == (3, 15, 2)
+
+    sources = {
+        "pkg.__init__": "pass\n",
+        "pkg.ns.a": (
+            "from dataclasses import dataclass\n"
+            "import ext_mutator\n"
+            "\n"
+            "@dataclass(frozen=True)\n"
+            "class Graph:\n"
+            "    @property\n"
+            "    def value(self):\n"
+            "        return 1\n"
+            "\n"
+            "token = 1\n"
+            "import pkg.ns.b\n"
+        ),
+        "pkg.ns.b": "from pkg.ns.a import token\n",
+    }
+    trees = {name: ast.parse(source) for name, source in sources.items()}
+    portion = SearchPortion(
+        "repo",
+        frozenset({"pkg/__init__.py", "pkg/ns/a.py", "pkg/ns/b.py"}),
+    )
+    conditional = evaluate_conditional_namespace_import_order(
+        trees,
+        "pkg.ns.a",
+        (portion,),
+        target_python_version=(3, 15),
+        assume_passive_external_imports=True,
+        assume_frozen_dataclass_decoration=True,
+    )
+
+    assert conditional.outcome == "CONDITIONAL_MODEL_PASS"
+    assert conditional.reason is None
+    assert conditional.authority == (
+        "CONDITIONAL_ORDERED_INVENTORY_AND_AST_NOT_RUNTIME_OR_LIVE_PROOF"
+    )
+    model = conditional.model_assessment
+    assert model is not None
+    assert model.outcome == "MODEL_PASS"
+    assert model.evidence_scope == (
+        "CONDITIONAL_EXTERNAL_AND_FROZEN_DATACLASS_"
+        "ASSUMPTIONS_NOT_RUNTIME_PROOF"
+    )
+    assert tuple(
+        (item.importer, item.operation, item.target, item.symbol,
+         item.line, item.column)
+        for item in model.assumed_external_imports
+    ) == (
+        ("pkg.ns.a", "FROM", "dataclasses", "dataclass", 1, 0),
+        ("pkg.ns.a", "IMPORT", "ext_mutator", None, 2, 0),
+    )
+    assert tuple(
+        (item.module, item.class_name, item.decorator,
+         item.line, item.column)
+        for item in model.assumed_dataclass_decorations
+    ) == ((
+        "pkg.ns.a", "Graph", "dataclasses.dataclass(frozen=True)", 4, 1,
+    ),)
+
+    edges = {
+        "pkg.__init__": set(),
+        "pkg.ns.a": {"pkg.ns.b"},
+        "pkg.ns.b": {"pkg.ns.a"},
+    }
+    ordinary = analyze_cycle_scenarios(edges, trees)
+    assert len(ordinary.components) == 1
+    assert ordinary.components[0].classification != (
+        "MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS"
+    )
+
+    package = tmp_path / "pkg"
+    namespace = package / "ns"
+    namespace.mkdir(parents=True)
+    (package / "__init__.py").write_text(sources["pkg.__init__"])
+    (namespace / "a.py").write_text(sources["pkg.ns.a"])
+    (namespace / "b.py").write_text(sources["pkg.ns.b"])
+    mutator = tmp_path / "ext_mutator.py"
+    command = [
+        sys.executable, "-I", "-S", "-c",
+        "import sys;sys.path.insert(0,sys.argv[1]);import pkg.ns.a",
+        str(tmp_path),
+    ]
+    original_property = builtins.property
+
+    mutator.write_text("import builtins\nbuiltins.property = 1\n")
+    adversarial = subprocess.run(
+        command, capture_output=True, text=True, timeout=10,
+    )
+    assert adversarial.returncode != 0
+    assert "TypeError: 'int' object is not callable" in adversarial.stderr
+    assert 'File "' in adversarial.stderr
+    assert "a.py" in adversarial.stderr
+    assert "@property" in adversarial.stderr
+    assert builtins.property is original_property
+
+    mutator.write_text("pass\n")
+    control = subprocess.run(
+        command, capture_output=True, text=True, timeout=10,
+    )
+    assert control.returncode == 0, control.stderr
+    assert builtins.property is original_property
