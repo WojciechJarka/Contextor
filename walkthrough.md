@@ -1,225 +1,317 @@
-# P5-M02 — BOUNDED INTEGER ARITHMETIC EXTRACTION
+# P5-M03 — EXPRESSION PREDICATES EXTRACTION
 
 ## PREFLIGHT
 
-DIRECT_EVIDENCE: HEAD `53f0b167ccaaae1744b3628aca15418d7f6423e1`; initial `git status --short` showed only `M walkthrough.md` (previous P5-M02 discovery report), disclosed before overwrite. Contextor pre-change canonical revision 1264, `package_model.py` canonical_state=fresh and workspace_sync=verified; cycle_semantics stale. Backend MCP PID 14072 executable `C:\Temp\Contextor_Repo\.venv\Scripts\python.exe`.
+DIRECT_EVIDENCE: HEAD `d0e94e0398f31ad9aecc8d847ac25fc85e31e142`; initial `git status --short` clean. Canonical LIVE revision 1266 before edits; Contextor `get_symbol_implementation` returned `_pure_literal_expression` at `package_model.py:641-738` and `_safe_annassign` at 753-768, both workspace_sync=verified. `_bounded_integer_arithmetic` resolved in `execution/expressions.py:6-80`, workspace_sync=verified. Backend MCP PID 14072 executable `C:\Temp\Contextor_Repo\.venv\Scripts\python.exe`.
 
-DIRECT_EVIDENCE: Contextor `get_symbol_implementation` returned `_bounded_integer_arithmetic` at `package_model.py:640-714`, identical to requested complete function. Disk preflight: `execution/__init__.py` exists and length 0; `execution/steps.py` exists; `package_model.py:27` imports `_Step` from `.execution.steps`; `execution/expressions.py` absent. Existing `_pure_literal_expression` calls the helper through the `package_model` global name at pre-change line 753, and positive/negative arithmetic regressions already exist in `tests/test_cycle_semantics_package_model_literals.py:282-325`. No semantic broadening was authorized or performed.
+CODE_PATH_PROVED: source definitions match the preceding P5-M02 discovery content; their line numbers shifted after the bounded helper extraction. Dependency chain verified in current source: `_safe_annassign -> _pure_literal_expression -> _bounded_integer_arithmetic` (`package_model.py:767,677`). The existing `_bounded_integer_arithmetic` implementation was not edited. Before editing, `package_model.py:28` contained exactly `from .execution.expressions import _bounded_integer_arithmetic`. No unrelated worktree modification pre-existed. Positive/negative literal, arithmetic, annotation and class/function regressions were identified in the previous discovery; this is a structural move with no new acceptance path.
 
 ## FILES_CHANGED
 
-- `contextor/core/cycle_semantics/execution/expressions.py` (new)
-- `contextor/core/cycle_semantics/package_model.py` (exact import and original helper deletion)
+- `contextor/core/cycle_semantics/execution/expressions.py`
+- `contextor/core/cycle_semantics/package_model.py`
 
-`walkthrough.md` is the report only. No test edits.
+`walkthrough.md` is the overwritten report only. No test or other source file changed.
 
 ## EXACT_IMPLEMENTATION
 
-DIRECT_EVIDENCE: new `expressions.py` contains the exact supplied function and imports. `package_model.py` imports it immediately after the `_Step` import; the original definition and trailing separation were removed. `_pure_literal_expression`, `_safe_annassign`, `_pure_all_assignment`, `_compile`, callers and existing imports were not edited. The full file and source diff follow.
+DIRECT_EVIDENCE: the complete two existing definitions were copied to `execution/expressions.py` after `_bounded_integer_arithmetic`, in the requested order and with two blank lines between module-level definitions. `package_model.py` now imports all three names in the requested parenthesized form and no longer defines the two relocated predicates. `_pure_all_assignment`, `_safe_passive_class_definition`, `_compile`, evaluator branches, result/event types and public evaluators were not edited. The full actual changed-source diffs are below.
 
 ## COMPATIBILITY_RESULTS
 
-DIRECT_EVIDENCE: all required backend-venv assertions passed. `package_model._bounded_integer_arithmetic is expressions._bounded_integer_arithmetic`; `_pure_literal_expression.__globals__["_bounded_integer_arithmetic"]` is that same object. `_pure_literal_expression`, `_safe_annassign` and `_compile` retain `__module__ == "contextor.core.cycle_semantics.package_model"`. New helper `__module__ == "contextor.core.cycle_semantics.execution.expressions"`.
+DIRECT_EVIDENCE: backend-venv assertions passed for all three `package_model` aliases being identical to `expressions` functions; `expressions._pure_literal_expression.__globals__["_bounded_integer_arithmetic"]` resolves to the exported helper; `expressions._safe_annassign.__globals__["_pure_literal_expression"]` resolves to the exported predicate. `package_model._compile.__module__` and `evaluate_package_import_order.__module__` remain `contextor.core.cycle_semantics.package_model`.
 
-CODE_PATH_PROVED: the helper's algorithm and caller lookup are unchanged in the checked source paths. UNKNOWN: arbitrary external introspection or pickle compatibility beyond the requested assertions is not certified.
+DIRECT_EVIDENCE: both relocated functions report `__module__ = contextor.core.cycle_semantics.execution.expressions` and `__globals__["__name__"] = contextor.core.cycle_semantics.execution.expressions`. No manual identity or metadata override was applied. UNKNOWN: compatibility of arbitrary external reflection/monkeypatching beyond these checks is not certified.
 
 ## TARGETED_TEST_RESULTS
 
-DIRECT_EVIDENCE: `C:\Temp\Contextor_Repo\.venv\Scripts\python.exe -m pytest -q tests/test_cycle_semantics_package_model_literals.py tests/test_cycle_semantics_package_model.py tests/test_cycle_semantics_passive_functions.py tests/test_cycle_semantics_passive_classes.py tests/test_cycle_semantics_decorator_definition_effects.py -rs` → **439 passed in 39.95s**. `git diff --check` exited 0 before report replacement; after report replacement it was rerun and remained clean except Git's line-ending advisory. No full suite.
+DIRECT_EVIDENCE: `C:\Temp\Contextor_Repo\.venv\Scripts\python.exe -m pytest -q tests/test_cycle_semantics_package_model_literals.py tests/test_cycle_semantics_package_model.py tests/test_cycle_semantics_passive_functions.py tests/test_cycle_semantics_passive_classes.py tests/test_cycle_semantics_decorator_definition_effects.py tests/test_cycle_semantics_namespace_path_model.py -rs` → **506 passed in 37.08s**. `git diff --check` exited 0; only a Git line-ending advisory appeared. No full pytest.
 
 ## MCP_POST_CHANGE_AUDIT
 
-DIRECT_EVIDENCE: desktop_watcher UPDATED `execution/expressions.py` at canonical revision 1265 and `package_model.py` at 1266. At revision 1266, both changed files report workspace_sync=verified and canonical_state=fresh. LIVE syntax-error count 0; package_model outbound graph adds hard edge `contextor.core.cycle_semantics.package_model -> contextor.core.cycle_semantics.execution.expressions`, making its outbound total 6. Expressions module inbound edge is package_model; outbound total 0. Structural cycles remain 16 normalized DFS paths; active warnings 16, MODEL_PASS paths 0. `cycle_semantics=stale`; current cyclic SCC count and graph fingerprint were not available in queried projections (UNKNOWN). Static source freshness does not prove running MCP code adoption. No FULL, update_file, restart, commit or push.
+DIRECT_EVIDENCE: desktop_watcher UPDATED `execution/expressions.py` at revision 1267 and `package_model.py` at revision 1268. Contextor `get_module_context` at canonical LIVE revision 1268 reports workspace_sync=verified for both changed files; canonical_state=fresh; syntax errors 0. The existing hard dependency `package_model -> execution.expressions` remains, with package_model outbound total 6 and expressions outbound total 0; no newly distinct module edge was observed. Structural diagnostic count remains 16 normalized DFS paths, active warnings 16, MODEL_PASS paths 0. `cycle_semantics=stale`. Cyclic SCC count was not available in the queried fresh projection. Static freshness does not prove running MCP code adoption. No FULL, update_file, restart, commit or push.
 
 ## FULL_DIFFS
 
 ```diff
+warning: in the working copy of 'contextor/core/cycle_semantics/execution/expressions.py', LF will be replaced by CRLF the next time Git touches it
 diff --git a/contextor/core/cycle_semantics/execution/expressions.py b/contextor/core/cycle_semantics/execution/expressions.py
-new file mode 100644
---- /dev/null
+index 5357893..57daf1f 100644
+--- a/contextor/core/cycle_semantics/execution/expressions.py
 +++ b/contextor/core/cycle_semantics/execution/expressions.py
-@@ -0,0 +1,80 @@
-+from __future__ import annotations
+@@ -78,3 +78,121 @@ def _bounded_integer_arithmetic(
+
+     accepted = calculate(expression, depth) is not None
+     return accepted, used
 +
-+import ast
 +
++def _pure_literal_expression(expr: ast.AST) -> bool:
++    pending: list[tuple[ast.AST, int, bool]] = [
++        (expr, 0, False)
++    ]
++    visited = 0
 +
-+def _bounded_integer_arithmetic(
-+    expression: ast.AST,
-+    *,
-+    depth: int,
-+    node_budget: int,
-+) -> tuple[bool, int]:
-+    """Recognize bounded, exact built-in integer arithmetic only."""
-+    used = 0
++    while pending:
++        node, depth, hashable_required = pending.pop()
++        visited += 1
 +
-+    def calculate(
-+        node: ast.AST,
-+        node_depth: int,
-+    ) -> int | None:
-+        nonlocal used
-+
-+        if node_depth > 16 or used >= node_budget:
-+            return None
-+
-+        used += 1
++        if visited > 256 or depth > 16:
++            return False
 +
 +        if type(node) is ast.Constant:
-+            if type(node.value) is not int:
-+                return None
-+            value = node.value
++            if type(node.value) not in {
++                type(None), bool, int, float,
++                complex, str, bytes,
++            }:
++                return False
++            continue
 +
-+        elif type(node) is ast.UnaryOp:
-+            if type(node.op) not in (ast.UAdd, ast.USub):
-+                return None
-+
-+            operand = calculate(
-+                node.operand,
-+                node_depth + 1,
-+            )
-+            if operand is None:
-+                return None
-+
-+            value = (
-+                operand
-+                if type(node.op) is ast.UAdd
-+                else -operand
-+            )
-+
-+        elif type(node) is ast.BinOp:
-+            if type(node.op) not in (
-+                ast.Add,
-+                ast.Sub,
-+                ast.Mult,
++        if type(node) is ast.UnaryOp:
++            if (
++                type(node.op) not in (ast.UAdd, ast.USub)
++                or type(node.operand) is not ast.Constant
++                or type(node.operand.value)
++                not in (int, float, complex)
 +            ):
-+                return None
++                return False
 +
-+            left = calculate(node.left, node_depth + 1)
-+            if left is None:
-+                return None
++            pending.append(
++                (node.operand, depth + 1, hashable_required)
++            )
++            continue
 +
-+            right = calculate(node.right, node_depth + 1)
-+            if right is None:
-+                return None
++        if type(node) is ast.BinOp:
++            accepted, counted = _bounded_integer_arithmetic(
++                node,
++                depth=depth,
++                node_budget=257 - visited,
++            )
 +
-+            if type(node.op) is ast.Add:
-+                value = left + right
-+            elif type(node.op) is ast.Sub:
-+                value = left - right
-+            else:
-+                value = left * right
++            visited += counted - 1
 +
-+        else:
-+            return None
++            if not accepted or visited > 256:
++                return False
 +
-+        if value.bit_length() > 64:
-+            return None
++            continue
 +
-+        return value
++        if type(node) is ast.Tuple:
++            pending.extend(
++                (item, depth + 1, hashable_required)
++                for item in reversed(node.elts)
++            )
++            continue
 +
-+    accepted = calculate(expression, depth) is not None
-+    return accepted, used
-```
-
-```diff
++        if type(node) is ast.List:
++            if hashable_required:
++                return False
++
++            pending.extend(
++                (item, depth + 1, False)
++                for item in reversed(node.elts)
++            )
++            continue
++
++        if type(node) is ast.Set:
++            if hashable_required:
++                return False
++
++            pending.extend(
++                (item, depth + 1, True)
++                for item in reversed(node.elts)
++            )
++            continue
++
++        if type(node) is ast.Dict:
++            if (
++                hashable_required
++                or len(node.keys) != len(node.values)
++                or any(key is None for key in node.keys)
++            ):
++                return False
++
++            for key, value in reversed(
++                list(zip(node.keys, node.values))
++            ):
++                pending.append(
++                    (value, depth + 1, False)
++                )
++                pending.append(
++                    (key, depth + 1, True)
++                )
++            continue
++
++        return False
++
++    return True
++
++
++def _safe_annassign(
++    statement: ast.AnnAssign,
++    annotation_semantics: str | None,
++) -> bool:
++    if (
++        annotation_semantics not in {"DEFERRED", "STRINGIFIED"}
++        or not isinstance(statement.target, ast.Name)
++        or statement.simple != 1
++        or not statement.target.id.isidentifier()
++        or statement.target.id.startswith("__")
++    ):
++        return False
++    return (
++        statement.value is None
++        or _pure_literal_expression(statement.value)
++    )
 diff --git a/contextor/core/cycle_semantics/package_model.py b/contextor/core/cycle_semantics/package_model.py
-index 0203d28..11d171c 100644
+index 11d171c..4ab403a 100644
 --- a/contextor/core/cycle_semantics/package_model.py
 +++ b/contextor/core/cycle_semantics/package_model.py
-@@ -25,6 +25,7 @@ from contextor.core.cycle_semantics.typing_guard import (
+@@ -25,7 +25,11 @@ from contextor.core.cycle_semantics.typing_guard import (
      recognize_typing_guard,
  )
  from .execution.steps import _Step
-+from .execution.expressions import _bounded_integer_arithmetic
+-from .execution.expressions import _bounded_integer_arithmetic
++from .execution.expressions import (
++    _bounded_integer_arithmetic,
++    _pure_literal_expression,
++    _safe_annassign,
++)
 
 
  @dataclass(frozen=True)
-@@ -637,83 +638,6 @@ def _safe_passive_class_definition(
+@@ -638,106 +642,6 @@ def _safe_passive_class_definition(
      return True
 
 
--def _bounded_integer_arithmetic(
--    expression: ast.AST,
--    *,
--    depth: int,
--    node_budget: int,
--) -> tuple[bool, int]:
--    """Recognize bounded, exact built-in integer arithmetic only."""
--    used = 0
+-def _pure_literal_expression(expr: ast.AST) -> bool:
+-    pending: list[tuple[ast.AST, int, bool]] = [
+-        (expr, 0, False)
+-    ]
+-    visited = 0
 -
--    def calculate(
--        node: ast.AST,
--        node_depth: int,
--    ) -> int | None:
--        nonlocal used
+-    while pending:
+-        node, depth, hashable_required = pending.pop()
+-        visited += 1
 -
--        if node_depth > 16 or used >= node_budget:
--            return None
--
--        used += 1
+-        if visited > 256 or depth > 16:
+-            return False
 -
 -        if type(node) is ast.Constant:
--            if type(node.value) is not int:
--                return None
--            value = node.value
+-            if type(node.value) not in {
+-                type(None), bool, int, float,
+-                complex, str, bytes,
+-            }:
+-                return False
+-            continue
 -
--        elif type(node) is ast.UnaryOp:
--            if type(node.op) not in (ast.UAdd, ast.USub):
--                return None
--
--            operand = calculate(
--                node.operand,
--                node_depth + 1,
--            )
--            if operand is None:
--                return None
--
--            value = (
--                operand
--                if type(node.op) is ast.UAdd
--                else -operand
--            )
--
--        elif type(node) is ast.BinOp:
--            if type(node.op) not in (
--                ast.Add,
--                ast.Sub,
--                ast.Mult,
+-        if type(node) is ast.UnaryOp:
+-            if (
+-                type(node.op) not in (ast.UAdd, ast.USub)
+-                or type(node.operand) is not ast.Constant
+-                or type(node.operand.value)
+-                not in (int, float, complex)
 -            ):
--                return None
+-                return False
 -
--            left = calculate(node.left, node_depth + 1)
--            if left is None:
--                return None
+-            pending.append(
+-                (node.operand, depth + 1, hashable_required)
+-            )
+-            continue
 -
--            right = calculate(node.right, node_depth + 1)
--            if right is None:
--                return None
+-        if type(node) is ast.BinOp:
+-            accepted, counted = _bounded_integer_arithmetic(
+-                node,
+-                depth=depth,
+-                node_budget=257 - visited,
+-            )
 -
--            if type(node.op) is ast.Add:
--                value = left + right
--            elif type(node.op) is ast.Sub:
--                value = left - right
--            else:
--                value = left * right
+-            visited += counted - 1
 -
--        else:
--            return None
+-            if not accepted or visited > 256:
+-                return False
 -
--        if value.bit_length() > 64:
--            return None
+-            continue
 -
--        return value
+-        if type(node) is ast.Tuple:
+-            pending.extend(
+-                (item, depth + 1, hashable_required)
+-                for item in reversed(node.elts)
+-            )
+-            continue
 -
--    accepted = calculate(expression, depth) is not None
--    return accepted, used
+-        if type(node) is ast.List:
+-            if hashable_required:
+-                return False
+-
+-            pending.extend(
+-                (item, depth + 1, False)
+-                for item in reversed(node.elts)
+-            )
+-            continue
+-
+-        if type(node) is ast.Set:
+-            if hashable_required:
+-                return False
+-
+-            pending.extend(
+-                (item, depth + 1, True)
+-                for item in reversed(node.elts)
+-            )
+-            continue
+-
+-        if type(node) is ast.Dict:
+-            if (
+-                hashable_required
+-                or len(node.keys) != len(node.values)
+-                or any(key is None for key in node.keys)
+-            ):
+-                return False
+-
+-            for key, value in reversed(
+-                list(zip(node.keys, node.values))
+-            ):
+-                pending.append(
+-                    (value, depth + 1, False)
+-                )
+-                pending.append(
+-                    (key, depth + 1, True)
+-                )
+-            continue
+-
+-        return False
+-
+-    return True
 -
 -
- def _pure_literal_expression(expr: ast.AST) -> bool:
-     pending: list[tuple[ast.AST, int, bool]] = [
-         (expr, 0, False)
+ def _pure_all_assignment(value: ast.AST) -> bool:
+     return (
+         type(value) in (ast.List, ast.Tuple)
+@@ -750,24 +654,6 @@ def _pure_all_assignment(value: ast.AST) -> bool:
+     )
+
+
+-def _safe_annassign(
+-    statement: ast.AnnAssign,
+-    annotation_semantics: str | None,
+-) -> bool:
+-    if (
+-        annotation_semantics not in {"DEFERRED", "STRINGIFIED"}
+-        or not isinstance(statement.target, ast.Name)
+-        or statement.simple != 1
+-        or not statement.target.id.isidentifier()
+-        or statement.target.id.startswith("__")
+-    ):
+-        return False
+-    return (
+-        statement.value is None
+-        or _pure_literal_expression(statement.value)
+-    )
+-
+-
+ def _compile(
+     tree: ast.Module,
+     logical: str,
 ```
 
 ## FINAL_VERDICT
 
-TARGETED_SOURCE_AND_TEST_PASS. Exact extraction, compatibility assertions, focused regressions and watcher/source freshness at revision 1266 are verified. Cycle semantics remains stale, so no fresh semantic-classification or runtime-adoption claim is made.
+TARGETED_SOURCE_AND_TEST_PASS. Requested extraction and compatibility checks pass at source/test level; LIVE watcher and file freshness are verified at revision 1268. Fresh cycle semantics and runtime adoption remain unproved, so no broader FINAL PASS claim is made.

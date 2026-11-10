@@ -78,3 +78,121 @@ def _bounded_integer_arithmetic(
 
     accepted = calculate(expression, depth) is not None
     return accepted, used
+
+
+def _pure_literal_expression(expr: ast.AST) -> bool:
+    pending: list[tuple[ast.AST, int, bool]] = [
+        (expr, 0, False)
+    ]
+    visited = 0
+
+    while pending:
+        node, depth, hashable_required = pending.pop()
+        visited += 1
+
+        if visited > 256 or depth > 16:
+            return False
+
+        if type(node) is ast.Constant:
+            if type(node.value) not in {
+                type(None), bool, int, float,
+                complex, str, bytes,
+            }:
+                return False
+            continue
+
+        if type(node) is ast.UnaryOp:
+            if (
+                type(node.op) not in (ast.UAdd, ast.USub)
+                or type(node.operand) is not ast.Constant
+                or type(node.operand.value)
+                not in (int, float, complex)
+            ):
+                return False
+
+            pending.append(
+                (node.operand, depth + 1, hashable_required)
+            )
+            continue
+
+        if type(node) is ast.BinOp:
+            accepted, counted = _bounded_integer_arithmetic(
+                node,
+                depth=depth,
+                node_budget=257 - visited,
+            )
+
+            visited += counted - 1
+
+            if not accepted or visited > 256:
+                return False
+
+            continue
+
+        if type(node) is ast.Tuple:
+            pending.extend(
+                (item, depth + 1, hashable_required)
+                for item in reversed(node.elts)
+            )
+            continue
+
+        if type(node) is ast.List:
+            if hashable_required:
+                return False
+
+            pending.extend(
+                (item, depth + 1, False)
+                for item in reversed(node.elts)
+            )
+            continue
+
+        if type(node) is ast.Set:
+            if hashable_required:
+                return False
+
+            pending.extend(
+                (item, depth + 1, True)
+                for item in reversed(node.elts)
+            )
+            continue
+
+        if type(node) is ast.Dict:
+            if (
+                hashable_required
+                or len(node.keys) != len(node.values)
+                or any(key is None for key in node.keys)
+            ):
+                return False
+
+            for key, value in reversed(
+                list(zip(node.keys, node.values))
+            ):
+                pending.append(
+                    (value, depth + 1, False)
+                )
+                pending.append(
+                    (key, depth + 1, True)
+                )
+            continue
+
+        return False
+
+    return True
+
+
+def _safe_annassign(
+    statement: ast.AnnAssign,
+    annotation_semantics: str | None,
+) -> bool:
+    if (
+        annotation_semantics not in {"DEFERRED", "STRINGIFIED"}
+        or not isinstance(statement.target, ast.Name)
+        or statement.simple != 1
+        or not statement.target.id.isidentifier()
+        or statement.target.id.startswith("__")
+    ):
+        return False
+    return (
+        statement.value is None
+        or _pure_literal_expression(statement.value)
+    )
