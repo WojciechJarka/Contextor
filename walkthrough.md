@@ -1,224 +1,152 @@
-# P5-M07-I2-T1 — CPython function identity baseline
+# P5-M07-I2-T2 — Observable model baseline
 
 ## PREFLIGHT
 
-- DIRECT_EVIDENCE: Contextor MCP was used first. `evaluate_package_import_order` resolves to `contextor/core/cycle_semantics/package_model.py:1154-2284`, canonical LIVE revision 1295, source fresh, `workspace_sync=verified`; `cycle_semantics=stale`.
-- DIRECT_EVIDENCE: HEAD `56cda86dbeb9d37b53c57ecd52f5f0302af4cf15`; initial status ` M walkthrough.md` only. The report was already modified by the preceding stage and has been overwritten as required. No other pre-existing changes.
-- DIRECT_EVIDENCE: Active backend venv executable `C:\Temp\Contextor_Repo\.venv\Scripts\python.exe`; it reports CPython `3.15.2` (`tags/v3.15.2:5e58eaa`).
-- DIRECT_EVIDENCE: `tests/test_cycle_semantics_function_identity_cpython.py` did not exist before editing. M07-I1 anchors remain in `execution/calls.py:8-35` and `package_model.py:1882-1889,2163-2171`; no production code was edited.
+- DIRECT_EVIDENCE: Contextor MCP first resolved `_execute_restricted_call` at `contextor/core/cycle_semantics/execution/calls.py:8-35`; canonical LIVE revision 1296, source fresh, `workspace_sync=verified`, `cycle_semantics=stale`. This is source evidence, not running-code adoption.
+- DIRECT_EVIDENCE: HEAD `97b86d2cfdecaa9672cd8810b73517a4d288693f`; initial `git status --short` was clean. Active backend interpreter: `C:\Temp\Contextor_Repo\.venv\Scripts\python.exe`.
+- DIRECT_EVIDENCE: M07-I1 source anchors remain at `execution/calls.py:8-35`, `execution/state.py:52-70`, and `package_model.py:1473,1882-1889,2163-2171`. The CPython T1 baseline exists and passed again (`7 passed in 2.26s`). The target model test file did not exist before editing.
 
 ## FILES_CHANGED
 
-- Added `tests/test_cycle_semantics_function_identity_cpython.py` with the exact requested seven-case CPython baseline. Its complete diff appears below.
-- Overwrote `walkthrough.md`, the required report. No production or existing test file changed.
+- Added `tests/test_cycle_semantics_function_identity_model.py` exactly as specified. Full new-file diff below.
+- Overwrote `walkthrough.md` for this task. No production or existing test file changed; `git diff --name-only` remained empty before the report edit, with only the new untracked test in `git status --short`.
 
-## CPYTHON_BASELINE_MATRIX
+## CPYTHON_BASELINE_REFERENCE
 
-DIRECT_EVIDENCE: Each listed observation is established by the test's exact keyed assertion against JSON emitted from an isolated `sys.executable -I -B` subprocess. All cases passed under CPython 3.15.2. A dash means that field was not asserted in that case.
+- DIRECT_EVIDENCE: `tests/test_cycle_semantics_function_identity_cpython.py:22-70,72-105,107-169` contains seven isolated CPython cases and keyed assertions. The T1 test passed in this task. It establishes CPython behavior, not model parity.
+- DIRECT_EVIDENCE: The new model test imports exactly the T1 `CASES` and assesses synthetic AST modules (`tests/test_cycle_semantics_function_identity_model.py:1-35`).
 
-| Case | Success | `pkg.old` | `pkg.new` | `g is f` | Error |
-|---|---:|---:|---:|---:|---|
-| direct-call | true | true | false | — | — |
-| alias-call | true | true | false | true | — |
-| alias-survives-rebinding | true | true | false | false | — |
-| old-alias-survives-redefinition | true | true | false | false | — |
-| new-definition-call | true | false | true | false | — |
-| noncallable-rebinding | false | false | false | — | `TypeError` |
-| foreign-function-cpython-control | true | true | false | — | — |
+## MODEL_OUTCOME_MATRIX
 
-The assertions are in `tests/test_cycle_semantics_function_identity_cpython.py:22-70,161-169`; the runner's observed fields are defined at `:72-105`. The foreign-call case establishes CPython behavior only and does not authorize changing Contextor's foreign-call UNKNOWN boundary.
+DIRECT_EVIDENCE: Model values below come from a read-only invocation of `evaluate_package_import_order` on the exact seven `CASES` inputs. The imported target list includes bootstrap imports. CPython results are from the passing keyed T1 assertions. `CALL_FUNCTION` entries show `(module, symbol)`.
+
+| Case | CPython result | Current model | Current model START_IMPORT targets | Current model CALL_FUNCTION | Parity status |
+|---|---|---|---|---|---|
+| direct-call | success; old | MODEL_PASS | `pkg`, `pkg.old` | `(pkg, f)` | Observed import effect matches |
+| alias-call | success; old | UNKNOWN | `pkg` | none | UNKNOWN; no parity proved |
+| alias-survives-rebinding | success; old | UNKNOWN | `pkg` | none | UNKNOWN; no parity proved |
+| old-alias-survives-redefinition | success; old | UNKNOWN | `pkg` | none | UNKNOWN; no parity proved |
+| new-definition-call | success; new | MODEL_PASS | `pkg`, `pkg.new` | `(pkg, f)` | Observed import effect matches |
+| noncallable-rebinding | `TypeError`; neither | UNKNOWN | `pkg` | none | Conservative UNKNOWN; no false PASS |
+| foreign-function-cpython-control | success; old | UNKNOWN | `consumer`, `pkg` | none | Conservative foreign-call UNKNOWN |
+
+- CODE_PATH_PROVED: The three same-module alias cases have CPython success but currently stop at UNKNOWN. They are candidates for future MODEL_PASS only if a later independently audited model change establishes the right import effects; this report does not grant PASS.
+- CODE_PATH_PROVED: Noncallable rebinding must not become MODEL_PASS under these inputs because the CPython case fails with `TypeError`. The foreign case remains outside the currently authorized model boundary even though CPython succeeds (`execution/calls.py:20-29`; `tests/test_cycle_semantics_package_model.py:2520-2532`).
+
+## OBSERVABLE_EVENT_EVIDENCE
+
+- DIRECT_EVIDENCE: Direct call emits `DEFINE_FUNCTION`, `CALL_FUNCTION(f)`, `START_IMPORT(pkg.old)`; new-definition call emits two `DEFINE_FUNCTION` events, `ALIAS(f,g)`, `CALL_FUNCTION(f)`, `START_IMPORT(pkg.new)`.
+- DIRECT_EVIDENCE: Each same-module alias UNKNOWN trace stops after `ALIAS` (and any subsequent `BIND` or second `DEFINE_FUNCTION`), before `CALL_FUNCTION` or child `START_IMPORT`. Noncallable rebinding stops after `BIND(g)`. Foreign call stops after `FROM(pkg,f)` with no `CALL_FUNCTION`.
+- CODE_PATH_PROVED: Current helper requires a string marker formed from current module and call target plus a same-name body key (`execution/calls.py:20-35`); alias copying is at `package_model.py:2196-2210`; failed call returns UNKNOWN before event emission (`package_model.py:2163-2181`). No safety is inferred from the absence of a later event.
 
 ## TARGETED_TEST_RESULTS
 
-- DIRECT_EVIDENCE: `C:\Temp\Contextor_Repo\.venv\Scripts\python.exe -m pytest -q tests/test_cycle_semantics_function_identity_cpython.py -rs` → `7 passed in 4.74s`.
-- DIRECT_EVIDENCE: `git diff --check` exited 0; its only output was Git's existing line-ending advisory for `walkthrough.md`. No full suite was run.
-- DIRECT_EVIDENCE: Final source status before report rewrite: ` M walkthrough.md`, `?? tests/test_cycle_semantics_function_identity_cpython.py`. No Git index/history mutation.
-- DIRECT_EVIDENCE: Contextor MCP returned `file_not_in_canonical_scope` for the new test file. Its canonical freshness is therefore UNKNOWN; the pre-existing canonical revision was 1295. No FULL, `update_file`, or restart was performed.
+- DIRECT_EVIDENCE: T1 preflight: `7 passed in 2.26s`.
+- DIRECT_EVIDENCE: Required combined run using the active backend venv: `14 passed in 5.34s` for `tests/test_cycle_semantics_function_identity_cpython.py` and `tests/test_cycle_semantics_function_identity_model.py` with `-q -rs`.
+- DIRECT_EVIDENCE: `git diff --check` exited 0. No full pytest, FULL, `update_file`, restart, Git add/commit/push, or index/history modification.
 
-## MODEL_PARITY_STATUS
+## SEMANTIC_GAPS
 
-- UNKNOWN: These tests establish CPython function identity, aliasing, rebinding, redefinition, import-effect, and noncallable-call behavior only. They do not exercise `evaluate_package_import_order` or establish model parity. The model's old alias-call UNKNOWN test remains unchanged at `tests/test_cycle_semantics_package_model_async_alias.py:235-242`.
-- DIRECT_EVIDENCE: The tests inspect `sys.modules` and package namespace identity inside an isolated interpreter; neither model events nor MODEL_PASS enter these assertions (`tests/test_cycle_semantics_function_identity_cpython.py:72-105,161-169`).
+- UNKNOWN: A model UNKNOWN is not CPython parity and supplies no permission to report safe import order. The model currently lacks same-module alias call execution; the new test records this current boundary.
+- UNKNOWN: Canonical LIVE status for the newly added test was not separately established. The preflight Contextor revision 1296 and source freshness concern the existing owner symbol. No semantic-cycle refresh was requested or performed.
 
 ## FULL_DIFFS
 
-Complete actual new-file diff (`/dev/null` → `tests/test_cycle_semantics_function_identity_cpython.py`):
+Complete actual new-file diff (`/dev/null` → `tests/test_cycle_semantics_function_identity_model.py`):
 
 ```diff
 --- /dev/null
-+++ b/tests/test_cycle_semantics_function_identity_cpython.py
-@@ -0,0 +1,169 @@
-+import json
-+import subprocess
-+import sys
-+import tempfile
-+from pathlib import Path
++++ b/tests/test_cycle_semantics_function_identity_model.py
+@@ -0,0 +1,87 @@
++import ast
 +
 +import pytest
 +
++from contextor.core.cycle_semantics.package_model import (
++    evaluate_package_import_order,
++)
 +
-+OLD = """\
-+def f():
-+    import pkg.old
-+"""
-+
-+NEW = """\
-+def f():
-+    import pkg.new
-+"""
-+
-+
-+CASES = [
-+    pytest.param(
-+        OLD + "\nf()\n",
-+        None,
-+        {"ok": True, "old": True, "new": False},
-+        id="direct-call",
-+    ),
-+    pytest.param(
-+        OLD + "\ng = f\ng()\n",
-+        None,
-+        {"ok": True, "old": True, "new": False,
-+         "alias_is_current": True},
-+        id="alias-call",
-+    ),
-+    pytest.param(
-+        OLD + "\ng = f\nf = None\ng()\n",
-+        None,
-+        {"ok": True, "old": True, "new": False,
-+         "alias_is_current": False},
-+        id="alias-survives-rebinding",
-+    ),
-+    pytest.param(
-+        OLD + "\ng = f\n" + NEW + "\ng()\n",
-+        None,
-+        {"ok": True, "old": True, "new": False,
-+         "alias_is_current": False},
-+        id="old-alias-survives-redefinition",
-+    ),
-+    pytest.param(
-+        OLD + "\ng = f\n" + NEW + "\nf()\n",
-+        None,
-+        {"ok": True, "old": False, "new": True,
-+         "alias_is_current": False},
-+        id="new-definition-call",
-+    ),
-+    pytest.param(
-+        OLD + "\ng = f\ng = None\ng()\n",
-+        None,
-+        {"ok": False, "old": False, "new": False,
-+         "error": "TypeError"},
-+        id="noncallable-rebinding",
-+    ),
-+    pytest.param(
-+        OLD,
-+        "from pkg import f\nf()\n",
-+        {"ok": True, "old": True, "new": False},
-+        id="foreign-function-cpython-control",
-+    ),
-+]
-+
-+
-+RUNNER = """\
-+import importlib
-+import json
-+import sys
-+
-+sys.path.insert(0, sys.argv[1])
-+
-+ok = True
-+error = None
-+
-+try:
-+    importlib.import_module(sys.argv[2])
-+except Exception as exc:
-+    ok = False
-+    error = type(exc).__name__
-+
-+pkg = sys.modules.get("pkg")
-+
-+alias_is_current = None
-+
-+if pkg is not None:
-+    namespace = vars(pkg)
-+    if "g" in namespace and "f" in namespace:
-+        alias_is_current = namespace["g"] is namespace["f"]
-+
-+print(json.dumps({
-+    "ok": ok,
-+    "error": error,
-+    "old": "pkg.old" in sys.modules,
-+    "new": "pkg.new" in sys.modules,
-+    "alias_is_current": alias_is_current,
-+}))
-+"""
++from test_cycle_semantics_function_identity_cpython import (
++    CASES,
++)
 +
 +
 +@pytest.mark.parametrize(
 +    "package_source,consumer_source,expected",
 +    CASES,
 +)
-+def test_restricted_function_identity_cpython(
++def test_current_model_identity_boundary(
 +    package_source,
 +    consumer_source,
 +    expected,
 +):
-+    with tempfile.TemporaryDirectory() as directory:
-+        root = Path(directory)
-+        package = root / "pkg"
-+        package.mkdir()
++    sources = {
++        "pkg.__init__": ast.parse(package_source),
++        "pkg.old": ast.parse("pass\n"),
++        "pkg.new": ast.parse("pass\n"),
++    }
 +
-+        (package / "__init__.py").write_text(
-+            package_source,
-+            encoding="utf-8",
++    entry = "pkg"
++
++    if consumer_source is not None:
++        sources["consumer"] = ast.parse(consumer_source)
++        entry = "consumer"
++
++    result = evaluate_package_import_order(
++        sources,
++        entry,
++    )
++
++    operations = [
++        event.operation
++        for event in result.events
++    ]
++
++    imported_targets = [
++        event.target
++        for event in result.events
++        if event.operation == "START_IMPORT"
++    ]
++
++    assert result.outcome in {
++        "MODEL_PASS",
++        "UNKNOWN",
++    }
++
++    if expected["ok"] is False:
++        assert result.outcome == "UNKNOWN"
++
++    if expected["ok"] is True:
++        assert result.outcome in {
++            "MODEL_PASS",
++            "UNKNOWN",
++        }
++
++    if result.outcome == "MODEL_PASS":
++        assert ("pkg.old" in imported_targets) == (
++            expected["old"]
 +        )
-+        (package / "old.py").write_text(
-+            "pass\n",
-+            encoding="utf-8",
-+        )
-+        (package / "new.py").write_text(
-+            "pass\n",
-+            encoding="utf-8",
++        assert ("pkg.new" in imported_targets) == (
++            expected["new"]
 +        )
 +
-+        entry = "pkg"
++    assert not (
++        "pkg.old" in imported_targets
++        and "pkg.new" in imported_targets
++        and expected["old"] != expected["new"]
++    )
 +
-+        if consumer_source is not None:
-+            (root / "consumer.py").write_text(
-+                consumer_source,
-+                encoding="utf-8",
-+            )
-+            entry = "consumer"
-+
-+        process = subprocess.run(
-+            [
-+                sys.executable,
-+                "-I",
-+                "-B",
-+                "-c",
-+                RUNNER,
-+                str(root),
-+                entry,
-+            ],
-+            text=True,
-+            capture_output=True,
-+            timeout=20,
-+            check=False,
++    assert result.outcome == (
++        "UNKNOWN"
++        if consumer_source is not None
++        else (
++            "UNKNOWN"
++            if "g()" in package_source
++            else "MODEL_PASS"
 +        )
-+
-+        assert process.returncode == 0, process.stderr
-+
-+        observed = json.loads(process.stdout)
-+
-+        for key, value in expected.items():
-+            assert observed[key] == value, (
-+                key,
-+                expected,
-+                observed,
-+                process.stderr,
-+            )
++    )
 ```
 
 ## FINAL_VERDICT
 
-- CONTRACT_PROVED: The requested CPython-only baseline was added exactly and all seven isolated scenarios passed. This stage does not certify Contextor model parity, runtime adoption, or cycle-semantic freshness. Stop after this baseline.
+- CONTRACT_PROVED: The exact seven-case observable model baseline was added and passed alongside the independent CPython baseline. Direct and redefined-current-name calls show matching import effects; three alias cases remain UNKNOWN; the noncallable and foreign cases remain UNKNOWN. This is a baseline report, not a semantic change or model parity certification for UNKNOWN cases. Stop after this stage.
