@@ -1,144 +1,224 @@
-# P5-M07-I1 — Restricted call execution extraction
+# P5-M07-I2-T1 — CPython function identity baseline
 
 ## PREFLIGHT
 
-- DIRECT_EVIDENCE: Initial HEAD `59caae34dc8edd0f817e1ef0b25daf23aed3fae3`; initial `git status --short` showed only ` M walkthrough.md` (pre-existing M07-D1 report, overwritten as requested). No Git index/history mutation by this task.
-- DIRECT_EVIDENCE: Contextor LIVE revision 1293 before change; `package_model.py` canonical fresh and workspace_sync verified. Active backend executable `C:\Temp\Contextor_Repo\.venv\Scripts\python.exe`. `execution/calls.py` did not exist.
-- DIRECT_EVIDENCE: The CALL_FUNCTION branch at `package_model.py:2162-2196` matched the specified marker check, UNKNOWN result, tuple body lookup, list splice, and event ordering. `programs[name] = list(program)` at 1422 and 1572; function body tuple stored at 1881-1884; shared frame advance at 2295. `_Step` imported from `execution.steps`. No SOURCE_DRIFT.
-- CODE_PATH_PROVED: The helper preserves exact marker matching and splice location. It does not emit events; the evaluator still emits CALL_FUNCTION after successful insertion and before shared frame increment. No alias, argument or decorator behavior is added.
+- DIRECT_EVIDENCE: Contextor MCP was used first. `evaluate_package_import_order` resolves to `contextor/core/cycle_semantics/package_model.py:1154-2284`, canonical LIVE revision 1295, source fresh, `workspace_sync=verified`; `cycle_semantics=stale`.
+- DIRECT_EVIDENCE: HEAD `56cda86dbeb9d37b53c57ecd52f5f0302af4cf15`; initial status ` M walkthrough.md` only. The report was already modified by the preceding stage and has been overwritten as required. No other pre-existing changes.
+- DIRECT_EVIDENCE: Active backend venv executable `C:\Temp\Contextor_Repo\.venv\Scripts\python.exe`; it reports CPython `3.15.2` (`tags/v3.15.2:5e58eaa`).
+- DIRECT_EVIDENCE: `tests/test_cycle_semantics_function_identity_cpython.py` did not exist before editing. M07-I1 anchors remain in `execution/calls.py:8-35` and `package_model.py:1882-1889,2163-2171`; no production code was edited.
 
 ## FILES_CHANGED
 
-- `contextor/core/cycle_semantics/execution/calls.py` (new)
-- `contextor/core/cycle_semantics/package_model.py`
-- `walkthrough.md` (report only)
+- Added `tests/test_cycle_semantics_function_identity_cpython.py` with the exact requested seven-case CPython baseline. Its complete diff appears below.
+- Overwrote `walkthrough.md`, the required report. No production or existing test file changed.
 
-## EXACT_IMPLEMENTATION
+## CPYTHON_BASELINE_MATRIX
 
-- DIRECT_EVIDENCE: Created `execution/calls.py` with the exact supplied `_execute_restricted_call` implementation.
-- DIRECT_EVIDENCE: `package_model.py` imports that helper and replaces only the CALL_FUNCTION branch's marker check and program splice. Event emission and common frame increment remain in the evaluator.
+DIRECT_EVIDENCE: Each listed observation is established by the test's exact keyed assertion against JSON emitted from an isolated `sys.executable -I -B` subprocess. All cases passed under CPython 3.15.2. A dash means that field was not asserted in that case.
 
-## CALL_EXECUTION_CHECKS
+| Case | Success | `pkg.old` | `pkg.new` | `g is f` | Error |
+|---|---:|---:|---:|---:|---|
+| direct-call | true | true | false | — | — |
+| alias-call | true | true | false | true | — |
+| alias-survives-rebinding | true | true | false | false | — |
+| old-alias-survives-redefinition | true | true | false | false | — |
+| new-definition-call | true | false | true | false | — |
+| noncallable-rebinding | false | false | false | — | `TypeError` |
+| foreign-function-cpython-control | true | true | false | — | — |
 
-- DIRECT_EVIDENCE: All specified backend-venv assertions passed: successful splice after call step, stored tuple identity preserved, repeated insertion without tuple mutation, aliased call UNKNOWN without program change, rebound original UNKNOWN without program change, and unchanged compiler/evaluator `__module__`.
+The assertions are in `tests/test_cycle_semantics_function_identity_cpython.py:22-70,161-169`; the runner's observed fields are defined at `:72-105`. The foreign-call case establishes CPython behavior only and does not authorize changing Contextor's foreign-call UNKNOWN boundary.
 
 ## TARGETED_TEST_RESULTS
 
-- DIRECT_EVIDENCE: Requested focused pytest subset: 285 passed, 2 third-party deprecation warnings, 27.22 s. No SCC02 or full suite.
-- DIRECT_EVIDENCE: `git diff --check` exit 0; only an LF/CRLF advisory for `walkthrough.md`.
+- DIRECT_EVIDENCE: `C:\Temp\Contextor_Repo\.venv\Scripts\python.exe -m pytest -q tests/test_cycle_semantics_function_identity_cpython.py -rs` → `7 passed in 4.74s`.
+- DIRECT_EVIDENCE: `git diff --check` exited 0; its only output was Git's existing line-ending advisory for `walkthrough.md`. No full suite was run.
+- DIRECT_EVIDENCE: Final source status before report rewrite: ` M walkthrough.md`, `?? tests/test_cycle_semantics_function_identity_cpython.py`. No Git index/history mutation.
+- DIRECT_EVIDENCE: Contextor MCP returned `file_not_in_canonical_scope` for the new test file. Its canonical freshness is therefore UNKNOWN; the pre-existing canonical revision was 1295. No FULL, `update_file`, or restart was performed.
 
-## MCP_POST_CHANGE_AUDIT
+## MODEL_PARITY_STATUS
 
-- DIRECT_EVIDENCE: LIVE revision 1295. Both changed modules canonical fresh and workspace_sync verified; module, graph, topology, cycles and lineage fresh. Project-level workspace_sync unverified.
-- DIRECT_EVIDENCE: New hard edge `package_model -> execution.calls`; calls has one outbound edge to `execution.steps` and none back to `package_model`.
-- DIRECT_EVIDENCE: Syntax errors 0; structural DFS back-edge cycle count 16; active warnings 16. `cycle_semantics` stale, so current cyclic SCC count unavailable. No FULL, update_file or restart.
-- UNKNOWN: Running backend adoption not established by source freshness; direct checks used a new backend-venv interpreter.
+- UNKNOWN: These tests establish CPython function identity, aliasing, rebinding, redefinition, import-effect, and noncallable-call behavior only. They do not exercise `evaluate_package_import_order` or establish model parity. The model's old alias-call UNKNOWN test remains unchanged at `tests/test_cycle_semantics_package_model_async_alias.py:235-242`.
+- DIRECT_EVIDENCE: The tests inspect `sys.modules` and package namespace identity inside an isolated interpreter; neither model events nor MODEL_PASS enter these assertions (`tests/test_cycle_semantics_function_identity_cpython.py:72-105,161-169`).
 
 ## FULL_DIFFS
 
-### contextor/core/cycle_semantics/execution/calls.py
+Complete actual new-file diff (`/dev/null` → `tests/test_cycle_semantics_function_identity_cpython.py`):
 
 ```diff
-diff --git a/contextor/core/cycle_semantics/execution/calls.py b/contextor/core/cycle_semantics/execution/calls.py
-new file mode 100644
 --- /dev/null
-+++ b/contextor/core/cycle_semantics/execution/calls.py
-@@ -0,0 +1,35 @@
-+from __future__ import annotations
++++ b/tests/test_cycle_semantics_function_identity_cpython.py
+@@ -0,0 +1,169 @@
++import json
++import subprocess
++import sys
++import tempfile
++from pathlib import Path
 +
-+from typing import Literal
-+
-+from .steps import _Step
++import pytest
 +
 +
-+def _execute_restricted_call(
-+    step: _Step,
-+    *,
-+    module: str,
-+    index: int,
-+    namespaces: dict[str, dict[str, object | None]],
-+    function_definitions: dict[
-+        str,
-+        dict[str, tuple[_Step, ...]],
-+    ],
-+    programs: dict[str, list[_Step]],
-+) -> Literal["ADVANCE", "RETURN_UNKNOWN"]:
-+    expected_binding = (
-+        "\x00FUNCTION:" + module + ":" + step.target
-+    )
++OLD = """\
++def f():
++    import pkg.old
++"""
 +
-+    if (
-+        namespaces[module].get(step.target)
-+        != expected_binding
-+        or step.target not in function_definitions[module]
-+    ):
-+        return "RETURN_UNKNOWN"
++NEW = """\
++def f():
++    import pkg.new
++"""
 +
-+    body_steps = function_definitions[module][step.target]
 +
-+    programs[module][index + 1:index + 1] = list(body_steps)
++CASES = [
++    pytest.param(
++        OLD + "\nf()\n",
++        None,
++        {"ok": True, "old": True, "new": False},
++        id="direct-call",
++    ),
++    pytest.param(
++        OLD + "\ng = f\ng()\n",
++        None,
++        {"ok": True, "old": True, "new": False,
++         "alias_is_current": True},
++        id="alias-call",
++    ),
++    pytest.param(
++        OLD + "\ng = f\nf = None\ng()\n",
++        None,
++        {"ok": True, "old": True, "new": False,
++         "alias_is_current": False},
++        id="alias-survives-rebinding",
++    ),
++    pytest.param(
++        OLD + "\ng = f\n" + NEW + "\ng()\n",
++        None,
++        {"ok": True, "old": True, "new": False,
++         "alias_is_current": False},
++        id="old-alias-survives-redefinition",
++    ),
++    pytest.param(
++        OLD + "\ng = f\n" + NEW + "\nf()\n",
++        None,
++        {"ok": True, "old": False, "new": True,
++         "alias_is_current": False},
++        id="new-definition-call",
++    ),
++    pytest.param(
++        OLD + "\ng = f\ng = None\ng()\n",
++        None,
++        {"ok": False, "old": False, "new": False,
++         "error": "TypeError"},
++        id="noncallable-rebinding",
++    ),
++    pytest.param(
++        OLD,
++        "from pkg import f\nf()\n",
++        {"ok": True, "old": True, "new": False},
++        id="foreign-function-cpython-control",
++    ),
++]
 +
-+    return "ADVANCE"
-```
-
-### contextor/core/cycle_semantics/package_model.py
-
-```diff
-diff --git a/contextor/core/cycle_semantics/package_model.py b/contextor/core/cycle_semantics/package_model.py
-index b8be4f1..d8249f5 100644
---- a/contextor/core/cycle_semantics/package_model.py
-+++ b/contextor/core/cycle_semantics/package_model.py
-@@ -59,6 +59,7 @@ from .execution.lifecycle import (
-     _complete_module_frame,
-     _start_module_frame,
- )
-+from .execution.calls import _execute_restricted_call
- 
- 
- @dataclass(frozen=True)
-@@ -2160,31 +2161,17 @@ def evaluate_package_import_order(
-             )
- 
-         elif step.op == "CALL_FUNCTION":
--            expected_binding = (
--                "\x00FUNCTION:" + module + ":" + step.target
-+            call_control = _execute_restricted_call(
-+                step,
-+                module=module,
-+                index=index,
-+                namespaces=namespaces,
-+                function_definitions=function_definitions,
-+                programs=programs,
-             )
- 
--            if (
--                namespaces[module].get(step.target)
--                != expected_binding
--                or step.target
--                not in function_definitions[module]
--            ):
--                return result(
--                    "UNKNOWN",
--                    module,
--                    step.target,
--                )
--
--            # Expand the function's restricted import-only body
--            # at its actual call site. This changes only the
--            # in-memory compiled execution sequence, never
--            # caller AST or source bytes.
--            body_steps = function_definitions[module][step.target]
--
--            programs[module][
--                index + 1:index + 1
--            ] = list(body_steps)
-+            if call_control == "RETURN_UNKNOWN":
-+                return result("UNKNOWN", module, step.target)
- 
-             events.append(
-                 PackageModelEvent(
++
++RUNNER = """\
++import importlib
++import json
++import sys
++
++sys.path.insert(0, sys.argv[1])
++
++ok = True
++error = None
++
++try:
++    importlib.import_module(sys.argv[2])
++except Exception as exc:
++    ok = False
++    error = type(exc).__name__
++
++pkg = sys.modules.get("pkg")
++
++alias_is_current = None
++
++if pkg is not None:
++    namespace = vars(pkg)
++    if "g" in namespace and "f" in namespace:
++        alias_is_current = namespace["g"] is namespace["f"]
++
++print(json.dumps({
++    "ok": ok,
++    "error": error,
++    "old": "pkg.old" in sys.modules,
++    "new": "pkg.new" in sys.modules,
++    "alias_is_current": alias_is_current,
++}))
++"""
++
++
++@pytest.mark.parametrize(
++    "package_source,consumer_source,expected",
++    CASES,
++)
++def test_restricted_function_identity_cpython(
++    package_source,
++    consumer_source,
++    expected,
++):
++    with tempfile.TemporaryDirectory() as directory:
++        root = Path(directory)
++        package = root / "pkg"
++        package.mkdir()
++
++        (package / "__init__.py").write_text(
++            package_source,
++            encoding="utf-8",
++        )
++        (package / "old.py").write_text(
++            "pass\n",
++            encoding="utf-8",
++        )
++        (package / "new.py").write_text(
++            "pass\n",
++            encoding="utf-8",
++        )
++
++        entry = "pkg"
++
++        if consumer_source is not None:
++            (root / "consumer.py").write_text(
++                consumer_source,
++                encoding="utf-8",
++            )
++            entry = "consumer"
++
++        process = subprocess.run(
++            [
++                sys.executable,
++                "-I",
++                "-B",
++                "-c",
++                RUNNER,
++                str(root),
++                entry,
++            ],
++            text=True,
++            capture_output=True,
++            timeout=20,
++            check=False,
++        )
++
++        assert process.returncode == 0, process.stderr
++
++        observed = json.loads(process.stdout)
++
++        for key, value in expected.items():
++            assert observed[key] == value, (
++                key,
++                expected,
++                observed,
++                process.stderr,
++            )
 ```
 
 ## FINAL_VERDICT
 
-- CONTRACT_PROVED: Exact extraction, direct controls, focused regressions and diff check passed. Changed-file LIVE evidence fresh. Cycle semantics and running-backend adoption remain unverified; no runtime semantic certification is claimed.
+- CONTRACT_PROVED: The requested CPython-only baseline was added exactly and all seven isolated scenarios passed. This stage does not certify Contextor model parity, runtime adoption, or cycle-semantic freshness. Stop after this baseline.
