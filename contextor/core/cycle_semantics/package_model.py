@@ -51,6 +51,7 @@ from .execution.imports import (
     _missing_piece,
     _execute_ready_import,
     _execute_prepare_from_member,
+    _resolve_from_child,
 )
 
 
@@ -1759,61 +1760,60 @@ def evaluate_package_import_order(
                 # CPython checks a package attribute before attempting
                 # to load a same-named child module. An existing binding
                 # takes precedence over the indexed child candidate.
-                if target in packages and member not in namespaces[target]:
-                    child = target + "." + member
+                from_child_control = _resolve_from_child(
+                    step,
+                    packages=packages,
+                    programs=programs,
+                    states=states,
+                    namespaces=namespaces,
+                    frames=frames,
+                )
 
-                    if child in programs:
-                        # CPython 3.10 IMPORT_FROM can fall back to sys.modules
-                        # for a child that has not yet been attached to its
-                        # parent package. Model only the active same-thread case.
-                        if states[child] == "INITIALIZING":
-                            if not any(
-                                active == child
-                                for active, _ in frames
-                            ):
-                                return result("UNKNOWN", child, member)
+                if from_child_control.action == "RETURN_UNKNOWN":
+                    return result(
+                        "UNKNOWN",
+                        from_child_control.target,
+                        from_child_control.symbol,
+                    )
 
-                            if not step.function_local and not step.class_local:
-                                namespaces[module][step.binding] = child
+                if from_child_control.action == "REENTRANT_CHILD":
+                    child = from_child_control.target
 
-                            events.append(
-                                PackageModelEvent(
-                                    module,
-                                    (
-                                        "FUNCTION_LOCAL_FROM_REENTRANT_CHILD"
-                                        if step.function_local
-                                        else "CLASS_LOCAL_FROM_REENTRANT_CHILD"
-                                        if step.class_local
-                                        else "FROM_REENTRANT_CHILD"
-                                    ),
-                                    child,
-                                    member,
-                                )
-                            )
+                    if not step.function_local and not step.class_local:
+                        namespaces[module][step.binding] = child
 
-                            frames[-1] = (module, index + 1)
-                            continue
-
-                        if states[child] != "NEW":
-                            return result("UNKNOWN", child, member)
-
-                        next_child = _missing_piece(child, states)
-
-                        if next_child != child:
-                            return result("UNKNOWN", child, member)
-
-                        states[child] = "INITIALIZING"
-
-                        events.append(
-                            PackageModelEvent(
-                                module,
-                                "START_IMPORT",
-                                child,
-                            )
+                    events.append(
+                        PackageModelEvent(
+                            module,
+                            (
+                                "FUNCTION_LOCAL_FROM_REENTRANT_CHILD"
+                                if step.function_local
+                                else "CLASS_LOCAL_FROM_REENTRANT_CHILD"
+                                if step.class_local
+                                else "FROM_REENTRANT_CHILD"
+                            ),
+                            child,
+                            member,
                         )
+                    )
 
-                        frames.append((child, 0))
-                        continue
+                    frames[-1] = (module, index + 1)
+                    continue
+
+                if from_child_control.action == "START_CHILD":
+                    child = from_child_control.target
+                    states[child] = "INITIALIZING"
+
+                    events.append(
+                        PackageModelEvent(
+                            module,
+                            "START_IMPORT",
+                            child,
+                        )
+                    )
+
+                    frames.append((child, 0))
+                    continue
 
                 if member not in namespaces[target]:
                     outcome = (

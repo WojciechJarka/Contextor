@@ -36,6 +36,7 @@ class _ImportControl:
         "ADVANCE",
         "RETURN_UNKNOWN",
         "START_CHILD",
+        "REENTRANT_CHILD",
     ]
     target: str | None = None
     symbol: str | None = None
@@ -139,3 +140,60 @@ def _execute_prepare_from_member(
         "ADVANCE",
         event_operation="PREPARE_FROM_MEMBER",
     )
+
+
+def _resolve_from_child(
+    step: _Step,
+    *,
+    packages: set[str],
+    programs: Mapping[str, object],
+    states: Mapping[str, str],
+    namespaces: Mapping[str, dict[str, object | None]],
+    frames: list[tuple[str, int]],
+) -> _ImportControl:
+    target = step.target
+    member = step.symbol
+
+    if target in packages and member not in namespaces[target]:
+        child = target + "." + member
+
+        if child in programs:
+            if states[child] == "INITIALIZING":
+                if not any(
+                    active == child
+                    for active, _ in frames
+                ):
+                    return _ImportControl(
+                        "RETURN_UNKNOWN",
+                        target=child,
+                        symbol=member,
+                    )
+
+                return _ImportControl(
+                    "REENTRANT_CHILD",
+                    target=child,
+                    symbol=member,
+                )
+
+            if states[child] != "NEW":
+                return _ImportControl(
+                    "RETURN_UNKNOWN",
+                    target=child,
+                    symbol=member,
+                )
+
+            next_child = _missing_piece(child, states)
+
+            if next_child != child:
+                return _ImportControl(
+                    "RETURN_UNKNOWN",
+                    target=child,
+                    symbol=member,
+                )
+
+            return _ImportControl(
+                "START_CHILD",
+                target=child,
+            )
+
+    return _ImportControl("ADVANCE")
