@@ -960,6 +960,15 @@ def _compile(
                     if isinstance(body_statement, ast.Pass):
                         continue
 
+                    if (
+                        isinstance(body_statement, ast.Return)
+                        and body_statement.value is None
+                    ):
+                        function_steps.append(
+                            _Step("RETURN_FUNCTION")
+                        )
+                        continue
+
                     if not isinstance(
                         body_statement,
                         (ast.Import, ast.ImportFrom),
@@ -2172,6 +2181,13 @@ def evaluate_package_import_order(
                     symbol=step.binding,
                 )
             )
+
+        elif step.op == "RETURN_FUNCTION":
+            if not isinstance(active_frame, _FunctionFrame):
+                return result("UNKNOWN", module)
+
+            frames.pop()
+            continue
 
         elif step.op == "CALL_FUNCTION":
             body = _execute_restricted_call(
