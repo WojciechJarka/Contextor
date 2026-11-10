@@ -35,9 +35,17 @@ from .execution.definition_checks import (
     _exact_restricted_dataclass_hash_field_call,
     _restricted_dataclass_field_annotation,
 )
+from .execution.class_facts import (
+    _ClassFact,
+    _BUILTIN_TYPE_ID,
+    _BUILTIN_CLASS_FACTS,
+    _BUILTIN_EXCEPTION_CLASS_IDENTITIES,
+    _merge_class_mros,
+)
 from .execution.state import (
     _new_module_initialization_state,
     _new_execution_cursor,
+    _new_definition_state,
 )
 
 
@@ -68,20 +76,6 @@ class AssumedFrozenDataclassDecoration:
     column: int
 
 
-@dataclass(frozen=True)
-class _ClassFact:
-    """Provenance and creation facts for one passive class definition."""
-
-    identity: str
-    origin: str
-    direct_bases: tuple[str, ...]
-    linear_mro: tuple[str, ...]
-    metaclass_identity: str
-    defines_init_subclass: bool
-    safe_to_subclass: bool
-    passive_metaclass_creation: bool = False
-
-
 def _safe_class_namespace_value(value: object) -> bool:
     """Values admitted in a passive class namespace cannot be descriptors."""
     if isinstance(value, _ClassFact) or value is None:
@@ -89,106 +83,6 @@ def _safe_class_namespace_value(value: object) -> bool:
     if type(value) is str:
         return not value.startswith("\x00ASSUMED_EXTERNAL:")
     return False
-
-
-_BUILTIN_TYPE_ID = "builtins.type"
-_BUILTIN_CLASS_FACTS = {
-    "type": _ClassFact(
-        identity=_BUILTIN_TYPE_ID,
-        origin="BUILTIN",
-        direct_bases=("builtins.object",),
-        linear_mro=(_BUILTIN_TYPE_ID, "builtins.object"),
-        metaclass_identity=_BUILTIN_TYPE_ID,
-        defines_init_subclass=False,
-        safe_to_subclass=True,
-        passive_metaclass_creation=True,
-    ),
-    "object": _ClassFact(
-        identity="builtins.object",
-        origin="BUILTIN",
-        direct_bases=(),
-        linear_mro=("builtins.object",),
-        metaclass_identity=_BUILTIN_TYPE_ID,
-        defines_init_subclass=False,
-        safe_to_subclass=True,
-    ),
-    "BaseException": _ClassFact(
-        identity="builtins.BaseException",
-        origin="BUILTIN",
-        direct_bases=("builtins.object",),
-        linear_mro=("builtins.BaseException", "builtins.object"),
-        metaclass_identity=_BUILTIN_TYPE_ID,
-        defines_init_subclass=False,
-        safe_to_subclass=True,
-    ),
-    "Exception": _ClassFact(
-        identity="builtins.Exception",
-        origin="BUILTIN",
-        direct_bases=("builtins.BaseException",),
-        linear_mro=(
-            "builtins.Exception",
-            "builtins.BaseException",
-            "builtins.object",
-        ),
-        metaclass_identity=_BUILTIN_TYPE_ID,
-        defines_init_subclass=False,
-        safe_to_subclass=True,
-    ),
-    "ValueError": _ClassFact(
-        identity="builtins.ValueError",
-        origin="BUILTIN",
-        direct_bases=("builtins.Exception",),
-        linear_mro=(
-            "builtins.ValueError",
-            "builtins.Exception",
-            "builtins.BaseException",
-            "builtins.object",
-        ),
-        metaclass_identity=_BUILTIN_TYPE_ID,
-        defines_init_subclass=False,
-        safe_to_subclass=True,
-    ),
-}
-_BUILTIN_EXCEPTION_CLASS_IDENTITIES = frozenset({
-    _BUILTIN_CLASS_FACTS[name].identity
-    for name in ("BaseException", "Exception", "ValueError")
-})
-
-
-def _merge_class_mros(
-    bases: tuple[_ClassFact, ...],
-) -> tuple[str, ...] | None:
-    """Return the C3 merge of proven base MROs, or None if inconsistent."""
-    sequences = [list(base.linear_mro) for base in bases]
-    sequences.append([base.identity for base in bases])
-    merged: list[str] = []
-
-    while any(sequences):
-        candidate = next(
-            (
-                sequence[0]
-                for sequence in sequences
-                if not any(
-                    sequence[0] in other[1:]
-                    for other in sequences
-                    if other
-                )
-            ),
-            None,
-        )
-        if candidate is None:
-            return None
-
-        merged.append(candidate)
-        remaining = []
-        for sequence in sequences:
-            if sequence and sequence[0] == candidate:
-                sequence = sequence[1:]
-            if sequence:
-                remaining.append(sequence)
-        sequences = remaining
-
-    return tuple(merged)
 
 
 @dataclass(frozen=True)
@@ -1560,20 +1454,10 @@ def evaluate_package_import_order(
     )
     states = module_initialization_state.states
     namespaces = module_initialization_state.namespaces
-    prepared_class_bases: dict[
-        str, tuple[tuple[_ClassFact, ...], _ClassFact]
-    ] = {}
-    class_facts_by_identity: dict[str, _ClassFact] = {
-        fact.identity: fact for fact in _BUILTIN_CLASS_FACTS.values()
-    }
-
-    function_definitions: dict[
-        str,
-        dict[str, tuple[_Step, ...]],
-    ] = {
-        name: {}
-        for name in programs
-    }
+    definition_state = _new_definition_state(programs)
+    prepared_class_bases = definition_state.prepared_class_bases
+    class_facts_by_identity = definition_state.class_facts_by_identity
+    function_definitions = definition_state.function_definitions
 
     bootstrap = "\x00ENTRY"
     execution_cursor = _new_execution_cursor(bootstrap)
