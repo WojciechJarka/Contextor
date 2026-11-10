@@ -55,6 +55,7 @@ from .execution.imports import (
     _execute_from_binding,
     _classify_external_import,
 )
+from .execution.lifecycle import _complete_module_frame
 
 
 @dataclass(frozen=True)
@@ -1575,27 +1576,23 @@ def evaluate_package_import_order(
         )
 
         if index >= len(steps):
-            frames.pop()
-
-            if module != bootstrap:
-                states[module] = "READY"
-                events.append(
-                    PackageModelEvent(module, "READY")
-                )
-
-                if "." in module:
-                    parent, child = module.rsplit(".", 1)
-                    namespaces[parent][child] = module
-
+            _complete_module_frame(
+                module,
+                bootstrap=bootstrap,
+                frames=frames,
+                states=states,
+                namespaces=namespaces,
+                emit_event=lambda event_module, operation, target, symbol: (
                     events.append(
                         PackageModelEvent(
-                            parent,
-                            "BIND_CHILD",
-                            module,
-                            child,
+                            event_module,
+                            operation,
+                            target,
+                            symbol,
                         )
                     )
-
+                ),
+            )
             continue
 
         step = steps[index]
