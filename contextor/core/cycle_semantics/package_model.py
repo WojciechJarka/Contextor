@@ -55,7 +55,10 @@ from .execution.imports import (
     _execute_from_binding,
     _classify_external_import,
 )
-from .execution.lifecycle import _complete_module_frame
+from .execution.lifecycle import (
+    _complete_module_frame,
+    _start_module_frame,
+)
 
 
 @dataclass(frozen=True)
@@ -1678,17 +1681,22 @@ def evaluate_package_import_order(
                 if next_piece not in programs:
                     return result("UNKNOWN", next_piece)
 
-                states[next_piece] = "INITIALIZING"
-
-                events.append(
-                    PackageModelEvent(
-                        module,
-                        "START_IMPORT",
-                        next_piece,
-                    )
+                _start_module_frame(
+                    next_piece,
+                    importer=module,
+                    frames=frames,
+                    states=states,
+                    emit_event=lambda event_module, operation, target, symbol: (
+                        events.append(
+                            PackageModelEvent(
+                                event_module,
+                                operation,
+                                target,
+                                symbol,
+                            )
+                        )
+                    ),
                 )
-
-                frames.append((next_piece, 0))
                 continue
 
             if step.op == "PREPARE_FROM_MEMBER":
@@ -1710,17 +1718,22 @@ def evaluate_package_import_order(
 
                 if prepare_control.action == "START_CHILD":
                     child = prepare_control.target
-                    states[child] = "INITIALIZING"
-
-                    events.append(
-                        PackageModelEvent(
-                            module,
-                            "START_IMPORT",
-                            child,
-                        )
+                    _start_module_frame(
+                        child,
+                        importer=module,
+                        frames=frames,
+                        states=states,
+                        emit_event=lambda event_module, operation, target, symbol: (
+                            events.append(
+                                PackageModelEvent(
+                                    event_module,
+                                    operation,
+                                    target,
+                                    symbol,
+                                )
+                            )
+                        ),
                     )
-
-                    frames.append((child, 0))
                     continue
 
                 events.append(
@@ -1805,17 +1818,22 @@ def evaluate_package_import_order(
 
                 if from_child_control.action == "START_CHILD":
                     child = from_child_control.target
-                    states[child] = "INITIALIZING"
-
-                    events.append(
-                        PackageModelEvent(
-                            module,
-                            "START_IMPORT",
-                            child,
-                        )
+                    _start_module_frame(
+                        child,
+                        importer=module,
+                        frames=frames,
+                        states=states,
+                        emit_event=lambda event_module, operation, target, symbol: (
+                            events.append(
+                                PackageModelEvent(
+                                    event_module,
+                                    operation,
+                                    target,
+                                    symbol,
+                                )
+                            )
+                        ),
                     )
-
-                    frames.append((child, 0))
                     continue
 
                 from_binding_control = _execute_from_binding(

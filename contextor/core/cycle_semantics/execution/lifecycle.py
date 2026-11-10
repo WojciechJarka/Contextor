@@ -31,3 +31,19 @@ def _complete_module_frame(
                 module,
                 child,
             )
+
+
+def _start_module_frame(
+    target: str,
+    *,
+    importer: str,
+    frames: list[tuple[str, int]],
+    states: dict[str, str],
+    emit_event: Callable[
+        [str, str, str | None, str | None],
+        None,
+    ],
+) -> None:
+    states[target] = "INITIALIZING"
+    emit_event(importer, "START_IMPORT", target, None)
+    frames.append((target, 0))
