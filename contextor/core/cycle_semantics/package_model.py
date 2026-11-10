@@ -50,6 +50,7 @@ from .execution.state import (
 from .execution.imports import (
     _missing_piece,
     _execute_ready_import,
+    _execute_prepare_from_member,
 )
 
 
@@ -1687,48 +1688,43 @@ def evaluate_package_import_order(
                 continue
 
             if step.op == "PREPARE_FROM_MEMBER":
-                member = step.symbol
+                prepare_control = _execute_prepare_from_member(
+                    step,
+                    packages=packages,
+                    programs=programs,
+                    states=states,
+                    namespaces=namespaces,
+                    frames=frames,
+                )
 
-                if (
-                    target in packages
-                    and member not in namespaces[target]
-                ):
-                    child = target + "." + member
+                if prepare_control.action == "RETURN_UNKNOWN":
+                    return result(
+                        "UNKNOWN",
+                        prepare_control.target,
+                        prepare_control.symbol,
+                    )
 
-                    if child in programs:
-                        if states[child] == "NEW":
-                            if _missing_piece(child, states) != child:
-                                return result("UNKNOWN", child, member)
+                if prepare_control.action == "START_CHILD":
+                    child = prepare_control.target
+                    states[child] = "INITIALIZING"
 
-                            states[child] = "INITIALIZING"
+                    events.append(
+                        PackageModelEvent(
+                            module,
+                            "START_IMPORT",
+                            child,
+                        )
+                    )
 
-                            events.append(
-                                PackageModelEvent(
-                                    module,
-                                    "START_IMPORT",
-                                    child,
-                                )
-                            )
-
-                            frames.append((child, 0))
-                            continue
-
-                        if states[child] == "INITIALIZING":
-                            if not any(
-                                active == child
-                                for active, _ in frames
-                            ):
-                                return result("UNKNOWN", child, member)
-
-                        elif states[child] == "READY":
-                            return result("UNKNOWN", child, member)
+                    frames.append((child, 0))
+                    continue
 
                 events.append(
                     PackageModelEvent(
                         module,
                         "PREPARE_FROM_MEMBER",
                         target,
-                        member,
+                        step.symbol,
                     )
                 )
 

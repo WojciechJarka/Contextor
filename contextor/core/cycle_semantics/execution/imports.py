@@ -32,7 +32,11 @@ def _missing_piece(
 
 @dataclass(frozen=True)
 class _ImportControl:
-    action: Literal["ADVANCE", "RETURN_UNKNOWN"]
+    action: Literal[
+        "ADVANCE",
+        "RETURN_UNKNOWN",
+        "START_CHILD",
+    ]
     target: str | None = None
     symbol: str | None = None
     event_operation: str | None = None
@@ -78,4 +82,60 @@ def _execute_ready_import(
             if step.class_local
             else "IMPORT"
         ),
+    )
+
+
+def _execute_prepare_from_member(
+    step: _Step,
+    *,
+    packages: set[str],
+    programs: Mapping[str, object],
+    states: Mapping[str, str],
+    namespaces: Mapping[str, dict[str, object | None]],
+    frames: list[tuple[str, int]],
+) -> _ImportControl:
+    target = step.target
+    member = step.symbol
+
+    if (
+        target in packages
+        and member not in namespaces[target]
+    ):
+        child = target + "." + member
+
+        if child in programs:
+            if states[child] == "NEW":
+                if _missing_piece(child, states) != child:
+                    return _ImportControl(
+                        "RETURN_UNKNOWN",
+                        target=child,
+                        symbol=member,
+                    )
+
+                return _ImportControl(
+                    "START_CHILD",
+                    target=child,
+                )
+
+            if states[child] == "INITIALIZING":
+                if not any(
+                    active == child
+                    for active, _ in frames
+                ):
+                    return _ImportControl(
+                        "RETURN_UNKNOWN",
+                        target=child,
+                        symbol=member,
+                    )
+
+            elif states[child] == "READY":
+                return _ImportControl(
+                    "RETURN_UNKNOWN",
+                    target=child,
+                    symbol=member,
+                )
+
+    return _ImportControl(
+        "ADVANCE",
+        event_operation="PREPARE_FROM_MEMBER",
     )
