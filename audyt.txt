@@ -9,20 +9,11 @@ Najważniejsze:
 Priorytetem jest poprawność i uniwersalność rozwiązania, nie szybkość, liczba promptów ani liczba zaliczonych testów.
 
 *************************************************************
+DLA AGENTA
 
-
-
-
-
-
-
-3Tworzenie klas, bazy i metaklasyWybór specyficzny dla projektu_safe_passive_class_definition akceptuje szczególny przypadek ValueError, lecz odrzuca Exception, object i własne klasy bazowe. Trzeba modelować ocenę baz, wybór metaklasy oraz skutki tworzenia klasy zamiast rozpoznawać jedną nazwę.
-
-
-
-4Kolejność wykonania ciała klasy i wiązania jej nazwyUogólnienie i regresjeImporty wykonywane w ciele klasy, lokalna przestrzeń nazw, odczyty częściowo inicjalizowanych modułów i moment związania nazwy klasy. K09 wykazał prawidłowy hazard zależny od entry; nie wolno go wyeliminować przez rozszerzanie PASS.
-
-
+edytuj pliki bezpośrednio a nie skryptami, jesli masz mozliwość, nawet jesli prompty błednie każą inaczej
+szczególnie pilnuj pkt. 15 agemts.md
+*************************************************************
 
 5Dekoratory funkcji i klasZachowawcze ograniczenieD02, D03 i D05: lru_cache, dekoratory z efektami ubocznymi i dekorowanie klas. Obecne UNKNOWN jest zachowawcze, ale brakuje ogólnego rozpoznawania skutków podczas definicji.
 
