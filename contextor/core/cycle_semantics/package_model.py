@@ -52,6 +52,7 @@ from .execution.imports import (
     _execute_ready_import,
     _execute_prepare_from_member,
     _resolve_from_child,
+    _execute_from_binding,
 )
 
 
@@ -1815,44 +1816,43 @@ def evaluate_package_import_order(
                     frames.append((child, 0))
                     continue
 
-                if member not in namespaces[target]:
-                    outcome = (
-                        "EARLY_BINDING_HAZARD"
-                        if states[target] == "INITIALIZING"
-                        else "MISSING_EXPORT"
+                from_binding_control = _execute_from_binding(
+                    step,
+                    module=module,
+                    states=states,
+                    namespaces=namespaces,
+                    class_namespace_admissible=(
+                        _safe_class_namespace_value
+                    ),
+                )
+
+                if from_binding_control.action == "RETURN_UNKNOWN":
+                    return result(
+                        "UNKNOWN",
+                        from_binding_control.target,
+                        from_binding_control.symbol,
                     )
 
+                if from_binding_control.action == "RETURN_OUTCOME":
                     events.append(
                         PackageModelEvent(
                             module,
-                            outcome,
+                            from_binding_control.event_operation,
                             target,
                             member,
                         )
                     )
 
-                    return result(outcome, target, member)
-
-                imported_value = namespaces[target][member]
-                if (
-                    step.class_local
-                    and not _safe_class_namespace_value(imported_value)
-                ):
-                    return result("UNKNOWN", target, member)
-
-                if not step.function_local and not step.class_local:
-                    namespaces[module][step.binding] = imported_value
+                    return result(
+                        from_binding_control.outcome,
+                        from_binding_control.target,
+                        from_binding_control.symbol,
+                    )
 
                 events.append(
                     PackageModelEvent(
                         module,
-                        (
-                            "FUNCTION_LOCAL_FROM"
-                            if step.function_local
-                            else "CLASS_LOCAL_FROM"
-                            if step.class_local
-                            else "FROM"
-                        ),
+                        from_binding_control.event_operation,
                         target,
                         member,
                     )

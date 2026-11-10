@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Callable
 from typing import Mapping
 from typing import Literal
 
@@ -37,10 +38,12 @@ class _ImportControl:
         "RETURN_UNKNOWN",
         "START_CHILD",
         "REENTRANT_CHILD",
+        "RETURN_OUTCOME",
     ]
     target: str | None = None
     symbol: str | None = None
     event_operation: str | None = None
+    outcome: str | None = None
 
 
 def _execute_ready_import(
@@ -197,3 +200,58 @@ def _resolve_from_child(
             )
 
     return _ImportControl("ADVANCE")
+
+
+def _execute_from_binding(
+    step: _Step,
+    *,
+    module: str,
+    states: Mapping[str, str],
+    namespaces: dict[str, dict[str, object | None]],
+    class_namespace_admissible: Callable[[object], bool],
+) -> _ImportControl:
+    target = step.target
+    member = step.symbol
+
+    if member not in namespaces[target]:
+        outcome = (
+            "EARLY_BINDING_HAZARD"
+            if states[target] == "INITIALIZING"
+            else "MISSING_EXPORT"
+        )
+
+        return _ImportControl(
+            "RETURN_OUTCOME",
+            target=target,
+            symbol=member,
+            event_operation=outcome,
+            outcome=outcome,
+        )
+
+    imported_value = namespaces[target][member]
+
+    if (
+        step.class_local
+        and not class_namespace_admissible(imported_value)
+    ):
+        return _ImportControl(
+            "RETURN_UNKNOWN",
+            target=target,
+            symbol=member,
+        )
+
+    if not step.function_local and not step.class_local:
+        namespaces[module][step.binding] = imported_value
+
+    return _ImportControl(
+        "ADVANCE",
+        target=target,
+        symbol=member,
+        event_operation=(
+            "FUNCTION_LOCAL_FROM"
+            if step.function_local
+            else "CLASS_LOCAL_FROM"
+            if step.class_local
+            else "FROM"
+        ),
+    )
