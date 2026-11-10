@@ -1,321 +1,350 @@
-# K09 — implementation
+# DECORATOR DEFINITION EFFECTS — D02/D03/D05
+
+## PREFLIGHT
+
+DIRECT_EVIDENCE: HEAD 34a3404d7962496109d5c4f0bc9c6f2408123af6; initially clean worktree; canonical revision 1260; package_model.py workspace_sync=verified; canonical state fresh; cycle_semantics stale. Backend PID 14072 executable C:\Temp\Contextor_Repo\.venv\Scripts\python.exe, CPython 3.15.2. Target file was absent.
+
+CODE_PATH_PROVED: conditional evaluator delegates to package evaluator with compile-on-first-import. Decorated definitions stop at UNKNOWN with UNMODELED_STATEMENT and first-decorator location. Existing namespace tests check this contract. SearchPortion exists.
+
+CONTRACT_PROVED: new subprocess cases compare model outcomes with CPython successes, ImportErrors, evaluation order and replacement binding. Positive and negative import entries are included. No MODEL_PASS widening.
+
+UNKNOWN: conditional evaluator lineage query returned canonical_live_unavailable. Full LIVE lineage and runtime adoption are not certified.
 
 ## FILES_CHANGED
 
-tests/test_cycle_semantics_passive_classes.py
+- tests/test_cycle_semantics_decorator_definition_effects.py (new)
 
-## K09_CASE_RESULTS
-- K09-A: pkg.a EARLY_BINDING_HAZARD / CPython ImportError; pkg.b MODEL_PASS / CPython success.
-- K09-B: pkg.a EARLY_BINDING_HAZARD / CPython ImportError; pkg.b MODEL_PASS / CPython success.
-- K09-C: corrected independent pkg.c target; pkg.a EARLY_BINDING_HAZARD / CPython ImportError; pkg.b MISSING_EXPORT / CPython ImportError.
-- K09-D: pkg.a EARLY_BINDING_HAZARD / CPython ImportError; pkg.b MISSING_EXPORT / CPython ImportError.
-- K09-E: MISSING_EXPORT / CPython ImportError.
-- K09-F: MODEL_PASS / CPython success.
-- K09-G: all three unsupported forms UNKNOWN.
-- K09-H: deterministic result and unchanged AST.
+## D02_RESULTS
 
-## MODEL_VS_CPYTHON
-- DIRECT_EVIDENCE: each K09-A–F assertion ran the existing `_actual` helper, which starts isolated CPython subprocesses, and all assertions passed.
-- CODE_PATH_PROVED: class-local imports and bindings are recorded separately from module exports; deferred method body import was not started.
-- CONTRACT_PROVED: bounded requested synthetic cases only, via focused tests and CPython subprocess outcomes.
-- INFERENCE: none used to claim broader Python import safety.
-- UNKNOWN: broader class metaclass, descriptor, and dynamic behavior outside bounded model.
+Conditional lru_cache outcome UNKNOWN, event UNMODELED_STATEMENT / FunctionDef / 2:1; CPython import and cached(3) succeed.
+
+## D03_RESULTS
+
+Function decorator and factory: pkg.a entry raises ImportError; pkg.b entry succeeds. Model UNKNOWN.
+
+## D05_RESULTS
+
+Class and class-body method decorator: pkg.a entry raises ImportError; pkg.b entry succeeds. Model UNKNOWN. Nested decorated method stops at ClassDef.
+
+## CPYTHON_COMPARISONS
+
+CPython 3.15.2 isolated subprocesses verify both entry orders, top-to-bottom expression evaluation, bottom-to-top application, class-body timing, and replacement of function/class bindings with 42. These are fixture-scoped observations.
 
 ## TARGETED_TEST_RESULTS
-- Backend process identity (PID 14072) command line and executable identified C:\Temp\Contextor_Repo\.venv\Scripts\python.exe.
-- `-m pytest -q tests/test_cycle_semantics_passive_classes.py`: 101 passed in 17.60s.
-- First `git diff --check` found blank lines at EOF in the target and report. Both were corrected. Final `git diff --check` exited 0.
+
+`C:\Temp\Contextor_Repo\.venv\Scripts\python.exe -m pytest -q tests/test_cycle_semantics_decorator_definition_effects.py tests/test_cycle_semantics_namespace_path_model.py`: 81 passed in 6.81s. `git diff --check`: passed. No full suite.
 
 ## MCP_POST_CHANGE_AUDIT
-- Pre-edit canonical revision 1258; watcher UPDATED event 1259 and UNCHANGED event 1260, continuous journal.
-- Canonical revision 1260; target workspace_sync=verified.
-- Syntax errors: 0 fresh. Structural DFS cycle paths: 16 fresh. Active warnings: 16 fresh.
-- cycle_semantics=stale; runtime execution status UNKNOWN_NOT_EVALUATED.
-- Current canonical state_id: unavailable from queried public overlays. Historical expected state_id 20261108_172727 belongs to publication revision 1128 and is not asserted for revision 1260.
-- Current graph fingerprint: unavailable from queried public overlays; graph family fresh is not substituted for fingerprint.
+
+get_live_events(after_revision=1260): latest revision 1260, continuity continuous, zero new canonical events. No desktop_watcher event for the test file observed; target test-file workspace_sync UNKNOWN. Fresh diagnostic view at revision 1260: syntax errors 0, structural DFS paths 16, active warnings 16, MODEL_PASS paths 0. Cycle semantics stale. state_id and graph fingerprint unavailable in queried evidence. No FULL, update_file, restart, commit or push.
 
 ## FULL_DIFFS
+
 ```diff
-diff --git a/tests/test_cycle_semantics_passive_classes.py b/tests/test_cycle_semantics_passive_classes.py
-index c59c20e..3d5dfda 100644
---- a/tests/test_cycle_semantics_passive_classes.py
-+++ b/tests/test_cycle_semantics_passive_classes.py
-@@ -1054,3 +1054,274 @@ def test_p3_d3_import_after_class_binding(tmp_path):
-         "assert m.Seen is m.C;assert type(m.C) is m.Meta",
-     )
-     assert actual.returncode == 0, actual.stderr
+diff --git a/tests/test_cycle_semantics_decorator_definition_effects.py b/tests/test_cycle_semantics_decorator_definition_effects.py
+new file mode 100644
+--- /dev/null
++++ b/tests/test_cycle_semantics_decorator_definition_effects.py
+@@ -0,0 +1,297 @@
++"""CPython-backed definition-time decorator effect regressions."""
 +
++import ast
++import subprocess
++import sys
 +
-+@pytest.mark.parametrize(
-+    "entry,expected",
-+    [
-+        ("pkg.a", "EARLY_BINDING_HAZARD"),
-+        ("pkg.b", "MODEL_PASS"),
-+    ],
++import pytest
++
++from contextor.core.cycle_semantics.namespace_path_model import (
++    SearchPortion,
 +)
-+def test_k09_a_class_name_bound_after_body(tmp_path, entry, expected):
-+    sources = {
-+        "pkg.__init__": "pass",
-+        "pkg.a": "class C:\n    import pkg.b",
-+        "pkg.b": "from pkg.a import C",
-+    }
-+
-+    result = _model(sources, entry)
-+    actual = _actual(tmp_path, sources, entry)
-+
-+    assert result.outcome == expected
-+
-+    if expected == "EARLY_BINDING_HAZARD":
-+        assert (result.target_module, result.symbol) == ("pkg.a", "C")
-+        assert actual.returncode != 0
-+        assert "ImportError" in actual.stderr
-+        assert not any(
-+            e.operation == "DEFINE_PASSIVE_CLASS"
-+            and e.module == "pkg.a"
-+            and e.symbol == "C"
-+            for e in result.events
-+        )
-+    else:
-+        assert actual.returncode == 0, actual.stderr
-+        operations = [
-+            e.operation for e in result.events
-+            if e.module == "pkg.a"
-+        ]
-+        assert operations.index("CLASS_LOCAL_IMPORT") < (
-+            operations.index("DEFINE_PASSIVE_CLASS")
-+        )
-+
-+
-+@pytest.mark.parametrize(
-+    "entry,expected",
-+    [
-+        ("pkg.a", "EARLY_BINDING_HAZARD"),
-+        ("pkg.b", "MODEL_PASS"),
-+    ],
++from contextor.core.cycle_semantics.package_model import (
++    evaluate_conditional_namespace_import_order,
++    evaluate_package_import_order,
 +)
-+def test_k09_b_module_binding_after_class(tmp_path, entry, expected):
-+    sources = {
-+        "pkg.__init__": "pass",
-+        "pkg.a": (
-+            "class C:\n"
-+            "    import pkg.b\n"
-+            "value = 1"
-+        ),
-+        "pkg.b": "from pkg.a import value",
-+    }
 +
-+    result = _model(sources, entry)
-+    actual = _actual(tmp_path, sources, entry)
 +
-+    assert result.outcome == expected
++def _model(sources, entry):
++    return evaluate_package_import_order(
++        {
++            name: ast.parse(source)
++            for name, source in sources.items()
++        },
++        entry,
++    )
 +
-+    if expected == "EARLY_BINDING_HAZARD":
-+        assert (result.target_module, result.symbol) == (
-+            "pkg.a", "value"
++
++def _actual(tmp_path, sources, entry):
++    for module, source in sources.items():
++        parts = module.split(".")
++        filename = (
++            "__init__.py"
++            if parts[-1] == "__init__"
++            else parts[-1] + ".py"
 +        )
-+        assert actual.returncode != 0
-+        assert "ImportError" in actual.stderr
-+    else:
-+        assert actual.returncode == 0, actual.stderr
-+        assert any(
-+            e.operation == "CLASS_LOCAL_IMPORT"
-+            and e.target == "pkg.b"
-+            for e in result.events
-+        )
++        path = tmp_path.joinpath(*parts[:-1], filename)
++        path.parent.mkdir(parents=True, exist_ok=True)
++        path.write_text(source + "\n", encoding="utf-8")
 +
-+
-+@pytest.mark.parametrize(
-+    "entry,expected",
-+    [
-+        ("pkg.a", "EARLY_BINDING_HAZARD"),
-+        ("pkg.b", "MISSING_EXPORT"),
-+    ],
-+)
-+def test_k09_c_class_local_alias_does_not_escape(
-+    tmp_path, entry, expected
-+):
-+    sources = {
-+        "pkg.__init__": "pass",
-+        "pkg.a": (
-+            "class C:\n"
-+            "    import pkg.c as inside\n"
-+            "    import pkg.b"
-+        ),
-+        "pkg.b": "from pkg.a import inside",
-+        "pkg.c": "pass",
-+    }
-+
-+    result = _model(sources, entry)
-+    actual = _actual(tmp_path, sources, entry)
-+
-+    assert result.outcome == expected
-+    assert (result.target_module, result.symbol) == (
-+        "pkg.a", "inside"
-+    )
-+    assert actual.returncode != 0
-+    assert "ImportError" in actual.stderr
-+
-+    assert not any(
-+        e.module == "pkg.a"
-+        and e.operation in {"BIND", "ALIAS"}
-+        and e.symbol == "inside"
-+        for e in result.events
++    return subprocess.run(
++        [
++            sys.executable,
++            "-I",
++            "-B",
++            "-c",
++            (
++                "import importlib,sys;"
++                "sys.path.insert(0,sys.argv[1]);"
++                "importlib.import_module(sys.argv[2])"
++            ),
++            str(tmp_path),
++            entry,
++        ],
++        capture_output=True,
++        text=True,
++        timeout=10,
++        check=False,
 +    )
 +
 +
-+@pytest.mark.parametrize(
-+    "entry,expected",
-+    [
-+        ("pkg.a", "EARLY_BINDING_HAZARD"),
-+        ("pkg.b", "MISSING_EXPORT"),
-+    ],
-+)
-+def test_k09_d_class_local_assignment_does_not_escape(
-+    tmp_path, entry, expected
-+):
-+    sources = {
-+        "pkg.__init__": "pass",
-+        "pkg.a": (
-+            "class C:\n"
-+            "    local = 1\n"
-+            "    import pkg.b"
-+        ),
-+        "pkg.b": "from pkg.a import local",
-+    }
-+
-+    result = _model(sources, entry)
-+    actual = _actual(tmp_path, sources, entry)
-+
-+    assert result.outcome == expected
-+    assert (result.target_module, result.symbol) == (
-+        "pkg.a", "local"
-+    )
-+    assert actual.returncode != 0
-+    assert "ImportError" in actual.stderr
-+
-+    assert any(
-+        e.module == "pkg.a"
-+        and e.operation == "CLASS_LOCAL_BIND"
-+        and e.symbol == "local"
-+        for e in result.events
-+    )
-+    assert not any(
-+        e.module == "pkg.a"
-+        and e.operation == "BIND"
-+        and e.symbol == "local"
-+        for e in result.events
++def test_d02_lru_cache_is_not_passive_runtime_proof(tmp_path):
++    source = (
++        "from functools import lru_cache\n"
++        "@lru_cache(maxsize=1024)\n"
++        "def cached(value):\n"
++        "    return value\n"
 +    )
 +
-+
-+def test_k09_e_class_local_from_is_not_module_export(tmp_path):
-+    sources = {
-+        "pkg.__init__": "pass",
-+        "pkg.a": "class C:\n    from pkg.b import token",
-+        "pkg.b": "token = 1",
-+        "pkg.c": "from pkg.a import token",
-+    }
-+
-+    result = _model(sources, "pkg.c")
-+    actual = _actual(tmp_path, sources, "pkg.c")
-+
-+    assert result.outcome == "MISSING_EXPORT"
-+    assert (result.target_module, result.symbol) == (
-+        "pkg.a", "token"
++    conditional = evaluate_conditional_namespace_import_order(
++        {"ns.a": ast.parse(source)},
++        "ns.a",
++        (SearchPortion("repo", frozenset({"ns/a.py"})),),
++        target_python_version=sys.version_info[:2],
++        assume_passive_external_imports=True,
 +    )
-+    assert actual.returncode != 0
-+    assert "ImportError" in actual.stderr
 +
-+    events = result.events
-+    class_from = next(
-+        i for i, e in enumerate(events)
-+        if e.module == "pkg.a"
-+        and e.operation == "CLASS_LOCAL_FROM"
-+        and e.target == "pkg.b"
-+        and e.symbol == "token"
++    assert conditional.outcome == "UNKNOWN"
++    assert conditional.model_assessment is not None
++
++    last = conditional.model_assessment.events[-1]
++    assert last.operation == "UNMODELED_STATEMENT"
++    assert last.target == "FunctionDef"
++    assert last.symbol == "2:1"
++
++    assert conditional.outcome != "CONDITIONAL_MODEL_PASS"
++
++    actual = _actual(
++        tmp_path,
++        {
++            "pkg.__init__": "pass",
++            "pkg.a": source + "assert cached(3) == 3\n",
++        },
++        "pkg.a",
 +    )
-+    missing = next(
-+        i for i, e in enumerate(events)
-+        if e.operation == "MISSING_EXPORT"
-+        and e.target == "pkg.a"
-+        and e.symbol == "token"
-+    )
-+    assert class_from < missing
-+
-+
-+def test_k09_f_method_body_import_is_deferred(tmp_path):
-+    sources = {
-+        "pkg.__init__": "pass",
-+        "pkg.a": (
-+            "class C:\n"
-+            "    def later(self):\n"
-+            "        import pkg.b\n"
-+            "value = 1"
-+        ),
-+        "pkg.b": "from pkg.a import value",
-+    }
-+
-+    result = _model(sources, "pkg.a")
-+    actual = _actual(tmp_path, sources, "pkg.a")
-+
-+    assert result.outcome == "MODEL_PASS"
 +    assert actual.returncode == 0, actual.stderr
 +
-+    assert not any(
-+        e.operation == "START_IMPORT"
-+        and e.target == "pkg.b"
-+        for e in result.events
-+    )
++
++@pytest.mark.parametrize(
++    "definition,export",
++    [
++        (
++            "def deco(obj):\n"
++            "    import pkg.b\n"
++            "    return obj\n"
++            "@deco\n"
++            "def export():\n"
++            "    pass\n",
++            "export",
++        ),
++        (
++            "def make():\n"
++            "    import pkg.b\n"
++            "    return lambda obj: obj\n"
++            "@make()\n"
++            "def export():\n"
++            "    pass\n",
++            "export",
++        ),
++        (
++            "def deco(obj):\n"
++            "    import pkg.b\n"
++            "    return obj\n"
++            "@deco\n"
++            "class C:\n"
++            "    pass\n",
++            "C",
++        ),
++        (
++            "def deco(obj):\n"
++            "    import pkg.b\n"
++            "    return obj\n"
++            "class C:\n"
++            "    @deco\n"
++            "    def method(self):\n"
++            "        pass\n",
++            "C",
++        ),
++    ],
++    ids=[
++        "function_decorator",
++        "decorator_factory",
++        "class_decorator",
++        "class_body_method_decorator",
++    ],
++)
++@pytest.mark.parametrize(
++    "entry,should_succeed",
++    [
++        ("pkg.a", False),
++        ("pkg.b", True),
++    ],
++)
++def test_d03_d05_decorator_import_entry_dependency(
++    tmp_path, definition, export, entry, should_succeed
++):
++    sources = {
++        "pkg.__init__": "pass",
++        "pkg.a": definition,
++        "pkg.b": f"from pkg.a import {export}",
++    }
++
++    modeled = _model(sources, entry)
++    actual = _actual(tmp_path, sources, entry)
++
++    assert modeled.outcome == "UNKNOWN"
++    assert modeled.outcome != "MODEL_PASS"
++
++    if should_succeed:
++        assert actual.returncode == 0, actual.stderr
++    else:
++        assert actual.returncode != 0
++        assert "ImportError" in actual.stderr
 +
 +
 +@pytest.mark.parametrize(
-+    "body",
++    "definition,expected_trace",
 +    [
-+        'class C:\n    exec("import pkg.b")',
-+        "class C(factory()):\n    import pkg.b",
-+        "@decorator\nclass C:\n    import pkg.b",
++        (
++            "@make('top')\n"
++            "@make('bottom')\n"
++            "def f():\n"
++            "    trace.append('function_body')\n",
++            [
++                "eval:top",
++                "eval:bottom",
++                "apply:bottom",
++                "apply:top",
++            ],
++        ),
++        (
++            "@make('top')\n"
++            "@make('bottom')\n"
++            "class C:\n"
++            "    trace.append('class_body')\n",
++            [
++                "eval:top",
++                "eval:bottom",
++                "class_body",
++                "apply:bottom",
++                "apply:top",
++            ],
++        ),
 +    ],
++    ids=["function_stack", "class_stack"],
 +)
-+def test_k09_g_unmodeled_class_effects_fail_closed(body):
++def test_decorator_expression_and_application_order(
++    tmp_path, definition, expected_trace
++):
++    source = (
++        "trace = []\n"
++        "def make(tag):\n"
++        "    trace.append('eval:' + tag)\n"
++        "    def apply(obj):\n"
++        "        trace.append('apply:' + tag)\n"
++        "        return obj\n"
++        "    return apply\n"
++        + definition
++        + f"\nassert trace == {expected_trace!r}\n"
++    )
++
++    modeled = _model(
++        {"pkg.__init__": "pass", "pkg.a": source},
++        "pkg.a",
++    )
++    actual = _actual(
++        tmp_path,
++        {"pkg.__init__": "pass", "pkg.a": source},
++        "pkg.a",
++    )
++
++    assert modeled.outcome == "UNKNOWN"
++    assert actual.returncode == 0, actual.stderr
++
++
++@pytest.mark.parametrize(
++    "definition,export",
++    [
++        (
++            "@replace\n"
++            "def exported():\n"
++            "    pass\n",
++            "exported",
++        ),
++        (
++            "@replace\n"
++            "class Exported:\n"
++            "    pass\n",
++            "Exported",
++        ),
++    ],
++    ids=["function_replacement", "class_replacement"],
++)
++def test_decorator_can_replace_definition_binding(
++    tmp_path, definition, export
++):
++    source = (
++        "def replace(obj):\n"
++        "    return 42\n"
++        + definition
++        + f"assert {export} == 42\n"
++    )
++
 +    sources = {
 +        "pkg.__init__": "pass",
-+        "pkg.a": body,
-+        "pkg.b": "pass",
++        "pkg.a": source,
 +    }
 +
-+    result = _model(sources, "pkg.a")
++    modeled = _model(sources, "pkg.a")
++    actual = _actual(tmp_path, sources, "pkg.a")
++
++    assert modeled.outcome == "UNKNOWN"
++    assert actual.returncode == 0, actual.stderr
++
++
++def test_nested_method_decorator_remains_unmodeled():
++    source = (
++        "class C:\n"
++        "    @deco\n"
++        "    def method(self):\n"
++        "        pass\n"
++    )
++
++    result = evaluate_conditional_namespace_import_order(
++        {"ns.a": ast.parse(source)},
++        "ns.a",
++        (SearchPortion("repo", frozenset({"ns/a.py"})),),
++        target_python_version=sys.version_info[:2],
++    )
 +
 +    assert result.outcome == "UNKNOWN"
-+    assert result.outcome != "MODEL_PASS"
-+
-+
-+def test_k09_h_deterministic_without_ast_mutation():
-+    sources = {
-+        "pkg.__init__": ast.parse("pass"),
-+        "pkg.a": ast.parse(
-+            "class C:\n"
-+            "    import pkg.b"
-+        ),
-+        "pkg.b": ast.parse("from pkg.a import C"),
-+    }
-+
-+    before = {
-+        name: ast.dump(tree, include_attributes=True)
-+        for name, tree in sources.items()
-+    }
-+
-+    first = evaluate_package_import_order(sources, "pkg.a")
-+    second = evaluate_package_import_order(sources, "pkg.a")
-+
-+    assert first == second
-+    assert first.events == second.events
-+    assert first.outcome == "EARLY_BINDING_HAZARD"
-+
-+    after = {
-+        name: ast.dump(tree, include_attributes=True)
-+        for name, tree in sources.items()
-+    }
-+    assert after == before
++    assert result.model_assessment is not None
++    assert result.model_assessment.events[-1].operation == (
++        "UNMODELED_STATEMENT"
++    )
++    assert result.model_assessment.events[-1].target == (
++        "ClassDef"
++    )
 ```
 
 ## FINAL_VERDICT
-Focused K09 tests passed. MCP source freshness verified at revision 1260. FINAL_PASS withheld because current state_id and graph fingerprint were not obtained and cycle_semantics remains stale.
+
+TARGETED_REGRESSION_PASS. FINAL PASS withheld: no post-change watcher event or test-file freshness proof, and cycle_semantics remains stale.
