@@ -35,6 +35,7 @@ from .execution.definition_checks import (
     _exact_restricted_dataclass_hash_field_call,
     _restricted_dataclass_field_annotation,
 )
+from .execution.state import _new_module_initialization_state
 
 
 @dataclass(frozen=True)
@@ -1551,15 +1552,11 @@ def evaluate_package_import_order(
         ):
             return result("UNKNOWN", package)
 
-    states = {
-        name: "NEW"
-        for name in programs
-    }
-
-    namespaces: dict[str, dict[str, object | None]] = {
-        name: {}
-        for name in programs
-    }
+    module_initialization_state = (
+        _new_module_initialization_state(programs)
+    )
+    states = module_initialization_state.states
+    namespaces = module_initialization_state.namespaces
     prepared_class_bases: dict[
         str, tuple[tuple[_ClassFact, ...], _ClassFact]
     ] = {}
