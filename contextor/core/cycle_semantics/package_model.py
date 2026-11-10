@@ -35,7 +35,10 @@ from .execution.definition_checks import (
     _exact_restricted_dataclass_hash_field_call,
     _restricted_dataclass_field_annotation,
 )
-from .execution.state import _new_module_initialization_state
+from .execution.state import (
+    _new_module_initialization_state,
+    _new_execution_cursor,
+)
 
 
 @dataclass(frozen=True)
@@ -1573,7 +1576,8 @@ def evaluate_package_import_order(
     }
 
     bootstrap = "\x00ENTRY"
-    frames: list[tuple[str, int]] = [(bootstrap, 0)]
+    execution_cursor = _new_execution_cursor(bootstrap)
+    frames = execution_cursor.frames
 
     def chain(name: str) -> tuple[str, ...]:
         parts = name.split(".")
@@ -1593,16 +1597,15 @@ def evaluate_package_import_order(
 
         return None
 
-    step_budget = 10000
     indexed_roots = frozenset(
         name.split(".", 1)[0]
         for name in programs
     )
 
     while frames:
-        step_budget -= 1
+        execution_cursor.step_budget -= 1
 
-        if step_budget < 0:
+        if execution_cursor.step_budget < 0:
             return result("UNKNOWN")
 
         module, index = frames[-1]
