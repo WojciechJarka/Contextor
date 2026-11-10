@@ -12,7 +12,7 @@ Priorytetem jest poprawność i uniwersalność rozwiązania, nie szybkość, li
 
 
 
-2Pochodzenie i przesłanianie nazwNiepełna weryfikacjaModel musi odróżniać nazwy od rzeczywistych obiektów: ValueError, property, field, dataclass, ast i inne symbole mogą zostać przesłonięte. Niektóre kontrole już istnieją, ale pełna spójność wiązań i zmian builtins jest niezweryfikowana.
+
 
 
 

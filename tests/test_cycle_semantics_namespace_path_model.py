@@ -1461,3 +1461,138 @@ def test_g18_p2_p8_no_full_inventory_shortcut():
     assert result.reason == (
         "INVENTORY_SOURCE_DOMAIN_MISMATCH"
     )
+
+
+def _p3_v10_assess(sources, *, assume_external=False):
+    files = frozenset(
+        module.replace(".", "/") + ".py"
+        for module in sources
+    )
+    return evaluate_conditional_namespace_import_order(
+        sources,
+        "ns.a",
+        (SearchPortion("root", files),),
+        target_python_version=(3, 15),
+        assume_passive_external_imports=assume_external,
+    )
+
+
+def test_p3_v10_function_decorator_location():
+    sources = {"ns.a": ast.parse(
+        "from functools import lru_cache\n"
+        "@lru_cache(maxsize=1024)\n"
+        "def parse(value):\n"
+        "    return value\n"
+    )}
+    result = _p3_v10_assess(sources, assume_external=True)
+
+    assert result.outcome == "UNKNOWN"
+    assert result.model_assessment is not None
+    assert result.model_assessment.events[-1].operation == "UNMODELED_STATEMENT"
+    assert result.model_assessment.events[-1].target == "FunctionDef"
+    assert result.model_assessment.events[-1].symbol == "2:1"
+
+
+def test_p3_v10_class_decorator_location():
+    result = _p3_v10_assess({"ns.a": ast.parse(
+        "@decorator\n"
+        "class Thing:\n"
+        "    pass\n"
+    )})
+
+    assert result.outcome == "UNKNOWN"
+    assert result.model_assessment is not None
+    assert result.model_assessment.events[-1].operation == "UNMODELED_STATEMENT"
+    assert result.model_assessment.events[-1].target == "ClassDef"
+    assert result.model_assessment.events[-1].symbol == "1:1"
+
+
+def test_p3_v10_ordinary_statement_location():
+    result = _p3_v10_assess({"ns.a": ast.parse(
+        "value = 1\n"
+        "raise RuntimeError('stop')\n"
+    )})
+
+    assert result.outcome == "UNKNOWN"
+    assert result.model_assessment is not None
+    assert result.model_assessment.events[-1].operation == "UNMODELED_STATEMENT"
+    assert result.model_assessment.events[-1].target == "Raise"
+    assert result.model_assessment.events[-1].symbol == "2:0"
+
+
+def test_p3_v10_prior_bind_and_import_retained():
+    result = _p3_v10_assess({
+        "ns.a": ast.parse(
+            "value = 1\n"
+            "import ns.b\n"
+            "raise RuntimeError('stop')\n"
+        ),
+        "ns.b": ast.parse("pass\n"),
+    })
+
+    assert result.outcome == "UNKNOWN"
+    assert result.model_assessment is not None
+    events = result.model_assessment.events
+    assert events[-1].operation == "UNMODELED_STATEMENT"
+    assert events[-1].symbol == "3:0"
+    assert any(event.operation == "BIND" and event.symbol == "value"
+               for event in events[:-1])
+    assert any(event.operation == "START_IMPORT" and event.target == "ns.b"
+               for event in events[:-1])
+
+
+def test_p3_v10_external_stop_has_no_provenance_event():
+    result = _p3_v10_assess({"ns.a": ast.parse(
+        "import external_unknown\n"
+        "raise RuntimeError('unreached')\n"
+    )})
+
+    assert result.outcome == "UNKNOWN"
+    assert result.model_assessment is not None
+    assert result.model_assessment.target_module == "external_unknown"
+    assert not any(event.operation == "UNMODELED_STATEMENT"
+                   for event in result.model_assessment.events)
+
+
+def test_p3_v10_early_hazard_precedes_unmodeled_statement():
+    result = _p3_v10_assess({
+        "ns.a": ast.parse(
+            "from ns.b import ready\n"
+            "ready = 1\n"
+            "raise RuntimeError('unreached')\n"
+        ),
+        "ns.b": ast.parse("from ns.a import ready\n"),
+    })
+
+    assert result.outcome == "CONDITIONAL_EARLY_BINDING_HAZARD"
+    assert result.model_assessment is not None
+    assert result.model_assessment.events[-1].operation == "EARLY_BINDING_HAZARD"
+    assert not any(event.operation == "UNMODELED_STATEMENT"
+                   for event in result.model_assessment.events)
+
+
+def test_p3_v10_model_pass_has_no_provenance_event():
+    result = _p3_v10_assess({"ns.a": ast.parse("value = 1\n")})
+
+    assert result.outcome == "CONDITIONAL_MODEL_PASS"
+    assert result.model_assessment is not None
+    assert not any(event.operation == "UNMODELED_STATEMENT"
+                   for event in result.model_assessment.events)
+
+
+def test_p3_v10_repeatable_without_ast_mutation():
+    sources = {"ns.a": ast.parse(
+        "value = 1\n"
+        "@decorator\n"
+        "class Thing:\n"
+        "    pass\n"
+    )}
+    before = ast.dump(sources["ns.a"], include_attributes=True)
+
+    first = _p3_v10_assess(sources)
+    second = _p3_v10_assess(sources)
+
+    assert first == second
+    assert first.model_assessment is not None
+    assert first.model_assessment.events[-1].symbol == "2:1"
+    assert ast.dump(sources["ns.a"], include_attributes=True) == before

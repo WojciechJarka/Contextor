@@ -1521,8 +1521,26 @@ def _compile_reachable_prefix(
     ):
         return None
 
+    statement = tree.body[low]
+    location = (
+        statement.decorator_list[0]
+        if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef,
+                                  ast.ClassDef))
+        and statement.decorator_list
+        else statement
+    )
+    line = getattr(location, "lineno", None)
+    column = getattr(location, "col_offset", None)
+
     return accepted + (
-        _Step("UNMODELED_STATEMENT"),
+        _Step(
+            "UNMODELED_STATEMENT",
+            target=type(statement).__name__,
+            source_line=line if type(line) is int and line >= 1 else None,
+            source_column=(
+                column if type(column) is int and column >= 0 else None
+            ),
+        ),
     )
 
 
@@ -2682,6 +2700,18 @@ def evaluate_package_import_order(
             )
 
         elif step.op == "UNMODELED_STATEMENT":
+            if _compile_on_first_import:
+                events.append(PackageModelEvent(
+                    module,
+                    "UNMODELED_STATEMENT",
+                    step.target,
+                    (
+                        f"{step.source_line}:{step.source_column}"
+                        if step.source_line is not None
+                        and step.source_column is not None
+                        else None
+                    ),
+                ))
             return result("UNKNOWN", module)
 
         else:
