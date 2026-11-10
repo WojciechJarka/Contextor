@@ -1,8 +1,25 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Literal
 
 from .steps import _Step
+
+
+@dataclass(frozen=True, eq=False)
+class _RestrictedFunction:
+    defining_module: str
+    body: tuple[_Step, ...]
+
+
+def _new_restricted_function(
+    defining_module: str,
+    body: tuple[_Step, ...],
+) -> _RestrictedFunction:
+    return _RestrictedFunction(
+        defining_module=defining_module,
+        body=body,
+    )
 
 
 def _execute_restricted_call(
@@ -11,25 +28,18 @@ def _execute_restricted_call(
     module: str,
     index: int,
     namespaces: dict[str, dict[str, object | None]],
-    function_definitions: dict[
-        str,
-        dict[str, tuple[_Step, ...]],
-    ],
     programs: dict[str, list[_Step]],
 ) -> Literal["ADVANCE", "RETURN_UNKNOWN"]:
-    expected_binding = (
-        "\x00FUNCTION:" + module + ":" + step.target
-    )
+    value = namespaces[module].get(step.target)
 
     if (
-        namespaces[module].get(step.target)
-        != expected_binding
-        or step.target not in function_definitions[module]
+        not isinstance(value, _RestrictedFunction)
+        or value.defining_module != module
     ):
         return "RETURN_UNKNOWN"
 
-    body_steps = function_definitions[module][step.target]
-
-    programs[module][index + 1:index + 1] = list(body_steps)
+    programs[module][index + 1:index + 1] = list(
+        value.body
+    )
 
     return "ADVANCE"

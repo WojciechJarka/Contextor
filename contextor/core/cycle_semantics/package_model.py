@@ -59,7 +59,10 @@ from .execution.lifecycle import (
     _complete_module_frame,
     _start_module_frame,
 )
-from .execution.calls import _execute_restricted_call
+from .execution.calls import (
+    _execute_restricted_call,
+    _new_restricted_function,
+)
 
 
 @dataclass(frozen=True)
@@ -1467,10 +1470,9 @@ def evaluate_package_import_order(
     )
     states = module_initialization_state.states
     namespaces = module_initialization_state.namespaces
-    definition_state = _new_definition_state(programs)
+    definition_state = _new_definition_state()
     prepared_class_bases = definition_state.prepared_class_bases
     class_facts_by_identity = definition_state.class_facts_by_identity
-    function_definitions = definition_state.function_definitions
 
     bootstrap = "\x00ENTRY"
     execution_cursor = _new_execution_cursor(bootstrap)
@@ -1880,12 +1882,11 @@ def evaluate_package_import_order(
                 )
 
         elif step.op == "DEFINE_FUNCTION":
-            function_definitions[module][step.binding] = (
-                step.function_body
-            )
-
             namespaces[module][step.binding] = (
-                "\x00FUNCTION:" + module + ":" + step.binding
+                _new_restricted_function(
+                    module,
+                    step.function_body,
+                )
             )
 
             events.append(
@@ -2166,7 +2167,6 @@ def evaluate_package_import_order(
                 module=module,
                 index=index,
                 namespaces=namespaces,
-                function_definitions=function_definitions,
                 programs=programs,
             )
 

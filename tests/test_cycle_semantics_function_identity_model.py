@@ -76,12 +76,81 @@ def test_current_model_identity_boundary(
         and expected["old"] != expected["new"]
     )
 
-    assert result.outcome == (
+    expected_outcome = (
         "UNKNOWN"
-        if consumer_source is not None
-        else (
-            "UNKNOWN"
-            if "g()" in package_source
-            else "MODEL_PASS"
+        if consumer_source is not None or not expected["ok"]
+        else "MODEL_PASS"
+    )
+
+    assert result.outcome == expected_outcome
+
+    call_events = [
+        event
+        for event in result.events
+        if event.operation == "CALL_FUNCTION"
+    ]
+
+    if expected_outcome == "MODEL_PASS":
+        assert len(call_events) == 1
+        assert call_events[0].module == "pkg"
+        assert call_events[0].symbol == (
+            "g" if "g()" in package_source else "f"
         )
+    else:
+        assert call_events == []
+
+
+def test_restricted_function_objects_have_distinct_identity():
+    from contextor.core.cycle_semantics.execution.calls import (
+        _new_restricted_function,
+    )
+    from contextor.core.cycle_semantics.execution.steps import (
+        _Step,
+    )
+
+    body = (_Step("PASS"),)
+
+    first = _new_restricted_function("pkg", body)
+    second = _new_restricted_function("pkg", body)
+
+    assert first is not second
+    assert first != second
+    assert first.body is body
+    assert second.body is body
+
+    bindings = {"f": first}
+    bindings["g"] = bindings["f"]
+    bindings["f"] = second
+
+    assert bindings["g"] is first
+    assert bindings["f"] is second
+
+
+def test_foreign_function_identity_remains_unknown():
+    sources = {
+        "pkg.__init__": ast.parse(
+            "def f():\n"
+            "    import pkg.old\n"
+        ),
+        "pkg.old": ast.parse("pass\n"),
+        "consumer": ast.parse(
+            "from pkg import f\n"
+            "f()\n"
+        ),
+    }
+
+    result = evaluate_package_import_order(
+        sources,
+        "consumer",
+    )
+
+    assert result.outcome == "UNKNOWN"
+    assert not any(
+        event.operation == "CALL_FUNCTION"
+        for event in result.events
+    )
+    assert not any(
+        event.operation == "START_IMPORT"
+        and event.target == "pkg.old"
+        for event in result.events
     )

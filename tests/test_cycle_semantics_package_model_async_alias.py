@@ -232,14 +232,19 @@ def test_alias_of_function_is_bound():
     assert "ALIAS" in _operations(result)
 
 
-def test_aliased_function_call_not_invented():
+def test_aliased_restricted_function_call_executes():
     result = _model(
         "def f():\n"
         "    pass\n"
         "other = f\n"
         "other()\n"
     )
-    assert result.outcome == "UNKNOWN"
+    assert result.outcome == "MODEL_PASS"
+    assert sum(
+        event.operation == "CALL_FUNCTION"
+        and event.symbol == "other"
+        for event in result.events
+    ) == 1
 
 
 def test_class_body_name_alias_still_unknown():
