@@ -197,7 +197,7 @@ def test_forward_decorator_reference_rejects_compile():
     ) is None
 
 
-def test_same_name_local_decorator_proof_gate():
+def test_same_name_local_decorator_proof_and_execution():
     source = "def C(cls):\n    return cls\n@C\nclass C:\n    pass\n"
     steps = _steps(source)
     assert steps is not None
@@ -206,9 +206,20 @@ def test_same_name_local_decorator_proof_gate():
         if step.op == "SNAPSHOT_CLASS_DECORATORS"
     )
     assert snapshot.decorator_names == ("C",)
-    assert evaluate_package_import_order(
+    result = evaluate_package_import_order(
         {"pkg.__init__": ast.parse(source)}, "pkg",
-    ).outcome == "UNKNOWN"
+    )
+    assert result.outcome == "MODEL_PASS"
+    assert tuple(
+        event.symbol
+        for event in result.events
+        if event.operation == "CALL_FUNCTION"
+    ) == ("C",)
+    assert any(
+        event.operation == "DEFINE_PASSIVE_CLASS"
+        and event.symbol == "C"
+        for event in result.events
+    )
 
 
 def test_exact_p10_eager_and_lazy_fixture():

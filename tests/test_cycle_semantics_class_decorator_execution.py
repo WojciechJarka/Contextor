@@ -36,11 +36,19 @@ CASES = [
         id="D-same-name",
     ),
     pytest.param(
-        "def top(cls):\n    import pkg.top\n    return cls\n"
-        "def bottom(cls):\n    import pkg.bottom\n    return cls\n"
-        "@top\n@bottom\nclass C:\n    pass\n",
+        "def top_decorator(cls):\n"
+        "    import pkg.top\n"
+        "    return cls\n"
+        "def bottom_decorator(cls):\n"
+        "    import pkg.bottom\n"
+        "    return cls\n"
+        "@top_decorator\n"
+        "@bottom_decorator\n"
+        "class C:\n"
+        "    pass\n",
         None, ("pkg.bottom", "pkg.top"), "MODEL_PASS",
-        ("bottom", "top"), ("pkg.bottom", "pkg.top"),
+        ("bottom_decorator", "top_decorator"),
+        ("pkg.bottom", "pkg.top"),
         id="E-two-pass-through",
     ),
     pytest.param(
