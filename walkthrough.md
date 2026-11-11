@@ -1,211 +1,43 @@
-# P5-M08-I8-I1 — named decorator identity snapshot
+# P5-M08-I8-I2 — BLOCKED_SEMANTIC_INTEGRITY
 
 ## PREFLIGHT
 
-- DIRECT_EVIDENCE: Contextor MCP first reported canonical LIVE revision 1335, `package_model.py` source fresh and `workspace_sync=verified`, cycle semantics stale. Initial HEAD `db1dd71b7bc3c0edcd8d21816ad84b380ad39e6d`; initial `git status --short` clean. Backend `C:\Temp\Contextor_Repo\.venv\Scripts\python.exe`, CPython 3.15.2. New test target did not exist.
-- DIRECT_EVIDENCE: `_RestrictedFunction` remains `@dataclass(frozen=True, eq=False)` at `execution/calls.py:8-12`; `_execute_restricted_call` resolves current module binding at `:27-52`. I7 parameter binding guard exists at `package_model.py:1072-1091`; single-name decorator branch at `:2028-2083`; multiple decorators remain rejected by validator at `:160-180`. I8-T1 and R1 tests are present.
+Zaakceptowany w poprzednim etapie. HEAD `6a12ab6f276a1e0ebd417a6f69e353c66399cca6`; aktywny CPython 3.15.2; przed próbą implementacji drzewo czyste poza `walkthrough.md`; canonical LIVE revision 1337, source sync `verified`, cycle semantics `stale`.
+
+## BLOCKING_CONDITION
+
+Specyfikacja przypadków G, H i I zawiera sprzeczne wymagania. Każe utworzyć moduły `pkg.a`, `pkg.b`, `pkg.c`, a zarazem definiuje w `pkg.__init__` funkcje `a`, `b`, `c` oraz wymaga `MODEL_PASS` dla G/H. Oba istniejące guardy kolizji nazw potomnych modułów w `contextor/core/cycle_semantics/package_model.py` (oryginalnie linie 1573–1584 i 1674–1685) zwracają `UNKNOWN`, gdy definicja funkcji ma nazwę identyczną z bezpośrednim dzieckiem pakietu. Punkt 7 specyfikacji nakazuje dodać do tych guardów `DEFINE_STACKED_FUNCTION` i zachować pozostałe warunki. Spełnienie tego punktu gwarantuje `UNKNOWN` dla G/H/I przed aplikacją dekoratorów. Wymagane jednocześnie `MODEL_PASS` i sekwencje `CALL_FUNCTION`/`START_IMPORT` są więc niemożliwe.
+
+DIRECT_EVIDENCE: source guard opiera się na zbiorze dzieci wyprowadzonym z `programs`; test ma tworzyć syntetyczne `pkg.a`, `pkg.b`, `pkg.c`. `DEFINE_FUNCTION` dla `a`, `b`, `c` jest już w guardzie. Powód ograniczenia jest opisany w komentarzu źródła: definicja funkcji i bezpośrednie dziecko o tej samej nazwie wymagają bogatszej semantyki shadowing/import-binding. Nowe zachowanie dekoratorów tego konfliktu nie rozwiązuje.
+
+CODE_PATH_PROVED: guard przed wykonaniem modułu występuje przy `not _compile_on_first_import`; drugi guard występuje przy kompilacji programu na pierwszym imporcie. Oba są przed `DEFINE_STACKED_FUNCTION` execution. Brak uzasadnienia do usunięcia/obejścia tego guardu w zadanym scope.
+
+CONTRACT_PROVED: wymaganie zachowania obu guardów i oczekiwanie `MODEL_PASS` dla G/H nie mogą współistnieć przy zadanych nazwach. To jest konflikt specyfikacji, nie regresja implementacji.
+
+INFERENCE: CPython może wykonać podane przykłady dzięki wcześniejszemu uchwyceniu obiektów dekoratorów i późniejszemu nadpisywaniu atrybutów pakietu przez import. Nie przedstawiam tego jako wykonanego porównania CPython; w tym etapie nie uruchomiono referencji.
+
+UNKNOWN: zachowanie po ewentualnej zmianie fixture na nazwy dekoratorów różne od nazw modułów dzieci oraz pełne wyniki targeted tests. Nie wykonano tych testów po wykryciu blokady.
+
+## ACTIONS
+
+Rozpoczęto literalną implementację w czterech plikach produkcyjnych. Po wykryciu sprzeczności cofnięto wszystkie te lokalne zmiany narzędziem `apply_patch`. Nie zmieniono production/tests/docs; zachowano jedynie ten raport. Nie wykonano FULL, SCC02, update_file, restartu ani operacji Git zmieniających indeks/historię.
+
+## TEST/RESULT
+
+Targeted pytest: NOT RUN — STOP zgodnie z failure contract. `git diff --check`: PASS dla bieżącego drzewa; ostrzeżenia Git dotyczą jedynie konwersji LF/CRLF. Brak traceback i event sequence, ponieważ testy/ewaluacja nie zostały uruchomione.
 
 ## FILES_CHANGED
 
-- `contextor/core/cycle_semantics/execution/calls.py`
-- `tests/test_cycle_semantics_decorator_snapshots.py` (new)
-- `walkthrough.md` (this report)
+NONE (source/test/docs). `walkthrough.md` jest jedyną zmianą w drzewie.
 
-## SNAPSHOT_REPRESENTATION
+## ACTUAL_DIFF/FULL_DIFF
 
-- DIRECT_EVIDENCE: `_DecoratorSnapshot` is frozen and identity-comparing (`eq=False`), with immutable tuples of names and values (`execution/calls.py:15-18`). `_snapshot_named_decorators` resolves each name from the provided namespace in source order and returns a tuple-backed snapshot (`:21-47`). It returns `None` for an empty stack, invalid name or absent binding.
+DIFFS=NONE
 
-## OBJECT_IDENTITY_CONTRACT
+## NEXT STEP
 
-- CODE_PATH_PROVED: The helper appends the exact object from `namespace[name]`; it does not copy, invoke or mutate the value (`execution/calls.py:29-47`). Direct tests show identity retained after rebinding and unchanged namespace after construction (`tests/test_cycle_semantics_decorator_snapshots.py:27-45,92-106`). This is a helper contract, not stacked-decorator execution support.
-
-## DUPLICATE_DECORATOR_CONTRACT
-
-- DIRECT_EVIDENCE: Repeated name entries produce repeated references to the same object (`tests/test_cycle_semantics_decorator_snapshots.py:48-60`). The helper does not deduplicate (`execution/calls.py:29-42`).
-
-## NONCALLABLE_AND_MISSING_NAME_CONTRACTS
-
-- DIRECT_EVIDENCE: A name bound to `None` yields a snapshot containing `None`; a missing name yields no snapshot (`tests/test_cycle_semantics_decorator_snapshots.py:63-81`). Callable eligibility is not checked in the helper (`execution/calls.py:21-47`). Invalid identifiers and an empty tuple are rejected (`tests/test_cycle_semantics_decorator_snapshots.py:84-89`).
-
-## UNCHANGED_EXECUTION_BOUNDARIES
-
-- CODE_PATH_PROVED: `_execute_restricted_call` below the inserted helper is unchanged, and `package_model.py`, `_compile`, `_Step`, `_FunctionFrame` and decorator execution branches have no task diff. The stacked-decorator regression remains UNKNOWN (`tests/test_cycle_semantics_stacked_decorator_identity.py:178-186`). No new MODEL_PASS case is admitted by this helper alone.
-
-## TARGETED_TEST_RESULTS
-
-- DIRECT_EVIDENCE: Requested seven-file focused subset completed **66 passed**, exit 0, 16.80 s. `git diff --check` exited 0; Git printed a line-ending notice only. No full suite or SCC02 was run.
-
-## MCP_POST_CHANGE_AUDIT
-
-- DIRECT_EVIDENCE: `execution.calls` was fresh and `workspace_sync=verified` at LIVE revision 1336; new test was fresh and verified at revision **1337**. Syntax errors 0, structural DFS back-edge cycle count 16. `execution.calls` still has only one hard outbound dependency, `execution.steps`; new test depends on `execution.calls`. `cycle_semantics=stale`; source freshness is not loaded-code adoption or a fresh semantic verdict.
-
-## FULL_DIFFS
-
-### contextor/core/cycle_semantics/execution/calls.py
-
-```diff
-diff --git a/contextor/core/cycle_semantics/execution/calls.py b/contextor/core/cycle_semantics/execution/calls.py
-index e9c5728..840c919 100644
---- a/contextor/core/cycle_semantics/execution/calls.py
-+++ b/contextor/core/cycle_semantics/execution/calls.py
-@@ -12,6 +12,38 @@ class _RestrictedFunction:
-     parameters: tuple[str, ...] = ()
-
-
-+@dataclass(frozen=True, eq=False)
-+class _DecoratorSnapshot:
-+    names: tuple[str, ...]
-+    values: tuple[object, ...]
-+
-+
-+def _snapshot_named_decorators(
-+    names: tuple[str, ...],
-+    namespace: dict[str, object | None],
-+) -> _DecoratorSnapshot | None:
-+    if not names:
-+        return None
-+
-+    values: list[object] = []
-+
-+    for name in names:
-+        if (
-+            not name
-+            or not name.isidentifier()
-+            or name.startswith("__")
-+            or name not in namespace
-+        ):
-+            return None
-+
-+        values.append(namespace[name])
-+
-+    return _DecoratorSnapshot(
-+        names=names,
-+        values=tuple(values),
-+    )
-+
-+
- def _new_restricted_function(
-     defining_module: str,
-     body: tuple[_Step, ...],
-```
-
-### tests/test_cycle_semantics_decorator_snapshots.py
-
-```diff
-diff --git a/tests/test_cycle_semantics_decorator_snapshots.py b/tests/test_cycle_semantics_decorator_snapshots.py
-new file mode 100644
-index 0000000..c3a3aa9
---- /dev/null
-+++ b/tests/test_cycle_semantics_decorator_snapshots.py
-@@ -0,0 +1,106 @@
-+from contextor.core.cycle_semantics.execution.calls import (
-+    _DecoratorSnapshot,
-+    _new_restricted_function,
-+    _snapshot_named_decorators,
-+)
-+
-+
-+def test_snapshot_preserves_source_order_and_identity():
-+    upper = _new_restricted_function("pkg", ())
-+    lower = _new_restricted_function("pkg", ())
-+
-+    namespace = {
-+        "upper": upper,
-+        "lower": lower,
-+    }
-+
-+    snapshot = _snapshot_named_decorators(
-+        ("upper", "lower"),
-+        namespace,
-+    )
-+
-+    assert isinstance(snapshot, _DecoratorSnapshot)
-+    assert snapshot.names == ("upper", "lower")
-+    assert snapshot.values[0] is upper
-+    assert snapshot.values[1] is lower
-+
-+
-+def test_rebinding_after_snapshot_preserves_objects():
-+    upper = _new_restricted_function("pkg", ())
-+    lower = _new_restricted_function("pkg", ())
-+    namespace = {"upper": upper, "lower": lower}
-+
-+    snapshot = _snapshot_named_decorators(
-+        ("upper", "lower"),
-+        namespace,
-+    )
-+
-+    namespace["upper"] = None
-+    namespace["lower"] = None
-+
-+    assert snapshot.values[0] is upper
-+    assert snapshot.values[1] is lower
-+
-+
-+def test_repeated_name_preserves_duplicate_identity():
-+    decorator = _new_restricted_function("pkg", ())
-+    namespace = {"deco": decorator}
-+
-+    snapshot = _snapshot_named_decorators(
-+        ("deco", "deco"),
-+        namespace,
-+    )
-+
-+    assert snapshot.names == ("deco", "deco")
-+    assert snapshot.values[0] is decorator
-+    assert snapshot.values[1] is decorator
-+
-+
-+def test_none_binding_is_snapshot_value():
-+    snapshot = _snapshot_named_decorators(
-+        ("deco",),
-+        {"deco": None},
-+    )
-+
-+    assert snapshot is not None
-+    assert snapshot.values == (None,)
-+
-+
-+def test_missing_name_rejects_entire_snapshot():
-+    decorator = _new_restricted_function("pkg", ())
-+
-+    assert _snapshot_named_decorators(
-+        ("upper", "missing"),
-+        {"upper": decorator},
-+    ) is None
-+
-+
-+def test_invalid_names_and_empty_stack_rejected():
-+    decorator = _new_restricted_function("pkg", ())
-+    namespace = {"deco": decorator}
-+
-+    for names in (
-+        (),
-+        ("",),
-+        ("__hidden",),
-+        ("not-valid",),
-+    ):
-+        assert _snapshot_named_decorators(
-+            names,
-+            namespace,
-+        ) is None
-+
-+
-+def test_snapshot_does_not_modify_namespace():
-+    decorator = _new_restricted_function("pkg", ())
-+    namespace = {"deco": decorator}
-+    before = dict(namespace)
-+
-+    snapshot = _snapshot_named_decorators(
-+        ("deco",),
-+        namespace,
-+    )
-+
-+    assert snapshot is not None
-+    assert namespace == before
-+    assert namespace["deco"] is decorator
-```
+Potrzebna poprawiona specyfikacja przypadków G/H/I, np. rozdzielenie nazw funkcji dekoratorów od nazw bezpośrednich modułów potomnych, albo osobna analiza semantyki kolizji i autoryzowany zakres jej modelowania. Nie zmieniać oczekiwań na `MODEL_PASS` bez uzasadnienia kontraktu.
 
 ## FINAL_VERDICT
 
-CONTRACT_PROVED for the snapshot helper's bounded ordering and identity behavior. Focused regressions passed, while stacked execution and current UNKNOWN boundaries remain unchanged. STOP after this stage.
+BLOCKED_SEMANTIC_INTEGRITY. FINAL PASS niedopuszczalny.
