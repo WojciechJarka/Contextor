@@ -96,7 +96,7 @@ def test_d02_lru_cache_is_not_passive_runtime_proof(tmp_path):
 
 
 @pytest.mark.parametrize(
-    "definition,export",
+    "definition,export,expected_model_outcomes",
     [
         (
             "def deco(obj):\n"
@@ -106,6 +106,7 @@ def test_d02_lru_cache_is_not_passive_runtime_proof(tmp_path):
             "def export():\n"
             "    pass\n",
             "export",
+            ("EARLY_BINDING_HAZARD", "MODEL_PASS"),
         ),
         (
             "def make():\n"
@@ -115,6 +116,7 @@ def test_d02_lru_cache_is_not_passive_runtime_proof(tmp_path):
             "def export():\n"
             "    pass\n",
             "export",
+            ("UNKNOWN", "UNKNOWN"),
         ),
         (
             "def deco(obj):\n"
@@ -124,6 +126,7 @@ def test_d02_lru_cache_is_not_passive_runtime_proof(tmp_path):
             "class C:\n"
             "    pass\n",
             "C",
+            ("UNKNOWN", "UNKNOWN"),
         ),
         (
             "def deco(obj):\n"
@@ -134,6 +137,7 @@ def test_d02_lru_cache_is_not_passive_runtime_proof(tmp_path):
             "    def method(self):\n"
             "        pass\n",
             "C",
+            ("UNKNOWN", "UNKNOWN"),
         ),
     ],
     ids=[
@@ -151,7 +155,7 @@ def test_d02_lru_cache_is_not_passive_runtime_proof(tmp_path):
     ],
 )
 def test_d03_d05_decorator_import_entry_dependency(
-    tmp_path, definition, export, entry, should_succeed
+    tmp_path, definition, export, expected_model_outcomes, entry, should_succeed
 ):
     sources = {
         "pkg.__init__": "pass",
@@ -162,14 +166,23 @@ def test_d03_d05_decorator_import_entry_dependency(
     modeled = _model(sources, entry)
     actual = _actual(tmp_path, sources, entry)
 
-    assert modeled.outcome == "UNKNOWN"
-    assert modeled.outcome != "MODEL_PASS"
-
     if should_succeed:
         assert actual.returncode == 0, actual.stderr
     else:
         assert actual.returncode != 0
         assert "ImportError" in actual.stderr
+
+    expected = expected_model_outcomes[
+        0 if entry == "pkg.a" else 1
+    ]
+
+    assert modeled.outcome == expected
+
+    if expected == "EARLY_BINDING_HAZARD":
+        assert any(
+            event.operation == "EARLY_BINDING_HAZARD"
+            for event in modeled.events
+        )
 
 
 @pytest.mark.parametrize(
