@@ -145,6 +145,7 @@ def _safe_passive_function_definition(
     allow_dunder: bool = False,
     annotation_semantics: str | None = None,
     allow_builtin_property: bool = False,
+    allow_restricted_decorator: bool = False,
 ) -> bool:
     """A definition whose creation has no unknown evaluations.
 
@@ -167,6 +168,12 @@ def _safe_passive_function_definition(
                 is ast.Name
                 and statement.decorator_list[0].id
                 == "property"
+            )
+            and not (
+                allow_restricted_decorator
+                and len(statement.decorator_list) == 1
+                and type(statement.decorator_list[0]) is ast.Name
+                and not statement.decorator_list[0].id.startswith("__")
             )
         )
         or (statement.returns is not None and annotation_semantics not in {
@@ -973,7 +980,9 @@ def _compile(
 
         elif isinstance(stmt, ast.FunctionDef):
             if not _safe_passive_function_definition(
-                stmt, annotation_semantics=annotation_semantics,
+                stmt,
+                annotation_semantics=annotation_semantics,
+                allow_restricted_decorator=True,
             ):
                 return None
 
@@ -1074,10 +1083,22 @@ def _compile(
             ):
                 restricted_callable = False
 
+            if stmt.decorator_list and not restricted_callable:
+                return None
+
             if restricted_callable:
                 steps.append(
                     _Step(
-                        "DEFINE_FUNCTION",
+                        (
+                            "DEFINE_DECORATED_FUNCTION"
+                            if stmt.decorator_list
+                            else "DEFINE_FUNCTION"
+                        ),
+                        target=(
+                            stmt.decorator_list[0].id
+                            if stmt.decorator_list
+                            else None
+                        ),
                         binding=stmt.name,
                         function_body=tuple(function_steps),
                         parameters=tuple(
@@ -1545,6 +1566,7 @@ def evaluate_package_import_order(
         if any(
             step.op in {
                 "DEFINE_FUNCTION",
+                "DEFINE_DECORATED_FUNCTION",
                 "DEFINE_OPAQUE_FUNCTION",
                 "DEFINE_PASSIVE_CLASS",
                 "DEFINE_CONDITIONAL_FROZEN_DATACLASS",
@@ -1645,6 +1667,7 @@ def evaluate_package_import_order(
                 if any(
                     step.op in {
                         "DEFINE_FUNCTION",
+                        "DEFINE_DECORATED_FUNCTION",
                         "DEFINE_OPAQUE_FUNCTION",
                         "DEFINE_PASSIVE_CLASS",
                         "DEFINE_CONDITIONAL_FROZEN_DATACLASS",
@@ -1994,6 +2017,61 @@ def evaluate_package_import_order(
                         member,
                     )
                 )
+
+        elif step.op == "DEFINE_DECORATED_FUNCTION":
+            if (
+                not step.target
+                or not step.binding
+                or step.target not in namespaces[module]
+            ):
+                return result("UNKNOWN", module, step.target)
+
+            decorated_function = _new_restricted_function(
+                module,
+                step.function_body,
+                step.parameters,
+            )
+            decorator_call = _Step(
+                "CALL_FUNCTION",
+                target=step.target,
+                call_argument_values=(decorated_function,),
+            )
+            local_bindings: dict[str, object | None] = {}
+            body = _execute_restricted_call(
+                decorator_call,
+                module=module,
+                namespaces=namespaces,
+                local_bindings=local_bindings,
+            )
+
+            if body is None:
+                return result("UNKNOWN", module, step.target)
+
+            events.append(
+                PackageModelEvent(
+                    module,
+                    "DEFINE_FUNCTION",
+                    symbol=step.binding,
+                )
+            )
+            events.append(
+                PackageModelEvent(
+                    module,
+                    "CALL_FUNCTION",
+                    symbol=step.target,
+                )
+            )
+            frames[-1] = _advance_frame(frames[-1])
+            frames.append(
+                _FunctionFrame(
+                    module,
+                    0,
+                    body,
+                    local_bindings,
+                    step.binding,
+                )
+            )
+            continue
 
         elif step.op == "DEFINE_FUNCTION":
             namespaces[module][step.binding] = (

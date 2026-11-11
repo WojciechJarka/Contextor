@@ -20,6 +20,7 @@ CASES = [
         ),
         None,
         (),
+        "UNKNOWN",
         id="positional-identity-return",
     ),
     pytest.param(
@@ -32,6 +33,7 @@ CASES = [
         ),
         None,
         (),
+        "UNKNOWN",
         id="parameter-and-local-binding",
     ),
     pytest.param(
@@ -43,6 +45,7 @@ CASES = [
         ),
         None,
         (),
+        "UNKNOWN",
         id="return-skips-later-import",
     ),
     pytest.param(
@@ -55,6 +58,7 @@ CASES = [
         ),
         None,
         (),
+        "MODEL_PASS",
         id="pass-through-decorator-defers-body",
     ),
     pytest.param(
@@ -68,6 +72,7 @@ CASES = [
         ),
         None,
         ("pkg.child",),
+        "MODEL_PASS",
         id="pass-through-decorator-then-call",
     ),
     pytest.param(
@@ -81,6 +86,7 @@ CASES = [
         ),
         None,
         ("pkg.child",),
+        "UNKNOWN",
         id="return-callable-and-invoke",
     ),
     pytest.param(
@@ -91,6 +97,7 @@ CASES = [
         ),
         "TypeError",
         (),
+        "UNKNOWN",
         id="missing-required-argument",
     ),
 ]
@@ -129,7 +136,7 @@ print(json.dumps({
 
 
 @pytest.mark.parametrize(
-    "source,expected_error,expected_imports",
+    "source,expected_error,expected_imports,expected_model_outcome",
     CASES,
 )
 def test_call_frame_cpython_and_current_model(
@@ -137,6 +144,7 @@ def test_call_frame_cpython_and_current_model(
     source: str,
     expected_error: str | None,
     expected_imports: tuple[str, ...],
+    expected_model_outcome: str,
 ):
     package = tmp_path / "pkg"
     package.mkdir()
@@ -182,9 +190,7 @@ def test_call_frame_cpython_and_current_model(
         "pkg",
     )
 
-    # Baseline of the current model, not the target
-    # outcome after call-frame implementation.
-    assert result.outcome == "UNKNOWN"
+    assert result.outcome == expected_model_outcome
 
     # A conservative UNKNOWN must not be presented
     # as execution parity or as evidence of passivity.

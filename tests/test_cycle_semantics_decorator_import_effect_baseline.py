@@ -22,6 +22,7 @@ CASES = [
             "    import pkg.child\n"
         ),
         (),
+        "MODEL_PASS",
         id="decorated-function-body-deferred",
     ),
     pytest.param(
@@ -34,6 +35,7 @@ CASES = [
             "    pass\n"
         ),
         ("pkg.child",),
+        "UNKNOWN",
         id="decorator-import-during-definition",
     ),
     pytest.param(
@@ -50,6 +52,7 @@ CASES = [
             "    pass\n"
         ),
         ("pkg.lower", "pkg.upper"),
+        "UNKNOWN",
         id="stacked-decorator-import-order",
     ),
     pytest.param(
@@ -62,6 +65,7 @@ CASES = [
             "    import pkg.body\n"
         ),
         ("pkg.body", "pkg.decorate"),
+        "UNKNOWN",
         id="class-body-before-decorator",
     ),
     pytest.param(
@@ -77,6 +81,7 @@ CASES = [
             "    pass\n"
         ),
         ("pkg.default", "pkg.decorate"),
+        "UNKNOWN",
         id="default-before-decorator-application",
     ),
 ]
@@ -114,11 +119,12 @@ print(json.dumps({
 """
 
 
-@pytest.mark.parametrize("source,expected_imports", CASES)
+@pytest.mark.parametrize("source,expected_imports,expected_model_outcome", CASES)
 def test_minimal_decorator_import_effects(
     tmp_path: Path,
     source: str,
     expected_imports: tuple[str, ...],
+    expected_model_outcome: str,
 ):
     package = tmp_path / "pkg"
     package.mkdir()
@@ -177,6 +183,4 @@ def test_minimal_decorator_import_effects(
         "pkg",
     )
 
-    # Current conservative model boundary.
-    # Not the target behavior after implementation.
-    assert result.outcome == "UNKNOWN"
+    assert result.outcome == expected_model_outcome
