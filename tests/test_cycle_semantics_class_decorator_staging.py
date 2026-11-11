@@ -72,7 +72,7 @@ def test_multiple_named_class_decorators_keep_source_order():
     assert snapshot.decorator_names == ("top", "bottom")
 
 
-def test_same_name_decorator_stages_but_remains_unknown():
+def test_same_name_decorator_stages_and_executes():
     source = "def C(cls):\n    return cls\n@C\nclass C:\n    pass\n"
     steps = _steps(source)
     assert steps is not None
@@ -81,7 +81,12 @@ def test_same_name_decorator_stages_but_remains_unknown():
     result = evaluate_package_import_order(
         {"pkg.__init__": ast.parse(source)}, "pkg",
     )
-    assert result.outcome == "UNKNOWN"
+    assert result.outcome == "MODEL_PASS"
+    assert any(
+        event.operation == "CALL_FUNCTION"
+        and event.symbol == "C"
+        for event in result.events
+    )
 
 
 def test_attribute_class_decorator_stays_unknown():

@@ -2509,14 +2509,10 @@ def evaluate_package_import_order(
                 return result("UNKNOWN", module, step.binding)
             prepared_class_bases[step.definition_id] = (base_facts, selected)
 
-        elif step.op == "DEFINE_DECORATED_PASSIVE_CLASS":
-            return result(
-                "UNKNOWN",
-                module,
-                step.binding,
-            )
-
-        elif step.op == "DEFINE_PASSIVE_CLASS":
+        elif step.op in {
+            "DEFINE_PASSIVE_CLASS",
+            "DEFINE_DECORATED_PASSIVE_CLASS",
+        }:
             prepared = prepared_class_bases.pop(
                 step.definition_id or "",
                 None,
@@ -2574,6 +2570,61 @@ def evaluate_package_import_order(
                 ),
             )
             class_facts_by_identity[identity] = class_fact
+            if step.op == "DEFINE_DECORATED_PASSIVE_CLASS":
+                decorator_pairs = class_decorator_snapshots.pop(
+                    identity,
+                    None,
+                )
+
+                if not decorator_pairs:
+                    return result("UNKNOWN", module, step.binding)
+
+                application_order = tuple(
+                    reversed(decorator_pairs)
+                )
+
+                first_name, first_object = application_order[0]
+                local_bindings: dict[str, object | None] = {}
+
+                body = _execute_restricted_object_call(
+                    first_object,
+                    class_fact,
+                    module=module,
+                    local_bindings=local_bindings,
+                )
+
+                if body is None:
+                    return result("UNKNOWN", module, first_name)
+
+                events.append(
+                    PackageModelEvent(
+                        module,
+                        "DEFINE_PASSIVE_CLASS",
+                        symbol=step.binding,
+                    )
+                )
+
+                events.append(
+                    PackageModelEvent(
+                        module,
+                        "CALL_FUNCTION",
+                        symbol=first_name,
+                    )
+                )
+
+                frames[-1] = _advance_frame(frames[-1])
+                frames.append(
+                    _FunctionFrame(
+                        module=module,
+                        index=0,
+                        steps=body,
+                        local_bindings=local_bindings,
+                        decorator_final_binding=step.binding,
+                        remaining_decorators=application_order[1:],
+                    )
+                )
+                continue
+
             namespaces[module][step.binding] = (
                 class_fact
             )
