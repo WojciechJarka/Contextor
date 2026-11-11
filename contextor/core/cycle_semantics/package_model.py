@@ -849,6 +849,22 @@ def _compile(
                 and not conditional_dataclass
             )
 
+            if ordinary_named_decorators:
+                decorator_names = tuple(
+                    decorator.id
+                    for decorator in stmt.decorator_list
+                )
+
+                if any(
+                    not any(
+                        earlier.op == "DEFINE_FUNCTION"
+                        and earlier.binding == decorator_name
+                        for earlier in steps
+                    )
+                    for decorator_name in decorator_names
+                ):
+                    return None
+
             if not conditional_dataclass:
                 if (
                     type(stmt.lineno) is not int
@@ -867,10 +883,7 @@ def _compile(
                             "SNAPSHOT_CLASS_DECORATORS",
                             binding=stmt.name,
                             definition_id=definition_id,
-                            decorator_names=tuple(
-                                decorator.id
-                                for decorator in stmt.decorator_list
-                            ),
+                            decorator_names=decorator_names,
                         )
                     )
                 steps.append(

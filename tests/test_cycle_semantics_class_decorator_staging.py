@@ -54,10 +54,22 @@ def test_decorated_class_body_import_staging():
 
 
 def test_multiple_named_class_decorators_keep_source_order():
-    steps = _steps("@top\n@bottom\nclass C:\n    pass\n")
+    steps = _steps(
+        "def top(cls):\n"
+        "    return cls\n"
+        "def bottom(cls):\n"
+        "    return cls\n"
+        "@top\n"
+        "@bottom\n"
+        "class C:\n"
+        "    pass\n"
+    )
     assert steps is not None
-    assert steps[0].op == "SNAPSHOT_CLASS_DECORATORS"
-    assert steps[0].decorator_names == ("top", "bottom")
+    snapshot = next(
+        step for step in steps
+        if step.op == "SNAPSHOT_CLASS_DECORATORS"
+    )
+    assert snapshot.decorator_names == ("top", "bottom")
 
 
 def test_same_name_decorator_stages_but_remains_unknown():
@@ -143,3 +155,114 @@ def test_snapshot_preserves_class_fact_reference_without_execution():
     assert snapshot is not None
     assert snapshot.values[0] is class_fact
     assert namespace == before
+
+
+def test_unresolved_decorator_rejects_whole_module_compile():
+    assert _steps(
+        "value = 1\n@unknown_decorator\nclass Bad:\n    pass\n"
+    ) is None
+
+
+def test_preceding_local_restricted_decorator_stages_in_order():
+    steps = _steps(
+        "def identity(cls):\n    return cls\n"
+        "@identity\nclass C:\n    pass\n"
+    )
+    assert steps is not None
+    assert tuple(step.op for step in steps) == (
+        "DEFINE_FUNCTION",
+        "SNAPSHOT_CLASS_DECORATORS",
+        "PREPARE_PASSIVE_CLASS",
+        "DEFINE_DECORATED_PASSIVE_CLASS",
+    )
+    assert steps[0].binding == "identity"
+
+
+def test_unbound_decorator_in_stack_rejects_compile():
+    assert _steps(
+        "def known(cls):\n    return cls\n"
+        "@unknown\n@known\nclass C:\n    pass\n"
+    ) is None
+
+
+def test_forward_decorator_reference_rejects_compile():
+    assert _steps(
+        "@later\nclass C:\n    pass\n"
+        "def later(cls):\n    return cls\n"
+    ) is None
+
+
+def test_same_name_local_decorator_proof_gate():
+    source = "def C(cls):\n    return cls\n@C\nclass C:\n    pass\n"
+    steps = _steps(source)
+    assert steps is not None
+    snapshot = next(
+        step for step in steps
+        if step.op == "SNAPSHOT_CLASS_DECORATORS"
+    )
+    assert snapshot.decorator_names == ("C",)
+    assert evaluate_package_import_order(
+        {"pkg.__init__": ast.parse(source)}, "pkg",
+    ).outcome == "UNKNOWN"
+
+
+def test_exact_p10_eager_and_lazy_fixture():
+    source = {
+        "pkg.__init__": ast.parse("pass"),
+        "pkg.a": ast.parse(
+            "def later():\n"
+            "    import pkg.bad\n"
+            "value = 1\n"
+        ),
+        "pkg.bad": ast.parse(
+            "@unknown_decorator\n"
+            "class Bad:\n"
+            "    pass\n"
+        ),
+    }
+    eager = evaluate_package_import_order(
+        source, "pkg.a", annotation_semantics="DEFERRED",
+    )
+    lazy = evaluate_package_import_order(
+        source, "pkg.a", annotation_semantics="DEFERRED",
+        _compile_on_first_import=True,
+    )
+    assert eager.outcome == "UNKNOWN"
+    assert eager.target_module == "pkg.bad"
+    assert eager.events == ()
+    assert lazy.outcome == "MODEL_PASS"
+    assert not any(
+        event.operation == "START_IMPORT"
+        and event.target == "pkg.bad"
+        for event in lazy.events
+    )
+
+
+def test_exact_p11_strict_and_opt_in_fixture():
+    sources = {
+        "pkg.__init__": ast.parse("pass"),
+        "pkg.a": ast.parse(
+            "value = 1\n"
+            "@unknown_decorator\n"
+            "class Bad:\n"
+            "    pass\n"
+        ),
+    }
+    strict = evaluate_package_import_order(
+        sources, "pkg.a", annotation_semantics="DEFERRED",
+    )
+    opt_in = evaluate_package_import_order(
+        sources, "pkg.a", annotation_semantics="DEFERRED",
+        _compile_on_first_import=True,
+    )
+    assert strict.outcome == "UNKNOWN"
+    assert strict.target_module == "pkg.a"
+    assert strict.events == ()
+    assert opt_in.outcome == "UNKNOWN"
+    assert opt_in.target_module == "pkg.a"
+    assert any(
+        event.operation == "BIND"
+        and event.module == "pkg.a"
+        and event.symbol == "value"
+        for event in opt_in.events
+    )
