@@ -62,7 +62,7 @@ CASES = [
     ),
     pytest.param(
         "def deco(fn):\n    import pkg.child\n    return fn\n@deco\ndef f():\n    pass\n",
-        None, ("pkg.child",), "UNKNOWN", (),
+        None, ("pkg.child",), "MODEL_PASS", ("deco",),
         id="decorator-import-effect-unsupported",
     ),
 ]

@@ -56,7 +56,7 @@ CASES = [
         "pass\n",
         None,
         ("pkg.child",),
-        "UNKNOWN",
+        "MODEL_PASS",
         id="import-then-parameter-return",
     ),
     pytest.param(

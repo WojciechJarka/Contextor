@@ -1069,19 +1069,26 @@ def _compile(
                         for item in compiled
                     )
 
-            if restricted_callable and any(
-                item.op == "RETURN_FUNCTION"
-                and item.symbol is not None
-                for item in function_steps
-            ) and any(
-                item.op in {
-                    "IMPORT",
-                    "FROM",
-                    "PREPARE_FROM_MEMBER",
-                }
-                for item in function_steps
-            ):
-                restricted_callable = False
+            if restricted_callable:
+                parameter_returns = (
+                    (
+                        position,
+                        item.symbol,
+                    )
+                    for position, item in enumerate(function_steps)
+                    if (
+                        item.op == "RETURN_FUNCTION"
+                        and item.symbol is not None
+                    )
+                )
+
+                if any(
+                    earlier.op in {"IMPORT", "FROM"}
+                    and earlier.binding == returned_name
+                    for position, returned_name in parameter_returns
+                    for earlier in function_steps[:position]
+                ):
+                    restricted_callable = False
 
             if stmt.decorator_list and not restricted_callable:
                 return None

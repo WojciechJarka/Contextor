@@ -35,7 +35,7 @@ CASES = [
             "    pass\n"
         ),
         ("pkg.child",),
-        "UNKNOWN",
+        "MODEL_PASS",
         id="decorator-import-during-definition",
     ),
     pytest.param(
