@@ -1,165 +1,410 @@
-# P5-M08-I9-T1 — class decorator definition-time baseline
+# P5-M08-I9-I1 — regression STOP
 
 ## PREFLIGHT
 
-DIRECT_EVIDENCE: HEAD `6d978b31534f9ab773d44d8f455642d8f7b54fdb`; clean worktree at start; active `C:\Temp\Contextor_Repo\.venv\Scripts\python.exe`, CPython 3.15.2. Contextor package_model revision 1352, workspace_sync verified, structural DFS cycles 16, cycle_semantics stale. I8-I2 snapshot/object-call/stacked continuation and both child-name guards are present. New target test file did not exist.
-
-CODE_PATH_PROVED: `package_model.py:245-307` rejects ordinary decorated ClassDef in passive class validation. `:809-984` otherwise prepares passive class, compiles class-body imports before `DEFINE_PASSIVE_CLASS`; `:2429-2497` binds the passive class. Child-name guards are at `:1578-1598` and `:1680-1700`. Existing decorator and stacked tests were inspected. Contextor identifies `evaluate_package_import_order` as canonical owner, with `evaluate_conditional_namespace_import_order` as a direct intra-module caller; static call context is not a complete dynamic call graph.
+DIRECT_EVIDENCE: HEAD `cef29d7d90dbdc43cae58b0ee78fb1eff15844af`; pre-existing change only in `walkthrough.md`; active `C:\Temp\Contextor_Repo\.venv\Scripts\python.exe`, CPython 3.15.2. Contextor LIVE revision 1353, `package_model.py` workspace_sync=verified, cycle_semantics=stale, structural DFS cycle count 16. D1 anchors, single `_DefinitionState` constructor, existing `_snapshot_named_decorators`, both collision guards and I9-T1 baseline were present.
 
 ## FILES_CHANGED
 
-- `tests/test_cycle_semantics_class_decorator_baseline.py`
+- `contextor/core/cycle_semantics/execution/state.py`
+- `contextor/core/cycle_semantics/package_model.py`
+- `tests/test_cycle_semantics_class_decorator_staging.py`
 
-`walkthrough.md` is the task report, excluded from source/test/docs diff count. No production or existing test file changed.
+`walkthrough.md` is this report.
 
-## CPYTHON_CLASS_DECORATOR_MATRIX
+## CLASS_DECORATOR_ADMISSION
 
-| Case | Isolated CPython JSON | Model | Complete model events |
-|---|---|---|---|
-| A pass-through | `{"error":null,"imports":[]}` | UNKNOWN | `[]` |
-| B decorator import | `{"error":null,"imports":["pkg.decorate"]}` | UNKNOWN | `[]` |
-| C body first | `{"error":null,"imports":["pkg.body","pkg.decorate"]}` | UNKNOWN | `[]` |
-| D stacked | `{"error":null,"imports":["pkg.body","pkg.bottom","pkg.top"]}` | UNKNOWN | `[]` |
-| E same name | `{"error":null,"imports":[]}` | UNKNOWN | `[]` |
-| F replacement None | `{"error":null,"imports":["pkg.body"]}` | UNKNOWN | `[]` |
-| G reentrant import | `{"error":"ImportError","imports":["pkg.child"]}` | UNKNOWN | `[]` |
+CODE_PATH_PROVED: validator admits only ordinary named decorator syntax under explicit opt-in; attribute and call decorators remain rejected. Conditional frozen dataclass detection uses exact qualified decorator predicate. This admission altered whole-module compilation behavior, producing the regressions below.
 
-The exact JSON expectations passed in isolated subprocess tests. UNKNOWN is no claim of model parity.
+## EARLY_DECORATOR_SNAPSHOT
 
-## CLASS_BODY_EXECUTION_ORDER
+CODE_PATH_PROVED: compiler emits `SNAPSHOT_CLASS_DECORATORS` before `PREPARE_PASSIVE_CLASS` and class-body steps; evaluator stores name/object pairs from `_snapshot_named_decorators` by definition ID without invoking the objects.
 
-DIRECT_EVIDENCE: C and D show class-body import before decorator imports. Class-body evaluation therefore precedes decorator application in these fixtures.
+## CLASS_COMPILER_SEQUENCE
 
-## DECORATOR_APPLICATION_ORDER
+CODE_PATH_PROVED: staged decorated class emits snapshot, prepare, optional class-local body import, and `DEFINE_DECORATED_PASSIVE_CLASS`; latter returns UNKNOWN. The new staging tests passed within the targeted run. No decorated class name is bound by the new branch.
 
-DIRECT_EVIDENCE: D import trace `pkg.body`, `pkg.bottom`, `pkg.top` establishes bottom-to-top application after body execution for that stack.
+## METACLASS_AND_MRO_PRESERVATION
 
-## CLASS_OBJECT_AND_FINAL_BINDING
+No edits to PREPARE_PASSIVE_CLASS, DEFINE_PASSIVE_CLASS, _ClassFact, metaclass selection or C3 merge. Related focused tests passed, but whole-module eager boundary regressed.
 
-DIRECT_EVIDENCE: F completes with a None replacement; G raises ImportError when child import requests `C` during decoration. Together they support class object creation and decorator application before final binding of `C`. This is fixture evidence, not a complete general CPython proof. No model staging claim is made.
+## CONDITIONAL_DATACLASS_PRESERVATION
 
-## SAME_NAME_DECORATOR_CONTRACT
+The new test uses the exact fixture and options from `test_frozen_dataclass_direct_conditional_record` and passed. Conditional evidence remains qualified, not ordinary MODEL_PASS runtime proof.
 
-DIRECT_EVIDENCE: E succeeds when `@C` refers to the prior function binding while the new class has the same name.
+## CHILD_NAME_COLLISION_GUARDS
 
-## REENTRANT_EARLY_BINDING_CONTRACT
+Both existing definition-name guards include `DEFINE_DECORATED_PASSIVE_CLASS`; no guard was removed.
 
-DIRECT_EVIDENCE: G observes `pkg.child` first and raises ImportError when `from pkg import C` executes before the decorated class is finally bound.
+## UNCHANGED_UNKNOWN_BOUNDARIES
 
-## CURRENT_MODEL_BOUNDARIES
-
-CODE_PATH_PROVED: ordinary class decorators fail passive-class validation and `evaluate_package_import_order` returns UNKNOWN before events. All seven fixtures returned UNKNOWN with complete event sequences `[]`. The test does not assert model import order under UNKNOWN. No new MODEL_PASS admission.
+Seven I9-T1 cases passed as UNKNOWN. Attribute/call decorator tests passed. However historical strict/eager boundaries for an unresolved named class decorator changed; see below. Thus this heading cannot claim full preservation.
 
 ## TARGETED_TEST_RESULTS
 
-Specified focused command: `55 passed in 13.80s`. `git diff --check`: exit 0. No full pytest or SCC02.
+Exact specified suite: `2 failed, 356 passed, 2 warnings in 42.19s`. Two failures in `tests/test_cycle_semantics_package_model.py`:
 
-## MCP_POST_TASK_AUDIT
+1. `test_p10_eager_contract_unchanged_and_lazy_opt_in`, line 2839. Source: `pkg.a` defines deferred `later()` importing `pkg.bad`; `pkg.bad` has `@unknown_decorator class Bad: pass`. Expected eager UNKNOWN, actual MODEL_PASS. Exact model event sequence:
+```json
+[{"module":"\u0000ENTRY","operation":"START_IMPORT","target":"pkg","symbol":null},{"module":"pkg","operation":"READY","target":null,"symbol":null},{"module":"\u0000ENTRY","operation":"START_IMPORT","target":"pkg.a","symbol":null},{"module":"pkg.a","operation":"DEFINE_FUNCTION","target":null,"symbol":"later"},{"module":"pkg.a","operation":"BIND","target":null,"symbol":"value"},{"module":"pkg.a","operation":"READY","target":null,"symbol":null},{"module":"pkg","operation":"BIND_CHILD","target":"pkg.a","symbol":"a"}]
+```
+Pytest traceback: `AssertionError: assert 'MODEL_PASS' == 'UNKNOWN'` at line 2839.
 
-Contextor canonical revision advanced from 1352 to 1353. New test module `workspace_sync=verified`; syntax errors 0, structural DFS cycle count 16. Source freshness does not attest loaded backend code. The event endpoint returned `confirmation_required` for the broad payload, so no exact watcher event is claimed. No FULL, update_file, restart, or semantic refresh.
+2. `test_p11_strict_mode_remains_whole_module_unknown`, line 2912. Source: `pkg.a` binds `value=1`, then has `@unknown_decorator class Bad: pass`. Expected strict UNKNOWN with no events; actual UNKNOWN after partial events:
+```json
+[{"module":"\u0000ENTRY","operation":"START_IMPORT","target":"pkg","symbol":null},{"module":"pkg","operation":"READY","target":null,"symbol":null},{"module":"\u0000ENTRY","operation":"START_IMPORT","target":"pkg.a","symbol":null},{"module":"pkg.a","operation":"BIND","target":null,"symbol":"value"}]
+```
+Pytest traceback: `AssertionError: assert (PackageModelEvent...) == ()` at line 2912. Relevant source anchors: validator `package_model.py:244-307`; ClassDef compiler `:809-1009`; eager precompile and execution paths `:1535-1740`; new snapshot `:2384-2418`.
+
+DIRECT_EVIDENCE: these tests do not run CPython subprocess; CPython observed JSON is not applicable. Model outcomes/events above were reproduced with the active interpreter. The likely cause is that compile now accepts syntactically named but unbound decorator references and defers rejection to execution; this is an inference from the changed path, not a certified repair design.
+
+`git diff --check`: exit 0; only LF/CRLF notices.
+
+## MCP_POST_CHANGE_AUDIT
+
+NOT RUN because section 12 allows it only after PASS. No FULL, update_file, restart or semantic refresh. Post-edit canonical freshness is UNKNOWN.
 
 ## FULL_DIFFS
 
 ```diff
-diff --git a/tests/test_cycle_semantics_class_decorator_baseline.py b/tests/test_cycle_semantics_class_decorator_baseline.py
+warning: in the working copy of 'contextor/core/cycle_semantics/execution/state.py', LF will be replaced by CRLF the next time Git touches it
+diff --git a/contextor/core/cycle_semantics/execution/state.py b/contextor/core/cycle_semantics/execution/state.py
+index 9b52250..96b9a44 100644
+--- a/contextor/core/cycle_semantics/execution/state.py
++++ b/contextor/core/cycle_semantics/execution/state.py
+@@ -98,6 +98,10 @@ class _DefinitionState:
+         str, tuple[tuple[_ClassFact, ...], _ClassFact]
+     ]
+     class_facts_by_identity: dict[str, _ClassFact]
++    class_decorator_snapshots: dict[
++        str,
++        tuple[tuple[str, object], ...],
++    ]
+ 
+ 
+ def _new_definition_state() -> _DefinitionState:
+@@ -107,4 +111,5 @@ def _new_definition_state() -> _DefinitionState:
+             fact.identity: fact
+             for fact in _BUILTIN_CLASS_FACTS.values()
+         },
++        class_decorator_snapshots={},
+     )
+diff --git a/contextor/core/cycle_semantics/package_model.py b/contextor/core/cycle_semantics/package_model.py
+index f914265..68261cb 100644
+--- a/contextor/core/cycle_semantics/package_model.py
++++ b/contextor/core/cycle_semantics/package_model.py
+@@ -246,6 +246,7 @@ def _safe_passive_class_definition(
+     *,
+     annotation_semantics: str | None = None,
+     allow_conditional_frozen_dataclass: bool = False,
++    allow_named_decorators: bool = False,
+ ) -> bool:
+     """Validate a class whose body has no unknown effects.
+ 
+@@ -301,6 +302,15 @@ def _safe_passive_class_definition(
+         or (
+             bool(statement.decorator_list)
+             and not conditional_dataclass
++            and not (
++                allow_named_decorators
++                and bool(statement.decorator_list)
++                and all(
++                    type(decorator) is ast.Name
++                    and not decorator.id.startswith("__")
++                    for decorator in statement.decorator_list
++                )
++            )
+         )
+         or getattr(statement, "type_params", ())
+     ):
+@@ -819,16 +829,26 @@ def _compile(
+             )
+             conditional_dataclass = (
+                 assume_frozen_dataclass
+-                and bool(stmt.decorator_list)
++                and annotation_semantics == "DEFERRED"
++                and len(stmt.decorator_list) == 1
++                and _exact_frozen_dataclass_decorator(
++                    stmt.decorator_list[0]
++                )
+             )
+             if not _safe_passive_class_definition(
+                 stmt, annotation_semantics=annotation_semantics,
+                 allow_conditional_frozen_dataclass=(
+                     conditional_dataclass
+                 ),
++                allow_named_decorators=not conditional_dataclass,
+             ):
+                 return None
+ 
++            ordinary_named_decorators = (
++                bool(stmt.decorator_list)
++                and not conditional_dataclass
++            )
++
+             if not conditional_dataclass:
+                 if (
+                     type(stmt.lineno) is not int
+@@ -841,6 +861,18 @@ def _compile(
+                 definition_id = (
+                     f"{logical}:{stmt.lineno}:{stmt.col_offset}"
+                 )
++                if ordinary_named_decorators:
++                    steps.append(
++                        _Step(
++                            "SNAPSHOT_CLASS_DECORATORS",
++                            binding=stmt.name,
++                            definition_id=definition_id,
++                            decorator_names=tuple(
++                                decorator.id
++                                for decorator in stmt.decorator_list
++                            ),
++                        )
++                    )
+                 steps.append(
+                     _Step(
+                         "PREPARE_PASSIVE_CLASS",
+@@ -971,7 +1003,11 @@ def _compile(
+             else:
+                 steps.append(
+                     _Step(
+-                        "DEFINE_PASSIVE_CLASS",
++                        (
++                            "DEFINE_DECORATED_PASSIVE_CLASS"
++                            if ordinary_named_decorators
++                            else "DEFINE_PASSIVE_CLASS"
++                        ),
+                         binding=stmt.name,
+                         source_line=stmt.lineno,
+                         source_column=stmt.col_offset,
+@@ -1590,6 +1626,7 @@ def evaluate_package_import_order(
+                 "DEFINE_STACKED_FUNCTION",
+                 "DEFINE_OPAQUE_FUNCTION",
+                 "DEFINE_PASSIVE_CLASS",
++                "DEFINE_DECORATED_PASSIVE_CLASS",
+                 "DEFINE_CONDITIONAL_FROZEN_DATACLASS",
+             }
+             and step.binding in children
+@@ -1619,6 +1656,9 @@ def evaluate_package_import_order(
+     definition_state = _new_definition_state()
+     prepared_class_bases = definition_state.prepared_class_bases
+     class_facts_by_identity = definition_state.class_facts_by_identity
++    class_decorator_snapshots = (
++        definition_state.class_decorator_snapshots
++    )
+ 
+     bootstrap = "\x00ENTRY"
+     execution_cursor = _new_execution_cursor(bootstrap)
+@@ -1692,6 +1732,7 @@ def evaluate_package_import_order(
+                         "DEFINE_STACKED_FUNCTION",
+                         "DEFINE_OPAQUE_FUNCTION",
+                         "DEFINE_PASSIVE_CLASS",
++                        "DEFINE_DECORATED_PASSIVE_CLASS",
+                         "DEFINE_CONDITIONAL_FROZEN_DATACLASS",
+                     }
+                     and step.binding in children
+@@ -2343,6 +2384,35 @@ def evaluate_package_import_order(
+                 )
+             )
+ 
++        elif step.op == "SNAPSHOT_CLASS_DECORATORS":
++            if (
++                not step.definition_id
++                or not step.binding
++                or not step.decorator_names
++            ):
++                return result("UNKNOWN", module)
++
++            snapshot = _snapshot_named_decorators(
++                step.decorator_names,
++                namespaces[module],
++            )
++
++            if snapshot is None:
++                return result(
++                    "UNKNOWN",
++                    module,
++                    step.binding,
++                )
++
++            class_decorator_snapshots[
++                step.definition_id
++            ] = tuple(
++                zip(
++                    snapshot.names,
++                    snapshot.values,
++                )
++            )
++
+         elif step.op == "PREPARE_PASSIVE_CLASS":
+             if not step.binding or not step.definition_id:
+                 return result("UNKNOWN", module, step.binding)
+@@ -2426,6 +2496,13 @@ def evaluate_package_import_order(
+                 return result("UNKNOWN", module, step.binding)
+             prepared_class_bases[step.definition_id] = (base_facts, selected)
+ 
++        elif step.op == "DEFINE_DECORATED_PASSIVE_CLASS":
++            return result(
++                "UNKNOWN",
++                module,
++                step.binding,
++            )
++
+         elif step.op == "DEFINE_PASSIVE_CLASS":
+             prepared = prepared_class_bases.pop(
+                 step.definition_id or "",
+diff --git a/tests/test_cycle_semantics_class_decorator_staging.py b/tests/test_cycle_semantics_class_decorator_staging.py
 new file mode 100644
 --- /dev/null
-+++ b/tests/test_cycle_semantics_class_decorator_baseline.py
-@@ -0,0 +1,92 @@
-+"""CPython class-decorator timing versus the current conservative model."""
++++ b/tests/test_cycle_semantics_class_decorator_staging.py
+@@ -0,0 +1,145 @@
++"""Compilation staging for named class decorators; execution remains unknown."""
 +
 +import ast
-+import json
-+import subprocess
-+import sys
 +
-+import pytest
-+
++from contextor.core.cycle_semantics.execution.calls import (
++    _snapshot_named_decorators,
++)
++from contextor.core.cycle_semantics.execution.class_facts import (
++    _BUILTIN_CLASS_FACTS,
++)
 +from contextor.core.cycle_semantics.package_model import (
++    _compile,
 +    evaluate_package_import_order,
 +)
-+from test_cycle_semantics_decorator_import_effect_baseline import RUNNER
 +
 +
-+CASES = [
-+    pytest.param(
-+        "def identity(cls):\n    return cls\n@identity\nclass C:\n    pass\n",
-+        None, (), id="A-pass-through",
-+    ),
-+    pytest.param(
-+        "def decorate(cls):\n    import pkg.decorate\n    return cls\n"
-+        "@decorate\nclass C:\n    pass\n",
-+        None, ("pkg.decorate",), id="B-decorator-import",
-+    ),
-+    pytest.param(
-+        "def decorate(cls):\n    import pkg.decorate\n    return cls\n"
-+        "@decorate\nclass C:\n    import pkg.body\n",
-+        None, ("pkg.body", "pkg.decorate"), id="C-body-before-decorator",
-+    ),
-+    pytest.param(
-+        "def top_decorator(cls):\n    import pkg.top\n    return cls\n"
-+        "def bottom_decorator(cls):\n    import pkg.bottom\n    return cls\n"
-+        "@top_decorator\n@bottom_decorator\nclass C:\n"
-+        "    import pkg.body\n",
-+        None, ("pkg.body", "pkg.bottom", "pkg.top"),
-+        id="D-stacked-class-decorators",
-+    ),
-+    pytest.param(
-+        "def C(cls):\n    return cls\n@C\nclass C:\n    pass\n",
-+        None, (), id="E-same-name-decorator",
-+    ),
-+    pytest.param(
-+        "def decorate(cls):\n    return\n@decorate\nclass C:\n"
-+        "    import pkg.body\n",
-+        None, ("pkg.body",), id="F-decorator-returns-none",
-+    ),
-+    pytest.param(
-+        "def decorate(cls):\n    import pkg.child\n    return cls\n"
-+        "@decorate\nclass C:\n    pass\n",
-+        "ImportError", ("pkg.child",), id="G-early-class-binding-hazard",
-+    ),
-+]
++def _steps(source, **options):
++    return _compile(ast.parse(source), "pkg", True, **options)
 +
 +
-+@pytest.mark.parametrize("source,expected_error,expected_imports", CASES)
-+def test_class_decorator_definition_time_baseline(
-+    tmp_path, source, expected_error, expected_imports,
-+):
-+    package = tmp_path / "pkg"
-+    package.mkdir()
-+    (package / "__init__.py").write_text(source, encoding="utf-8")
-+
-+    sources = {"pkg.__init__": ast.parse(source)}
-+    for child in ("body", "decorate", "top", "bottom", "child"):
-+        child_source = (
-+            "from pkg import C\n"
-+            if child == "child" and expected_error == "ImportError"
-+            else "pass\n"
-+        )
-+        (package / f"{child}.py").write_text(child_source, encoding="utf-8")
-+        sources[f"pkg.{child}"] = ast.parse(child_source)
-+
-+    process = subprocess.run(
-+        [sys.executable, "-I", "-B", "-c", RUNNER, str(tmp_path)],
-+        capture_output=True,
-+        text=True,
-+        timeout=20,
-+        check=False,
++def test_single_named_class_decorator_staging():
++    steps = _steps(
++        "def identity(cls):\n    return cls\n"
++        "@identity\nclass C:\n    pass\n"
 +    )
-+    assert process.returncode == 0, process.stderr
-+    observed = json.loads(process.stdout)
-+    assert observed == {
-+        "error": expected_error,
-+        "imports": list(expected_imports),
-+    }
-+
-+    result = evaluate_package_import_order(sources, "pkg")
-+    assert result.outcome == "UNKNOWN", (
-+        result.outcome,
-+        [event.__dict__ for event in result.events],
++    assert steps is not None
++    class_steps = steps[1:]
++    assert tuple(step.op for step in class_steps) == (
++        "SNAPSHOT_CLASS_DECORATORS",
++        "PREPARE_PASSIVE_CLASS",
++        "DEFINE_DECORATED_PASSIVE_CLASS",
 +    )
++    assert class_steps[0].decorator_names == ("identity",)
++    assert len({step.definition_id for step in class_steps}) == 1
++    assert class_steps[0].definition_id is not None
++
++
++def test_decorated_class_body_import_staging():
++    steps = _steps(
++        "def identity(cls):\n    return cls\n"
++        "@identity\nclass C:\n    import pkg.body\n"
++    )
++    assert steps is not None
++    class_steps = steps[1:]
++    assert tuple(step.op for step in class_steps) == (
++        "SNAPSHOT_CLASS_DECORATORS",
++        "PREPARE_PASSIVE_CLASS",
++        "IMPORT",
++        "DEFINE_DECORATED_PASSIVE_CLASS",
++    )
++    assert class_steps[2].target == "pkg.body"
++    assert class_steps[2].class_local is True
++    assert class_steps[0].definition_id == class_steps[-1].definition_id
++
++
++def test_multiple_named_class_decorators_keep_source_order():
++    steps = _steps("@top\n@bottom\nclass C:\n    pass\n")
++    assert steps is not None
++    assert steps[0].op == "SNAPSHOT_CLASS_DECORATORS"
++    assert steps[0].decorator_names == ("top", "bottom")
++
++
++def test_same_name_decorator_stages_but_remains_unknown():
++    source = "def C(cls):\n    return cls\n@C\nclass C:\n    pass\n"
++    steps = _steps(source)
++    assert steps is not None
++    assert steps[1].op == "SNAPSHOT_CLASS_DECORATORS"
++    assert steps[1].decorator_names == ("C",)
++    result = evaluate_package_import_order(
++        {"pkg.__init__": ast.parse(source)}, "pkg",
++    )
++    assert result.outcome == "UNKNOWN"
++
++
++def test_attribute_class_decorator_stays_unknown():
++    source = "@factory.decorate\nclass C:\n    pass\n"
++    assert _steps(source) is None
++    assert evaluate_package_import_order(
++        {"pkg.__init__": ast.parse(source)}, "pkg",
++    ).outcome == "UNKNOWN"
++
++
++def test_call_class_decorator_stays_unknown():
++    source = "@factory()\nclass C:\n    pass\n"
++    assert _steps(source) is None
++    assert evaluate_package_import_order(
++        {"pkg.__init__": ast.parse(source)}, "pkg",
++    ).outcome == "UNKNOWN"
++
++
++def test_qualified_conditional_frozen_dataclass_unchanged():
++    # Same qualified fixture and options as test_frozen_dataclass_direct_conditional_record.
++    source = (
++        "from dataclasses import dataclass\n"
++        "@dataclass(frozen=True)\nclass Graph:\n    value: int\n"
++    )
++    steps = _steps(
++        source,
++        annotation_semantics="DEFERRED",
++        assume_frozen_dataclass=True,
++    )
++    assert steps is not None
++    assert any(
++        step.op == "DEFINE_CONDITIONAL_FROZEN_DATACLASS"
++        for step in steps
++    )
++    assert not any(
++        step.op == "SNAPSHOT_CLASS_DECORATORS" for step in steps
++    )
++    result = evaluate_package_import_order(
++        {"pkg.__init__": ast.parse(source)},
++        "pkg",
++        annotation_semantics="DEFERRED",
++        _compile_on_first_import=True,
++        _assume_passive_external_imports=True,
++        _assume_frozen_dataclass_decoration=True,
++    )
++    assert result.outcome == "MODEL_PASS"
++    assert result.evidence_scope == (
++        "CONDITIONAL_EXTERNAL_AND_FROZEN_DATACLASS_"
++        "ASSUMPTIONS_NOT_RUNTIME_PROOF"
++    )
++    assert len(result.assumed_dataclass_decorations) == 1
++    assert result.assumed_dataclass_decorations[0].class_name == "Graph"
++
++
++def test_ordinary_undecorated_class_unchanged():
++    steps = _steps("class C:\n    pass\n")
++    assert steps is not None
++    assert tuple(step.op for step in steps) == (
++        "PREPARE_PASSIVE_CLASS",
++        "DEFINE_PASSIVE_CLASS",
++    )
++
++
++def test_snapshot_preserves_class_fact_reference_without_execution():
++    class_fact = _BUILTIN_CLASS_FACTS["object"]
++    namespace = {"decorator": class_fact}
++    before = namespace.copy()
++    snapshot = _snapshot_named_decorators(
++        ("decorator",), namespace,
++    )
++    assert snapshot is not None
++    assert snapshot.values[0] is class_fact
++    assert namespace == before
 ```
 
 ## FINAL_VERDICT
 
-PASS for I9-T1 baseline scope: seven isolated CPython cases and current UNKNOWN boundaries verified; targeted tests and source freshness passed. No class-decorator execution admitted.
+REGRESSION_FAILURE / BLOCKED_SEMANTIC_INTEGRITY. No FINAL PASS. Per failure contract, no independent fix or test weakening; current staged changes remain uncommitted for auditor review.

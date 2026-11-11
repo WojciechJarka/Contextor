@@ -246,6 +246,7 @@ def _safe_passive_class_definition(
     *,
     annotation_semantics: str | None = None,
     allow_conditional_frozen_dataclass: bool = False,
+    allow_named_decorators: bool = False,
 ) -> bool:
     """Validate a class whose body has no unknown effects.
 
@@ -301,6 +302,15 @@ def _safe_passive_class_definition(
         or (
             bool(statement.decorator_list)
             and not conditional_dataclass
+            and not (
+                allow_named_decorators
+                and bool(statement.decorator_list)
+                and all(
+                    type(decorator) is ast.Name
+                    and not decorator.id.startswith("__")
+                    for decorator in statement.decorator_list
+                )
+            )
         )
         or getattr(statement, "type_params", ())
     ):
@@ -819,15 +829,25 @@ def _compile(
             )
             conditional_dataclass = (
                 assume_frozen_dataclass
-                and bool(stmt.decorator_list)
+                and annotation_semantics == "DEFERRED"
+                and len(stmt.decorator_list) == 1
+                and _exact_frozen_dataclass_decorator(
+                    stmt.decorator_list[0]
+                )
             )
             if not _safe_passive_class_definition(
                 stmt, annotation_semantics=annotation_semantics,
                 allow_conditional_frozen_dataclass=(
                     conditional_dataclass
                 ),
+                allow_named_decorators=not conditional_dataclass,
             ):
                 return None
+
+            ordinary_named_decorators = (
+                bool(stmt.decorator_list)
+                and not conditional_dataclass
+            )
 
             if not conditional_dataclass:
                 if (
@@ -841,6 +861,18 @@ def _compile(
                 definition_id = (
                     f"{logical}:{stmt.lineno}:{stmt.col_offset}"
                 )
+                if ordinary_named_decorators:
+                    steps.append(
+                        _Step(
+                            "SNAPSHOT_CLASS_DECORATORS",
+                            binding=stmt.name,
+                            definition_id=definition_id,
+                            decorator_names=tuple(
+                                decorator.id
+                                for decorator in stmt.decorator_list
+                            ),
+                        )
+                    )
                 steps.append(
                     _Step(
                         "PREPARE_PASSIVE_CLASS",
@@ -971,7 +1003,11 @@ def _compile(
             else:
                 steps.append(
                     _Step(
-                        "DEFINE_PASSIVE_CLASS",
+                        (
+                            "DEFINE_DECORATED_PASSIVE_CLASS"
+                            if ordinary_named_decorators
+                            else "DEFINE_PASSIVE_CLASS"
+                        ),
                         binding=stmt.name,
                         source_line=stmt.lineno,
                         source_column=stmt.col_offset,
@@ -1590,6 +1626,7 @@ def evaluate_package_import_order(
                 "DEFINE_STACKED_FUNCTION",
                 "DEFINE_OPAQUE_FUNCTION",
                 "DEFINE_PASSIVE_CLASS",
+                "DEFINE_DECORATED_PASSIVE_CLASS",
                 "DEFINE_CONDITIONAL_FROZEN_DATACLASS",
             }
             and step.binding in children
@@ -1619,6 +1656,9 @@ def evaluate_package_import_order(
     definition_state = _new_definition_state()
     prepared_class_bases = definition_state.prepared_class_bases
     class_facts_by_identity = definition_state.class_facts_by_identity
+    class_decorator_snapshots = (
+        definition_state.class_decorator_snapshots
+    )
 
     bootstrap = "\x00ENTRY"
     execution_cursor = _new_execution_cursor(bootstrap)
@@ -1692,6 +1732,7 @@ def evaluate_package_import_order(
                         "DEFINE_STACKED_FUNCTION",
                         "DEFINE_OPAQUE_FUNCTION",
                         "DEFINE_PASSIVE_CLASS",
+                        "DEFINE_DECORATED_PASSIVE_CLASS",
                         "DEFINE_CONDITIONAL_FROZEN_DATACLASS",
                     }
                     and step.binding in children
@@ -2343,6 +2384,35 @@ def evaluate_package_import_order(
                 )
             )
 
+        elif step.op == "SNAPSHOT_CLASS_DECORATORS":
+            if (
+                not step.definition_id
+                or not step.binding
+                or not step.decorator_names
+            ):
+                return result("UNKNOWN", module)
+
+            snapshot = _snapshot_named_decorators(
+                step.decorator_names,
+                namespaces[module],
+            )
+
+            if snapshot is None:
+                return result(
+                    "UNKNOWN",
+                    module,
+                    step.binding,
+                )
+
+            class_decorator_snapshots[
+                step.definition_id
+            ] = tuple(
+                zip(
+                    snapshot.names,
+                    snapshot.values,
+                )
+            )
+
         elif step.op == "PREPARE_PASSIVE_CLASS":
             if not step.binding or not step.definition_id:
                 return result("UNKNOWN", module, step.binding)
@@ -2425,6 +2495,13 @@ def evaluate_package_import_order(
             if not selected.passive_metaclass_creation:
                 return result("UNKNOWN", module, step.binding)
             prepared_class_bases[step.definition_id] = (base_facts, selected)
+
+        elif step.op == "DEFINE_DECORATED_PASSIVE_CLASS":
+            return result(
+                "UNKNOWN",
+                module,
+                step.binding,
+            )
 
         elif step.op == "DEFINE_PASSIVE_CLASS":
             prepared = prepared_class_bases.pop(
