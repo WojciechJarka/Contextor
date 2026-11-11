@@ -12,6 +12,38 @@ class _RestrictedFunction:
     parameters: tuple[str, ...] = ()
 
 
+@dataclass(frozen=True, eq=False)
+class _DecoratorSnapshot:
+    names: tuple[str, ...]
+    values: tuple[object, ...]
+
+
+def _snapshot_named_decorators(
+    names: tuple[str, ...],
+    namespace: dict[str, object | None],
+) -> _DecoratorSnapshot | None:
+    if not names:
+        return None
+
+    values: list[object] = []
+
+    for name in names:
+        if (
+            not name
+            or not name.isidentifier()
+            or name.startswith("__")
+            or name not in namespace
+        ):
+            return None
+
+        values.append(namespace[name])
+
+    return _DecoratorSnapshot(
+        names=names,
+        values=tuple(values),
+    )
+
+
 def _new_restricted_function(
     defining_module: str,
     body: tuple[_Step, ...],
