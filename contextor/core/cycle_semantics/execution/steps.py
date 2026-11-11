@@ -23,3 +23,4 @@ class _Step:
     passive_metaclass_body: bool = False
     parameters: tuple[str, ...] = ()
     call_argument_values: tuple[object, ...] = ()
+    call_argument_name: str | None = None

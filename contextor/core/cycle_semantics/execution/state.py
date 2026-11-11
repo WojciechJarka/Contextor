@@ -38,6 +38,7 @@ class _FunctionFrame:
         compare=False,
         repr=False,
     )
+    result_binding: str | None = None
 
 
 def _frame_module(
@@ -65,6 +66,7 @@ def _advance_frame(
             frame.index + 1,
             frame.steps,
             frame.local_bindings,
+            frame.result_binding,
         )
     return (frame[0], frame[1] + 1)
 

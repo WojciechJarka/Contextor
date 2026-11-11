@@ -749,6 +749,42 @@ def _compile(
                         name,
                     )
                 )
+            elif (
+                isinstance(value, ast.Call)
+                and isinstance(value.func, ast.Name)
+                and not value.func.id.startswith("__")
+                and len(value.args) <= 1
+                and not value.keywords
+                and all(
+                    (
+                        type(argument) is ast.Constant
+                        and type(argument.value)
+                        in (type(None), bool, int, str)
+                    )
+                    or (
+                        type(argument) is ast.Name
+                        and not argument.id.startswith("__")
+                    )
+                    for argument in value.args
+                )
+            ):
+                steps.append(
+                    _Step(
+                        "CALL_FUNCTION",
+                        target=value.func.id,
+                        binding=name,
+                        call_argument_name=(
+                            value.args[0].id
+                            if value.args and type(value.args[0]) is ast.Name
+                            else None
+                        ),
+                        call_argument_values=tuple(
+                            argument.value
+                            for argument in value.args
+                            if type(argument) is ast.Constant
+                        ),
+                    )
+                )
             else:
                 return None
 
@@ -969,6 +1005,20 @@ def _compile(
                         )
                         continue
 
+                    if (
+                        isinstance(body_statement, ast.Return)
+                        and isinstance(body_statement.value, ast.Name)
+                        and len(args.args) == 1
+                        and body_statement.value.id == args.args[0].arg
+                    ):
+                        function_steps.append(
+                            _Step(
+                                "RETURN_FUNCTION",
+                                symbol=body_statement.value.id,
+                            )
+                        )
+                        continue
+
                     if not isinstance(
                         body_statement,
                         (ast.Import, ast.ImportFrom),
@@ -1009,6 +1059,20 @@ def _compile(
                         )
                         for item in compiled
                     )
+
+            if restricted_callable and any(
+                item.op == "RETURN_FUNCTION"
+                and item.symbol is not None
+                for item in function_steps
+            ) and any(
+                item.op in {
+                    "IMPORT",
+                    "FROM",
+                    "PREPARE_FROM_MEMBER",
+                }
+                for item in function_steps
+            ):
+                restricted_callable = False
 
             if restricted_callable:
                 steps.append(
@@ -1054,9 +1118,15 @@ def _compile(
                 or len(expression.args) > 1
                 or expression.keywords
                 or any(
-                    not isinstance(argument, ast.Constant)
-                    or type(argument.value)
-                    not in (type(None), bool, int, str)
+                    not (
+                        type(argument) is ast.Constant
+                        and type(argument.value)
+                        in (type(None), bool, int, str)
+                    )
+                    and not (
+                        type(argument) is ast.Name
+                        and not argument.id.startswith("__")
+                    )
                     for argument in expression.args
                 )
             ):
@@ -1066,9 +1136,16 @@ def _compile(
                 _Step(
                     "CALL_FUNCTION",
                     target=expression.func.id,
+                    call_argument_name=(
+                        expression.args[0].id
+                        if expression.args
+                        and type(expression.args[0]) is ast.Name
+                        else None
+                    ),
                     call_argument_values=tuple(
                         argument.value
                         for argument in expression.args
+                        if type(argument) is ast.Constant
                     ),
                 )
             )
@@ -1480,7 +1557,7 @@ def evaluate_package_import_order(
         writes_child = any(
             step.binding in children
             and (
-                step.op in {"BIND", "ALIAS"}
+                step.op in {"BIND", "ALIAS", "CALL_FUNCTION"}
                 or (step.op == "FROM" and step.target != package)
             )
             for step in programs[package]
@@ -1580,7 +1657,7 @@ def evaluate_package_import_order(
                 writes_child = any(
                     step.binding in children
                     and (
-                        step.op in {"BIND", "ALIAS"}
+                        step.op in {"BIND", "ALIAS", "CALL_FUNCTION"}
                         or (
                             step.op == "FROM"
                             and step.target != module
@@ -1614,6 +1691,8 @@ def evaluate_package_import_order(
 
         if index >= len(steps):
             if isinstance(active_frame, _FunctionFrame):
+                if active_frame.result_binding is not None:
+                    namespaces[module][active_frame.result_binding] = None
                 frames.pop()
                 execution_cursor.step_budget += 1
             else:
@@ -2201,14 +2280,46 @@ def evaluate_package_import_order(
             if not isinstance(active_frame, _FunctionFrame):
                 return result("UNKNOWN", module)
 
+            returned_value = None
+
+            if step.symbol is not None:
+                if step.symbol not in active_frame.local_bindings:
+                    return result("UNKNOWN", module, step.symbol)
+
+                returned_value = active_frame.local_bindings[step.symbol]
+
+            result_binding = active_frame.result_binding
+
             frames.pop()
+
+            if result_binding is not None:
+                namespaces[module][result_binding] = returned_value
+
             continue
 
         elif step.op == "CALL_FUNCTION":
+            call_step = step
+
+            if step.call_argument_name is not None:
+                if step.call_argument_name not in namespaces[module]:
+                    return result(
+                        "UNKNOWN",
+                        module,
+                        step.call_argument_name,
+                    )
+
+                call_step = replace(
+                    step,
+                    call_argument_values=(
+                        namespaces[module][step.call_argument_name],
+                    ),
+                    call_argument_name=None,
+                )
+
             local_bindings: dict[str, object | None] = {}
 
             body = _execute_restricted_call(
-                step,
+                call_step,
                 module=module,
                 namespaces=namespaces,
                 local_bindings=local_bindings,
@@ -2232,6 +2343,7 @@ def evaluate_package_import_order(
                     0,
                     body,
                     local_bindings,
+                    step.binding,
                 )
             )
             continue

@@ -1,241 +1,323 @@
-# P5-M08-I4 — single positional argument binding
+# P5-M08-I5 — restricted return value transport
 
 ## PREFLIGHT
 
-DIRECT_EVIDENCE: Contextor MCP used first. Initial canonical LIVE revision 1315, source fresh, `workspace_sync=verified`. Initial HEAD `d17534a8510d691a38196d50442423f46f280389`; initial status clean. Backend `C:\Temp\Contextor_Repo\.venv\Scripts\python.exe` is CPython 3.15.2. Source anchors matched at `execution/steps.py:6-23`, `execution/calls.py:8-38`, `execution/state.py:31-41`, `package_model.py:940-1064,1905-1917,2192-2212`. The external two-argument factory calls at `tests/test_cycle_semantics_function_identity_model.py:113-114` retain compatibility through the new default.
+- DIRECT_EVIDENCE: Contextor MCP queried `package_model.py` first. Canonical LIVE revision 1319, source fresh and `workspace_sync=verified`; `cycle_semantics=stale`. Initial HEAD `8003547c6fce9047379b936fe7414d39322b8066`; initial `git status --short` clean. Backend `C:\Temp\Contextor_Repo\.venv\Scripts\python.exe` (CPython 3.15.2, established by prior M08-I4 and used in this task).
+- DIRECT_EVIDENCE: Accepted anchors matched current source: `_Step` fields (`execution/steps.py:6-25`), `_FunctionFrame` and `_advance_frame` (`execution/state.py:31-72`), function/call compiler (`package_model.py:940-1149`), return and call evaluator (`package_model.py:2279-2348`). `replace` was already imported at `package_model.py:11`. Package child-name collision guards were present at `package_model.py:1543-1570,1636-1672`. All `_FunctionFrame` constructors and `_advance_frame` consumers were inventoried by targeted `rg`.
 
 ## FILES_CHANGED
 
-`contextor/core/cycle_semantics/execution/steps.py`; `contextor/core/cycle_semantics/execution/calls.py`; `contextor/core/cycle_semantics/package_model.py`; `tests/test_cycle_semantics_single_positional_binding.py` (new). `walkthrough.md` is this report.
+- `contextor/core/cycle_semantics/execution/steps.py`
+- `contextor/core/cycle_semantics/execution/state.py`
+- `contextor/core/cycle_semantics/package_model.py`
+- `tests/test_cycle_semantics_return_value_transport.py` (new)
+- `walkthrough.md` (this report)
 
-## ARGUMENT_BINDING_CONTRACT
+## RETURN_VALUE_TRANSPORT
 
-CODE_PATH_PROVED: Compiler admits at most one ordinary required positional parameter and at most one literal call argument of type `None`, `bool`, `int`, or `str` (`package_model.py:946-956,1050-1073`). The supported function body remains pass/import/from-import/bare-return (`package_model.py:958-1012`). The call helper checks the current module namespace object, defining module and arity before binding (`execution/calls.py:27-52`).
+- CODE_PATH_PROVED: The compiler emits `RETURN_FUNCTION` with `step.symbol` only for a return of the sole positional parameter (`package_model.py:1008-1020`). It marks a restricted function opaque if that kind of return is combined with an import step (`package_model.py:1063-1076`). Bare return remains supported.
+- CODE_PATH_PROVED: On return, the evaluator reads the current function frame's local binding, pops the function frame, and writes the result to the suspended module's result binding (`package_model.py:2279-2301`). Normal function-frame exhaustion binds abstract `None` (`package_model.py:1691-1699`). The caller was already advanced before the function frame was pushed (`package_model.py:2337-2348`).
 
-## FUNCTION_SIGNATURE_REPRESENTATION
+## FUNCTION_OBJECT_IDENTITY
 
-DIRECT_EVIDENCE: Two fields appended to frozen `_Step` (`execution/steps.py:24-25`); one field appended to `_RestrictedFunction` with an empty default (`execution/calls.py:12`). `_new_restricted_function` preserves two-argument calls (`execution/calls.py:16-27`).
+- CODE_PATH_PROVED: `_execute_restricted_call` returns the bound object from the current namespace and places that same object in the frame's `local_bindings` (`execution/calls.py:27-52`); `RETURN_FUNCTION` reads and rebinds it without copying (`package_model.py:2286-2301`). The positive CPython/model cases prove execution of the returned object's original body after aliasing and rebinding (`tests/test_cycle_semantics_return_value_transport.py:18-37,75-117`).
 
-## LOCAL_BINDING_ISOLATION
+## ASSIGNED_CALL_CONTRACT
 
-CODE_PATH_PROVED: A new dictionary is made for each call and stored in that call's frame (`package_model.py:2207-2239`); frame advancement retains the same dictionary (`execution/state.py:64-72`). Direct tests cover binding, two independent calls, aliasing, wrong arity, zero arguments and foreign calls (`tests/test_cycle_semantics_single_positional_binding.py:129-201`).
+- CODE_PATH_PROVED: `_compile` accepts `result = simple_name(...)` only with zero or one literal or ordinary name argument, preserving the pre-existing assignment-target and dunder restrictions (`package_model.py:683-793`). Expression calls use the same argument boundary (`package_model.py:1112-1149`). Name arguments are looked up in the current module namespace immediately before admission; missing names yield `UNKNOWN` (`package_model.py:2303-2323`). A new frame carries `result_binding` (`execution/state.py:31-72; package_model.py:2339-2348`). Both package child-name collision guards now include assigned `CALL_FUNCTION` (`package_model.py:1557-1567,1657-1668`).
 
 ## CPYTHON_PARITY_MATRIX
 
-| Case | CPython 3.15.2 | Model | Child START_IMPORT |
+| Case | CPython 3.15.2 | Model | Model CALL_FUNCTION |
 |---|---|---|---|
-| required argument import | success; child | MODEL_PASS | child |
-| alias signature | success; child | MODEL_PASS | child |
-| argument and bare return | success; child only | MODEL_PASS | child |
-| missing argument | TypeError; none | UNKNOWN | none |
-| excess argument | TypeError; none | UNKNOWN | none |
-| two arguments | TypeError; none | UNKNOWN | none |
+| pass-through identity | success; `pkg.child` | MODEL_PASS; child | identity, alias |
+| alias after original rebinding | success; `pkg.child` | MODEL_PASS; child | identity, alias |
+| independent calls | success; first, second | MODEL_PASS; first, second | identity, identity, a, b |
+| bare return assigned | success; no child | MODEL_PASS | f |
+| natural completion assigned | success; no child | MODEL_PASS | f |
+| unresolved argument name | NameError; no child | UNKNOWN | none |
+| unsupported global return lookup | success; no child | UNKNOWN | none |
+| returned noncallable | TypeError; no child | UNKNOWN | identity only |
+| local import shadows parameter | success; `pkg.child` | UNKNOWN | none |
 
-DIRECT_EVIDENCE: `tests/test_cycle_semantics_single_positional_binding.py:20-128` asserts the six rows using the isolated CPython runner in `tests/test_cycle_semantics_decorator_import_effect_baseline.py:76-107`, then separately checks model outcome and events. This does not prove arbitrary call support.
+- DIRECT_EVIDENCE: The nine parameterized cases in `tests/test_cycle_semantics_return_value_transport.py:18-118` execute the same source under isolated CPython and as AST through the model. Exact error type, ordered child import trace, model outcome and call-event order are asserted. `UNKNOWN` is not claimed as parity.
 
-## WRONG_ARITY_NEGATIVE_CONTRACTS
+## NEGATIVE_CONTRACTS
 
-CODE_PATH_PROVED: Wrong arity returns `UNKNOWN` before `CALL_FUNCTION` or child import; two-argument syntax is rejected by compiler (`execution/calls.py:36-42`; `package_model.py:1050-1062,2207-2220`). Direct helper test proves no local write on failed arity (`tests/test_cycle_semantics_single_positional_binding.py:160-171`).
-
-## UNCHANGED_UNKNOWN_BOUNDARIES
-
-CODE_PATH_PROVED: Decorated definitions, computed/keyword call arguments, defaults for restricted calls and unsupported bodies remain outside this execution path (`package_model.py:142-225,946-1012,1050-1062`). Foreign functions return `None` from the helper (`execution/calls.py:36-42`). No parameter reads, valued returns or closures were introduced.
+- CODE_PATH_PROVED: Unsupported global return is opaque because zero-parameter `return original` does not match the parameter-return branch (`package_model.py:1008-1025`). Import followed by parameter return is opaque by the mixed-step guard (`package_model.py:1063-1076`). Missing name and noncallable target return `UNKNOWN` before a successful call event for that target (`package_model.py:2307-2331`). Foreign restricted function calls remain rejected by `execution/calls.py:35-42`.
 
 ## TARGETED_TEST_RESULTS
 
-DIRECT_EVIDENCE: The requested 11 focused test files completed with **289 passed, 2 third-party Authlib deprecation warnings**, exit 0, 41.20 s. `git diff --check` exit 0, with line-ending notices only.
+- DIRECT_EVIDENCE: The exact requested 13-file focused pytest command completed with **314 passed, 2 third-party Authlib deprecation warnings**, exit code 0, 39.79 s. `git diff --check` exited 0; Git printed only line-ending notices. No full suite or SCC02 was run.
 
 ## MCP_POST_CHANGE_AUDIT
 
-DIRECT_EVIDENCE: Canonical LIVE revision **1319**, `workspace_sync=verified` for `package_model.py`, `execution/steps.py` and `execution/calls.py`; source/graph/topology/cycles fresh; `cycle_semantics=stale`. Syntax errors 0; DFS structural cycle count 16; active warning count 16. Hard edges remain `package_model -> execution.calls -> execution.steps`; steps has no outbound hard edge. Separate cyclic SCC count was not available from this query. Source freshness does not establish loaded-code adoption or current semantic classification.
+- DIRECT_EVIDENCE: Canonical LIVE revision **1323**; `package_model.py`, `execution/state.py` and `execution/steps.py` source fresh with `workspace_sync=verified`; module/graph/topology/cycles fresh; `cycle_semantics=stale`. Syntax errors 0, DFS structural cycle count 16, active warnings 16. `execution/state.py` still depends on `execution.class_facts` and `execution.steps`; `execution.steps` has no outbound hard edge. Source freshness is not runtime adoption or fresh semantic classification.
 
 ## FULL_DIFFS
 
-These are complete source/test diffs. Blank context lines omit only Git's trailing context space for Markdown whitespace hygiene.
+Complete source/test diffs follow. Git's trailing spaces on blank context lines are omitted in the Markdown rendering only.
 
 ### execution/steps.py
 
 ```diff
 diff --git a/contextor/core/cycle_semantics/execution/steps.py b/contextor/core/cycle_semantics/execution/steps.py
-index 4c6245b..fd962a9 100644
+index fd962a9..2d92617 100644
 --- a/contextor/core/cycle_semantics/execution/steps.py
 +++ b/contextor/core/cycle_semantics/execution/steps.py
-@@ -21,3 +21,5 @@ class _Step:
-     base_names: tuple[str, ...] = ()
-     explicit_metaclass_name: str | None = None
+@@ -23,3 +23,4 @@ class _Step:
      passive_metaclass_body: bool = False
-+    parameters: tuple[str, ...] = ()
-+    call_argument_values: tuple[object, ...] = ()
+     parameters: tuple[str, ...] = ()
+     call_argument_values: tuple[object, ...] = ()
++    call_argument_name: str | None = None
 ```
 
-### execution/calls.py
+### execution/state.py
 
 ```diff
-diff --git a/contextor/core/cycle_semantics/execution/calls.py b/contextor/core/cycle_semantics/execution/calls.py
-index 32965a1..e9c5728 100644
---- a/contextor/core/cycle_semantics/execution/calls.py
-+++ b/contextor/core/cycle_semantics/execution/calls.py
-@@ -9,15 +9,18 @@ from .steps import _Step
- class _RestrictedFunction:
-     defining_module: str
-     body: tuple[_Step, ...]
-+    parameters: tuple[str, ...] = ()
-
-
- def _new_restricted_function(
-     defining_module: str,
-     body: tuple[_Step, ...],
-+    parameters: tuple[str, ...] = (),
- ) -> _RestrictedFunction:
-     return _RestrictedFunction(
-         defining_module=defining_module,
-         body=body,
-+        parameters=parameters,
+diff --git a/contextor/core/cycle_semantics/execution/state.py b/contextor/core/cycle_semantics/execution/state.py
+index 17d54aa..7fd4221 100644
+--- a/contextor/core/cycle_semantics/execution/state.py
++++ b/contextor/core/cycle_semantics/execution/state.py
+@@ -38,6 +38,7 @@ class _FunctionFrame:
+         compare=False,
+         repr=False,
      )
++    result_binding: str | None = None
 
 
-@@ -26,13 +29,23 @@ def _execute_restricted_call(
-     *,
-     module: str,
-     namespaces: dict[str, dict[str, object | None]],
-+    local_bindings: dict[str, object | None],
- ) -> tuple[_Step, ...] | None:
-     value = namespaces[module].get(step.target)
-
-     if (
-         not isinstance(value, _RestrictedFunction)
-         or value.defining_module != module
-+        or len(value.parameters)
-+        != len(step.call_argument_values)
-     ):
-         return None
-
-+    local_bindings.update(
-+        zip(
-+            value.parameters,
-+            step.call_argument_values,
-+        )
-+    )
-+
-     return value.body
+ def _frame_module(
+@@ -65,6 +66,7 @@ def _advance_frame(
+             frame.index + 1,
+             frame.steps,
+             frame.local_bindings,
++            frame.result_binding,
+         )
+     return (frame[0], frame[1] + 1)
 ```
 
 ### package_model.py
 
 ```diff
 diff --git a/contextor/core/cycle_semantics/package_model.py b/contextor/core/cycle_semantics/package_model.py
-index 7b0384b..10fdf8f 100644
+index 10fdf8f..0500033 100644
 --- a/contextor/core/cycle_semantics/package_model.py
 +++ b/contextor/core/cycle_semantics/package_model.py
-@@ -943,14 +943,14 @@ def _compile(
-
-             args = stmt.args
-
--            restricted_callable = not (
--                args.posonlyargs
--                or args.args
--                or args.vararg is not None
--                or args.kwonlyargs
--                or args.kwarg is not None
--                or args.defaults
--                or args.kw_defaults
-+            restricted_callable = (
-+                not args.posonlyargs
-+                and len(args.args) <= 1
-+                and args.vararg is None
-+                and not args.kwonlyargs
-+                and args.kwarg is None
-+                and not args.defaults
-+                and not args.kw_defaults
-             )
-
-             function_steps: list[_Step] = []
-@@ -1016,6 +1016,10 @@ def _compile(
-                         "DEFINE_FUNCTION",
-                         binding=stmt.name,
-                         function_body=tuple(function_steps),
-+                        parameters=tuple(
-+                            parameter.arg
-+                            for parameter in args.args
-+                        ),
+@@ -749,6 +749,42 @@ def _compile(
+                         name,
                      )
                  )
++            elif (
++                isinstance(value, ast.Call)
++                and isinstance(value.func, ast.Name)
++                and not value.func.id.startswith("__")
++                and len(value.args) <= 1
++                and not value.keywords
++                and all(
++                    (
++                        type(argument) is ast.Constant
++                        and type(argument.value)
++                        in (type(None), bool, int, str)
++                    )
++                    or (
++                        type(argument) is ast.Name
++                        and not argument.id.startswith("__")
++                    )
++                    for argument in value.args
++                )
++            ):
++                steps.append(
++                    _Step(
++                        "CALL_FUNCTION",
++                        target=value.func.id,
++                        binding=name,
++                        call_argument_name=(
++                            value.args[0].id
++                            if value.args and type(value.args[0]) is ast.Name
++                            else None
++                        ),
++                        call_argument_values=tuple(
++                            argument.value
++                            for argument in value.args
++                            if type(argument) is ast.Constant
++                        ),
++                    )
++                )
              else:
-@@ -1047,8 +1051,14 @@ def _compile(
-                 not isinstance(expression, ast.Call)
-                 or not isinstance(expression.func, ast.Name)
-                 or expression.func.id.startswith("__")
--                or expression.args
-+                or len(expression.args) > 1
-                 or expression.keywords
-+                or any(
-+                    not isinstance(argument, ast.Constant)
-+                    or type(argument.value)
-+                    not in (type(None), bool, int, str)
-+                    for argument in expression.args
-                 )
-             ):
                  return None
 
-@@ -1056,6 +1066,10 @@ def _compile(
+@@ -969,6 +1005,20 @@ def _compile(
+                         )
+                         continue
+
++                    if (
++                        isinstance(body_statement, ast.Return)
++                        and isinstance(body_statement.value, ast.Name)
++                        and len(args.args) == 1
++                        and body_statement.value.id == args.args[0].arg
++                    ):
++                        function_steps.append(
++                            _Step(
++                                "RETURN_FUNCTION",
++                                symbol=body_statement.value.id,
++                            )
++                        )
++                        continue
++
+                     if not isinstance(
+                         body_statement,
+                         (ast.Import, ast.ImportFrom),
+@@ -1010,6 +1060,20 @@ def _compile(
+                         for item in compiled
+                     )
+
++            if restricted_callable and any(
++                item.op == "RETURN_FUNCTION"
++                and item.symbol is not None
++                for item in function_steps
++            ) and any(
++                item.op in {
++                    "IMPORT",
++                    "FROM",
++                    "PREPARE_FROM_MEMBER",
++                }
++                for item in function_steps
++            ):
++                restricted_callable = False
++
+             if restricted_callable:
+                 steps.append(
+                     _Step(
+@@ -1054,9 +1118,15 @@ def _compile(
+                 or len(expression.args) > 1
+                 or expression.keywords
+                 or any(
+-                    not isinstance(argument, ast.Constant)
+-                    or type(argument.value)
+-                    not in (type(None), bool, int, str)
++                    not (
++                        type(argument) is ast.Constant
++                        and type(argument.value)
++                        in (type(None), bool, int, str)
++                    )
++                    and not (
++                        type(argument) is ast.Name
++                        and not argument.id.startswith("__")
++                    )
+                     for argument in expression.args
+                 )
+             ):
+@@ -1066,9 +1136,16 @@ def _compile(
                  _Step(
                      "CALL_FUNCTION",
                      target=expression.func.id,
-+                    call_argument_values=tuple(
-+                        argument.value
-+                        for argument in expression.args
++                    call_argument_name=(
++                        expression.args[0].id
++                        if expression.args
++                        and type(expression.args[0]) is ast.Name
++                        else None
 +                    ),
+                     call_argument_values=tuple(
+                         argument.value
+                         for argument in expression.args
++                        if type(argument) is ast.Constant
+                     ),
                  )
              )
-
-@@ -1907,6 +1921,7 @@ def evaluate_package_import_order(
-                 _new_restricted_function(
-                     module,
-                     step.function_body,
-+                    step.parameters,
-                 )
+@@ -1480,7 +1557,7 @@ def evaluate_package_import_order(
+         writes_child = any(
+             step.binding in children
+             and (
+-                step.op in {"BIND", "ALIAS"}
++                step.op in {"BIND", "ALIAS", "CALL_FUNCTION"}
+                 or (step.op == "FROM" and step.target != package)
              )
+             for step in programs[package]
+@@ -1580,7 +1657,7 @@ def evaluate_package_import_order(
+                 writes_child = any(
+                     step.binding in children
+                     and (
+-                        step.op in {"BIND", "ALIAS"}
++                        step.op in {"BIND", "ALIAS", "CALL_FUNCTION"}
+                         or (
+                             step.op == "FROM"
+                             and step.target != module
+@@ -1614,6 +1691,8 @@ def evaluate_package_import_order(
 
-@@ -2190,10 +2205,13 @@ def evaluate_package_import_order(
+         if index >= len(steps):
+             if isinstance(active_frame, _FunctionFrame):
++                if active_frame.result_binding is not None:
++                    namespaces[module][active_frame.result_binding] = None
+                 frames.pop()
+                 execution_cursor.step_budget += 1
+             else:
+@@ -2201,14 +2280,46 @@ def evaluate_package_import_order(
+             if not isinstance(active_frame, _FunctionFrame):
+                 return result("UNKNOWN", module)
+
++            returned_value = None
++
++            if step.symbol is not None:
++                if step.symbol not in active_frame.local_bindings:
++                    return result("UNKNOWN", module, step.symbol)
++
++                returned_value = active_frame.local_bindings[step.symbol]
++
++            result_binding = active_frame.result_binding
++
+             frames.pop()
++
++            if result_binding is not None:
++                namespaces[module][result_binding] = returned_value
++
              continue
 
          elif step.op == "CALL_FUNCTION":
-+            local_bindings: dict[str, object | None] = {}
++            call_step = step
 +
++            if step.call_argument_name is not None:
++                if step.call_argument_name not in namespaces[module]:
++                    return result(
++                        "UNKNOWN",
++                        module,
++                        step.call_argument_name,
++                    )
++
++                call_step = replace(
++                    step,
++                    call_argument_values=(
++                        namespaces[module][step.call_argument_name],
++                    ),
++                    call_argument_name=None,
++                )
++
+             local_bindings: dict[str, object | None] = {}
+
              body = _execute_restricted_call(
-                 step,
+-                step,
++                call_step,
                  module=module,
                  namespaces=namespaces,
-+                local_bindings=local_bindings,
+                 local_bindings=local_bindings,
+@@ -2232,6 +2343,7 @@ def evaluate_package_import_order(
+                     0,
+                     body,
+                     local_bindings,
++                    step.binding,
+                 )
              )
-
-             if body is None:
-@@ -2208,7 +2226,14 @@ def evaluate_package_import_order(
-             )
-
-             frames[-1] = _advance_frame(frames[-1])
--            frames.append(_FunctionFrame(module, 0, body))
-+            frames.append(
-+                _FunctionFrame(
-+                    module,
-+                    0,
-+                    body,
-+                    local_bindings,
-+                )
              continue
-
-         elif step.op == "BIND":
 ```
 
-### tests/test_cycle_semantics_single_positional_binding.py
+### tests/test_cycle_semantics_return_value_transport.py
 
 ```diff
-diff --git a/tests/test_cycle_semantics_single_positional_binding.py b/tests/test_cycle_semantics_single_positional_binding.py
+diff --git a/tests/test_cycle_semantics_return_value_transport.py b/tests/test_cycle_semantics_return_value_transport.py
 new file mode 100644
-index 0000000..d3fee70
+index 0000000..d927962
 --- /dev/null
-+++ b/tests/test_cycle_semantics_single_positional_binding.py
-@@ -0,0 +1,201 @@
++++ b/tests/test_cycle_semantics_return_value_transport.py
+@@ -0,0 +1,134 @@
 +import ast
 +import json
 +import subprocess
@@ -247,198 +329,131 @@ index 0000000..d3fee70
 +    _execute_restricted_call,
 +    _new_restricted_function,
 +)
-+from contextor.core.cycle_semantics.execution.state import _FunctionFrame
-+from contextor.core.cycle_semantics.execution.steps import _Step
-+from contextor.core.cycle_semantics.package_model import (
-+    evaluate_package_import_order,
++from contextor.core.cycle_semantics.execution.state import (
++    _FunctionFrame,
++    _advance_frame,
 +)
++from contextor.core.cycle_semantics.execution.steps import _Step
++from contextor.core.cycle_semantics.package_model import evaluate_package_import_order
 +from test_cycle_semantics_decorator_import_effect_baseline import RUNNER
 +
 +
 +CASES = [
 +    pytest.param(
-+        "def f(x):\n    import pkg.child\nf(7)\n",
-+        None,
-+        ("pkg.child",),
-+        "MODEL_PASS",
-+        id="required-argument-import",
++        "def original():\n    import pkg.child\ndef identity(fn):\n    return fn\nalias = identity(original)\nalias()\n",
++        None, ("pkg.child",), "MODEL_PASS", ("identity", "alias"),
++        id="pass-through-identity",
 +    ),
 +    pytest.param(
-+        "def f(x):\n    import pkg.child\ng = f\ng(7)\n",
-+        None,
-+        ("pkg.child",),
-+        "MODEL_PASS",
-+        id="alias-preserves-parameter-signature",
++        "def original():\n    import pkg.child\nsaved = original\ndef identity(fn):\n    return fn\noriginal = None\nalias = identity(saved)\nalias()\n",
++        None, ("pkg.child",), "MODEL_PASS", ("identity", "alias"),
++        id="alias-after-rebinding",
 +    ),
 +    pytest.param(
-+        "def f(x):\n    import pkg.child\n    return\n    import pkg.after\nf(7)\n",
-+        None,
-+        ("pkg.child",),
-+        "MODEL_PASS",
-+        id="argument-with-bare-return",
++        "def one():\n    import pkg.first\ndef two():\n    import pkg.second\ndef identity(fn):\n    return fn\na = identity(one)\nb = identity(two)\na()\nb()\n",
++        None, ("pkg.first", "pkg.second"), "MODEL_PASS",
++        ("identity", "identity", "a", "b"),
++        id="independent-calls",
 +    ),
 +    pytest.param(
-+        "def f(x):\n    import pkg.child\nf()\n",
-+        "TypeError",
-+        (),
-+        "UNKNOWN",
-+        id="missing-argument",
++        "def f():\n    return\nresult = f()\n",
++        None, (), "MODEL_PASS", ("f",), id="bare-return-assigned",
 +    ),
 +    pytest.param(
-+        "def f():\n    import pkg.child\nf(7)\n",
-+        "TypeError",
-+        (),
-+        "UNKNOWN",
-+        id="excess-argument",
++        "def f():\n    pass\nresult = f()\n",
++        None, (), "MODEL_PASS", ("f",), id="natural-completion-assigned",
 +    ),
 +    pytest.param(
-+        "def f(x):\n    import pkg.child\nf(7, 8)\n",
-+        "TypeError",
-+        (),
-+        "UNKNOWN",
-+        id="two-arguments-unsupported",
++        "def identity(fn):\n    return fn\nalias = identity(missing)\n",
++        "NameError", (), "UNKNOWN", (), id="unresolved-argument-name",
++    ),
++    pytest.param(
++        "def original():\n    pass\ndef f():\n    return original\nalias = f()\n",
++        None, (), "UNKNOWN", (), id="unsupported-global-return-lookup",
++    ),
++    pytest.param(
++        "def identity(fn):\n    return fn\nalias = identity(7)\nalias()\n",
++        "TypeError", (), "UNKNOWN", ("identity",),
++        id="returned-noncallable",
++    ),
++    pytest.param(
++        "def f(x):\n    import pkg.child as x\n    return x\nresult = f(7)\n",
++        None, ("pkg.child",), "UNKNOWN", (),
++        id="local-import-shadows-parameter",
 +    ),
 +]
 +
 +
 +@pytest.mark.parametrize(
-+    "source,expected_error,expected_imports,expected_outcome",
++    "source,expected_error,expected_imports,expected_outcome,expected_calls",
 +    CASES,
 +)
-+def test_single_positional_binding_matches_cpython(
-+    tmp_path,
-+    source,
-+    expected_error,
-+    expected_imports,
-+    expected_outcome,
++def test_return_value_transport_matches_cpython(
++    tmp_path, source, expected_error, expected_imports,
++    expected_outcome, expected_calls,
 +):
 +    package = tmp_path / "pkg"
 +    package.mkdir()
 +    (package / "__init__.py").write_text(source, encoding="utf-8")
-+    for child in ("child", "after"):
++    for child in ("child", "first", "second"):
 +        (package / f"{child}.py").write_text("pass\n", encoding="utf-8")
 +
 +    process = subprocess.run(
 +        [sys.executable, "-I", "-B", "-c", RUNNER, str(tmp_path)],
-+        capture_output=True,
-+        text=True,
-+        timeout=20,
-+        check=False,
++        capture_output=True, text=True, timeout=20, check=False,
 +    )
 +    assert process.returncode == 0, process.stderr
-+    observed = json.loads(process.stdout)
-+    assert observed == {
++    assert json.loads(process.stdout) == {
 +        "error": expected_error,
 +        "imports": list(expected_imports),
 +    }
 +
-+    result = evaluate_package_import_order(
-+        {
-+            "pkg.__init__": ast.parse(source),
-+            "pkg.child": ast.parse("pass\n"),
-+            "pkg.after": ast.parse("pass\n"),
-+        },
-+        "pkg",
-+    )
++    sources = {"pkg.__init__": ast.parse(source)}
++    for child in ("child", "first", "second"):
++        sources[f"pkg.{child}"] = ast.parse("pass\n")
++    result = evaluate_package_import_order(sources, "pkg")
 +    assert result.outcome == expected_outcome
-+    imported = [
-+        event.target
-+        for event in result.events
-+        if event.operation == "START_IMPORT"
-+        and event.target in {"pkg.child", "pkg.after"}
-+    ]
++    assert tuple(
++        event.symbol for event in result.events
++        if event.operation == "CALL_FUNCTION"
++    ) == expected_calls
 +    if expected_outcome == "MODEL_PASS":
-+        assert imported == list(expected_imports)
++        assert tuple(
++            event.target for event in result.events
++            if event.operation == "START_IMPORT"
++            and event.target in {"pkg.child", "pkg.first", "pkg.second"}
++        ) == expected_imports
 +    else:
-+        assert imported == []
 +        assert not any(
-+            event.operation == "CALL_FUNCTION"
++            event.operation == "START_IMPORT"
++            and event.target in {"pkg.child", "pkg.first", "pkg.second"}
 +            for event in result.events
 +        )
 +
 +
-+def test_argument_is_bound_in_new_frame():
++def test_returned_function_retains_object_identity():
 +    body = (_Step("RETURN_FUNCTION"),)
-+    function = _new_restricted_function("pkg", body, ("x",))
-+    namespaces = {"pkg": {"f": function}}
-+    local_bindings = {}
-+    returned = _execute_restricted_call(
-+        _Step("CALL_FUNCTION", target="f", call_argument_values=(7,)),
-+        module="pkg",
-+        namespaces=namespaces,
-+        local_bindings=local_bindings,
-+    )
-+    frame = _FunctionFrame("pkg", 0, returned, local_bindings)
-+    assert returned is body
-+    assert frame.local_bindings == {"x": 7}
-+    assert frame.local_bindings is local_bindings
-+
-+
-+def test_two_calls_have_independent_local_bindings():
-+    function = _new_restricted_function("pkg", (), ("x",))
-+    namespaces = {"pkg": {"f": function}}
-+    first = {}
-+    second = {}
-+    for value, bindings in ((7, first), (8, second)):
-+        assert _execute_restricted_call(
-+            _Step("CALL_FUNCTION", target="f", call_argument_values=(value,)),
-+            module="pkg",
-+            namespaces=namespaces,
-+            local_bindings=bindings,
-+        ) == ()
-+    assert first == {"x": 7}
-+    assert second == {"x": 8}
-+    assert first is not second
-+
-+
-+def test_wrong_arity_does_not_bind():
-+    function = _new_restricted_function("pkg", (), ("x",))
-+    bindings = {}
++    function = _new_restricted_function("pkg", body)
++    local_bindings = {"fn": function}
++    frame = _FunctionFrame("pkg", 0, body, local_bindings, "alias")
++    advanced = _advance_frame(frame)
++    assert advanced.result_binding == "alias"
++    assert advanced.local_bindings is local_bindings
++    assert local_bindings["fn"] is function
 +    assert _execute_restricted_call(
-+        _Step("CALL_FUNCTION", target="f"),
-+        module="pkg",
-+        namespaces={"pkg": {"f": function}},
-+        local_bindings=bindings,
++        _Step("CALL_FUNCTION", target="alias"), module="pkg",
++        namespaces={"pkg": {"alias": function}}, local_bindings={},
++    ) is body
++
++
++def test_foreign_function_remains_rejected():
++    foreign = _new_restricted_function("other", ())
++    assert _execute_restricted_call(
++        _Step("CALL_FUNCTION", target="alias"), module="pkg",
++        namespaces={"pkg": {"alias": foreign}}, local_bindings={},
 +    ) is None
-+    assert bindings == {}
-+
-+
-+def test_alias_preserves_signature():
-+    function = _new_restricted_function("pkg", (), ("x",))
-+    bindings = {}
-+    assert _execute_restricted_call(
-+        _Step("CALL_FUNCTION", target="g", call_argument_values=(7,)),
-+        module="pkg",
-+        namespaces={"pkg": {"f": function, "g": function}},
-+        local_bindings=bindings,
-+    ) == ()
-+    assert bindings == {"x": 7}
-+
-+
-+def test_no_argument_function_still_works():
-+    function = _new_restricted_function("pkg", ())
-+    bindings = {}
-+    assert _execute_restricted_call(
-+        _Step("CALL_FUNCTION", target="f"),
-+        module="pkg",
-+        namespaces={"pkg": {"f": function}},
-+        local_bindings=bindings,
-+    ) == ()
-+    assert bindings == {}
-+
-+
-+def test_foreign_function_is_not_executed():
-+    function = _new_restricted_function("other", (), ("x",))
-+    bindings = {}
-+    assert _execute_restricted_call(
-+        _Step("CALL_FUNCTION", target="f", call_argument_values=(7,)),
-+        module="pkg",
-+        namespaces={"pkg": {"f": function}},
-+        local_bindings=bindings,
-+    ) is None
-+    assert bindings == {}
 ```
 
 ## FINAL_VERDICT
 
-CONTRACT_PROVED for the six stated CPython import-effect cases and the focused helper contracts. The bounded extension passed all requested focused tests. Canonical LIVE source is fresh; `cycle_semantics` remains stale, so no fresh warning or runtime-safety classification is claimed. STOP after this stage.
+CONTRACT_PROVED for the nine listed CPython cases and bounded return transport. Focused tests passed. Canonical source and graph are fresh, while cycle semantics remain stale; no fresh warning-suppression or runtime-safety claim is made. STOP after this stage.
