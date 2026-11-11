@@ -52,7 +52,7 @@ CASES = [
             "    pass\n"
         ),
         ("pkg.lower", "pkg.upper"),
-        "UNKNOWN",
+        "MODEL_PASS",
         id="stacked-decorator-import-order",
     ),
     pytest.param(

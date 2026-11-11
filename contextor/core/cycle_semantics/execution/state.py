@@ -39,6 +39,10 @@ class _FunctionFrame:
         repr=False,
     )
     result_binding: str | None = None
+    decorator_final_binding: str | None = None
+    remaining_decorators: tuple[
+        tuple[str, object], ...
+    ] = ()
 
 
 def _frame_module(
@@ -67,6 +71,8 @@ def _advance_frame(
             frame.steps,
             frame.local_bindings,
             frame.result_binding,
+            frame.decorator_final_binding,
+            frame.remaining_decorators,
         )
     return (frame[0], frame[1] + 1)
 

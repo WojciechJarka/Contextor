@@ -81,3 +81,21 @@ def _execute_restricted_call(
     )
 
     return value.body
+
+
+def _execute_restricted_object_call(
+    value: object,
+    argument: object,
+    *,
+    module: str,
+    local_bindings: dict[str, object | None],
+) -> tuple[_Step, ...] | None:
+    if (
+        not isinstance(value, _RestrictedFunction)
+        or value.defining_module != module
+        or len(value.parameters) != 1
+    ):
+        return None
+
+    local_bindings[value.parameters[0]] = argument
+    return value.body

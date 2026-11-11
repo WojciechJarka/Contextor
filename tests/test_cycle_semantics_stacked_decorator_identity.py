@@ -28,6 +28,7 @@ CASES = [
         ),
         None,
         ("pkg.bottom", "pkg.top"),
+        "MODEL_PASS",
         id="bottom-up-application",
     ),
     pytest.param(
@@ -42,6 +43,7 @@ CASES = [
         ),
         None,
         ("pkg.child", "pkg.child"),
+        "MODEL_PASS",
         id="same-decorator-called-twice",
     ),
     pytest.param(
@@ -61,6 +63,7 @@ CASES = [
         ),
         None,
         ("pkg.bottom", "pkg.top"),
+        "UNKNOWN",
         id="upper-binding-replaced-after-evaluation",
     ),
     pytest.param(
@@ -77,6 +80,7 @@ CASES = [
         ),
         None,
         ("pkg.top",),
+        "MODEL_PASS",
         id="none-intermediate-value",
     ),
     pytest.param(
@@ -94,6 +98,7 @@ CASES = [
         ),
         "TypeError",
         ("pkg.bottom",),
+        "UNKNOWN",
         id="upper-wrong-arity-after-lower-effect",
     ),
     pytest.param(
@@ -112,13 +117,14 @@ CASES = [
         ),
         None,
         ("pkg.bottom", "pkg.top", "pkg.child"),
+        "MODEL_PASS",
         id="decorated-body-executed-last",
     ),
 ]
 
 
 @pytest.mark.parametrize(
-    "source,expected_error,expected_imports",
+    "source,expected_error,expected_imports,expected_model_outcome",
     CASES,
 )
 def test_stacked_decorator_cpython_and_current_boundary(
@@ -126,6 +132,7 @@ def test_stacked_decorator_cpython_and_current_boundary(
     source,
     expected_error,
     expected_imports,
+    expected_model_outcome,
 ):
     package = tmp_path / "pkg"
     package.mkdir()
@@ -177,10 +184,13 @@ def test_stacked_decorator_cpython_and_current_boundary(
         "pkg",
     )
 
-    assert result.outcome == "UNKNOWN"
+    assert result.outcome == expected_model_outcome
 
-    assert not any(
-        event.operation == "CALL_FUNCTION"
-        and event.symbol in {"upper", "lower", "deco"}
-        for event in result.events
-    )
+    if expected_model_outcome == "MODEL_PASS":
+        actual_starts = tuple(
+            event.target for event in result.events
+            if event.operation == "START_IMPORT"
+            and event.target is not None
+            and event.target.startswith("pkg.")
+        )
+        assert actual_starts == tuple(dict.fromkeys(expected_imports))

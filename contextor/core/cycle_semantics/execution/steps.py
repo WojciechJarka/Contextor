@@ -24,3 +24,4 @@ class _Step:
     parameters: tuple[str, ...] = ()
     call_argument_values: tuple[object, ...] = ()
     call_argument_name: str | None = None
+    decorator_names: tuple[str, ...] = ()

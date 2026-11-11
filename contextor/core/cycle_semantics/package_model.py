@@ -64,7 +64,9 @@ from .execution.lifecycle import (
 )
 from .execution.calls import (
     _execute_restricted_call,
+    _execute_restricted_object_call,
     _new_restricted_function,
+    _snapshot_named_decorators,
 )
 
 
@@ -171,9 +173,12 @@ def _safe_passive_function_definition(
             )
             and not (
                 allow_restricted_decorator
-                and len(statement.decorator_list) == 1
-                and type(statement.decorator_list[0]) is ast.Name
-                and not statement.decorator_list[0].id.startswith("__")
+                and bool(statement.decorator_list)
+                and all(
+                    type(decorator) is ast.Name
+                    and not decorator.id.startswith("__")
+                    for decorator in statement.decorator_list
+                )
             )
         )
         or (statement.returns is not None and annotation_semantics not in {
@@ -1097,9 +1102,13 @@ def _compile(
                 steps.append(
                     _Step(
                         (
-                            "DEFINE_DECORATED_FUNCTION"
-                            if stmt.decorator_list
-                            else "DEFINE_FUNCTION"
+                            "DEFINE_STACKED_FUNCTION"
+                            if len(stmt.decorator_list) > 1
+                            else (
+                                "DEFINE_DECORATED_FUNCTION"
+                                if stmt.decorator_list
+                                else "DEFINE_FUNCTION"
+                            )
                         ),
                         target=(
                             stmt.decorator_list[0].id
@@ -1112,6 +1121,10 @@ def _compile(
                             parameter.arg
                             for parameter in args.args
                         ),
+                        decorator_names=tuple(
+                            decorator.id
+                            for decorator in stmt.decorator_list
+                        ) if len(stmt.decorator_list) > 1 else (),
                     )
                 )
             else:
@@ -1574,6 +1587,7 @@ def evaluate_package_import_order(
             step.op in {
                 "DEFINE_FUNCTION",
                 "DEFINE_DECORATED_FUNCTION",
+                "DEFINE_STACKED_FUNCTION",
                 "DEFINE_OPAQUE_FUNCTION",
                 "DEFINE_PASSIVE_CLASS",
                 "DEFINE_CONDITIONAL_FROZEN_DATACLASS",
@@ -1675,6 +1689,7 @@ def evaluate_package_import_order(
                     step.op in {
                         "DEFINE_FUNCTION",
                         "DEFINE_DECORATED_FUNCTION",
+                        "DEFINE_STACKED_FUNCTION",
                         "DEFINE_OPAQUE_FUNCTION",
                         "DEFINE_PASSIVE_CLASS",
                         "DEFINE_CONDITIONAL_FROZEN_DATACLASS",
@@ -1721,6 +1736,55 @@ def evaluate_package_import_order(
 
         if index >= len(steps):
             if isinstance(active_frame, _FunctionFrame):
+                if active_frame.decorator_final_binding is not None:
+                    frames.pop()
+                    execution_cursor.step_budget += 1
+
+                    if active_frame.remaining_decorators:
+                        next_name, next_object = (
+                            active_frame.remaining_decorators[0]
+                        )
+                        next_locals: dict[str, object | None] = {}
+
+                        next_body = _execute_restricted_object_call(
+                            next_object,
+                            None,
+                            module=module,
+                            local_bindings=next_locals,
+                        )
+
+                        if next_body is None:
+                            return result("UNKNOWN", module, next_name)
+
+                        events.append(
+                            PackageModelEvent(
+                                module,
+                                "CALL_FUNCTION",
+                                symbol=next_name,
+                            )
+                        )
+
+                        frames.append(
+                            _FunctionFrame(
+                                module=module,
+                                index=0,
+                                steps=next_body,
+                                local_bindings=next_locals,
+                                decorator_final_binding=(
+                                    active_frame.decorator_final_binding
+                                ),
+                                remaining_decorators=(
+                                    active_frame.remaining_decorators[1:]
+                                ),
+                            )
+                        )
+                    else:
+                        namespaces[module][
+                            active_frame.decorator_final_binding
+                        ] = None
+
+                    continue
+
                 if active_frame.result_binding is not None:
                     namespaces[module][active_frame.result_binding] = None
                 frames.pop()
@@ -2024,6 +2088,77 @@ def evaluate_package_import_order(
                         member,
                     )
                 )
+
+        elif step.op == "DEFINE_STACKED_FUNCTION":
+            if (
+                not step.binding
+                or len(step.decorator_names) < 2
+            ):
+                return result("UNKNOWN", module)
+
+            snapshot = _snapshot_named_decorators(
+                step.decorator_names,
+                namespaces[module],
+            )
+
+            if snapshot is None:
+                return result("UNKNOWN", module)
+
+            decorated_function = _new_restricted_function(
+                module,
+                step.function_body,
+                step.parameters,
+            )
+
+            application_order = tuple(
+                reversed(
+                    tuple(
+                        zip(snapshot.names, snapshot.values)
+                    )
+                )
+            )
+
+            first_name, first_object = application_order[0]
+            local_bindings: dict[str, object | None] = {}
+
+            body = _execute_restricted_object_call(
+                first_object,
+                decorated_function,
+                module=module,
+                local_bindings=local_bindings,
+            )
+
+            if body is None:
+                return result("UNKNOWN", module, first_name)
+
+            events.append(
+                PackageModelEvent(
+                    module,
+                    "DEFINE_FUNCTION",
+                    symbol=step.binding,
+                )
+            )
+
+            events.append(
+                PackageModelEvent(
+                    module,
+                    "CALL_FUNCTION",
+                    symbol=first_name,
+                )
+            )
+
+            frames[-1] = _advance_frame(frames[-1])
+            frames.append(
+                _FunctionFrame(
+                    module=module,
+                    index=0,
+                    steps=body,
+                    local_bindings=local_bindings,
+                    decorator_final_binding=step.binding,
+                    remaining_decorators=application_order[1:],
+                )
+            )
+            continue
 
         elif step.op == "DEFINE_DECORATED_FUNCTION":
             if (
@@ -2376,6 +2511,52 @@ def evaluate_package_import_order(
             result_binding = active_frame.result_binding
 
             frames.pop()
+
+            if active_frame.decorator_final_binding is not None:
+                if active_frame.remaining_decorators:
+                    next_name, next_object = (
+                        active_frame.remaining_decorators[0]
+                    )
+                    next_locals: dict[str, object | None] = {}
+
+                    next_body = _execute_restricted_object_call(
+                        next_object,
+                        returned_value,
+                        module=module,
+                        local_bindings=next_locals,
+                    )
+
+                    if next_body is None:
+                        return result("UNKNOWN", module, next_name)
+
+                    events.append(
+                        PackageModelEvent(
+                            module,
+                            "CALL_FUNCTION",
+                            symbol=next_name,
+                        )
+                    )
+
+                    frames.append(
+                        _FunctionFrame(
+                            module=module,
+                            index=0,
+                            steps=next_body,
+                            local_bindings=next_locals,
+                            decorator_final_binding=(
+                                active_frame.decorator_final_binding
+                            ),
+                            remaining_decorators=(
+                                active_frame.remaining_decorators[1:]
+                            ),
+                        )
+                    )
+                else:
+                    namespaces[module][
+                        active_frame.decorator_final_binding
+                    ] = returned_value
+
+                continue
 
             if result_binding is not None:
                 namespaces[module][result_binding] = returned_value
