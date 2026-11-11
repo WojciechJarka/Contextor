@@ -126,7 +126,7 @@ def test_d02_lru_cache_is_not_passive_runtime_proof(tmp_path):
             "class C:\n"
             "    pass\n",
             "C",
-            ("UNKNOWN", "UNKNOWN"),
+            ("EARLY_BINDING_HAZARD", "MODEL_PASS"),
         ),
         (
             "def deco(obj):\n"
