@@ -943,14 +943,14 @@ def _compile(
 
             args = stmt.args
 
-            restricted_callable = not (
-                args.posonlyargs
-                or args.args
-                or args.vararg is not None
-                or args.kwonlyargs
-                or args.kwarg is not None
-                or args.defaults
-                or args.kw_defaults
+            restricted_callable = (
+                not args.posonlyargs
+                and len(args.args) <= 1
+                and args.vararg is None
+                and not args.kwonlyargs
+                and args.kwarg is None
+                and not args.defaults
+                and not args.kw_defaults
             )
 
             function_steps: list[_Step] = []
@@ -1016,6 +1016,10 @@ def _compile(
                         "DEFINE_FUNCTION",
                         binding=stmt.name,
                         function_body=tuple(function_steps),
+                        parameters=tuple(
+                            parameter.arg
+                            for parameter in args.args
+                        ),
                     )
                 )
             else:
@@ -1047,8 +1051,14 @@ def _compile(
                 not isinstance(expression, ast.Call)
                 or not isinstance(expression.func, ast.Name)
                 or expression.func.id.startswith("__")
-                or expression.args
+                or len(expression.args) > 1
                 or expression.keywords
+                or any(
+                    not isinstance(argument, ast.Constant)
+                    or type(argument.value)
+                    not in (type(None), bool, int, str)
+                    for argument in expression.args
+                )
             ):
                 return None
 
@@ -1056,6 +1066,10 @@ def _compile(
                 _Step(
                     "CALL_FUNCTION",
                     target=expression.func.id,
+                    call_argument_values=tuple(
+                        argument.value
+                        for argument in expression.args
+                    ),
                 )
             )
 
@@ -1907,6 +1921,7 @@ def evaluate_package_import_order(
                 _new_restricted_function(
                     module,
                     step.function_body,
+                    step.parameters,
                 )
             )
 
@@ -2190,10 +2205,13 @@ def evaluate_package_import_order(
             continue
 
         elif step.op == "CALL_FUNCTION":
+            local_bindings: dict[str, object | None] = {}
+
             body = _execute_restricted_call(
                 step,
                 module=module,
                 namespaces=namespaces,
+                local_bindings=local_bindings,
             )
 
             if body is None:
@@ -2208,7 +2226,14 @@ def evaluate_package_import_order(
             )
 
             frames[-1] = _advance_frame(frames[-1])
-            frames.append(_FunctionFrame(module, 0, body))
+            frames.append(
+                _FunctionFrame(
+                    module,
+                    0,
+                    body,
+                    local_bindings,
+                )
+            )
             continue
 
         elif step.op == "BIND":

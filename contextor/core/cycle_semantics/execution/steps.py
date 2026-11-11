@@ -21,3 +21,5 @@ class _Step:
     base_names: tuple[str, ...] = ()
     explicit_metaclass_name: str | None = None
     passive_metaclass_body: bool = False
+    parameters: tuple[str, ...] = ()
+    call_argument_values: tuple[object, ...] = ()
