@@ -37,7 +37,7 @@ original_import = builtins.__import__
 decorator_inputs = []
 
 def traced_import(name, globals=None, locals=None, fromlist=(), level=0):
-    if name in {"pkg.decorators", "pkg.effect"}:
+    if name in {"pkg.decorators", "pkg.effect", "pkg.decorators.effect"}:
         imports.append(name)
     return original_import(name, globals, locals, fromlist, level)
 
@@ -63,6 +63,10 @@ finally:
 
 app = sys.modules.get("pkg.app")
 decorators = sys.modules.get("pkg.decorators")
+decorator = (
+    getattr(decorators, export_name, None)
+    if decorators is not None else None
+)
 binding_present = app is not None and binding_name in app.__dict__
 value = app.__dict__.get(binding_name) if binding_present else None
 seen = decorator_inputs[0] if decorator_inputs else None
@@ -86,6 +90,7 @@ print(json.dumps({
         type(value).__module__ + "." + type(value).__qualname__
         if binding_present else None
     ),
+    "binding_repr": repr(value) if binding_present else None,
     "binding_callable": callable(value) if binding_present else False,
     "body_result": body_result,
     "body_result_type": body_result_type,
@@ -101,6 +106,15 @@ print(json.dumps({
             decorators, export_name, object()
         )
     ),
+    "decorator_package": (
+        getattr(decorator, "__globals__", {}).get("__package__")
+        if decorator is not None else None
+    ),
+    "loaded_effect_modules": [
+        name
+        for name in ("pkg.decorators.effect", "pkg.effect")
+        if name in sys.modules
+    ],
 }, sort_keys=True))
 """
 
@@ -174,6 +188,93 @@ def _case_sources(case):
                 "from pkg.decorators import identity\n"
                 "@identity\n"
                 "class C:\n"
+                "    pass\n"
+            ),
+        })
+    elif case == "A2":
+        sources.update({
+            "pkg.decorators": (
+                "def identity(fn):\n"
+                "    return fn\n"
+            ),
+            "pkg.app": (
+                "from pkg.decorators import identity\n"
+                "@identity\n"
+                "def f():\n"
+                "    pass\n"
+            ),
+        })
+    elif case == "B2":
+        sources.update({
+            "pkg.decorators": (
+                "def apply_decorator(fn):\n"
+                "    import pkg.effect\n"
+                "    return fn\n"
+            ),
+            "pkg.app": (
+                "from pkg.decorators import apply_decorator\n"
+                "@apply_decorator\n"
+                "def f():\n"
+                "    pass\n"
+            ),
+            "pkg.effect": "pass\n",
+        })
+    elif case == "C2":
+        sources.update({
+            "pkg.decorators": (
+                "def identity(fn):\n"
+                "    return fn\n"
+            ),
+            "pkg.app": (
+                "from pkg.decorators import identity as alias\n"
+                "@alias\n"
+                "def f():\n"
+                "    pass\n"
+            ),
+        })
+    elif case == "D2":
+        sources.update({
+            "pkg.decorators": (
+                "def replace(fn):\n"
+                "    return None\n"
+            ),
+            "pkg.app": (
+                "from pkg.decorators import replace\n"
+                "@replace\n"
+                "def f():\n"
+                "    pass\n"
+            ),
+        })
+    elif case == "E2":
+        sources.update({
+            "pkg.decorators.__init__": (
+                "def relative_decorator(fn):\n"
+                "    from . import effect\n"
+                "    return effect.ORIGIN\n"
+            ),
+            "pkg.decorators.effect": (
+                "ORIGIN = 'defining-package-effect'\n"
+            ),
+            "pkg.effect": "ORIGIN = 'caller-package-effect'\n",
+            "pkg.app": (
+                "from pkg.decorators import relative_decorator\n"
+                "@relative_decorator\n"
+                "def f():\n"
+                "    pass\n"
+            ),
+        })
+    elif case == "F2":
+        sources.update({
+            "pkg.decorators": (
+                "marker = 'decorators-global'\n"
+                "def read_marker(fn):\n"
+                "    return marker\n"
+            ),
+            "pkg.app": (
+                "marker = 'app-global'\n"
+                "from pkg.decorators import read_marker\n"
+                "@read_marker\n"
+                "def f():\n"
                 "    pass\n"
             ),
         })
@@ -302,6 +403,132 @@ def test_indexed_cross_module_decorator_reference_and_model_boundary(
     assert modeled.outcome == "UNKNOWN"
     assert modeled.evidence_scope == "RESTRICTED_REGULAR_PACKAGE_MODEL"
     assert modeled.events == ()
+
+
+@pytest.mark.parametrize(
+    "case,export_name,decorator_binding_name,imported_symbol,expected_imports,expected_type,expected_callable,expected_result,expected_same_input",
+    [
+        pytest.param(
+            "A2", "identity", "identity", "identity",
+            ("pkg.decorators",), "builtins.function", True, None, True,
+            id="A2-supported-imported-identity",
+        ),
+        pytest.param(
+            "B2", "apply_decorator", "apply_decorator", "apply_decorator",
+            ("pkg.decorators", "pkg.effect"),
+            "builtins.function", True, None, True,
+            id="B2-supported-imported-effectful-decorator",
+        ),
+        pytest.param(
+            "C2", "identity", "alias", "identity",
+            ("pkg.decorators",), "builtins.function", True, None, True,
+            id="C2-supported-imported-alias",
+        ),
+        pytest.param(
+            "D2", "replace", "replace", "replace",
+            ("pkg.decorators",), "builtins.NoneType", False, None, False,
+            id="D2-supported-imported-returns-none",
+        ),
+    ],
+)
+def test_supported_body_imported_decorators_remain_unknown(
+    tmp_path,
+    case,
+    export_name,
+    decorator_binding_name,
+    imported_symbol,
+    expected_imports,
+    expected_type,
+    expected_callable,
+    expected_result,
+    expected_same_input,
+):
+    sources = _case_sources(case)
+    observed = _reference(
+        tmp_path,
+        sources,
+        export_name,
+        "f",
+        "function",
+        decorator_binding_name,
+    )
+
+    assert observed["error"] is None
+    assert tuple(observed["imports"]) == expected_imports
+    assert observed["binding_present"] is True
+    assert observed["binding_type"] == expected_type
+    assert observed["binding_callable"] is expected_callable
+    assert observed["body_result"] == expected_result
+    assert observed["decorator_calls_at_definition"] == 1
+    assert observed["decorator_seen_present"] is True
+    assert observed["binding_is_decorator_input"] is expected_same_input
+    assert observed["binding_is_imported_export"] is True
+
+    modeled = evaluate_package_import_order(
+        {name: ast.parse(source) for name, source in sources.items()},
+        "pkg.app",
+    )
+    assert modeled.outcome == "UNKNOWN"
+    assert modeled.evidence_scope == "RESTRICTED_REGULAR_PACKAGE_MODEL"
+    assert any(
+        event.operation == "FROM"
+        and event.module == "pkg.app"
+        and event.target == "pkg.decorators"
+        and event.symbol == imported_symbol
+        for event in modeled.events
+    )
+    assert not any(
+        event.operation == "CALL_FUNCTION"
+        for event in modeled.events
+    )
+    assert not any(
+        event.target == "pkg.effect"
+        for event in modeled.events
+    )
+
+
+def test_cpython_relative_decorator_import_uses_defining_package_context(
+    tmp_path,
+):
+    sources = _case_sources("E2")
+    observed = _reference(
+        tmp_path,
+        sources,
+        "relative_decorator",
+        "f",
+        "function",
+        "relative_decorator",
+    )
+
+    assert observed["error"] is None
+    assert observed["binding_present"] is True
+    assert observed["binding_type"] == "builtins.str"
+    assert observed["binding_repr"] == repr("defining-package-effect")
+    assert observed["decorator_package"] == "pkg.decorators"
+    assert observed["loaded_effect_modules"] == ["pkg.decorators.effect"]
+    assert observed["decorator_calls_at_definition"] == 1
+    assert observed["binding_is_imported_export"] is True
+
+
+def test_cpython_imported_decorator_reads_its_defining_module_global(
+    tmp_path,
+):
+    sources = _case_sources("F2")
+    observed = _reference(
+        tmp_path,
+        sources,
+        "read_marker",
+        "f",
+        "function",
+        "read_marker",
+    )
+
+    assert observed["error"] is None
+    assert observed["binding_present"] is True
+    assert observed["binding_type"] == "builtins.str"
+    assert observed["binding_repr"] == repr("decorators-global")
+    assert observed["decorator_calls_at_definition"] == 1
+    assert observed["binding_is_imported_export"] is True
 
 
 def test_indexed_from_import_availability_does_not_admit_cross_module_call():
