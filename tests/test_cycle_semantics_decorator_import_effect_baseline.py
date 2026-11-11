@@ -40,14 +40,14 @@ CASES = [
     ),
     pytest.param(
         (
-            "def upper(fn):\n"
+            "def upper_decorator(fn):\n"
             "    import pkg.upper\n"
             "    return fn\n"
-            "def lower(fn):\n"
+            "def lower_decorator(fn):\n"
             "    import pkg.lower\n"
             "    return fn\n"
-            "@upper\n"
-            "@lower\n"
+            "@upper_decorator\n"
+            "@lower_decorator\n"
             "def f():\n"
             "    pass\n"
         ),

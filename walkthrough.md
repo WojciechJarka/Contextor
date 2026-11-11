@@ -1,613 +1,119 @@
-# P5-M08-I8-I2-R1 — regression STOP
+# P5-M08-I8-I2 + R2 — completion report
 
 ## PREFLIGHT
 
-Accepted prior preflight. At continuation: HEAD `48dbe14cb2b41c52e61aad81a4e3be41f644b584`, clean source tree, CPython 3.15.2. Exact source anchors unchanged.
+DIRECT_EVIDENCE: current HEAD `54fffc72774e113eac7d7735db7e87f1fcb435f1`; clean worktree before R2; active interpreter `C:\Temp\Contextor_Repo\.venv\Scripts\python.exe`, CPython 3.15.2. Contextor LIVE revision 1350, source workspace_sync=verified, cycle_semantics=stale. HEAD includes the prior I8-I2 production and test paths. The previously reported implementation is preserved in that commit; no production edits in R2.
 
 ## FILES_CHANGED
 
+New R2 edits:
+- `tests/test_cycle_semantics_named_function_decorators.py`
+- `tests/test_cycle_semantics_decorator_import_effect_baseline.py`
+
+Prior I8-I2 paths committed in HEAD `54fffc7`:
 - `contextor/core/cycle_semantics/execution/calls.py`
-- `contextor/core/cycle_semantics/execution/steps.py`
 - `contextor/core/cycle_semantics/execution/state.py`
+- `contextor/core/cycle_semantics/execution/steps.py`
 - `contextor/core/cycle_semantics/package_model.py`
 - `tests/test_cycle_semantics_stacked_decorator_execution.py`
 - `tests/test_cycle_semantics_stacked_decorator_identity.py`
 - `tests/test_cycle_semantics_decorator_import_effect_baseline.py`
 
-## SNAPSHOT_APPLICATION_ORDER
+The only other current worktree change is this report.
 
-CODE_PATH_PROVED: the new stacked branch snapshots decorator references before application, then reverses the captured pair order. It never rescans namespace names. Each next decorator receives the previous return object through a separate frame.
+## STACKED_DECORATOR_IMPLEMENTATION
+
+CODE_PATH_PROVED from committed source: `DEFINE_STACKED_FUNCTION` stores named decorator sequence; execution uses immutable object snapshot, reverse application order, and one restricted frame per call. Both package child-name collision guards remain active. No R2 production dependency edge was introduced.
+
+## SNAPSHOT_OBJECT_IDENTITY
+
+CODE_PATH_PROVED: `_DecoratorSnapshot` stores object references, including repeated names; continuation carries those references, not re-resolved names.
+
+## BOTTOM_UP_APPLICATION
+
+DIRECT_EVIDENCE: corrected import-order fixture model events call `lower_decorator`, then `upper_decorator`; START_IMPORT order `pkg.lower`, `pkg.upper`. Isolated CPython test runner observed success and the same import order.
 
 ## FUNCTION_FRAME_CONTINUATION
 
-CODE_PATH_PROVED: return and natural completion both continue through `remaining_decorators`; ordinary `result_binding` path is retained. The module caller is advanced once before the first decorator. The 10000-step budget is unchanged.
+CODE_PATH_PROVED: RETURN_FUNCTION and natural completion continue through `remaining_decorators`. Ordinary result_binding remains separate. The 10000-step limit remains.
 
-## INTERMEDIATE_VALUE_TRANSPORT
+## INTERMEDIATE_RETURN_VALUES
 
-CODE_PATH_PROVED: `returned_value` is passed by object identity. Natural completion passes `None`.
+CODE_PATH_PROVED: each returned object, including None, is passed to the next restricted function frame. New A–I targeted cases pass, including middle None and wrong arity.
 
 ## FINAL_BINDING_CONTRACT
 
-CODE_PATH_PROVED: the stacked branch does not write `namespaces[module][step.binding]`; the last continuation writes final binding. This is code path evidence only; targeted regressions failed.
+CODE_PATH_PROVED: stacked definition branch does not write `namespaces[module][step.binding]`; only completion of final decorator does. The identity case has no CALL_FUNCTION(f) or child import, confirming deferred body behavior. No independent runtime inspection of an intermediate namespace was claimed.
 
 ## CPYTHON_PARITY_MATRIX
 
-The nine new cases A–I and six identity cases passed their assertions in the targeted run, including isolated CPython checks. No separate broad semantic parity claim follows. The two failures below occurred in pre-existing baselines. CPython observations for failing baseline cases were asserted successfully before model assertion:
-- `multiple-decorators`: `{"error": null, "imports": []}`.
-- `stacked-decorator-import-order`: `{"error": null, "imports": ["pkg.lower", "pkg.upper"]}`.
+- Multiple identity decorators: isolated CPython runner returned `{"error": null, "imports": []}`; model MODEL_PASS; CALL_FUNCTION identity, identity; no START_IMPORT(pkg.child).
+- Corrected import order: isolated CPython runner returned `{"error": null, "imports": ["pkg.lower", "pkg.upper"]}`; model MODEL_PASS; CALL_FUNCTION lower_decorator, upper_decorator; START_IMPORT pkg.lower, pkg.upper.
+- Nine stacked A–I cases: their isolated CPython and modeled expectations pass in the specified targeted suite. UNKNOWN negatives remain model uncertainty, not CPython parity.
 
-## NEGATIVE_ARITY_AND_REBINDING
+## CORRECTED_HISTORICAL_BASELINES
 
-New D/F/I tests passed in the targeted run. UNKNOWN is not CPython parity.
+`multiple-decorators` kept source and CPython expectations; only model outcome and call sequence changed. `stacked-decorator-import-order` kept import targets and expected outcome/order; decorator function names changed to avoid indexed child-name collisions. No other baseline edited.
 
-## UPDATED_BASELINES
+## NEGATIVE_CONTRACTS
 
-`stacked_decorator_identity.py` updated for six outcomes; its six tests passed. `decorator_import_effect_baseline.py` changed the specified stacked expectation to MODEL_PASS; this failed because that unchanged fixture names decorator functions `upper` and `lower` and direct child modules `pkg.upper` and `pkg.lower`. The existing child-name guard returns UNKNOWN before any events. The R1 correction changed only G/H/I, so this old baseline conflict persists.
-
-A second existing baseline `test_cycle_semantics_named_function_decorators.py::... [multiple-decorators]` expects UNKNOWN and zero calls. The new model returns MODEL_PASS with two identity calls. That test file is outside the authorized edit set. No assertion was weakened.
+DIRECT_EVIDENCE: original I8-T1 global-rebinding fixture remains UNKNOWN in passing targeted suite. Wrong arity and final None call also remain UNKNOWN. Existing child-name guards are present in committed source and were not changed by R2. Model named-function identity case never executes the deferred `f` body.
 
 ## TARGETED_TEST_RESULTS
 
-Exact specified command: `2 failed, 310 passed, 2 warnings in 48.41s`.
+First R2 gate: `16 passed in 5.60s`.
 
-Failure 1: `test_named_function_decorator_cpython_and_model[multiple-decorators]`, `tests/test_cycle_semantics_named_function_decorators.py:100`. Expected UNKNOWN, actual MODEL_PASS. Full model event sequence:
-```json
-[{"module":"\u0000ENTRY","operation":"START_IMPORT","target":"pkg","symbol":null},{"module":"pkg","operation":"DEFINE_FUNCTION","target":null,"symbol":"identity"},{"module":"pkg","operation":"DEFINE_FUNCTION","target":null,"symbol":"f"},{"module":"pkg","operation":"CALL_FUNCTION","target":null,"symbol":"identity"},{"module":"pkg","operation":"CALL_FUNCTION","target":null,"symbol":"identity"},{"module":"pkg","operation":"READY","target":null,"symbol":null}]
-```
+Full specified I8-I2 targeted regression: `312 passed, 2 warnings in 31.20s`. Warnings originate from external authlib/fastmcp deprecations. No full suite or SCC02 run.
 
-Failure 2: `test_minimal_decorator_import_effects[stacked-decorator-import-order]`, `tests/test_cycle_semantics_decorator_import_effect_baseline.py:186`. Expected MODEL_PASS, actual UNKNOWN. Full model event sequence: `[]`. Relevant source anchors: `package_model.py:1573-1584`, `:1674-1685` before the patch; both package child-name guards retained and extended for DEFINE_STACKED_FUNCTION.
-
-Pytest tracebacks: both failures are AssertionError at the respective `assert result.outcome == expected...`; actual/expected values above. No production exception occurred.
-
-`git diff --check`: exit 0. Git printed only LF/CRLF conversion warnings.
+`git diff --check`: exit 0; Git emitted LF/CRLF conversion notices only.
 
 ## MCP_POST_CHANGE_AUDIT
 
-NOT RUN: original section 15 authorizes it only after PASS. No FULL, update_file, semantic refresh or restart. LIVE source adoption and revision after edits remain UNKNOWN.
+DIRECT_EVIDENCE: Desktop watcher events revisions 1351 and 1352 for the two test files; event continuity continuous. Current canonical LIVE revision 1352. Both changed tests and production owner `package_model.py`: `workspace_sync=verified`, canonical module/graph/topology/cycles fresh; cycle_semantics stale. Syntax errors 0, structural DFS cycle count 16. Each changed test module has one outbound hard dependency to `contextor.core.cycle_semantics.package_model`; production owner has 12 outbound dependencies, unchanged from preflight. Source freshness does not attest backend loaded-code adoption. No FULL, update_file or restart.
 
 ## FULL_DIFFS
 
+I8-I2 production and earlier test changes are committed in HEAD `54fffc72774e113eac7d7735db7e87f1fcb435f1`; paths are identified above. The complete current uncommitted source/test diffs are:
+
 ```diff
-warning: in the working copy of 'contextor/core/cycle_semantics/execution/calls.py', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'contextor/core/cycle_semantics/execution/state.py', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'contextor/core/cycle_semantics/execution/steps.py', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'tests/test_cycle_semantics_decorator_import_effect_baseline.py', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'tests/test_cycle_semantics_stacked_decorator_identity.py', LF will be replaced by CRLF the next time Git touches it
-diff --git a/contextor/core/cycle_semantics/execution/calls.py b/contextor/core/cycle_semantics/execution/calls.py
-index 840c919..8f7db99 100644
---- a/contextor/core/cycle_semantics/execution/calls.py
-+++ b/contextor/core/cycle_semantics/execution/calls.py
-@@ -81,3 +81,21 @@ def _execute_restricted_call(
-     )
- 
-     return value.body
-+
-+
-+def _execute_restricted_object_call(
-+    value: object,
-+    argument: object,
-+    *,
-+    module: str,
-+    local_bindings: dict[str, object | None],
-+) -> tuple[_Step, ...] | None:
-+    if (
-+        not isinstance(value, _RestrictedFunction)
-+        or value.defining_module != module
-+        or len(value.parameters) != 1
-+    ):
-+        return None
-+
-+    local_bindings[value.parameters[0]] = argument
-+    return value.body
-diff --git a/contextor/core/cycle_semantics/execution/state.py b/contextor/core/cycle_semantics/execution/state.py
-index 7fd4221..9b52250 100644
---- a/contextor/core/cycle_semantics/execution/state.py
-+++ b/contextor/core/cycle_semantics/execution/state.py
-@@ -39,6 +39,10 @@ class _FunctionFrame:
-         repr=False,
-     )
-     result_binding: str | None = None
-+    decorator_final_binding: str | None = None
-+    remaining_decorators: tuple[
-+        tuple[str, object], ...
-+    ] = ()
- 
- 
- def _frame_module(
-@@ -67,6 +71,8 @@ def _advance_frame(
-             frame.steps,
-             frame.local_bindings,
-             frame.result_binding,
-+            frame.decorator_final_binding,
-+            frame.remaining_decorators,
-         )
-     return (frame[0], frame[1] + 1)
- 
-diff --git a/contextor/core/cycle_semantics/execution/steps.py b/contextor/core/cycle_semantics/execution/steps.py
-index 2d92617..1288c81 100644
---- a/contextor/core/cycle_semantics/execution/steps.py
-+++ b/contextor/core/cycle_semantics/execution/steps.py
-@@ -24,3 +24,4 @@ class _Step:
-     parameters: tuple[str, ...] = ()
-     call_argument_values: tuple[object, ...] = ()
-     call_argument_name: str | None = None
-+    decorator_names: tuple[str, ...] = ()
-diff --git a/contextor/core/cycle_semantics/package_model.py b/contextor/core/cycle_semantics/package_model.py
-index af766cc..f914265 100644
---- a/contextor/core/cycle_semantics/package_model.py
-+++ b/contextor/core/cycle_semantics/package_model.py
-@@ -64,7 +64,9 @@ from .execution.lifecycle import (
- )
- from .execution.calls import (
-     _execute_restricted_call,
-+    _execute_restricted_object_call,
-     _new_restricted_function,
-+    _snapshot_named_decorators,
- )
- 
- 
-@@ -171,9 +173,12 @@ def _safe_passive_function_definition(
-             )
-             and not (
-                 allow_restricted_decorator
--                and len(statement.decorator_list) == 1
--                and type(statement.decorator_list[0]) is ast.Name
--                and not statement.decorator_list[0].id.startswith("__")
-+                and bool(statement.decorator_list)
-+                and all(
-+                    type(decorator) is ast.Name
-+                    and not decorator.id.startswith("__")
-+                    for decorator in statement.decorator_list
-+                )
-             )
-         )
-         or (statement.returns is not None and annotation_semantics not in {
-@@ -1097,9 +1102,13 @@ def _compile(
-                 steps.append(
-                     _Step(
-                         (
--                            "DEFINE_DECORATED_FUNCTION"
--                            if stmt.decorator_list
--                            else "DEFINE_FUNCTION"
-+                            "DEFINE_STACKED_FUNCTION"
-+                            if len(stmt.decorator_list) > 1
-+                            else (
-+                                "DEFINE_DECORATED_FUNCTION"
-+                                if stmt.decorator_list
-+                                else "DEFINE_FUNCTION"
-+                            )
-                         ),
-                         target=(
-                             stmt.decorator_list[0].id
-@@ -1112,6 +1121,10 @@ def _compile(
-                             parameter.arg
-                             for parameter in args.args
-                         ),
-+                        decorator_names=tuple(
-+                            decorator.id
-+                            for decorator in stmt.decorator_list
-+                        ) if len(stmt.decorator_list) > 1 else (),
-                     )
-                 )
-             else:
-@@ -1574,6 +1587,7 @@ def evaluate_package_import_order(
-             step.op in {
-                 "DEFINE_FUNCTION",
-                 "DEFINE_DECORATED_FUNCTION",
-+                "DEFINE_STACKED_FUNCTION",
-                 "DEFINE_OPAQUE_FUNCTION",
-                 "DEFINE_PASSIVE_CLASS",
-                 "DEFINE_CONDITIONAL_FROZEN_DATACLASS",
-@@ -1675,6 +1689,7 @@ def evaluate_package_import_order(
-                     step.op in {
-                         "DEFINE_FUNCTION",
-                         "DEFINE_DECORATED_FUNCTION",
-+                        "DEFINE_STACKED_FUNCTION",
-                         "DEFINE_OPAQUE_FUNCTION",
-                         "DEFINE_PASSIVE_CLASS",
-                         "DEFINE_CONDITIONAL_FROZEN_DATACLASS",
-@@ -1721,6 +1736,55 @@ def evaluate_package_import_order(
- 
-         if index >= len(steps):
-             if isinstance(active_frame, _FunctionFrame):
-+                if active_frame.decorator_final_binding is not None:
-+                    frames.pop()
-+                    execution_cursor.step_budget += 1
-+
-+                    if active_frame.remaining_decorators:
-+                        next_name, next_object = (
-+                            active_frame.remaining_decorators[0]
-+                        )
-+                        next_locals: dict[str, object | None] = {}
-+
-+                        next_body = _execute_restricted_object_call(
-+                            next_object,
-+                            None,
-+                            module=module,
-+                            local_bindings=next_locals,
-+                        )
-+
-+                        if next_body is None:
-+                            return result("UNKNOWN", module, next_name)
-+
-+                        events.append(
-+                            PackageModelEvent(
-+                                module,
-+                                "CALL_FUNCTION",
-+                                symbol=next_name,
-+                            )
-+                        )
-+
-+                        frames.append(
-+                            _FunctionFrame(
-+                                module=module,
-+                                index=0,
-+                                steps=next_body,
-+                                local_bindings=next_locals,
-+                                decorator_final_binding=(
-+                                    active_frame.decorator_final_binding
-+                                ),
-+                                remaining_decorators=(
-+                                    active_frame.remaining_decorators[1:]
-+                                ),
-+                            )
-+                        )
-+                    else:
-+                        namespaces[module][
-+                            active_frame.decorator_final_binding
-+                        ] = None
-+
-+                    continue
-+
-                 if active_frame.result_binding is not None:
-                     namespaces[module][active_frame.result_binding] = None
-                 frames.pop()
-@@ -2025,6 +2089,77 @@ def evaluate_package_import_order(
-                     )
-                 )
- 
-+        elif step.op == "DEFINE_STACKED_FUNCTION":
-+            if (
-+                not step.binding
-+                or len(step.decorator_names) < 2
-+            ):
-+                return result("UNKNOWN", module)
-+
-+            snapshot = _snapshot_named_decorators(
-+                step.decorator_names,
-+                namespaces[module],
-+            )
-+
-+            if snapshot is None:
-+                return result("UNKNOWN", module)
-+
-+            decorated_function = _new_restricted_function(
-+                module,
-+                step.function_body,
-+                step.parameters,
-+            )
-+
-+            application_order = tuple(
-+                reversed(
-+                    tuple(
-+                        zip(snapshot.names, snapshot.values)
-+                    )
-+                )
-+            )
-+
-+            first_name, first_object = application_order[0]
-+            local_bindings: dict[str, object | None] = {}
-+
-+            body = _execute_restricted_object_call(
-+                first_object,
-+                decorated_function,
-+                module=module,
-+                local_bindings=local_bindings,
-+            )
-+
-+            if body is None:
-+                return result("UNKNOWN", module, first_name)
-+
-+            events.append(
-+                PackageModelEvent(
-+                    module,
-+                    "DEFINE_FUNCTION",
-+                    symbol=step.binding,
-+                )
-+            )
-+
-+            events.append(
-+                PackageModelEvent(
-+                    module,
-+                    "CALL_FUNCTION",
-+                    symbol=first_name,
-+                )
-+            )
-+
-+            frames[-1] = _advance_frame(frames[-1])
-+            frames.append(
-+                _FunctionFrame(
-+                    module=module,
-+                    index=0,
-+                    steps=body,
-+                    local_bindings=local_bindings,
-+                    decorator_final_binding=step.binding,
-+                    remaining_decorators=application_order[1:],
-+                )
-+            )
-+            continue
-+
-         elif step.op == "DEFINE_DECORATED_FUNCTION":
-             if (
-                 not step.target
-@@ -2377,6 +2512,52 @@ def evaluate_package_import_order(
- 
-             frames.pop()
- 
-+            if active_frame.decorator_final_binding is not None:
-+                if active_frame.remaining_decorators:
-+                    next_name, next_object = (
-+                        active_frame.remaining_decorators[0]
-+                    )
-+                    next_locals: dict[str, object | None] = {}
-+
-+                    next_body = _execute_restricted_object_call(
-+                        next_object,
-+                        returned_value,
-+                        module=module,
-+                        local_bindings=next_locals,
-+                    )
-+
-+                    if next_body is None:
-+                        return result("UNKNOWN", module, next_name)
-+
-+                    events.append(
-+                        PackageModelEvent(
-+                            module,
-+                            "CALL_FUNCTION",
-+                            symbol=next_name,
-+                        )
-+                    )
-+
-+                    frames.append(
-+                        _FunctionFrame(
-+                            module=module,
-+                            index=0,
-+                            steps=next_body,
-+                            local_bindings=next_locals,
-+                            decorator_final_binding=(
-+                                active_frame.decorator_final_binding
-+                            ),
-+                            remaining_decorators=(
-+                                active_frame.remaining_decorators[1:]
-+                            ),
-+                        )
-+                    )
-+                else:
-+                    namespaces[module][
-+                        active_frame.decorator_final_binding
-+                    ] = returned_value
-+
-+                continue
-+
-             if result_binding is not None:
-                 namespaces[module][result_binding] = returned_value
- 
 diff --git a/tests/test_cycle_semantics_decorator_import_effect_baseline.py b/tests/test_cycle_semantics_decorator_import_effect_baseline.py
-index 4027548..9942d25 100644
+index 9942d25..a53eaf9 100644
 --- a/tests/test_cycle_semantics_decorator_import_effect_baseline.py
 +++ b/tests/test_cycle_semantics_decorator_import_effect_baseline.py
-@@ -52,7 +52,7 @@ CASES = [
+@@ -40,14 +40,14 @@ CASES = [
+     ),
+     pytest.param(
+         (
+-            "def upper(fn):\n"
++            "def upper_decorator(fn):\n"
+             "    import pkg.upper\n"
+             "    return fn\n"
+-            "def lower(fn):\n"
++            "def lower_decorator(fn):\n"
+             "    import pkg.lower\n"
+             "    return fn\n"
+-            "@upper\n"
+-            "@lower\n"
++            "@upper_decorator\n"
++            "@lower_decorator\n"
+             "def f():\n"
              "    pass\n"
          ),
-         ("pkg.lower", "pkg.upper"),
--        "UNKNOWN",
-+        "MODEL_PASS",
-         id="stacked-decorator-import-order",
+diff --git a/tests/test_cycle_semantics_named_function_decorators.py b/tests/test_cycle_semantics_named_function_decorators.py
+index 3f66a8a..9e88d6a 100644
+--- a/tests/test_cycle_semantics_named_function_decorators.py
++++ b/tests/test_cycle_semantics_named_function_decorators.py
+@@ -57,7 +57,7 @@ CASES = [
      ),
      pytest.param(
-diff --git a/tests/test_cycle_semantics_stacked_decorator_identity.py b/tests/test_cycle_semantics_stacked_decorator_identity.py
-index 85c71d3..55010cb 100644
---- a/tests/test_cycle_semantics_stacked_decorator_identity.py
-+++ b/tests/test_cycle_semantics_stacked_decorator_identity.py
-@@ -28,6 +28,7 @@ CASES = [
-         ),
-         None,
-         ("pkg.bottom", "pkg.top"),
-+        "MODEL_PASS",
-         id="bottom-up-application",
+         "def identity(fn):\n    return fn\n@identity\n@identity\ndef f():\n    import pkg.child\n",
+-        None, (), "UNKNOWN", (),
++        None, (), "MODEL_PASS", ("identity", "identity"),
+         id="multiple-decorators",
      ),
      pytest.param(
-@@ -42,6 +43,7 @@ CASES = [
-         ),
-         None,
-         ("pkg.child", "pkg.child"),
-+        "MODEL_PASS",
-         id="same-decorator-called-twice",
-     ),
-     pytest.param(
-@@ -61,6 +63,7 @@ CASES = [
-         ),
-         None,
-         ("pkg.bottom", "pkg.top"),
-+        "UNKNOWN",
-         id="upper-binding-replaced-after-evaluation",
-     ),
-     pytest.param(
-@@ -77,6 +80,7 @@ CASES = [
-         ),
-         None,
-         ("pkg.top",),
-+        "MODEL_PASS",
-         id="none-intermediate-value",
-     ),
-     pytest.param(
-@@ -94,6 +98,7 @@ CASES = [
-         ),
-         "TypeError",
-         ("pkg.bottom",),
-+        "UNKNOWN",
-         id="upper-wrong-arity-after-lower-effect",
-     ),
-     pytest.param(
-@@ -112,13 +117,14 @@ CASES = [
-         ),
-         None,
-         ("pkg.bottom", "pkg.top", "pkg.child"),
-+        "MODEL_PASS",
-         id="decorated-body-executed-last",
-     ),
- ]
- 
- 
- @pytest.mark.parametrize(
--    "source,expected_error,expected_imports",
-+    "source,expected_error,expected_imports,expected_model_outcome",
-     CASES,
- )
- def test_stacked_decorator_cpython_and_current_boundary(
-@@ -126,6 +132,7 @@ def test_stacked_decorator_cpython_and_current_boundary(
-     source,
-     expected_error,
-     expected_imports,
-+    expected_model_outcome,
- ):
-     package = tmp_path / "pkg"
-     package.mkdir()
-@@ -177,10 +184,13 @@ def test_stacked_decorator_cpython_and_current_boundary(
-         "pkg",
-     )
- 
--    assert result.outcome == "UNKNOWN"
-+    assert result.outcome == expected_model_outcome
- 
--    assert not any(
--        event.operation == "CALL_FUNCTION"
--        and event.symbol in {"upper", "lower", "deco"}
--        for event in result.events
--    )
-+    if expected_model_outcome == "MODEL_PASS":
-+        actual_starts = tuple(
-+            event.target for event in result.events
-+            if event.operation == "START_IMPORT"
-+            and event.target is not None
-+            and event.target.startswith("pkg.")
-+        )
-+        assert actual_starts == tuple(dict.fromkeys(expected_imports))
-diff --git a/tests/test_cycle_semantics_stacked_decorator_execution.py b/tests/test_cycle_semantics_stacked_decorator_execution.py
-new file mode 100644
---- /dev/null
-+++ b/tests/test_cycle_semantics_stacked_decorator_execution.py
-@@ -0,0 +1,107 @@
-+import ast
-+import json
-+import subprocess
-+import sys
-+
-+import pytest
-+
-+from contextor.core.cycle_semantics.package_model import (
-+    evaluate_package_import_order,
-+)
-+from test_cycle_semantics_decorator_import_effect_baseline import RUNNER
-+from test_cycle_semantics_stacked_decorator_identity import CASES
-+
-+
-+THREE_PASS = (
-+    "def top_decorator(fn):\n"
-+    "    import pkg.a\n"
-+    "    return fn\n"
-+    "def middle_decorator(fn):\n"
-+    "    import pkg.b\n"
-+    "    return fn\n"
-+    "def bottom_decorator(fn):\n"
-+    "    import pkg.c\n"
-+    "    return fn\n"
-+    "@top_decorator\n"
-+    "@middle_decorator\n"
-+    "@bottom_decorator\n"
-+    "def f():\n"
-+    "    pass\n"
-+)
-+
-+MIDDLE_NONE = (
-+    "def top_decorator(fn):\n"
-+    "    import pkg.a\n"
-+    "    return fn\n"
-+    "def middle_decorator(fn):\n"
-+    "    return\n"
-+    "def bottom_decorator(fn):\n"
-+    "    import pkg.c\n"
-+    "    return fn\n"
-+    "@top_decorator\n"
-+    "@middle_decorator\n"
-+    "@bottom_decorator\n"
-+    "def f():\n"
-+    "    pass\n"
-+)
-+
-+
-+@pytest.mark.parametrize(
-+    "source,error,imports,outcome,calls,starts",
-+    [
-+        pytest.param(CASES[0].values[0], None, ("pkg.bottom", "pkg.top"), "MODEL_PASS", ("lower", "upper"), ("pkg.bottom", "pkg.top"), id="A-bottom-up"),
-+        pytest.param(CASES[1].values[0], None, ("pkg.child", "pkg.child"), "MODEL_PASS", ("deco", "deco"), ("pkg.child",), id="B-repeated"),
-+        pytest.param(CASES[3].values[0], None, ("pkg.top",), "MODEL_PASS", ("lower", "upper"), ("pkg.top",), id="C-intermediate-none"),
-+        pytest.param(CASES[4].values[0], "TypeError", ("pkg.bottom",), "UNKNOWN", ("lower",), ("pkg.bottom",), id="D-wrong-arity"),
-+        pytest.param(CASES[5].values[0], None, ("pkg.bottom", "pkg.top", "pkg.child"), "MODEL_PASS", ("lower", "upper", "f"), ("pkg.bottom", "pkg.top", "pkg.child"), id="E-deferred-body"),
-+        pytest.param(CASES[2].values[0], None, ("pkg.bottom", "pkg.top"), "UNKNOWN", (), (), id="F-global-rebinding"),
-+        pytest.param(THREE_PASS, None, ("pkg.c", "pkg.b", "pkg.a"), "MODEL_PASS", ("bottom_decorator", "middle_decorator", "top_decorator"), ("pkg.c", "pkg.b", "pkg.a"), id="G-three-pass-through"),
-+        pytest.param(MIDDLE_NONE, None, ("pkg.c", "pkg.a"), "MODEL_PASS", ("bottom_decorator", "middle_decorator", "top_decorator"), ("pkg.c", "pkg.a"), id="H-middle-none"),
-+        pytest.param(MIDDLE_NONE + "f()\n", "TypeError", ("pkg.c", "pkg.a"), "UNKNOWN", ("bottom_decorator", "middle_decorator", "top_decorator"), ("pkg.c", "pkg.a"), id="I-final-none-called"),
-+    ],
-+)
-+def test_stacked_decorator_execution(
-+    tmp_path, source, error, imports, outcome, calls, starts,
-+):
-+    package = tmp_path / "pkg"
-+    package.mkdir()
-+    (package / "__init__.py").write_text(source, encoding="utf-8")
-+
-+    child_names = ("top", "bottom", "child", "a", "b", "c")
-+    sources = {"pkg.__init__": ast.parse(source)}
-+    for name in child_names:
-+        (package / f"{name}.py").write_text("pass\n", encoding="utf-8")
-+        sources[f"pkg.{name}"] = ast.parse("pass\n")
-+
-+    process = subprocess.run(
-+        [sys.executable, "-I", "-B", "-c", RUNNER, str(tmp_path)],
-+        capture_output=True,
-+        text=True,
-+        timeout=20,
-+        check=False,
-+    )
-+    assert process.returncode == 0, process.stderr
-+    observed = json.loads(process.stdout)
-+    assert observed == {"error": error, "imports": list(imports)}
-+
-+    result = evaluate_package_import_order(sources, "pkg")
-+    assert result.outcome == outcome
-+    actual_calls = tuple(
-+        event.symbol for event in result.events
-+        if event.operation == "CALL_FUNCTION"
-+    )
-+    assert actual_calls == calls
-+    actual_starts = tuple(
-+        event.target for event in result.events
-+        if event.operation == "START_IMPORT"
-+        and event.target is not None
-+        and event.target.startswith("pkg.")
-+    )
-+    assert actual_starts == starts
-+
-+    if source == CASES[1].values[0]:
-+        assert sum(
-+            event.operation == "FUNCTION_LOCAL_IMPORT"
-+            and event.target == "pkg.child"
-+            for event in result.events
-+        ) == 2
 ```
 
 ## FINAL_VERDICT
 
-REGRESSION_FAILURE / BLOCKED_SEMANTIC_INTEGRITY. FINAL PASS denied. Per failure contract, no independent repair or further tests. Corrective specification must resolve both existing baseline conflicts while preserving the child-name guards and authorization boundary.
+FINAL PASS for the scoped I8-I2 + R2 implementation and targeted regression contract. This does not claim fresh cycle semantics, backend loaded-code adoption, or general Python execution parity.
