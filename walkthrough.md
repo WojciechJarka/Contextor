@@ -1,225 +1,610 @@
-# P5-M08-I10-D1 — external decorator knowledge boundary
+# P5-M08-I10-T1 — indexed cross-module decorator baseline
 
 ## PREFLIGHT
 
 DIRECT_EVIDENCE:
 
-- HEAD before report replacement: 1b97e60545aa6f602a78e9b7623e265932d1535a.
-- git status --short was empty before report replacement. No source or test edits were present.
-- Contextor MCP get_module_context for contextor/core/cycle_semantics/package_model.py answered from canonical LIVE revision 1366. canonical_state=fresh, workspace_sync=verified, provenance=live. The cycle_semantics family was marked stale; module, graph, topology, artifact_consumption, cycles, collisions and lineage were marked fresh. No semantic refresh was requested or run.
-- Earlier same-revision MCP reads for execution.calls and execution.imports also reported workspace_sync=verified.
+- HEAD at preflight: acf0e9b5ff112b849239cb51d08642d0924bf5b3. git status --short was empty before this task; tests/test_cycle_semantics_cross_module_decorator_baseline.py did not exist.
 - Active interpreter: C:\Temp\Contextor_Repo\.venv\Scripts\python.exe, CPython 3.15.2 (64-bit Windows).
-- The current HEAD contains the I9-I2 and I9-T2 artifacts: class decorator staging includes test_same_name_decorator_stages_and_executes and test_class_decorator_identity_counterexamples.py is present. The relevant production branches are present in package_model.py.
-- No backend restart, FULL, SCC02, update_file, semantic refresh, pytest, Git index operation or Git history operation was performed.
-
-Actions/evidence:
-
-- Contextor MCP documentation for get_module_context was read before the freshness query.
-- Literal source and test reads followed the MCP check.
-- All synthetic CPython module files were created in temporary directories outside the repository and run in fresh processes with -I -B.
-- The first synthetic-process setup omitted the temporary root from the isolated child's sys.path and produced ModuleNotFoundError for pkg. That attempt is setup-only and contributes no semantic result. The probe was corrected by inserting the provided temporary root into sys.path; the five corrected cases all completed and their evidence is reported below.
-
-## CURRENT_DECORATOR_ADMISSION_BOUNDARY
-
-CODE_PATH_PROVED:
-
-- Function admission is in contextor/core/cycle_semantics/package_model.py:144-242. The validator rejects invalid or dunder names by default, unsupported annotations/type parameters/type comments and nonliteral defaults. A decorator list is admitted only when allow_restricted_decorator=True and every decorator expression is exactly ast.Name with a non-dunder identifier; the separate builtin-property exception is a single exact property name for a FunctionDef.
-- Class admission is in package_model.py:244-488. Ordinary class decorators are admitted only when allow_named_decorators=True and every decorator is exactly ast.Name with a non-dunder identifier. Attribute expressions and calls are rejected. Bases must be ast.Name expressions; only the one explicit keyword metaclass=<Name> form is admitted. Class bodies are restricted to pass, imports, safe annotation assignments, pure-literal assignments, an initial literal docstring, and admitted safe method definitions. Reserved class-creation method names are rejected. Unsupported class-body statements reject the definition.
-- The ordinary named class decorator path in package_model.py:819-1033 additionally requires each decorator name to have an earlier DEFINE_FUNCTION step. It emits SNAPSHOT_CLASS_DECORATORS before PREPARE_PASSIVE_CLASS and the class-body steps, then emits DEFINE_DECORATED_PASSIVE_CLASS after the body. The conditional frozen dataclass path is selected separately and emits DEFINE_CONDITIONAL_FROZEN_DATACLASS; it does not use ordinary named decorator snapshots.
-- FunctionDef compilation is in package_model.py:1035-1186. A restricted decorated function emits DEFINE_DECORATED_FUNCTION for one simple-name decorator or DEFINE_STACKED_FUNCTION for multiple names. A decorator factory expression such as lru_cache(maxsize=8) is an ast.Call, not ast.Name, so it fails this restricted compilation path before model execution.
-- There is no lru_cache or functools-specific branch in package_model.py or contextor/core/cycle_semantics/execution. The literal production-source search returned no matches for either token. There is no decorator-name allowlist.
-- Bare @lru_cache is syntactically a simple Name, but name syntax does not establish a trusted callable. In the normal package model, from functools import lru_cache reaches the unsupported external FROM boundary before the decorator can be applied. The optional passive-external-import assumption is an explicit conditional mode and is not runtime proof; with that assumption the decorated factory form still becomes UNKNOWN at the unmodeled FunctionDef.
-
-INFERENCE:
-
-- Under the current narrow grammar, simple-name syntax is an admission shape only. It does not establish object provenance, purity, absence of side effects, or identity with the object originally imported under that name.
-
-## EXTERNAL_IMPORT_PROVENANCE
-
-CODE_PATH_PROVED:
-
-- Import compilation resolves the target/member and stores the source alias as the step binding in package_model.py:501-625. At execution, _execute_from_binding in contextor/core/cycle_semantics/execution/imports.py:206-258 reads the actual indexed namespace value and assigns that same value to namespaces[module][step.binding]. Thus an indexed from-import alias preserves the modeled object reference; the FROM event records the imported member and target module.
-- _classify_external_import in execution/imports.py:261-294 returns UNKNOWN_UNMODELED for an ordinary external import. It returns ASSUME only when passive external imports are explicitly enabled for compile-on-first-import, the target is not indexed, and the import is not class-local. The assumption is recorded as an assumed import and represented by a conditional sentinel, not by execution or inspection of an external callable.
-- _RestrictedFunction is a frozen identity-based record containing defining_module, body and parameters (execution/calls.py:8-18). _execute_restricted_call (calls.py:59-83) and _execute_restricted_object_call (calls.py:86-101) require that the captured value be a _RestrictedFunction defined by the currently executing module. The object-call form also requires exactly one parameter. A valid indexed function imported from another module therefore retains its identity but does not satisfy the same-module execution predicate when used as a decorator in the importer.
-- _snapshot_named_decorators (calls.py:21-44) copies ordered names and exact namespace values into frozen _DecoratorSnapshot (calls.py:8-18). Stacked function execution snapshots before application at package_model.py:2154-2163; class decorator names are snapshotted by the earlier SNAPSHOT_CLASS_DECORATORS operation at package_model.py:2400-2428. A single decorated function uses its target name in DEFINE_DECORATED_FUNCTION at package_model.py:2217-2274 and resolves that current namespace value at application. The snapshot mechanism is not a claim that every decorator route uses a snapshot.
-
-DIRECT_EVIDENCE:
-
-- Normal imports from functools are not treated as passive. The existing D02 test explicitly uses the opt-in conditional external-import assumption and still expects UNKNOWN for the lru_cache factory expression.
-- No external installed package was executed by these probes. The external decorator cases below use only locally authored synthetic modules.
-
-## EXISTING_D02_REGRESSIONS
-
-The bounded inventory covered decorator-named tests and test_cycle_semantics_package_model.py. Relevant current test contracts:
-
-| File and test | Current expectation/evidence |
-| --- | --- |
-| tests/test_cycle_semantics_decorator_definition_effects.py::test_d02_lru_cache_is_not_passive_runtime_proof | Conditional model outcome UNKNOWN; final conditional event is UNMODELED_STATEMENT for FunctionDef at 2:1; explicitly rejects CONDITIONAL_MODEL_PASS. CPython import/call succeeds. |
-| tests/test_cycle_semantics_decorator_definition_effects.py::test_d03_d05_decorator_import_entry_dependency | Local restricted function/class decorators that import pkg.b produce EARLY_BINDING_HAZARD when importing the partial export, and MODEL_PASS when importing pkg.b. Decorator-factory and class-body method-decorator cases expect UNKNOWN. |
-| tests/test_cycle_semantics_decorator_definition_effects.py::test_decorator_expression_and_application_order | CPython confirms expression evaluation top-to-bottom and application bottom-to-top for factory expressions; model expectation is UNKNOWN. |
-| tests/test_cycle_semantics_decorator_definition_effects.py::test_decorator_can_replace_definition_binding | CPython source returns 42; model expects UNKNOWN for both function and class replacement. |
-| tests/test_cycle_semantics_decorator_definition_effects.py::test_nested_method_decorator_remains_unmodeled | UNKNOWN for a decorated method nested in a class. |
-| tests/test_cycle_semantics_decorator_import_effect_baseline.py::test_minimal_decorator_import_effects | Parameterized local restricted cases cover deferred function bodies, imports during decorator application, stacked decorator import order, and a class-body import preceding decorator application. Expected outcomes are MODEL_PASS except class-body-before-decorator, which expects UNKNOWN. |
-| tests/test_cycle_semantics_class_decorator_baseline.py::test_class_decorator_definition_time_baseline | Cases cover pass-through, decorator import, class-body-before-application ordering, stack ordering, same-name decorator, None return, and early class-name import hazard. Expected outcomes include MODEL_PASS for supported local decorators and EARLY_BINDING_HAZARD for the cyclic child case. |
-| tests/test_cycle_semantics_class_decorator_staging.py::test_same_name_decorator_stages_and_executes | Historical I9-I1 expectation is corrected: compilation emits the named snapshot and model outcome is MODEL_PASS with CALL_FUNCTION C. The same file keeps attribute/call decorator forms UNKNOWN and checks conditional frozen dataclass staging separately. Its module docstring still says execution remains unknown; that wording is stale relative to the current test assertion and was not edited. |
-| tests/test_cycle_semantics_class_decorator_identity_counterexamples.py::test_class_decorator_identity_counterexamples | Cases cover rebinding before snapshot (UNKNOWN; CPython TypeError), same-name and duplicate references (MODEL_PASS), class-local shadowing, post-decoration rebinding, and a noncallable stack member (UNKNOWN; CPython TypeError). |
-| tests/test_cycle_semantics_stacked_decorator_identity.py::test_stacked_decorator_cpython_and_current_boundary | Includes a decorator binding replaced after decorator-expression evaluation; CPython imports pkg.bottom then pkg.top, while the model expects UNKNOWN. |
-| tests/test_cycle_semantics_stacked_decorator_execution.py::test_stacked_decorator_execution | Cases include bottom-up order, intermediate None, global rebinding, and final None called; the last expects UNKNOWN after CPython TypeError. |
-| tests/test_cycle_semantics_decorator_snapshots.py | Unit regressions assert source-order snapshots preserve object identity, repeated references, None values and values after namespace rebinding. |
-| tests/test_cycle_semantics_package_model.py::test_external_assumption_normal_model_still_unknown | Normal external import remains UNKNOWN with no assumptions recorded. |
-| tests/test_cycle_semantics_package_model.py::test_external_assumption_refused_without_lazy_compilation | Assumption alone, without compile-on-first-import, does not admit the external import. |
-| tests/test_cycle_semantics_package_model.py::test_external_assumption_direct_conditional_scope | The explicit conditional import case can MODEL_PASS, with evidence_scope CONDITIONAL_PASSIVE_EXTERNAL_IMPORT_ASSUMPTION_NOT_RUNTIME_PROOF and the import listed as assumed. |
-| tests/test_cycle_semantics_package_model.py::test_external_assumption_does_not_skip_indexed_import | An indexed child remains modeled under the conditional setting and does not become an assumed external import. |
-| tests/test_cycle_semantics_package_model.py::test_external_assumption_called_local_import_keeps_location | Explicit conditional import assumptions for a called restricted local function retain importer, operation, target and source location. |
-| tests/test_cycle_semantics_package_model.py::test_external_assumption_uncalled_function_has_no_record | An uncalled function's external import has no reached-assumption record. |
-
-No dedicated regression for applying a decorator imported as an alias from a different indexed module was found in this bounded inventory. The indexed cross-module observation below exercises that boundary without changing tests.
-
-## CPYTHON_LRU_CACHE_MATRIX
-
-Method: each A-G source was executed in a separate fresh process using the active CPython 3.15.2 interpreter with -I -B. A tracing import wrapper recorded the source-level import name/fromlist. A trace hook recorded executions of f's body without altering the source fixtures.
-
-| Case | Definition/result | Final f and identity | Body execution | Source import observation |
-| --- | --- | --- | --- | --- |
-| A, from functools import lru_cache; @lru_cache | Successful | functools._lru_cache_wrapper, callable; __wrapped__ is the original builtins.function; f is not that original function; wrapper created | None at definition; no call was made | functools, fromlist [lru_cache] |
-| B, @lru_cache(maxsize=8) | Successful | Same wrapper type and identity relationship as A | None at definition; no call was made | functools, fromlist [lru_cache] |
-| C, import functools; @functools.lru_cache | Successful | Same wrapper type and identity relationship as A | None at definition; no call was made | functools, empty fromlist |
-| D, from functools import lru_cache as cache; @cache | Successful | Same wrapper type and identity relationship as A | None at definition; no call was made | functools, fromlist [lru_cache] |
-| E, rebind lru_cache to lambda fn: None; @lru_cache | Successful; no exception | f is None and noncallable; no wrapper | None at definition; no call was made | functools, fromlist [lru_cache] |
-| F, rebind lru_cache to None; @lru_cache | TypeError: 'NoneType' object is not callable; f is not bound | No final f and no wrapper | None | functools, fromlist [lru_cache] |
-| G, A followed by f(1) | Successful | Same wrapper type; __wrapped__ remains the original function and f is not it | No execution at definition; the body executed once on f(1), with the trace observing the return-x line | functools, fromlist [lru_cache] |
-
-Each child returned process code 0 because the probe caught and reported the expected F exception. Every successful A-D/G wrapper had wrapped_present=true and wrapped_type=builtins.function. These observations are specific to CPython 3.15.2 and the exact listed sources; wrapper creation does not establish general decorator safety.
-
-## WRAPPER_OBJECT_IDENTITY
-
-DIRECT_EVIDENCE:
-
-- A-D and G end with an object whose runtime type is functools._lru_cache_wrapper. Its __wrapped__ attribute refers to a builtins.function, and the wrapper is not that function by identity.
-- E demonstrates that a binding with the imported spelling lru_cache can be replaced before decorator application; the replacement's returned None becomes f.
-- F demonstrates the same rebinding to a noncallable value and the exact CPython TypeError.
-
-CODE_PATH_PROVED:
-
-- The current restricted decorator return vocabulary can produce the original restricted argument or None through RETURN_FUNCTION/natural frame completion. It does not construct a functools wrapper. Arbitrary return expressions and external callable execution are outside the restricted path and terminate conservatively as UNKNOWN.
-
-INFERENCE:
-
-- Import spelling/provenance by itself is insufficient to establish that a name still refers to the imported callable or that its application preserves the input identity.
-
-## DECORATOR_FACTORY_BOUNDARY
-
-CODE_PATH_PROVED:
-
-- A decorator factory expression is an ast.Call and is rejected by the simple ast.Name decorator grammar. The compiler does not evaluate arbitrary decorator expressions.
-- The single-name restricted function/class decorator paths accept only a same-module _RestrictedFunction with the required argument count. Stacked paths first snapshot exact name/value pairs, then apply in reverse source order.
-- A supported local decorator body may import indexed package modules; those imports and the resulting package events are modeled. This does not admit executing an arbitrary imported callable.
-
-DIRECT_EVIDENCE:
-
-- Existing test_decorator_expression_and_application_order and the lru_cache factory probe both distinguish syntax that invokes a factory from a simple name decorator. The former's CPython source succeeds while the model intentionally returns UNKNOWN; the current lru_cache factory model observation below likewise returns UNKNOWN.
-
-## SYNTHETIC_EXTERNAL_EFFECT_MATRIX
-
-Method: each row used an isolated CPython process importing a temporary synthetic package. pkg.__init__ recorded package/import order, then imported pkg.decorators, defined class C with a class-body trace entry, and applied the external module's deco. All cases record whether C already existed in pkg during application. For D the external decorator assigned pkg.C = 'early-binding'. The process also retained the exact class object passed to the decorator for identity comparison.
-
-Common import-trace prefix for all cases:
-
-    import:pkg.decorators:from=deco
-    import:_io:from=
-    import:_io:from=
-    import:builtins:from=
-    import:sys:from=
-
-| Case | Ordered execution/effects after import prefix | Final binding or exception |
-| --- | --- | --- |
-| A, return original | package-start; before-class; class-body; apply:start; binding-C-before=False; apply:return-original; after-class | Successful; pkg.C is class pkg.C and is the exact object passed to deco. |
-| B, return None | package-start; before-class; class-body; apply:start; binding-C-before=False; apply:return-None; after-class | Successful; pkg.C is None. |
-| C, import pkg.effect | package-start; before-class; class-body; apply:start; binding-C-before=False; import:pkg.effect:from=; import:_io:from= twice; import:builtins:from=; effect-module-body; apply:return-original; after-class | Successful; pkg.C is the exact object passed to deco. The package effect import occurs during application and before final class-name binding. |
-| D, alter package global | package-start; before-class; class-body; apply:start; binding-C-before=False; binding-C-during='early-binding'; apply:return-original; after-class | Successful; final pkg.C is again the exact passed class object, after the decorator's early assignment was overwritten by the class statement's final binding. |
-| E, raise | package-start; before-class; class-body; apply:start; binding-C-before=False; apply:raise | Import raises RuntimeError: synthetic decorator failure. pkg was removed from sys.modules after the failed import; no final C binding was produced. |
-
-DIRECT_EVIDENCE:
-
-- For all five probes, class-body execution precedes decorator application. The class name is not present in pkg during application. The statement's final name assignment happens only after successful decorator return.
-- External module imports and global mutation can occur during application; an exception can escape from application. These are CPython results from synthetic fixtures, not model admissions.
-
-## MODEL_OBSERVATIONS
-
-All observations used evaluate_package_import_order on parsed indexed sources. No external callable was executed by Contextor. Complete relevant event sequences are listed in order; each event is module:operation(target, symbol), with omitted target/symbol shown as —. ENTRY is a readable report label for the evaluator's internal bootstrap module identifier.
-
-| Indexed input | Outcome and evidence_scope | Relevant complete events / assumptions |
-| --- | --- | --- |
-| Local same-module identity decorator on function | MODEL_PASS; RESTRICTED_REGULAR_PACKAGE_MODEL | ENTRY:START_IMPORT(pkg, —); pkg:READY(—, —); ENTRY:START_IMPORT(pkg.app, —); pkg.app:DEFINE_FUNCTION(—, deco); pkg.app:DEFINE_FUNCTION(—, f); pkg.app:CALL_FUNCTION(—, deco); pkg.app:READY(—, —); pkg:BIND_CHILD(pkg.app, app). |
-| Bare from functools import lru_cache; @lru_cache def f | UNKNOWN; RESTRICTED_REGULAR_PACKAGE_MODEL | ENTRY:START_IMPORT(pkg, —); pkg:READY(—, —); ENTRY:START_IMPORT(pkg.app, —). reached_unmodeled_import: importer pkg.app, FROM functools member lru_cache at 1:0. No decorator call occurs. |
-| lru_cache factory expression | UNKNOWN; RESTRICTED_REGULAR_PACKAGE_MODEL | No events; the whole module's restricted compilation fails before execution. |
-| Indexed pkg.decorators function imported into pkg.app and used as @deco | UNKNOWN; RESTRICTED_REGULAR_PACKAGE_MODEL | ENTRY:START_IMPORT(pkg, —); pkg:READY(—, —); ENTRY:START_IMPORT(pkg.app, —); pkg.app:START_IMPORT(pkg.decorators, —); pkg.decorators:DEFINE_FUNCTION(—, deco); pkg.decorators:READY(—, —); pkg:BIND_CHILD(pkg.decorators, decorators); pkg.app:FROM(pkg.decorators, deco). The imported value is a foreign-module _RestrictedFunction; same-module object-call validation fails before CALL_FUNCTION. |
-| Same indexed cross-module decorator whose body would import pkg.effect | UNKNOWN; RESTRICTED_REGULAR_PACKAGE_MODEL | Same complete events as the preceding row, ending at pkg.app:FROM(pkg.decorators, deco). The decorator body and its pkg.effect import are not executed or reported. |
-| lru_cache factory form with _compile_on_first_import=True and _assume_passive_external_imports=True | UNKNOWN; CONDITIONAL_PASSIVE_EXTERNAL_IMPORT_ASSUMPTION_NOT_RUNTIME_PROOF | ENTRY:START_IMPORT(pkg, —); pkg:READY(—, —); ENTRY:START_IMPORT(pkg.app, —); pkg.app:ASSUMED_EXTERNAL_IMPORT(functools, lru_cache); pkg.app:UNMODELED_STATEMENT(FunctionDef, 2:1). assumed_external_imports contains the FROM functools lru_cache row at 1:0. |
-| Local class decorator imports indexed pkg.effect and returns its input | MODEL_PASS; RESTRICTED_REGULAR_PACKAGE_MODEL | ENTRY:START_IMPORT(pkg, —); pkg:READY(—, —); ENTRY:START_IMPORT(pkg.app, —); pkg.app:DEFINE_FUNCTION(—, deco); pkg.app:DEFINE_PASSIVE_CLASS(—, C); pkg.app:CALL_FUNCTION(—, deco); pkg.app:START_IMPORT(pkg.effect, —); pkg.effect:READY(—, —); pkg:BIND_CHILD(pkg.effect, effect); pkg.app:FUNCTION_LOCAL_IMPORT(pkg.effect, pkg); pkg.app:READY(—, —); pkg:BIND_CHILD(pkg.app, app). |
-| Local class decorator returns None, then C() is evaluated | UNKNOWN; RESTRICTED_REGULAR_PACKAGE_MODEL | Through application: ENTRY:START_IMPORT(pkg, —); pkg:READY(—, —); ENTRY:START_IMPORT(pkg.app, —); pkg.app:DEFINE_FUNCTION(—, deco); pkg.app:DEFINE_PASSIVE_CLASS(—, C); pkg.app:CALL_FUNCTION(—, deco). The subsequent call is UNKNOWN for symbol C, consistent with the modeled final namespace value None. |
-
-No row treats UNKNOWN as a runtime mismatch. No model observation changes or expands the current admission boundary.
-
-## MODEL_PASS_SAFETY_PRECONDITIONS
-
-CODE_PATH_PROVED:
-
-- Current ordinary MODEL_PASS for decorator examples is limited to the restricted grammar, modeled same-module callable identity, supported one-argument call shape, restricted body operations/return values, and indexed imports whose initialization can be modeled.
-- The conditional external import mode has a distinct evidence_scope explicitly labeled NOT_RUNTIME_PROOF. A conditional assumption can record an external import, but it neither executes nor validates an external decorator.
-- Class creation facts use frozen _ClassFact values keyed by definition_id in class_facts_by_identity before decorator application. The decorated class name is bound in the module namespace only after the final decorator frame completes. A None return may replace that namespace binding without deleting the separately keyed class fact.
-
-CONTRACT_PROVED:
-
-- The D1 request is read-only discovery, not implementation. Its required distinction is supported by the source contracts and CPython reference probes above: restricted local decoration can be modeled; external callable behavior is not thereby known.
-
-INFERENCE:
-
-- A general safety claim for an external decorator would need evidence about the exact callable object selected at application time, its implementation or independently documented semantics, its effects/imports, possible exceptions, and the value/identity it returns. Decorator-factory expression evaluation and alias/rebinding would also need evidence. The current external-import assumption supplies none of those callable semantics. This is a statement of missing knowledge, not an implementation design.
-
-## UNRESOLVED_SEMANTIC_REQUIREMENTS
-
-UNKNOWN:
-
-- The behavior of arbitrary installed external decorators, including their body effects, import behavior, exception behavior, wrapper identity, and return object, is not inferred from their import spelling.
-- No installed third-party decorator was run or examined.
-- The probes establish the listed CPython 3.15.2 behavior only. They do not establish a general guarantee for standard-library or external decorators.
-- Contextor's canonical cycle_semantics family was stale at revision 1366. This task performed no semantic refresh; the source/model observations here are tied to the checked-out source and recorded MCP freshness, not a claim that LIVE semantic facts were recomputed.
-
-## RELEVANT_SOURCE_ANCHORS
-
-- contextor/core/cycle_semantics/package_model.py:144-242 — restricted function admission and decorator expression grammar.
-- contextor/core/cycle_semantics/package_model.py:244-488 — passive class body, bases/metaclass and ordinary-vs-conditional decorator admission.
-- contextor/core/cycle_semantics/package_model.py:501-625 — import and from-import target/binding compilation.
-- contextor/core/cycle_semantics/package_model.py:819-1033 — class validation, prior local decorator definition check, snapshot, class preparation, class body imports and final definition operation.
-- contextor/core/cycle_semantics/package_model.py:1035-1186 — function definition restrictions, supported return steps and decorated function operations.
-- contextor/core/cycle_semantics/package_model.py:1350-1425 — evaluator contract, evidence_scope and opt-in conditional assumptions.
-- contextor/core/cycle_semantics/package_model.py:1792-1844 — natural function-frame completion; None transport and deferred final decorated-name binding.
-- contextor/core/cycle_semantics/package_model.py:2146-2274 — stacked and single decorated function execution.
-- contextor/core/cycle_semantics/package_model.py:2400-2428 — class decorator snapshot.
-- contextor/core/cycle_semantics/package_model.py:2440-2510 — prepared bases and metaclass candidate validation.
-- contextor/core/cycle_semantics/package_model.py:2513-2635 — class fact construction/identity map, decorator application and final namespace path.
-- contextor/core/cycle_semantics/package_model.py:2640-2704 — explicit function return transport through remaining decorators.
-- contextor/core/cycle_semantics/execution/calls.py:8-101 — identity-based restricted function/snapshot records and same-module call checks.
-- contextor/core/cycle_semantics/execution/imports.py:206-294 — imported object binding and conditional external-import classification.
-- contextor/core/cycle_semantics/execution/state.py:32-90, 96-114 — function continuation fields, frame advancement, 10000-step budget and definition-time identity maps.
-- contextor/core/cycle_semantics/execution/class_facts.py:7-18 — frozen _ClassFact identity and class provenance fields.
-- tests/test_cycle_semantics_decorator_definition_effects.py:61-84, 157-217, 219-287 — D02, decorator import entry, factory ordering and replacement regressions.
-- tests/test_cycle_semantics_class_decorator_staging.py:75-90, 92-106, 108-143 — same-name execution, unsupported expression forms and separate conditional dataclass coverage.
-- tests/test_cycle_semantics_class_decorator_identity_counterexamples.py:15-60 — pre-snapshot rebinding, identity, repeated reference, class-local shadowing, post-decoration rebinding and noncallable stack cases.
-- tests/test_cycle_semantics_package_model.py:1201-1288 — normal and conditional external-import assumption regressions.
+- Contextor MCP was queried first. package_model.py, execution/calls.py and execution/imports.py answered from canonical LIVE revision 1366 with canonical_state=fresh and workspace_sync=verified. cycle_semantics was stale; no semantic refresh was run.
+- Source verification confirmed _RestrictedFunction retains defining_module; indexed FROM preserves the same modeled object reference; _execute_restricted_object_call requires same-module callable provenance; ordinary named class decorators require a preceding local DEFINE_FUNCTION compile step.
+- The authorized target did not exist at preflight. No production source, existing test, backend, Git index or Git history changes were made.
 
 ## FILES_CHANGED
 
-- No production source, test or documentation file was changed.
-- walkthrough.md was replaced with this task report as required by the repository workflow. Report-only walkthrough changes are excluded from the source/test changed-file inventory.
+- tests/test_cycle_semantics_cross_module_decorator_baseline.py — new authorized test file.
+- walkthrough.md — task report, report-only and excluded from source/test diff inventory.
 
-## ACTUAL_DIFF
+## CROSS_MODULE_CALLABLE_PROVENANCE
 
-Source/test/docs diff: NONE.
+CODE_PATH_PROVED:
 
-git diff --check: PASS after report write.
+- contextor/core/cycle_semantics/execution/calls.py:9-12 defines frozen identity-based _RestrictedFunction values containing defining_module, body and parameters.
+- execution/imports.py:206-258 resolves an indexed FROM member from the target module namespace and assigns that same object reference to the importer's binding. The direct test observes namespaces[pkg.app][alias] is identity after _execute_from_binding.
+- execution/calls.py:86-101 rejects _execute_restricted_object_call unless the value is a _RestrictedFunction whose defining_module equals the current module and whose parameter count is one. The imported identity remains available by object identity, but the same-module call guard refuses to execute it from pkg.app.
+- package_model.py:847-865 requires each ordinary class decorator name to match an earlier DEFINE_FUNCTION step. An imported name emitted by FROM does not satisfy that compiler predicate.
+- package_model.py:1035-1148 restricts decorated function bodies to pass, return-without-value, returning the sole parameter, and supported imports. The final decorated-function check returns None from compilation when another body statement occurs; this accounts for the empty event tuples for A-D's return 1 fixtures.
+- The focused test also evaluates an import-only indexed package shape: the evaluator returns MODEL_PASS and emits FROM for pkg.decorators.identity. That proves modeled import availability for that shape; it does not permit using the imported callable as a cross-module decorator.
 
-## FINAL_VERDICT
+INFERENCE:
 
-READ-ONLY DISCOVERY COMPLETE. CPython 3.15.2 probes A-G and synthetic external-effect probes A-E completed after correcting the isolated subprocess path setup. Current model observations and bounded regression inventory are recorded above. No pytest was necessary or run. No implementation or test admission was made. STOP AFTER DISCOVERY.
+- A FROM event and retained callable identity are evidence of import/binding, not evidence that the restricted evaluator has permission or semantics to invoke the callable in another module.
+
+## CPYTHON_REFERENCE_MATRIX
+
+Each required case ran in a fresh isolated CPython 3.15.2 subprocess using -I -B and temporary package sources. The decorator fixtures remain literal to the specification. A trace hook observes the decorator call arguments without changing those sources. The runner records relevant imports, call count after importing pkg.app, final binding type/identity, and function behavior or class callability.
+
+| Case | CPython result | Import order | Definition-time decoration | Final binding and identity |
+| --- | --- | --- | --- | --- |
+| A, imported identity function decorator | Import succeeds; f() returns 1 | pkg.decorators | identity called once before f() is invoked | f is builtins.function and is the exact object passed to identity |
+| B, imported decorator imports pkg.effect | Import succeeds; f() returns 1 | pkg.decorators, pkg.effect | apply_decorator called once; pkg.effect is imported during its application | f is builtins.function and is the exact object passed to apply_decorator |
+| C, imported identity alias | Import succeeds; f() returns 1 | pkg.decorators | identity called once before f() is invoked | app.alias is the exact imported decorators.identity callable; final f is the exact object passed to identity |
+| D, imported decorator returns None | Import succeeds | pkg.decorators | replace called once | f is builtins.NoneType, noncallable, and not the object passed to replace |
+| E, imported class decorator | Import succeeds; C() creates pkg.app.C | pkg.decorators | identity called once during class definition | C is builtins.type, callable, and the exact class object passed to identity |
+
+For every case CPython error=null, decorator_calls_at_definition=1, and binding_is_imported_export=true. Case B's pkg.effect import is observed after pkg.decorators loads and during decorator application.
+
+## INDEXED_FROM_IMPORT_IDENTITY
+
+DIRECT_EVIDENCE:
+
+- The helper test creates an identity-based _RestrictedFunction owned by pkg.decorators, passes it through _execute_from_binding under alias, and asserts the importer binding is the same object by is.
+- The test then calls _execute_restricted_object_call with current module pkg.app and asserts the result is None. The callable's defining_module remains pkg.decorators.
+- An evaluator import-only control returns MODEL_PASS with evidence_scope RESTRICTED_REGULAR_PACKAGE_MODEL and a FROM event for pkg.app importing identity from pkg.decorators.
+
+Complete import-only evaluator events, in order (ENTRY is a readable label for the internal bootstrap module identifier):
+
+    ENTRY:START_IMPORT(target=pkg)
+    pkg:READY
+    ENTRY:START_IMPORT(target=pkg.app)
+    pkg.app:START_IMPORT(target=pkg.decorators)
+    pkg.decorators:DEFINE_FUNCTION(symbol=identity)
+    pkg.decorators:READY
+    pkg:BIND_CHILD(target=pkg.decorators, symbol=decorators)
+    pkg.app:FROM(target=pkg.decorators, symbol=identity)
+    pkg.app:READY
+    pkg:BIND_CHILD(target=pkg.app, symbol=app)
+
+## DECORATOR_APPLICATION_EFFECTS
+
+DIRECT_EVIDENCE:
+
+- CPython case B imports pkg.decorators then pkg.effect. The synthetic decorator imports pkg.effect inside apply_decorator, after module definition and while the decorator is running.
+- For the exact required case B source, the current model outcome is UNKNOWN with evidence_scope RESTRICTED_REGULAR_PACKAGE_MODEL and no events. The decorated f body contains return 1, outside the restricted decorated-function body vocabulary; compilation returns no program before package imports are simulated. This is not evidence of a cross-module call attempt.
+- A separate model-supported-body control uses the same imported apply_decorator with def f(): pass. It imports pkg.decorators, records the FROM binding, then returns UNKNOWN before CALL_FUNCTION. Complete events:
+
+    ENTRY:START_IMPORT(target=pkg)
+    pkg:READY
+    ENTRY:START_IMPORT(target=pkg.app)
+    pkg.app:START_IMPORT(target=pkg.decorators)
+    pkg.decorators:DEFINE_FUNCTION(symbol=apply_decorator)
+    pkg.decorators:READY
+    pkg:BIND_CHILD(target=pkg.decorators, symbol=decorators)
+    pkg.app:FROM(target=pkg.decorators, symbol=apply_decorator)
+
+- That control emits no CALL_FUNCTION for apply_decorator, START_IMPORT(pkg.effect), or FUNCTION_LOCAL_IMPORT(pkg.effect). The decorator body is not executed by the model, so its import is not represented as a modeled effect.
+
+## IMPORTED_ALIAS_BEHAVIOR
+
+DIRECT_EVIDENCE:
+
+- In case C, pkg.app binds identity as alias. The CPython runner checks app.alias is decorators.identity and gets true. It separately checks final f is the object seen by identity and gets true.
+- The Contextor outcome for the exact case C fixture is UNKNOWN, with no events. As in cases A, B and D, return 1 in the decorated function body is rejected by restricted compilation before import simulation.
+- The separate helper/import-only checks establish the indexed FROM identity rule without attributing cross-module call permission to the alias.
+
+## RETURN_NONE_BEHAVIOR
+
+DIRECT_EVIDENCE:
+
+- CPython case D imports successfully, executes replace once during definition, and binds f to None.
+- The Contextor outcome is UNKNOWN with no events for the exact case D fixture because its decorated function body returns the unsupported constant 1 before import simulation.
+- No final None binding was inferred or admitted by the model in this indexed cross-module fixture.
+
+## CLASS_DECORATOR_COMPILER_BOUNDARY
+
+CODE_PATH_PROVED:
+
+- For exact case E, the class decorator is imported by FROM, not defined by an earlier local DEFINE_FUNCTION operation in pkg.app. The ordinary named-class-decorator compiler gate rejects that shape. The model outcome is UNKNOWN, target_module=pkg.app, symbol=None, events=().
+- CPython succeeds: the imported identity decorator receives the newly created class and returns the same callable class object.
+- The existing compiler gate was not changed or weakened.
+
+## EXTERNAL_FUNCTOOLS_BOUNDARY
+
+DIRECT_EVIDENCE:
+
+- A focused negative test uses from functools import lru_cache with @lru_cache and no assumptions. It gets UNKNOWN, evidence_scope RESTRICTED_REGULAR_PACKAGE_MODEL, target_module=functools, and reached_unmodeled_import=(operation=FROM, target=functools, symbol=lru_cache, line=1, column=0). No CALL_FUNCTION for lru_cache is emitted.
+- execution/imports.py:261-294 keeps an ordinary external import at UNKNOWN_UNMODELED; only the explicit conditional passive-import mode can assume it.
+- No lru_cache allowlist or production treatment was added. External-import policy was not changed.
+
+## MODEL_OBSERVATIONS
+
+For each exact required A-E source set, evaluate_package_import_order returns UNKNOWN with evidence_scope RESTRICTED_REGULAR_PACKAGE_MODEL, target_module=pkg.app, symbol=None, and events=(). A-D are blocked during full restricted compilation because the decorated function body returns constant 1. E is blocked by the preceding-local-DEFINE_FUNCTION class decorator gate.
+
+The separate supported-body cross-module effect control returns UNKNOWN for target_module=pkg.app and symbol=apply_decorator. Its full event tuple is the eight events listed under DECORATOR_APPLICATION_EFFECTS. It contains FROM but no CALL_FUNCTION and no effect-module START_IMPORT.
+
+The separate ordinary external functools control returns UNKNOWN with target_module=functools; events are ENTRY:START_IMPORT(pkg), pkg:READY, ENTRY:START_IMPORT(pkg.app). The reached unmodeled import is FROM functools lru_cache at 1:0.
+
+No UNKNOWN result is classified as a CPython mismatch.
+
+## TARGETED_TEST_RESULTS
+
+The first full targeted invocation exposed test-runner wiring error in case C: the runner was given alias as the final decorated binding name and attempted alias(), causing TypeError because identity requires fn. This was not a CPython/model semantic discrepancy. The runner was corrected to track decorator_binding_name separately from final binding_name; the exact fixture sources and expected outcomes were preserved. A trace hook now observes identity and definition-time calls without adding statements to pkg.decorators.
+
+Final required command:
+
+    .venv\Scripts\python.exe -m pytest -q tests/test_cycle_semantics_cross_module_decorator_baseline.py tests/test_cycle_semantics_decorator_definition_effects.py tests/test_cycle_semantics_class_decorator_baseline.py tests/test_cycle_semantics_class_decorator_identity_counterexamples.py tests/test_cycle_semantics_stacked_decorator_execution.py tests/test_cycle_semantics_package_model.py -rs
+
+Result: 252 passed in 19.68s. The new file contributes 9 passing tests.
+
+No full pytest, SCC02, FULL, backend restart or update_file was run. No Git add, commit, push or history/index operation was performed.
+
+## MCP_POST_TASK_AUDIT
+
+DIRECT_EVIDENCE:
+
+- Contextor get_module_context for tests/test_cycle_semantics_cross_module_decorator_baseline.py resolved tests.test_cycle_semantics_cross_module_decorator_baseline at canonical LIVE revision 1370.
+- canonical_state=fresh; workspace_sync=verified; provenance=live. cycle_semantics remained stale; no semantic refresh was run.
+- Syntax errors: 0, availability=fresh.
+- Structural DFS cycles: 16, availability=fresh. Count semantics are DFS back-edge paths with rotation deduplication, not all simple cycles.
+
+## FULL_DIFFS
+
+Complete new-file diff follows. It is the final source version tested by the targeted command above.
+
+    diff --git a/tests/test_cycle_semantics_cross_module_decorator_baseline.py b/tests/test_cycle_semantics_cross_module_decorator_baseline.py
+    new file mode 100644
+    index 0000000..68b95ea
+    --- /dev/null
+    +++ b/tests/test_cycle_semantics_cross_module_decorator_baseline.py
+    @@ -0,0 +1,451 @@
+    +"""CPython and current-model baseline for indexed cross-module decorators."""
+    +
+    +import ast
+    +import json
+    +import subprocess
+    +import sys
+    +from pathlib import Path
+    +
+    +import pytest
+    +
+    +from contextor.core.cycle_semantics.execution.calls import (
+    +    _execute_restricted_object_call,
+    +    _new_restricted_function,
+    +)
+    +from contextor.core.cycle_semantics.execution.imports import (
+    +    _execute_from_binding,
+    +)
+    +from contextor.core.cycle_semantics.execution.steps import _Step
+    +from contextor.core.cycle_semantics.package_model import (
+    +    evaluate_package_import_order,
+    +)
+    +
+    +
+    +_REFERENCE_RUNNER = r"""
+    +import builtins
+    +import importlib
+    +import json
+    +import sys
+    +
+    +sys.path.insert(0, sys.argv[1])
+    +export_name = sys.argv[2]
+    +binding_name = sys.argv[3]
+    +binding_kind = sys.argv[4]
+    +decorator_binding_name = sys.argv[5]
+    +imports = []
+    +original_import = builtins.__import__
+    +decorator_inputs = []
+    +
+    +def traced_import(name, globals=None, locals=None, fromlist=(), level=0):
+    +    if name in {"pkg.decorators", "pkg.effect"}:
+    +        imports.append(name)
+    +    return original_import(name, globals, locals, fromlist, level)
+    +
+    +builtins.__import__ = traced_import
+    +def trace_decorator(frame, event, arg):
+    +    if (
+    +        event == "call"
+    +        and frame.f_globals.get("__name__") == "pkg.decorators"
+    +        and frame.f_code.co_name == export_name
+    +    ):
+    +        parameter = "cls" if binding_kind == "class" else "fn"
+    +        decorator_inputs.append(frame.f_locals.get(parameter))
+    +    return trace_decorator
+    +
+    +sys.settrace(trace_decorator)
+    +error = None
+    +try:
+    +    importlib.import_module("pkg.app")
+    +except BaseException as exc:
+    +    error = {"type": type(exc).__name__, "message": str(exc)}
+    +finally:
+    +    sys.settrace(None)
+    +
+    +app = sys.modules.get("pkg.app")
+    +decorators = sys.modules.get("pkg.decorators")
+    +binding_present = app is not None and binding_name in app.__dict__
+    +value = app.__dict__.get(binding_name) if binding_present else None
+    +seen = decorator_inputs[0] if decorator_inputs else None
+    +decorator_calls_at_definition = len(decorator_inputs)
+    +body_result = None
+    +body_result_type = None
+    +if error is None and callable(value):
+    +    if binding_kind == "function":
+    +        body_result = value()
+    +    else:
+    +        instance = value()
+    +        body_result_type = (
+    +            type(instance).__module__ + "." + type(instance).__qualname__
+    +        )
+    +
+    +print(json.dumps({
+    +    "error": error,
+    +    "imports": imports,
+    +    "binding_present": binding_present,
+    +    "binding_type": (
+    +        type(value).__module__ + "." + type(value).__qualname__
+    +        if binding_present else None
+    +    ),
+    +    "binding_callable": callable(value) if binding_present else False,
+    +    "body_result": body_result,
+    +    "body_result_type": body_result_type,
+    +    "decorator_calls_at_definition": decorator_calls_at_definition,
+    +    "decorator_seen_present": bool(decorator_inputs),
+    +    "binding_is_decorator_input": (
+    +        binding_present and value is seen and seen is not None
+    +    ),
+    +    "binding_is_imported_export": (
+    +        app is not None
+    +        and decorators is not None
+    +        and app.__dict__.get(decorator_binding_name) is getattr(
+    +            decorators, export_name, object()
+    +        )
+    +    ),
+    +}, sort_keys=True))
+    +"""
+    +
+    +
+    +def _case_sources(case):
+    +    sources = {
+    +        "pkg.__init__": "pass\n",
+    +    }
+    +
+    +    if case == "A":
+    +        sources.update({
+    +            "pkg.decorators": (
+    +                "def identity(fn):\n"
+    +                "    return fn\n"
+    +            ),
+    +            "pkg.app": (
+    +                "from pkg.decorators import identity\n"
+    +                "@identity\n"
+    +                "def f():\n"
+    +                "    return 1\n"
+    +            ),
+    +        })
+    +    elif case == "B":
+    +        sources.update({
+    +            "pkg.decorators": (
+    +                "def apply_decorator(fn):\n"
+    +                "    import pkg.effect\n"
+    +                "    return fn\n"
+    +            ),
+    +            "pkg.app": (
+    +                "from pkg.decorators import apply_decorator\n"
+    +                "@apply_decorator\n"
+    +                "def f():\n"
+    +                "    return 1\n"
+    +            ),
+    +            "pkg.effect": "pass\n",
+    +        })
+    +    elif case == "C":
+    +        sources.update({
+    +            "pkg.decorators": (
+    +                "def identity(fn):\n"
+    +                "    return fn\n"
+    +            ),
+    +            "pkg.app": (
+    +                "from pkg.decorators import identity as alias\n"
+    +                "@alias\n"
+    +                "def f():\n"
+    +                "    return 1\n"
+    +            ),
+    +        })
+    +    elif case == "D":
+    +        sources.update({
+    +            "pkg.decorators": (
+    +                "def replace(fn):\n"
+    +                "    return None\n"
+    +            ),
+    +            "pkg.app": (
+    +                "from pkg.decorators import replace\n"
+    +                "@replace\n"
+    +                "def f():\n"
+    +                "    return 1\n"
+    +            ),
+    +        })
+    +    elif case == "E":
+    +        sources.update({
+    +            "pkg.decorators": (
+    +                "def identity(cls):\n"
+    +                "    return cls\n"
+    +            ),
+    +            "pkg.app": (
+    +                "from pkg.decorators import identity\n"
+    +                "@identity\n"
+    +                "class C:\n"
+    +                "    pass\n"
+    +            ),
+    +        })
+    +    else:
+    +        raise AssertionError(f"unknown case: {case}")
+    +
+    +    return sources
+    +
+    +
+    +def _write_sources(root: Path, sources):
+    +    for module, source in sources.items():
+    +        parts = module.split(".")
+    +        if parts[-1] == "__init__":
+    +            directory = root.joinpath(*parts[:-1])
+    +            filename = "__init__.py"
+    +        else:
+    +            directory = root.joinpath(*parts[:-1])
+    +            filename = parts[-1] + ".py"
+    +        directory.mkdir(parents=True, exist_ok=True)
+    +        directory.joinpath(filename).write_text(source, encoding="utf-8")
+    +
+    +
+    +def _reference(
+    +    tmp_path,
+    +    sources,
+    +    export_name,
+    +    binding_name,
+    +    binding_kind,
+    +    decorator_binding_name,
+    +):
+    +    _write_sources(tmp_path, sources)
+    +    completed = subprocess.run(
+    +        [
+    +            sys.executable,
+    +            "-I",
+    +            "-B",
+    +            "-c",
+    +            _REFERENCE_RUNNER,
+    +            str(tmp_path),
+    +            export_name,
+    +            binding_name,
+    +            binding_kind,
+    +            decorator_binding_name,
+    +        ],
+    +        capture_output=True,
+    +        text=True,
+    +        timeout=20,
+    +        check=False,
+    +    )
+    +    assert completed.returncode == 0, completed.stderr
+    +    return json.loads(completed.stdout)
+    +
+    +
+    +@pytest.mark.parametrize(
+    +    "case,export_name,decorator_binding_name,binding_name,binding_kind,expected_imports,expected_type,expected_callable,expected_result,expected_instance_type,expected_same_input",
+    +    [
+    +        pytest.param(
+    +            "A", "identity", "identity", "f", "function",
+    +            ("pkg.decorators",), "builtins.function", True, 1, None, True,
+    +            id="A-imported-identity-function",
+    +        ),
+    +        pytest.param(
+    +            "B", "apply_decorator", "apply_decorator", "f", "function",
+    +            ("pkg.decorators", "pkg.effect"),
+    +            "builtins.function", True, 1, None, True,
+    +            id="B-imported-decorator-effect",
+    +        ),
+    +        pytest.param(
+    +            "C", "identity", "alias", "f", "function",
+    +            ("pkg.decorators",), "builtins.function", True, 1, None, True,
+    +            id="C-imported-alias",
+    +        ),
+    +        pytest.param(
+    +            "D", "replace", "replace", "f", "function",
+    +            ("pkg.decorators",), "builtins.NoneType", False, None, None, False,
+    +            id="D-imported-decorator-returns-none",
+    +        ),
+    +        pytest.param(
+    +            "E", "identity", "identity", "C", "class",
+    +            ("pkg.decorators",), "builtins.type", True, None,
+    +            "pkg.app.C", True,
+    +            id="E-imported-class-decorator",
+    +        ),
+    +    ],
+    +)
+    +def test_indexed_cross_module_decorator_reference_and_model_boundary(
+    +    tmp_path,
+    +    case,
+    +    export_name,
+    +    decorator_binding_name,
+    +    binding_name,
+    +    binding_kind,
+    +    expected_imports,
+    +    expected_type,
+    +    expected_callable,
+    +    expected_result,
+    +    expected_instance_type,
+    +    expected_same_input,
+    +):
+    +    sources = _case_sources(case)
+    +    observed = _reference(
+    +        tmp_path,
+    +        sources,
+    +        export_name,
+    +        binding_name,
+    +        binding_kind,
+    +        decorator_binding_name,
+    +    )
+    +
+    +    assert observed["error"] is None
+    +    assert tuple(observed["imports"]) == expected_imports
+    +    assert observed["binding_present"] is True
+    +    assert observed["binding_type"] == expected_type
+    +    assert observed["binding_callable"] is expected_callable
+    +    assert observed["body_result"] == expected_result
+    +    assert observed["body_result_type"] == expected_instance_type
+    +    assert observed["decorator_calls_at_definition"] == 1
+    +    assert observed["decorator_seen_present"] is True
+    +    assert observed["binding_is_decorator_input"] is expected_same_input
+    +    assert observed["binding_is_imported_export"] is True
+    +
+    +    modeled = evaluate_package_import_order(
+    +        {name: ast.parse(source) for name, source in sources.items()},
+    +        "pkg.app",
+    +    )
+    +    assert modeled.outcome == "UNKNOWN"
+    +    assert modeled.evidence_scope == "RESTRICTED_REGULAR_PACKAGE_MODEL"
+    +    assert modeled.events == ()
+    +
+    +
+    +def test_indexed_from_import_availability_does_not_admit_cross_module_call():
+    +    identity = _new_restricted_function(
+    +        "pkg.decorators",
+    +        (),
+    +        ("fn",),
+    +    )
+    +    namespaces = {
+    +        "pkg.decorators": {"identity": identity},
+    +        "pkg.app": {},
+    +    }
+    +    control = _execute_from_binding(
+    +        _Step(
+    +            "FROM",
+    +            target="pkg.decorators",
+    +            symbol="identity",
+    +            binding="alias",
+    +        ),
+    +        module="pkg.app",
+    +        states={"pkg.decorators": "READY"},
+    +        namespaces=namespaces,
+    +        class_namespace_admissible=lambda value: True,
+    +    )
+    +
+    +    assert control.action == "ADVANCE"
+    +    assert namespaces["pkg.app"]["alias"] is identity
+    +    assert identity.defining_module == "pkg.decorators"
+    +    assert _execute_restricted_object_call(
+    +        identity,
+    +        object(),
+    +        module="pkg.app",
+    +        local_bindings={},
+    +    ) is None
+    +
+    +    indexed_sources = {
+    +        "pkg.__init__": ast.parse("pass\n"),
+    +        "pkg.decorators": ast.parse(
+    +            "def identity(fn):\n    return fn\n"
+    +        ),
+    +        "pkg.app": ast.parse(
+    +            "from pkg.decorators import identity\n"
+    +        ),
+    +    }
+    +    imported = evaluate_package_import_order(indexed_sources, "pkg.app")
+    +    assert imported.outcome == "MODEL_PASS"
+    +    assert imported.evidence_scope == "RESTRICTED_REGULAR_PACKAGE_MODEL"
+    +    assert any(
+    +        event.operation == "FROM"
+    +        and event.module == "pkg.app"
+    +        and event.target == "pkg.decorators"
+    +        and event.symbol == "identity"
+    +        for event in imported.events
+    +    )
+    +
+    +
+    +def test_imported_decorator_body_effect_is_not_reported_as_model_execution():
+    +    sources = {
+    +        "pkg.__init__": ast.parse("pass\n"),
+    +        "pkg.decorators": ast.parse(
+    +            "def apply_decorator(fn):\n"
+    +            "    import pkg.effect\n"
+    +            "    return fn\n"
+    +        ),
+    +        "pkg.app": ast.parse(
+    +            "from pkg.decorators import apply_decorator\n"
+    +            "@apply_decorator\n"
+    +            "def f():\n"
+    +            "    pass\n"
+    +        ),
+    +        "pkg.effect": ast.parse("pass\n"),
+    +    }
+    +    modeled = evaluate_package_import_order(sources, "pkg.app")
+    +
+    +    assert modeled.outcome == "UNKNOWN"
+    +    assert modeled.evidence_scope == "RESTRICTED_REGULAR_PACKAGE_MODEL"
+    +    assert any(
+    +        event.operation == "FROM"
+    +        and event.module == "pkg.app"
+    +        and event.target == "pkg.decorators"
+    +        and event.symbol == "apply_decorator"
+    +        for event in modeled.events
+    +    )
+    +    assert not any(
+    +        event.operation == "CALL_FUNCTION"
+    +        and event.symbol == "apply_decorator"
+    +        for event in modeled.events
+    +    )
+    +    assert not any(
+    +        event.operation == "START_IMPORT"
+    +        and event.target == "pkg.effect"
+    +        for event in modeled.events
+    +    )
+    +    assert not any(
+    +        event.operation == "FUNCTION_LOCAL_IMPORT"
+    +        and event.target == "pkg.effect"
+    +        for event in modeled.events
+    +    )
+    +
+    +
+    +def test_external_functools_decorator_remains_unmodeled_without_assumptions():
+    +    sources = {
+    +        "pkg.__init__": ast.parse("pass\n"),
+    +        "pkg.decorators": ast.parse("pass\n"),
+    +        "pkg.app": ast.parse(
+    +            "from functools import lru_cache\n"
+    +            "@lru_cache\n"
+    +            "def f():\n"
+    +            "    pass\n"
+    +        ),
+    +    }
+    +    modeled = evaluate_package_import_order(sources, "pkg.app")
+    +
+    +    assert modeled.outcome == "UNKNOWN"
+    +    assert modeled.evidence_scope == "RESTRICTED_REGULAR_PACKAGE_MODEL"
+    +    assert modeled.target_module == "functools"
+    +    assert modeled.reached_unmodeled_import is not None
+    +    assert (
+    +        modeled.reached_unmodeled_import.operation,
+    +        modeled.reached_unmodeled_import.target,
+    +        modeled.reached_unmodeled_import.symbol,
+    +    ) == ("FROM", "functools", "lru_cache")
+    +    assert not any(
+    +        event.operation == "CALL_FUNCTION"
+    +        and event.symbol == "lru_cache"
+    +        for event in modeled.events
+    +    )
+    +
+    +
+    +def test_imported_class_decorator_does_not_satisfy_local_compile_gate():
+    +    sources = {
+    +        "pkg.__init__": ast.parse("pass\n"),
+    +        "pkg.decorators": ast.parse(
+    +            "def identity(cls):\n    return cls\n"
+    +        ),
+    +        "pkg.app": ast.parse(
+    +            "from pkg.decorators import identity\n"
+    +            "@identity\n"
+    +            "class C:\n"
+    +            "    pass\n"
+    +        ),
+    +    }
+    +    modeled = evaluate_package_import_order(sources, "pkg.app")
+    +
+    +    assert modeled.outcome == "UNKNOWN"
+    +    assert modeled.evidence_scope == "RESTRICTED_REGULAR_PACKAGE_MODEL"
+    +    assert modeled.events == ()
