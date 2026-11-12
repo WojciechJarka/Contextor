@@ -1,141 +1,110 @@
-# P5-M08-I10-T3 — cross-module decorator stack baseline
+# P5-M08-I10-I3-R1 — cross-module decorator stacks
 
 ## PREFLIGHT
 
-- **DIRECT_EVIDENCE:** Contextor MCP first returned canonical LIVE revision `1382`; `package_model.py` was `canonical_state=fresh`, `workspace_sync=verified`, provenance `live`, with no advisory warning.
-- **DIRECT_EVIDENCE:** HEAD was `37545a8f85dfc609042eae38c74bf49585e5e7a2`; working tree was clean before this task.
-- **DIRECT_EVIDENCE:** active `.venv\Scripts\python.exe` is CPython `3.15.2`.
-- **DIRECT_EVIDENCE:** `tests/test_cycle_semantics_cross_module_stacked_baseline.py` did not exist at preflight.
-- **CODE_PATH_PROVED:** I10-I2/R2 is present. The single imported decorator branch remains at `package_model.py:2227-2308`; the imported-object helper remains guarded at `execution/calls.py:86-101`.
-- **CODE_PATH_PROVED:** `DEFINE_STACKED_FUNCTION` at `package_model.py:2156` snapshots named decorator objects and reverses the snapshot for bottom-up application, but calls each object helper with the applying module. The helper rejects a `_RestrictedFunction` whose `defining_module` differs.
-- **CODE_PATH_PROVED:** the return continuation at `package_model.py:2687` advances to the next snapshot object using the current frame module. Natural completion at `package_model.py:1780-1850` similarly supplies `None` to the next object using that module.
-- **CODE_PATH_PROVED:** `_FunctionFrame` carries `module`, decorator continuation fields, and `binding_module`; `_advance_frame` preserves them (`execution/state.py:32-78`).
-- No production source or existing test was edited.
+- DIRECT_EVIDENCE: HEAD 08ec8a8f5b412d226e57b289fd18e3e22e4eac31.
+- DIRECT_EVIDENCE: before implementation, git status contained only the previous walkthrough.md report modification; no production/test source was premodified. This report replaces that previous report per repository instructions.
+- DIRECT_EVIDENCE: Contextor LIVE revision 1384, provenance live; package_model.py and the T3 baseline test were workspace_sync=verified, no advisory warning.
+- DIRECT_EVIDENCE: active interpreter CPython 3.15.2.
+- DIRECT_EVIDENCE: I10-I1 _FunctionFrame still has result_binding, decorator_final_binding, remaining_decorators, binding_module; _advance_frame carries the fields.
+- DIRECT_EVIDENCE: I10-I2 single foreign decorator branch remains around package_model.py:2227-2308 and executes a one-parameter restricted function in its defining module.
+- DIRECT_EVIDENCE: all six unchanged T3 CPython fixture checks passed in the first gate before model assertions.
+- DIRECT_EVIDENCE: Contextor reported cycle_semantics stale; no semantic refresh was performed.
 
 ## FILES_CHANGED
 
-- `tests/test_cycle_semantics_cross_module_stacked_baseline.py` (new).
-- `walkthrough.md` (this report; excluded from source/test diff accounting).
-- No production changes and no existing test changes.
+- contextor/core/cycle_semantics/package_model.py
+- tests/test_cycle_semantics_cross_module_stacked_baseline.py
+- tests/test_cycle_semantics_cross_module_stack_continuation.py (new)
+- walkthrough.md (report artifact; excluded from source/test diff accounting)
 
-## CPYTHON_STACK_MATRIX
+## PREVIOUS_STOP_RESOLUTION
 
-| Case | CPython decorator calls, in order | CPython imports, in order | Error | Final `f` |
-|---|---|---|---|---|
-| A | `bottom@pkg.decorators`, `upper@pkg.app` | `pkg.decorators`, `pkg.bottom_effect`, `pkg.upper_effect` | none | callable function; same object as first decorator input |
-| B | `bottom@pkg.app`, `upper@pkg.decorators` | `pkg.decorators`, `pkg.bottom_effect`, `pkg.upper_effect` | none | callable function; same object as first decorator input |
-| C | `lower@pkg.lower`, `upper@pkg.upper` | `pkg.lower`, `pkg.upper`, `pkg.lower_effect`, `pkg.upper_effect` | none | callable function; same object as first decorator input |
-| D | `lower@pkg.lower`, `upper@pkg.upper` through aliases | `pkg.lower`, `pkg.upper`, `pkg.lower_effect`, `pkg.upper_effect` | none | callable function; same object as first decorator input |
-| E | `bottom@pkg.decorators`, then `upper@pkg.app` receives `None` | `pkg.decorators` | none | `None`, not callable |
-| F | `bottom@pkg.app` | `pkg.decorators`, `pkg.bottom_effect` | `TypeError` applying `None` as upper decorator | no final binding; failed module import |
+R1 replaced the unrepresentable runtime global-rebinding requirement with an isolated _snapshot_named_decorators identity regression. No grammar was extended. The snapshot identity test passed in the first gate.
 
-Every CPython reference subprocess used `-I -B` and reported version `[3, 15, 2]`. The import trace records actual import order; `loaded_effect_modules` is compared as a membership set, not used as an ordering channel.
+## OBJECT_IDENTITY_ADMISSION
 
-## FOREIGN_BOTTOM_LOCAL_UPPER
+The production patch applies the specified admission checks to the exact snapshot object at the first and continuation call sites: _RestrictedFunction, one parameter, defining module present in logical_sources and programs. It calls _execute_restricted_object_call with that object's defining module. The helper itself and its guards were not changed.
 
-- Case A CPython invokes the foreign bottom decorator first, imports `pkg.bottom_effect`, then invokes the local upper decorator and imports `pkg.upper_effect`. The final binding is the original callable function.
-- Model result: `UNKNOWN`, evidence scope `RESTRICTED_REGULAR_PACKAGE_MODEL`, target `pkg.app`, symbol `bottom`. It records the imported bottom binding and local upper definition, but no decorator call or effect import.
+## FIRST_DECORATOR_EXECUTION
 
-```text
-PackageModelEvent(module='\x00ENTRY', operation='START_IMPORT', target='pkg', symbol=None)
-PackageModelEvent(module='pkg', operation='READY', target=None, symbol=None)
-PackageModelEvent(module='\x00ENTRY', operation='START_IMPORT', target='pkg.app', symbol=None)
-PackageModelEvent(module='pkg.app', operation='START_IMPORT', target='pkg.decorators', symbol=None)
-PackageModelEvent(module='pkg.decorators', operation='DEFINE_FUNCTION', target=None, symbol='bottom')
-PackageModelEvent(module='pkg.decorators', operation='READY', target=None, symbol=None)
-PackageModelEvent(module='pkg', operation='BIND_CHILD', target='pkg.decorators', symbol='decorators')
-PackageModelEvent(module='pkg.app', operation='FROM', target='pkg.decorators', symbol='bottom')
-PackageModelEvent(module='pkg.app', operation='DEFINE_FUNCTION', target=None, symbol='upper')
-```
+DEFINE_STACKED_FUNCTION now executes the bottom captured object in first_object.defining_module while attributing its CALL_FUNCTION event to the applying module. The frame owns the defining module and carries binding_module=applying module.
 
-## LOCAL_BOTTOM_FOREIGN_UPPER
+## RETURN_CONTINUATION
 
-- Case B CPython invokes local bottom before foreign upper. Both effects occur and `f` remains the original callable function.
-- Model result: `UNKNOWN`, evidence scope `RESTRICTED_REGULAR_PACKAGE_MODEL`, target `pkg.app`, symbol `upper`. The local bottom decorator runs once and imports `pkg.bottom_effect`; there is no upper `CALL_FUNCTION` or `pkg.upper_effect` import.
+RETURN_FUNCTION now transports returned_value to the next captured object, executes it in next_object.defining_module, attributes CALL_FUNCTION to binding_module, and preserves deferred final namespace binding.
 
-```text
-PackageModelEvent(module='\x00ENTRY', operation='START_IMPORT', target='pkg', symbol=None)
-PackageModelEvent(module='pkg', operation='READY', target=None, symbol=None)
-PackageModelEvent(module='\x00ENTRY', operation='START_IMPORT', target='pkg.app', symbol=None)
-PackageModelEvent(module='pkg.app', operation='START_IMPORT', target='pkg.decorators', symbol=None)
-PackageModelEvent(module='pkg.decorators', operation='DEFINE_FUNCTION', target=None, symbol='upper')
-PackageModelEvent(module='pkg.decorators', operation='READY', target=None, symbol=None)
-PackageModelEvent(module='pkg', operation='BIND_CHILD', target='pkg.decorators', symbol='decorators')
-PackageModelEvent(module='pkg.app', operation='FROM', target='pkg.decorators', symbol='upper')
-PackageModelEvent(module='pkg.app', operation='DEFINE_FUNCTION', target=None, symbol='bottom')
-PackageModelEvent(module='pkg.app', operation='DEFINE_FUNCTION', target=None, symbol='f')
-PackageModelEvent(module='pkg.app', operation='CALL_FUNCTION', target=None, symbol='bottom')
-PackageModelEvent(module='pkg.app', operation='START_IMPORT', target='pkg.bottom_effect', symbol=None)
-PackageModelEvent(module='pkg.bottom_effect', operation='READY', target=None, symbol=None)
-PackageModelEvent(module='pkg', operation='BIND_CHILD', target='pkg.bottom_effect', symbol='bottom_effect')
-PackageModelEvent(module='pkg.app', operation='FUNCTION_LOCAL_IMPORT', target='pkg.bottom_effect', symbol='pkg')
-```
+## NATURAL_CONTINUATION
 
-## TWO_FOREIGN_DEFINING_MODULES
+Natural frame completion now transports None and executes the next captured object in its defining module. CALL_FUNCTION is attributed to binding_module. Existing frame pop order, step-budget compensation, continuation state and final None binding remain.
 
-- Case C CPython invokes `lower` in `pkg.lower`, then `upper` in `pkg.upper`; each imports its own effect. The final binding remains the original function.
-- Model result: `UNKNOWN`, evidence scope `RESTRICTED_REGULAR_PACKAGE_MODEL`, target `pkg.app`, symbol `lower`. Both FROM bindings are recorded, with no decorator calls or effect imports.
+## APPLYING_MODULE_BINDING
 
-```text
-PackageModelEvent(module='\x00ENTRY', operation='START_IMPORT', target='pkg', symbol=None)
-PackageModelEvent(module='pkg', operation='READY', target=None, symbol=None)
-PackageModelEvent(module='\x00ENTRY', operation='START_IMPORT', target='pkg.app', symbol=None)
-PackageModelEvent(module='pkg.app', operation='START_IMPORT', target='pkg.lower', symbol=None)
-PackageModelEvent(module='pkg.lower', operation='DEFINE_FUNCTION', target=None, symbol='lower')
-PackageModelEvent(module='pkg.lower', operation='READY', target=None, symbol=None)
-PackageModelEvent(module='pkg', operation='BIND_CHILD', target='pkg.lower', symbol='lower')
-PackageModelEvent(module='pkg.app', operation='FROM', target='pkg.lower', symbol='lower')
-PackageModelEvent(module='pkg.app', operation='START_IMPORT', target='pkg.upper', symbol=None)
-PackageModelEvent(module='pkg.upper', operation='DEFINE_FUNCTION', target=None, symbol='upper')
-PackageModelEvent(module='pkg.upper', operation='READY', target=None, symbol=None)
-PackageModelEvent(module='pkg', operation='BIND_CHILD', target='pkg.upper', symbol='upper')
-PackageModelEvent(module='pkg.app', operation='FROM', target='pkg.upper', symbol='upper')
-```
+The final binding still writes to namespaces[binding_module] only after the last decorator. No intermediate namespace write was added.
 
-## IMPORTED_ALIASES
+## BOTTOM_UP_ORDER
 
-- Case D CPython calls the original `lower` and `upper` function objects from their defining modules through `bottom_alias` and `top_alias`, bottom-up. The final binding is identical to the original function input.
-- Model result: `UNKNOWN`, evidence scope `RESTRICTED_REGULAR_PACKAGE_MODEL`, target `pkg.app`, symbol `bottom_alias`. The model's FROM event symbols remain the original exports `lower`, `upper`; no decorator calls or effects are invented.
+The existing reversed snapshot name/object order is preserved. In the tested passing model outcomes, CALL_FUNCTION symbols were bottom-to-top and attributed to pkg.app.
 
-```text
-PackageModelEvent(module='\x00ENTRY', operation='START_IMPORT', target='pkg', symbol=None)
-PackageModelEvent(module='pkg', operation='READY', target=None, symbol=None)
-PackageModelEvent(module='\x00ENTRY', operation='START_IMPORT', target='pkg.app', symbol=None)
-PackageModelEvent(module='pkg.app', operation='START_IMPORT', target='pkg.lower', symbol=None)
-PackageModelEvent(module='pkg.lower', operation='DEFINE_FUNCTION', target=None, symbol='lower')
-PackageModelEvent(module='pkg.lower', operation='READY', target=None, symbol=None)
-PackageModelEvent(module='pkg', operation='BIND_CHILD', target='pkg.lower', symbol='lower')
-PackageModelEvent(module='pkg.app', operation='FROM', target='pkg.lower', symbol='lower')
-PackageModelEvent(module='pkg.app', operation='START_IMPORT', target='pkg.upper', symbol=None)
-PackageModelEvent(module='pkg.upper', operation='DEFINE_FUNCTION', target=None, symbol='upper')
-PackageModelEvent(module='pkg.upper', operation='READY', target=None, symbol=None)
-PackageModelEvent(module='pkg', operation='BIND_CHILD', target='pkg.upper', symbol='upper')
-PackageModelEvent(module='pkg.app', operation='FROM', target='pkg.upper', symbol='upper')
-```
+## T3_CPYTHON_PARITY_MATRIX
+
+- DIRECT_EVIDENCE: all six unchanged CPython fixture comparisons passed during the first gate, including exact calls/imports and final binding observations.
+- A-E passed their complete baseline tests, including updated model expectations and separate f() checks.
+- F's CPython comparison passed; its model remained UNKNOWN, called only bottom, and recorded bottom_effect. It failed on a local_imports expected-value shape.
+- No CPython fixture source or reference expectation was changed.
 
 ## INTERMEDIATE_NONE
 
-- Case E CPython calls foreign `bottom`, which returns `None`; local `upper` then receives `None` and returns it. Final `f` is `None`.
-- Model result: `UNKNOWN`, evidence scope `RESTRICTED_REGULAR_PACKAGE_MODEL`, target `pkg.app`, symbol `bottom`. It records no decorator call because the foreign bottom object is rejected by the existing module-provenance check.
+The new natural-completion and bare-return tests both passed: definition-only MODEL_PASS and appended f() UNKNOWN, with no CALL_FUNCTION(f).
 
-```text
-PackageModelEvent(module='\x00ENTRY', operation='START_IMPORT', target='pkg', symbol=None)
-PackageModelEvent(module='pkg', operation='READY', target=None, symbol=None)
-PackageModelEvent(module='\x00ENTRY', operation='START_IMPORT', target='pkg.app', symbol=None)
-PackageModelEvent(module='pkg.app', operation='START_IMPORT', target='pkg.decorators', symbol=None)
-PackageModelEvent(module='pkg.decorators', operation='DEFINE_FUNCTION', target=None, symbol='bottom')
-PackageModelEvent(module='pkg.decorators', operation='READY', target=None, symbol=None)
-PackageModelEvent(module='pkg', operation='BIND_CHILD', target='pkg.decorators', symbol='decorators')
-PackageModelEvent(module='pkg.app', operation='FROM', target='pkg.decorators', symbol='bottom')
-PackageModelEvent(module='pkg.app', operation='DEFINE_FUNCTION', target=None, symbol='upper')
-```
+## SNAPSHOT_IDENTITY_UNIT_REGRESSION
 
-## NONCALLABLE_FOREIGN_UPPER
+The new unit test passed. After snapshot, the mutable namespace's upper alias was changed to a third restricted function; snapshot names and exact original upper/bottom object identities remained unchanged. This is the unit-only identity contract, not full evaluator parity for runtime global rebinding.
 
-- Case F CPython applies local bottom and imports `pkg.bottom_effect`, then attempts to call the rebound `None` upper decorator and raises `TypeError`. The failed `pkg.app` module has no final `f` binding.
-- Model result: `UNKNOWN`, evidence scope `RESTRICTED_REGULAR_PACKAGE_MODEL`, target `pkg.app`, symbol `upper`. It records bottom's call and import, but no fabricated upper call or upper effect.
+## NEGATIVE_BOUNDARIES
 
-```text
+- The noncallable-upper test reached UNKNOWN after the bottom call and bottom_effect import, with no fabricated upper call; its starts assertion failed before later assertions.
+- Same-module stacked execution, single imported decorator, imported class decorator, and external functools.lru_cache tests passed.
+- No class, compiler, helper, external callable, or import policy changes were made.
+
+## FIRST_GATE_RESULTS
+
+Command:
+.\.venv\Scripts\python.exe -m pytest -q tests/test_cycle_semantics_cross_module_stacked_baseline.py tests/test_cycle_semantics_cross_module_stack_continuation.py -rs
+
+DIRECT_EVIDENCE: 5 failed, 12 passed in 4.63s. Per R1, STOP was required at this gate. No independent fixes were made.
+
+### Exact failures and traceback anchors
+
+1. tests/test_cycle_semantics_cross_module_stacked_baseline.py::test_cross_module_decorator_stack_cpython_and_model_baseline[F], line 500: AssertionError. Actual local-import tuple: (("pkg.bottom_effect", "pkg.app"),). Expected: ("pkg.bottom_effect",). Earlier assertions passed: CPython comparison, UNKNOWN outcome, CALL_FUNCTION(bottom), FROM events, starts and uniqueness.
+
+2. tests/test_cycle_semantics_cross_module_stack_continuation.py::test_foreign_bottom_then_local_upper_uses_each_defining_module, line 88: AssertionError in _starts. Actual tuple:
+   (("\x00ENTRY", "pkg.app"), ("pkg.app", "pkg.decorators"), ("pkg.decorators", "pkg.bottom_effect"), ("pkg.app", "pkg.upper_effect"))
+   Expected tuple:
+   (("pkg.app", "pkg.decorators"), ("pkg.decorators", "pkg.bottom_effect"), ("pkg.app", "pkg.upper_effect"))
+
+3. tests/test_cycle_semantics_cross_module_stack_continuation.py::test_local_bottom_then_foreign_upper_preserves_effect_order, line 140: AssertionError in _starts. Actual tuple:
+   (("\x00ENTRY", "pkg.app"), ("pkg.app", "pkg.decorators"), ("pkg.app", "pkg.bottom_effect"), ("pkg.decorators", "pkg.upper_effect"))
+   Expected tuple:
+   (("pkg.app", "pkg.decorators"), ("pkg.app", "pkg.bottom_effect"), ("pkg.decorators", "pkg.upper_effect"))
+
+4. tests/test_cycle_semantics_cross_module_stack_continuation.py::test_two_foreign_decorators_execute_in_distinct_modules, line 210: AssertionError in _starts. Actual tuple:
+   (("\x00ENTRY", "pkg.app"), ("pkg.app", "pkg.lower"), ("pkg.app", "pkg.upper"), ("pkg.lower", "pkg.lower_effect"), ("pkg.upper", "pkg.upper_effect"))
+   Expected tuple:
+   (("pkg.app", "pkg.lower"), ("pkg.app", "pkg.upper"), ("pkg.lower", "pkg.lower_effect"), ("pkg.upper", "pkg.upper_effect"))
+
+5. tests/test_cycle_semantics_cross_module_stack_continuation.py::test_noncallable_upper_stops_after_lower_effect_without_binding_f, line 366: AssertionError in _starts. Actual tuple:
+   (("\x00ENTRY", "pkg.app"), ("pkg.app", "pkg.decorators"), ("pkg.app", "pkg.bottom_effect"))
+   Expected tuple:
+   (("pkg.app", "pkg.decorators"), ("pkg.app", "pkg.bottom_effect"))
+
+The \x00ENTRY token above denotes the exact module string \x00ENTRY, as in the event representations below. These are assertion failures; no evaluator exception or production traceback occurred.
+
+### Complete events — baseline case F
+
+Outcome UNKNOWN; target_module=pkg.app; symbol=upper.
+
+~~~text
 PackageModelEvent(module='\x00ENTRY', operation='START_IMPORT', target='pkg', symbol=None)
 PackageModelEvent(module='pkg', operation='READY', target=None, symbol=None)
 PackageModelEvent(module='\x00ENTRY', operation='START_IMPORT', target='pkg.app', symbol=None)
@@ -152,456 +121,462 @@ PackageModelEvent(module='pkg.app', operation='START_IMPORT', target='pkg.bottom
 PackageModelEvent(module='pkg.bottom_effect', operation='READY', target=None, symbol=None)
 PackageModelEvent(module='pkg', operation='BIND_CHILD', target='pkg.bottom_effect', symbol='bottom_effect')
 PackageModelEvent(module='pkg.app', operation='FUNCTION_LOCAL_IMPORT', target='pkg.bottom_effect', symbol='pkg')
-```
+~~~
 
-## CURRENT_FRAME_CONTINUATION_EVIDENCE
+### Complete events — continuation case A
 
-- `_FunctionFrame` carries decorator-final binding, remaining decorator object identities, and a separate `binding_module` (`execution/state.py:32-78`). `_advance_frame` preserves those fields.
-- `DEFINE_STACKED_FUNCTION` snapshots namespace objects before application, reverses the decorator list, and attempts the bottom object first (`package_model.py:2156 onward`). It validates the first object using `_execute_restricted_object_call(..., module=applying_module)` before emitting its CALL_FUNCTION event.
-- `RETURN_FUNCTION` and natural completion pass the next captured decorator object the intermediate value or `None`, but use the current frame module in the helper call (`package_model.py:2687 onward; 1780 onward`). Thus a local bottom may run and produce imports, while a foreign upper remains unexecuted and makes the outcome UNKNOWN.
-- `_execute_restricted_object_call` rejects mismatched defining modules and any object that is not a one-parameter `_RestrictedFunction` (`execution/calls.py:86-101`).
-- These are **CODE_PATH_PROVED** boundaries; CPython parity is directly evidenced by the subprocess matrix above. No stack support was added.
+Outcome MODEL_PASS; target_module=None; symbol=None.
 
-## SINGLE_DECORATOR_REGRESSION
+~~~text
+PackageModelEvent(module='\x00ENTRY', operation='START_IMPORT', target='pkg', symbol=None)
+PackageModelEvent(module='pkg', operation='READY', target=None, symbol=None)
+PackageModelEvent(module='\x00ENTRY', operation='START_IMPORT', target='pkg.app', symbol=None)
+PackageModelEvent(module='pkg.app', operation='START_IMPORT', target='pkg.decorators', symbol=None)
+PackageModelEvent(module='pkg.decorators', operation='DEFINE_FUNCTION', target=None, symbol='bottom')
+PackageModelEvent(module='pkg.decorators', operation='READY', target=None, symbol=None)
+PackageModelEvent(module='pkg', operation='BIND_CHILD', target='pkg.decorators', symbol='decorators')
+PackageModelEvent(module='pkg.app', operation='FROM', target='pkg.decorators', symbol='bottom')
+PackageModelEvent(module='pkg.app', operation='DEFINE_FUNCTION', target=None, symbol='upper')
+PackageModelEvent(module='pkg.app', operation='DEFINE_FUNCTION', target=None, symbol='f')
+PackageModelEvent(module='pkg.app', operation='CALL_FUNCTION', target=None, symbol='bottom')
+PackageModelEvent(module='pkg.decorators', operation='START_IMPORT', target='pkg.bottom_effect', symbol=None)
+PackageModelEvent(module='pkg.bottom_effect', operation='READY', target=None, symbol=None)
+PackageModelEvent(module='pkg', operation='BIND_CHILD', target='pkg.bottom_effect', symbol='bottom_effect')
+PackageModelEvent(module='pkg.decorators', operation='FUNCTION_LOCAL_IMPORT', target='pkg.bottom_effect', symbol='pkg')
+PackageModelEvent(module='pkg.app', operation='CALL_FUNCTION', target=None, symbol='upper')
+PackageModelEvent(module='pkg.app', operation='START_IMPORT', target='pkg.upper_effect', symbol=None)
+PackageModelEvent(module='pkg.upper_effect', operation='READY', target=None, symbol=None)
+PackageModelEvent(module='pkg', operation='BIND_CHILD', target='pkg.upper_effect', symbol='upper_effect')
+PackageModelEvent(module='pkg.app', operation='FUNCTION_LOCAL_IMPORT', target='pkg.upper_effect', symbol='pkg')
+PackageModelEvent(module='pkg.app', operation='READY', target=None, symbol=None)
+PackageModelEvent(module='pkg', operation='BIND_CHILD', target='pkg.app', symbol='app')
+~~~
 
-- The requested regression command includes the existing I10-I2 single-decorator test `test_indexed_single_decorator_matches_cpython_and_binds_result` in `test_cycle_semantics_cross_module_single_decorator.py`; it passed.
-- Same-module stack guards `test_stacked_decorator_execution` and `test_stacked_decorators_remain_bottom_to_top_without_duplicates` passed.
-- External callable guards `test_external_lru_cache_remains_unknown` and `test_external_functools_decorator_remains_unmodeled` passed.
+### Complete events — continuation case B
 
-## TARGETED_TEST_RESULTS
+Outcome MODEL_PASS; target_module=None; symbol=None.
 
-- Exact command: `& .\.venv\Scripts\python.exe -m pytest -q tests/test_cycle_semantics_cross_module_stacked_baseline.py tests/test_cycle_semantics_cross_module_single_decorator.py tests/test_cycle_semantics_stacked_decorator_execution.py tests/test_cycle_semantics_stacked_decorator_identity.py tests/test_cycle_semantics_function_frame_result_owner.py -rs`.
-- The first attempt reached a helper assertion before model evaluation for C/D because the test compared loaded-module membership in the filter-list order. The CPython import-order assertion is separate and remained exact; the membership comparison was corrected to sets.
-- Final **DIRECT_EVIDENCE:** `41 passed in 7.43s`.
-- `git diff --check` exited `0`.
-- No full pytest or SCC02 was run.
+~~~text
+PackageModelEvent(module='\x00ENTRY', operation='START_IMPORT', target='pkg', symbol=None)
+PackageModelEvent(module='pkg', operation='READY', target=None, symbol=None)
+PackageModelEvent(module='\x00ENTRY', operation='START_IMPORT', target='pkg.app', symbol=None)
+PackageModelEvent(module='pkg.app', operation='START_IMPORT', target='pkg.decorators', symbol=None)
+PackageModelEvent(module='pkg.decorators', operation='DEFINE_FUNCTION', target=None, symbol='upper')
+PackageModelEvent(module='pkg.decorators', operation='READY', target=None, symbol=None)
+PackageModelEvent(module='pkg', operation='BIND_CHILD', target='pkg.decorators', symbol='decorators')
+PackageModelEvent(module='pkg.app', operation='FROM', target='pkg.decorators', symbol='upper')
+PackageModelEvent(module='pkg.app', operation='DEFINE_FUNCTION', target=None, symbol='bottom')
+PackageModelEvent(module='pkg.app', operation='DEFINE_FUNCTION', target=None, symbol='f')
+PackageModelEvent(module='pkg.app', operation='CALL_FUNCTION', target=None, symbol='bottom')
+PackageModelEvent(module='pkg.app', operation='START_IMPORT', target='pkg.bottom_effect', symbol=None)
+PackageModelEvent(module='pkg.bottom_effect', operation='READY', target=None, symbol=None)
+PackageModelEvent(module='pkg', operation='BIND_CHILD', target='pkg.bottom_effect', symbol='bottom_effect')
+PackageModelEvent(module='pkg.app', operation='FUNCTION_LOCAL_IMPORT', target='pkg.bottom_effect', symbol='pkg')
+PackageModelEvent(module='pkg.app', operation='CALL_FUNCTION', target=None, symbol='upper')
+PackageModelEvent(module='pkg.decorators', operation='START_IMPORT', target='pkg.upper_effect', symbol=None)
+PackageModelEvent(module='pkg.upper_effect', operation='READY', target=None, symbol=None)
+PackageModelEvent(module='pkg', operation='BIND_CHILD', target='pkg.upper_effect', symbol='upper_effect')
+PackageModelEvent(module='pkg.decorators', operation='FUNCTION_LOCAL_IMPORT', target='pkg.upper_effect', symbol='pkg')
+PackageModelEvent(module='pkg.app', operation='READY', target=None, symbol=None)
+PackageModelEvent(module='pkg', operation='BIND_CHILD', target='pkg.app', symbol='app')
+~~~
 
-## MCP_POST_TASK_AUDIT
+### Complete events — continuation case C
 
-- **DIRECT_EVIDENCE:** canonical LIVE revision `1384`, provenance `live`.
-- New test source: `canonical_state=fresh`, `workspace_sync=verified`, no advisory warning.
-- `package_model.py`: `canonical_state=fresh`, `workspace_sync=verified`, no advisory warning; production source was not changed.
-- Syntax error count: `0`.
-- Structural DFS cycle count: `16`, with semantics `DFS_BACK_EDGE_PATHS_DEDUP_ROTATION_NOT_ALL_SIMPLE_CYCLES` (not all simple cycles).
-- `cycle_semantics` family remains marked stale; no semantic refresh was requested or performed.
-- No FULL, `update_file`, backend restart, Git staging, commit, push, index mutation, or history mutation was performed.
+Outcome MODEL_PASS; target_module=None; symbol=None.
+
+~~~text
+PackageModelEvent(module='\x00ENTRY', operation='START_IMPORT', target='pkg', symbol=None)
+PackageModelEvent(module='pkg', operation='READY', target=None, symbol=None)
+PackageModelEvent(module='\x00ENTRY', operation='START_IMPORT', target='pkg.app', symbol=None)
+PackageModelEvent(module='pkg.app', operation='START_IMPORT', target='pkg.lower', symbol=None)
+PackageModelEvent(module='pkg.lower', operation='DEFINE_FUNCTION', target=None, symbol='lower')
+PackageModelEvent(module='pkg.lower', operation='READY', target=None, symbol=None)
+PackageModelEvent(module='pkg', operation='BIND_CHILD', target='pkg.lower', symbol='lower')
+PackageModelEvent(module='pkg.app', operation='FROM', target='pkg.lower', symbol='lower')
+PackageModelEvent(module='pkg.app', operation='START_IMPORT', target='pkg.upper', symbol=None)
+PackageModelEvent(module='pkg.upper', operation='DEFINE_FUNCTION', target=None, symbol='upper')
+PackageModelEvent(module='pkg.upper', operation='READY', target=None, symbol=None)
+PackageModelEvent(module='pkg', operation='BIND_CHILD', target='pkg.upper', symbol='upper')
+PackageModelEvent(module='pkg.app', operation='FROM', target='pkg.upper', symbol='upper')
+PackageModelEvent(module='pkg.app', operation='DEFINE_FUNCTION', target=None, symbol='f')
+PackageModelEvent(module='pkg.app', operation='CALL_FUNCTION', target=None, symbol='lower')
+PackageModelEvent(module='pkg.lower', operation='START_IMPORT', target='pkg.lower_effect', symbol=None)
+PackageModelEvent(module='pkg.lower_effect', operation='READY', target=None, symbol=None)
+PackageModelEvent(module='pkg', operation='BIND_CHILD', target='pkg.lower_effect', symbol='lower_effect')
+PackageModelEvent(module='pkg.lower', operation='FUNCTION_LOCAL_IMPORT', target='pkg.lower_effect', symbol='pkg')
+PackageModelEvent(module='pkg.app', operation='CALL_FUNCTION', target=None, symbol='upper')
+PackageModelEvent(module='pkg.upper', operation='START_IMPORT', target='pkg.upper_effect', symbol=None)
+PackageModelEvent(module='pkg.upper_effect', operation='READY', target=None, symbol=None)
+PackageModelEvent(module='pkg', operation='BIND_CHILD', target='pkg.upper_effect', symbol='upper_effect')
+PackageModelEvent(module='pkg.upper', operation='FUNCTION_LOCAL_IMPORT', target='pkg.upper_effect', symbol='pkg')
+PackageModelEvent(module='pkg.app', operation='READY', target=None, symbol=None)
+PackageModelEvent(module='pkg', operation='BIND_CHILD', target='pkg.app', symbol='app')
+~~~
+
+### Complete events — continuation case G
+
+Outcome UNKNOWN; target_module=pkg.app; symbol=upper.
+
+~~~text
+PackageModelEvent(module='\x00ENTRY', operation='START_IMPORT', target='pkg', symbol=None)
+PackageModelEvent(module='pkg', operation='READY', target=None, symbol=None)
+PackageModelEvent(module='\x00ENTRY', operation='START_IMPORT', target='pkg.app', symbol=None)
+PackageModelEvent(module='pkg.app', operation='START_IMPORT', target='pkg.decorators', symbol=None)
+PackageModelEvent(module='pkg.decorators', operation='DEFINE_FUNCTION', target=None, symbol='upper')
+PackageModelEvent(module='pkg.decorators', operation='READY', target=None, symbol=None)
+PackageModelEvent(module='pkg', operation='BIND_CHILD', target='pkg.decorators', symbol='decorators')
+PackageModelEvent(module='pkg.app', operation='FROM', target='pkg.decorators', symbol='upper')
+PackageModelEvent(module='pkg.app', operation='BIND', target=None, symbol='upper')
+PackageModelEvent(module='pkg.app', operation='DEFINE_FUNCTION', target=None, symbol='bottom')
+PackageModelEvent(module='pkg.app', operation='DEFINE_FUNCTION', target=None, symbol='f')
+PackageModelEvent(module='pkg.app', operation='CALL_FUNCTION', target=None, symbol='bottom')
+PackageModelEvent(module='pkg.app', operation='START_IMPORT', target='pkg.bottom_effect', symbol=None)
+PackageModelEvent(module='pkg.bottom_effect', operation='READY', target=None, symbol=None)
+PackageModelEvent(module='pkg', operation='BIND_CHILD', target='pkg.bottom_effect', symbol='bottom_effect')
+PackageModelEvent(module='pkg.app', operation='FUNCTION_LOCAL_IMPORT', target='pkg.bottom_effect', symbol='pkg')
+~~~
+
+## TARGETED_REGRESSION_RESULTS
+
+NOT RUN. The first gate failed. The targeted regression command was not run. No full pytest or SCC02 was run.
+
+## MCP_POST_CHANGE_AUDIT
+
+NOT RUN because R1 requires stopping after a first-gate failure. Preflight LIVE was revision 1384. No post-change source freshness or revision is claimed.
 
 ## FULL_DIFFS
 
-Complete diff for the new test file. No existing tests or production files changed. `walkthrough.md` is this report and is excluded from source/test diff accounting.
+Complete task diffs for all changed source/test files are included below. walkthrough.md is the report artifact.
 
-```diff
+~~~diff
+diff --git a/contextor/core/cycle_semantics/package_model.py b/contextor/core/cycle_semantics/package_model.py
+index 1e7e9df..e6e477c 100644
+--- a/contextor/core/cycle_semantics/package_model.py
++++ b/contextor/core/cycle_semantics/package_model.py
+@@ -1807,10 +1807,23 @@ def evaluate_package_import_order(
+                         )
+                         next_locals: dict[str, object | None] = {}
+ 
++                        if (
++                            not isinstance(
++                                next_object,
++                                _RestrictedFunction,
++                            )
++                            or len(next_object.parameters) != 1
++                            or next_object.defining_module
++                            not in logical_sources
++                            or next_object.defining_module
++                            not in programs
++                        ):
++                            return result("UNKNOWN", module, next_name)
++
+                         next_body = _execute_restricted_object_call(
+                             next_object,
+                             None,
+-                            module=module,
++                            module=next_object.defining_module,
+                             local_bindings=next_locals,
+                         )
+ 
+@@ -1819,7 +1832,7 @@ def evaluate_package_import_order(
+ 
+                         events.append(
+                             PackageModelEvent(
+-                                module,
++                                binding_module,
+                                 "CALL_FUNCTION",
+                                 symbol=next_name,
+                             )
+@@ -1827,7 +1840,7 @@ def evaluate_package_import_order(
+ 
+                         frames.append(
+                             _FunctionFrame(
+-                                module=module,
++                                module=next_object.defining_module,
+                                 index=0,
+                                 steps=next_body,
+                                 local_bindings=next_locals,
+@@ -2185,10 +2198,18 @@ def evaluate_package_import_order(
+             first_name, first_object = application_order[0]
+             local_bindings: dict[str, object | None] = {}
+ 
++            if (
++                not isinstance(first_object, _RestrictedFunction)
++                or len(first_object.parameters) != 1
++                or first_object.defining_module not in logical_sources
++                or first_object.defining_module not in programs
++            ):
++                return result("UNKNOWN", module, first_name)
++
+             body = _execute_restricted_object_call(
+                 first_object,
+                 decorated_function,
+-                module=module,
++                module=first_object.defining_module,
+                 local_bindings=local_bindings,
+             )
+ 
+@@ -2214,12 +2235,13 @@ def evaluate_package_import_order(
+             frames[-1] = _advance_frame(frames[-1])
+             frames.append(
+                 _FunctionFrame(
+-                    module=module,
++                    module=first_object.defining_module,
+                     index=0,
+                     steps=body,
+                     local_bindings=local_bindings,
+                     decorator_final_binding=step.binding,
+                     remaining_decorators=application_order[1:],
++                    binding_module=module,
+                 )
+             )
+             continue
+@@ -2713,10 +2735,23 @@ def evaluate_package_import_order(
+                     )
+                     next_locals: dict[str, object | None] = {}
+ 
++                    if (
++                        not isinstance(
++                            next_object,
++                            _RestrictedFunction,
++                        )
++                        or len(next_object.parameters) != 1
++                        or next_object.defining_module
++                        not in logical_sources
++                        or next_object.defining_module
++                        not in programs
++                    ):
++                        return result("UNKNOWN", module, next_name)
++
+                     next_body = _execute_restricted_object_call(
+                         next_object,
+                         returned_value,
+-                        module=module,
++                        module=next_object.defining_module,
+                         local_bindings=next_locals,
+                     )
+ 
+@@ -2725,7 +2760,7 @@ def evaluate_package_import_order(
+ 
+                     events.append(
+                         PackageModelEvent(
+-                            module,
++                            binding_module,
+                             "CALL_FUNCTION",
+                             symbol=next_name,
+                         )
+@@ -2733,7 +2768,7 @@ def evaluate_package_import_order(
+ 
+                     frames.append(
+                         _FunctionFrame(
+-                            module=module,
++                            module=next_object.defining_module,
+                             index=0,
+                             steps=next_body,
+                             local_bindings=next_locals,
 diff --git a/tests/test_cycle_semantics_cross_module_stacked_baseline.py b/tests/test_cycle_semantics_cross_module_stacked_baseline.py
-new file mode 100644
-index 0000000..fadf7fe
---- /dev/null
+index fadf7fe..61791b2 100644
+--- a/tests/test_cycle_semantics_cross_module_stacked_baseline.py
 +++ b/tests/test_cycle_semantics_cross_module_stacked_baseline.py
-@@ -0,0 +1,468 @@
-+"""CPython and model baselines for cross-module decorator stacks."""
+@@ -147,10 +147,18 @@ _EXPECTED = {
+         "binding_type": "builtins.function",
+         "binding_callable": True,
+         "binding_is_first_input": True,
+-        "model_calls": (),
++        "model_outcome": "MODEL_PASS",
++        "model_calls": ("bottom", "upper"),
+         "from_symbols": ("bottom",),
+-        "model_starts": ("pkg.decorators",),
+-        "local_imports": (),
++        "model_starts": (
++            "pkg.decorators",
++            "pkg.bottom_effect",
++            "pkg.upper_effect",
++        ),
++        "local_imports": (
++            ("pkg.bottom_effect", "pkg.decorators"),
++            ("pkg.upper_effect", "pkg.app"),
++        ),
+     },
+     "B": {
+         "error_type": None,
+@@ -168,10 +176,18 @@ _EXPECTED = {
+         "binding_type": "builtins.function",
+         "binding_callable": True,
+         "binding_is_first_input": True,
+-        "model_calls": ("bottom",),
++        "model_outcome": "MODEL_PASS",
++        "model_calls": ("bottom", "upper"),
+         "from_symbols": ("upper",),
+-        "model_starts": ("pkg.decorators", "pkg.bottom_effect"),
+-        "local_imports": ("pkg.bottom_effect",),
++        "model_starts": (
++            "pkg.decorators",
++            "pkg.bottom_effect",
++            "pkg.upper_effect",
++        ),
++        "local_imports": (
++            ("pkg.bottom_effect", "pkg.app"),
++            ("pkg.upper_effect", "pkg.decorators"),
++        ),
+     },
+     "C": {
+         "error_type": None,
+@@ -190,10 +206,19 @@ _EXPECTED = {
+         "binding_type": "builtins.function",
+         "binding_callable": True,
+         "binding_is_first_input": True,
+-        "model_calls": (),
++        "model_outcome": "MODEL_PASS",
++        "model_calls": ("lower", "upper"),
+         "from_symbols": ("lower", "upper"),
+-        "model_starts": ("pkg.lower", "pkg.upper"),
+-        "local_imports": (),
++        "model_starts": (
++            "pkg.lower",
++            "pkg.upper",
++            "pkg.lower_effect",
++            "pkg.upper_effect",
++        ),
++        "local_imports": (
++            ("pkg.lower_effect", "pkg.lower"),
++            ("pkg.upper_effect", "pkg.upper"),
++        ),
+     },
+     "D": {
+         "error_type": None,
+@@ -212,10 +237,19 @@ _EXPECTED = {
+         "binding_type": "builtins.function",
+         "binding_callable": True,
+         "binding_is_first_input": True,
+-        "model_calls": (),
++        "model_outcome": "MODEL_PASS",
++        "model_calls": ("bottom_alias", "top_alias"),
+         "from_symbols": ("lower", "upper"),
+-        "model_starts": ("pkg.lower", "pkg.upper"),
+-        "local_imports": (),
++        "model_starts": (
++            "pkg.lower",
++            "pkg.upper",
++            "pkg.lower_effect",
++            "pkg.upper_effect",
++        ),
++        "local_imports": (
++            ("pkg.lower_effect", "pkg.lower"),
++            ("pkg.upper_effect", "pkg.upper"),
++        ),
+     },
+     "E": {
+         "error_type": None,
+@@ -229,7 +263,8 @@ _EXPECTED = {
+         "binding_type": "builtins.NoneType",
+         "binding_callable": False,
+         "binding_is_first_input": False,
+-        "model_calls": (),
++        "model_outcome": "MODEL_PASS",
++        "model_calls": ("bottom", "upper"),
+         "from_symbols": ("bottom",),
+         "model_starts": ("pkg.decorators",),
+         "local_imports": (),
+@@ -243,6 +278,7 @@ _EXPECTED = {
+         "binding_type": None,
+         "binding_callable": False,
+         "binding_is_first_input": False,
++        "model_outcome": "UNKNOWN",
+         "model_calls": ("bottom",),
+         "from_symbols": ("upper",),
+         "model_starts": ("pkg.decorators", "pkg.bottom_effect"),
+@@ -440,29 +476,59 @@ def test_cross_module_decorator_stack_cpython_and_model_baseline(tmp_path, case)
+     )
+ 
+     modeled = _model(sources)
+-    assert modeled.outcome == "UNKNOWN"
++    assert modeled.outcome == expected["model_outcome"]
+     assert modeled.evidence_scope == "RESTRICTED_REGULAR_PACKAGE_MODEL"
+-    assert tuple(event.symbol for event in _events(modeled, "CALL_FUNCTION")) == expected[
+-        "model_calls"
+-    ]
++    calls = _events(modeled, "CALL_FUNCTION")
++    assert tuple(event.symbol for event in calls) == expected["model_calls"]
++    assert tuple(event.module for event in calls) == ("pkg.app",) * len(calls)
+     assert tuple(event.symbol for event in _events(modeled, "FROM")) == expected[
+         "from_symbols"
+     ]
+-    assert tuple(
++    model_starts = tuple(
+         event.target
+         for event in _events(modeled, "START_IMPORT")
+         if event.target in _TRACKED_IMPORTS
+-    ) == expected["model_starts"]
++    )
++    assert model_starts == expected["model_starts"]
++    assert len(model_starts) == len(set(model_starts))
+     local_imports = tuple(
+         event
+         for event in modeled.events
+         if event.operation == "FUNCTION_LOCAL_IMPORT"
+         and event.target in _TRACKED_EFFECTS
+     )
+-    assert tuple(event.target for event in local_imports) == expected["local_imports"]
+-    assert all(event.module == "pkg.app" for event in local_imports)
+-    if expected["model_calls"]:
+-        assert all(
+-            event.module == "pkg.app"
+-            for event in _events(modeled, "CALL_FUNCTION")
++    assert tuple(
++        (event.target, event.module)
++        for event in local_imports
++    ) == expected["local_imports"]
++    assert not any(
++        event.operation == "BIND" and event.symbol == "f"
++        for event in modeled.events
++    )
 +
++    if case in {"A", "B", "C", "D"}:
++        model_only_sources = dict(sources)
++        model_only_sources["pkg.app"] += "f()\n"
++        called = _model(model_only_sources)
++        assert called.outcome == "MODEL_PASS"
++        called_events = _events(called, "CALL_FUNCTION")
++        assert tuple(event.symbol for event in called_events) == (
++            *expected["model_calls"],
++            "f",
++        )
++        assert tuple(event.module for event in called_events) == (
++            "pkg.app",
++        ) * len(called_events)
++
++    elif case == "E":
++        model_only_sources = dict(sources)
++        model_only_sources["pkg.app"] += "f()\n"
++        called = _model(model_only_sources)
++        assert called.outcome == "UNKNOWN"
++        assert tuple(
++            event.symbol for event in _events(called, "CALL_FUNCTION")
++        ) == expected["model_calls"]
++        assert not any(
++            event.operation == "CALL_FUNCTION" and event.symbol == "f"
++            for event in called.events
+         )
+~~~
+
+~~~diff
+diff --git a/tests/test_cycle_semantics_cross_module_stack_continuation.py b/tests/test_cycle_semantics_cross_module_stack_continuation.py
+new file mode 100644
+index 0000000..823901e
+--- /dev/null
++++ b/tests/test_cycle_semantics_cross_module_stack_continuation.py
+@@ -0,0 +1,507 @@
 +import ast
-+import json
-+import subprocess
-+import sys
-+from pathlib import Path
 +
-+import pytest
-+
++from contextor.core.cycle_semantics.execution.calls import (
++    _RestrictedFunction,
++    _snapshot_named_decorators,
++)
 +from contextor.core.cycle_semantics.package_model import (
 +    evaluate_package_import_order,
 +)
-+
-+
-+_REFERENCE_RUNNER = r"""
-+import builtins
-+import importlib
-+import json
-+import sys
-+
-+sys.path.insert(0, sys.argv[1])
-+decorator_specs = json.loads(sys.argv[2])
-+tracked_imports = set(json.loads(sys.argv[3]))
-+tracked_effects = json.loads(sys.argv[4])
-+imports = []
-+decorator_calls = []
-+decorator_inputs = []
-+original_import = builtins.__import__
-+
-+def traced_import(name, globals=None, locals=None, fromlist=(), level=0):
-+    if name in tracked_imports:
-+        imports.append(name)
-+    return original_import(name, globals, locals, fromlist, level)
-+
-+builtins.__import__ = traced_import
-+
-+def trace_decorators(frame, event, arg):
-+    if event == "call":
-+        module_name = frame.f_globals.get("__name__")
-+        function_name = frame.f_code.co_name
-+        for expected_name, expected_module, parameter in decorator_specs:
-+            if function_name == expected_name and module_name == expected_module:
-+                value = frame.f_locals.get(parameter)
-+                decorator_calls.append(
-+                    [
-+                        function_name,
-+                        module_name,
-+                        type(value).__module__ + "." + type(value).__qualname__,
-+                    ]
-+                )
-+                decorator_inputs.append(value)
-+                break
-+    return trace_decorators
-+
-+sys.settrace(trace_decorators)
-+error_type = None
-+try:
-+    app = importlib.import_module("pkg.app")
-+except BaseException as exc:
-+    app = sys.modules.get("pkg.app")
-+    error_type = type(exc).__name__
-+finally:
-+    sys.settrace(None)
-+    builtins.__import__ = original_import
-+
-+binding_present = app is not None and "f" in app.__dict__
-+value = app.__dict__.get("f") if binding_present else None
-+print(json.dumps({
-+    "python": list(sys.version_info[:3]),
-+    "error_type": error_type,
-+    "decorator_calls": decorator_calls,
-+    "imports": imports,
-+    "loaded_effect_modules": [
-+        name for name in tracked_effects if name in sys.modules
-+    ],
-+    "binding_present": binding_present,
-+    "binding_type": (
-+        type(value).__module__ + "." + type(value).__qualname__
-+        if binding_present else None
-+    ),
-+    "binding_callable": callable(value) if binding_present else False,
-+    "binding_is_first_decorator_input": (
-+        binding_present
-+        and bool(decorator_inputs)
-+        and value is decorator_inputs[0]
-+    ),
-+}, sort_keys=True))
-+"""
-+
-+
-+_TRACKED_IMPORTS = (
-+    "pkg.decorators",
-+    "pkg.lower",
-+    "pkg.upper",
-+    "pkg.bottom_effect",
-+    "pkg.upper_effect",
-+    "pkg.lower_effect",
-+)
-+_TRACKED_EFFECTS = (
-+    "pkg.bottom_effect",
-+    "pkg.upper_effect",
-+    "pkg.lower_effect",
-+)
-+
-+_DECORATOR_SPECS = {
-+    "A": (
-+        ("bottom", "pkg.decorators", "fn"),
-+        ("upper", "pkg.app", "fn"),
-+    ),
-+    "B": (
-+        ("bottom", "pkg.app", "fn"),
-+        ("upper", "pkg.decorators", "fn"),
-+    ),
-+    "C": (
-+        ("lower", "pkg.lower", "fn"),
-+        ("upper", "pkg.upper", "fn"),
-+    ),
-+    "D": (
-+        ("lower", "pkg.lower", "fn"),
-+        ("upper", "pkg.upper", "fn"),
-+    ),
-+    "E": (
-+        ("bottom", "pkg.decorators", "fn"),
-+        ("upper", "pkg.app", "value"),
-+    ),
-+    "F": (
-+        ("bottom", "pkg.app", "fn"),
-+        ("upper", "pkg.decorators", "fn"),
-+    ),
-+}
-+
-+_EXPECTED = {
-+    "A": {
-+        "error_type": None,
-+        "calls": (
-+            ("bottom", "pkg.decorators", "builtins.function"),
-+            ("upper", "pkg.app", "builtins.function"),
-+        ),
-+        "imports": (
-+            "pkg.decorators",
-+            "pkg.bottom_effect",
-+            "pkg.upper_effect",
-+        ),
-+        "loaded_effects": ("pkg.bottom_effect", "pkg.upper_effect"),
-+        "binding_present": True,
-+        "binding_type": "builtins.function",
-+        "binding_callable": True,
-+        "binding_is_first_input": True,
-+        "model_calls": (),
-+        "from_symbols": ("bottom",),
-+        "model_starts": ("pkg.decorators",),
-+        "local_imports": (),
-+    },
-+    "B": {
-+        "error_type": None,
-+        "calls": (
-+            ("bottom", "pkg.app", "builtins.function"),
-+            ("upper", "pkg.decorators", "builtins.function"),
-+        ),
-+        "imports": (
-+            "pkg.decorators",
-+            "pkg.bottom_effect",
-+            "pkg.upper_effect",
-+        ),
-+        "loaded_effects": ("pkg.bottom_effect", "pkg.upper_effect"),
-+        "binding_present": True,
-+        "binding_type": "builtins.function",
-+        "binding_callable": True,
-+        "binding_is_first_input": True,
-+        "model_calls": ("bottom",),
-+        "from_symbols": ("upper",),
-+        "model_starts": ("pkg.decorators", "pkg.bottom_effect"),
-+        "local_imports": ("pkg.bottom_effect",),
-+    },
-+    "C": {
-+        "error_type": None,
-+        "calls": (
-+            ("lower", "pkg.lower", "builtins.function"),
-+            ("upper", "pkg.upper", "builtins.function"),
-+        ),
-+        "imports": (
-+            "pkg.lower",
-+            "pkg.upper",
-+            "pkg.lower_effect",
-+            "pkg.upper_effect",
-+        ),
-+        "loaded_effects": ("pkg.lower_effect", "pkg.upper_effect"),
-+        "binding_present": True,
-+        "binding_type": "builtins.function",
-+        "binding_callable": True,
-+        "binding_is_first_input": True,
-+        "model_calls": (),
-+        "from_symbols": ("lower", "upper"),
-+        "model_starts": ("pkg.lower", "pkg.upper"),
-+        "local_imports": (),
-+    },
-+    "D": {
-+        "error_type": None,
-+        "calls": (
-+            ("lower", "pkg.lower", "builtins.function"),
-+            ("upper", "pkg.upper", "builtins.function"),
-+        ),
-+        "imports": (
-+            "pkg.lower",
-+            "pkg.upper",
-+            "pkg.lower_effect",
-+            "pkg.upper_effect",
-+        ),
-+        "loaded_effects": ("pkg.lower_effect", "pkg.upper_effect"),
-+        "binding_present": True,
-+        "binding_type": "builtins.function",
-+        "binding_callable": True,
-+        "binding_is_first_input": True,
-+        "model_calls": (),
-+        "from_symbols": ("lower", "upper"),
-+        "model_starts": ("pkg.lower", "pkg.upper"),
-+        "local_imports": (),
-+    },
-+    "E": {
-+        "error_type": None,
-+        "calls": (
-+            ("bottom", "pkg.decorators", "builtins.function"),
-+            ("upper", "pkg.app", "builtins.NoneType"),
-+        ),
-+        "imports": ("pkg.decorators",),
-+        "loaded_effects": (),
-+        "binding_present": True,
-+        "binding_type": "builtins.NoneType",
-+        "binding_callable": False,
-+        "binding_is_first_input": False,
-+        "model_calls": (),
-+        "from_symbols": ("bottom",),
-+        "model_starts": ("pkg.decorators",),
-+        "local_imports": (),
-+    },
-+    "F": {
-+        "error_type": "TypeError",
-+        "calls": (("bottom", "pkg.app", "builtins.function"),),
-+        "imports": ("pkg.decorators", "pkg.bottom_effect"),
-+        "loaded_effects": ("pkg.bottom_effect",),
-+        "binding_present": False,
-+        "binding_type": None,
-+        "binding_callable": False,
-+        "binding_is_first_input": False,
-+        "model_calls": ("bottom",),
-+        "from_symbols": ("upper",),
-+        "model_starts": ("pkg.decorators", "pkg.bottom_effect"),
-+        "local_imports": ("pkg.bottom_effect",),
-+    },
-+}
-+
-+
-+def _sources(case):
-+    sources = {"pkg.__init__": "pass\n"}
-+    if case == "A":
-+        sources.update(
-+            {
-+                "pkg.decorators": (
-+                    "def bottom(fn):\n"
-+                    "    import pkg.bottom_effect\n"
-+                    "    return fn\n"
-+                ),
-+                "pkg.bottom_effect": "pass\n",
-+                "pkg.upper_effect": "pass\n",
-+                "pkg.app": (
-+                    "from pkg.decorators import bottom\n"
-+                    "def upper(fn):\n"
-+                    "    import pkg.upper_effect\n"
-+                    "    return fn\n"
-+                    "@upper\n"
-+                    "@bottom\n"
-+                    "def f():\n"
-+                    "    pass\n"
-+                ),
-+            }
-+        )
-+    elif case == "B":
-+        sources.update(
-+            {
-+                "pkg.decorators": (
-+                    "def upper(fn):\n"
-+                    "    import pkg.upper_effect\n"
-+                    "    return fn\n"
-+                ),
-+                "pkg.upper_effect": "pass\n",
-+                "pkg.bottom_effect": "pass\n",
-+                "pkg.app": (
-+                    "from pkg.decorators import upper\n"
-+                    "def bottom(fn):\n"
-+                    "    import pkg.bottom_effect\n"
-+                    "    return fn\n"
-+                    "@upper\n"
-+                    "@bottom\n"
-+                    "def f():\n"
-+                    "    pass\n"
-+                ),
-+            }
-+        )
-+    elif case in {"C", "D"}:
-+        sources.update(
-+            {
-+                "pkg.lower": (
-+                    "def lower(fn):\n"
-+                    "    import pkg.lower_effect\n"
-+                    "    return fn\n"
-+                ),
-+                "pkg.upper": (
-+                    "def upper(fn):\n"
-+                    "    import pkg.upper_effect\n"
-+                    "    return fn\n"
-+                ),
-+                "pkg.lower_effect": "pass\n",
-+                "pkg.upper_effect": "pass\n",
-+                "pkg.app": (
-+                    (
-+                        "from pkg.lower import lower as bottom_alias\n"
-+                        "from pkg.upper import upper as top_alias\n"
-+                        "@top_alias\n"
-+                        "@bottom_alias\n"
-+                    )
-+                    if case == "D"
-+                    else (
-+                        "from pkg.lower import lower\n"
-+                        "from pkg.upper import upper\n"
-+                        "@upper\n"
-+                        "@lower\n"
-+                    )
-+                )
-+                + "def f():\n    pass\n",
-+            }
-+        )
-+    elif case == "E":
-+        sources.update(
-+            {
-+                "pkg.decorators": "def bottom(fn):\n    return\n",
-+                "pkg.app": (
-+                    "from pkg.decorators import bottom\n"
-+                    "def upper(value):\n"
-+                    "    return value\n"
-+                    "@upper\n"
-+                    "@bottom\n"
-+                    "def f():\n"
-+                    "    pass\n"
-+                ),
-+            }
-+        )
-+    elif case == "F":
-+        sources.update(
-+            {
-+                "pkg.decorators": (
-+                    "def upper(fn):\n"
-+                    "    import pkg.upper_effect\n"
-+                    "    return fn\n"
-+                ),
-+                "pkg.upper_effect": "pass\n",
-+                "pkg.bottom_effect": "pass\n",
-+                "pkg.app": (
-+                    "from pkg.decorators import upper\n"
-+                    "upper = None\n"
-+                    "def bottom(fn):\n"
-+                    "    import pkg.bottom_effect\n"
-+                    "    return fn\n"
-+                    "@upper\n"
-+                    "@bottom\n"
-+                    "def f():\n"
-+                    "    pass\n"
-+                ),
-+            }
-+        )
-+    else:
-+        raise AssertionError(f"unknown case: {case}")
-+    return sources
-+
-+
-+def _write_sources(root: Path, sources):
-+    for module, source in sources.items():
-+        parts = module.split(".")
-+        directory = root.joinpath(*parts[:-1])
-+        filename = "__init__.py" if parts[-1] == "__init__" else parts[-1] + ".py"
-+        directory.mkdir(parents=True, exist_ok=True)
-+        directory.joinpath(filename).write_text(source, encoding="utf-8")
-+
-+
-+def _cpython_reference(tmp_path, case, sources):
-+    _write_sources(tmp_path, sources)
-+    completed = subprocess.run(
-+        [
-+            sys.executable,
-+            "-I",
-+            "-B",
-+            "-c",
-+            _REFERENCE_RUNNER,
-+            str(tmp_path),
-+            json.dumps(_DECORATOR_SPECS[case]),
-+            json.dumps(_TRACKED_IMPORTS),
-+            json.dumps(_TRACKED_EFFECTS),
-+        ],
-+        capture_output=True,
-+        text=True,
-+        timeout=20,
-+        check=False,
-+    )
-+    assert completed.returncode == 0, completed.stderr
-+    return json.loads(completed.stdout)
 +
 +
 +def _model(sources):
@@ -619,54 +594,490 @@ index 0000000..fadf7fe
 +    )
 +
 +
-+@pytest.mark.parametrize("case", ("A", "B", "C", "D", "E", "F"))
-+def test_cross_module_decorator_stack_cpython_and_model_baseline(tmp_path, case):
-+    expected = _EXPECTED[case]
-+    sources = _sources(case)
-+    observed = _cpython_reference(tmp_path, case, sources)
-+
-+    assert observed["python"] == [3, 15, 2]
-+    assert observed["error_type"] == expected["error_type"]
-+    assert tuple(tuple(call) for call in observed["decorator_calls"]) == expected["calls"]
-+    assert tuple(observed["imports"]) == expected["imports"]
-+    assert set(observed["loaded_effect_modules"]) == set(expected["loaded_effects"])
-+    assert observed["binding_present"] is expected["binding_present"]
-+    assert observed["binding_type"] == expected["binding_type"]
-+    assert observed["binding_callable"] is expected["binding_callable"]
-+    assert (
-+        observed["binding_is_first_decorator_input"]
-+        is expected["binding_is_first_input"]
++def _calls(model):
++    return tuple(
++        (event.module, event.symbol)
++        for event in _events(model, "CALL_FUNCTION")
 +    )
++
++
++def _starts(model):
++    return tuple(
++        (event.module, event.target)
++        for event in _events(model, "START_IMPORT")
++        if event.target is not None and event.target.startswith("pkg.")
++    )
++
++
++def _local_imports(model):
++    return tuple(
++        (event.module, event.target, event.symbol)
++        for event in _events(model, "FUNCTION_LOCAL_IMPORT")
++    )
++
++
++def _assert_unique_module_starts(model):
++    targets = tuple(target for _module, target in _starts(model))
++    assert len(targets) == len(set(targets))
++
++
++def _with_f_call(sources):
++    model_sources = dict(sources)
++    model_sources["pkg.app"] += "f()\n"
++    return _model(model_sources)
++
++
++def test_foreign_bottom_then_local_upper_uses_each_defining_module():
++    sources = {
++        "pkg.__init__": "pass\n",
++        "pkg.decorators": (
++            "def bottom(fn):\n"
++            "    import pkg.bottom_effect\n"
++            "    return fn\n"
++        ),
++        "pkg.bottom_effect": "pass\n",
++        "pkg.upper_effect": "pass\n",
++        "pkg.app": (
++            "from pkg.decorators import bottom\n"
++            "def upper(fn):\n"
++            "    import pkg.upper_effect\n"
++            "    return fn\n"
++            "@upper\n"
++            "@bottom\n"
++            "def f():\n"
++            "    pass\n"
++        ),
++    }
++
++    modeled = _model(sources)
++    assert modeled.outcome == "MODEL_PASS"
++    assert _calls(modeled) == (
++        ("pkg.app", "bottom"),
++        ("pkg.app", "upper"),
++    )
++    assert _starts(modeled) == (
++        ("pkg.app", "pkg.decorators"),
++        ("pkg.decorators", "pkg.bottom_effect"),
++        ("pkg.app", "pkg.upper_effect"),
++    )
++    assert _local_imports(modeled) == (
++        ("pkg.decorators", "pkg.bottom_effect", "pkg"),
++        ("pkg.app", "pkg.upper_effect", "pkg"),
++    )
++    assert not any(
++        event.operation == "BIND" and event.symbol == "f"
++        for event in modeled.events
++    )
++    _assert_unique_module_starts(modeled)
++
++    called = _with_f_call(sources)
++    assert called.outcome == "MODEL_PASS"
++    assert _calls(called) == (
++        ("pkg.app", "bottom"),
++        ("pkg.app", "upper"),
++        ("pkg.app", "f"),
++    )
++
++
++def test_local_bottom_then_foreign_upper_preserves_effect_order():
++    sources = {
++        "pkg.__init__": "pass\n",
++        "pkg.decorators": (
++            "def upper(fn):\n"
++            "    import pkg.upper_effect\n"
++            "    return fn\n"
++        ),
++        "pkg.upper_effect": "pass\n",
++        "pkg.bottom_effect": "pass\n",
++        "pkg.app": (
++            "from pkg.decorators import upper\n"
++            "def bottom(fn):\n"
++            "    import pkg.bottom_effect\n"
++            "    return fn\n"
++            "@upper\n"
++            "@bottom\n"
++            "def f():\n"
++            "    pass\n"
++        ),
++    }
++
++    modeled = _model(sources)
++    assert modeled.outcome == "MODEL_PASS"
++    assert _calls(modeled) == (
++        ("pkg.app", "bottom"),
++        ("pkg.app", "upper"),
++    )
++    assert _starts(modeled) == (
++        ("pkg.app", "pkg.decorators"),
++        ("pkg.app", "pkg.bottom_effect"),
++        ("pkg.decorators", "pkg.upper_effect"),
++    )
++    assert _local_imports(modeled) == (
++        ("pkg.app", "pkg.bottom_effect", "pkg"),
++        ("pkg.decorators", "pkg.upper_effect", "pkg"),
++    )
++    bottom_call = next(
++        index
++        for index, event in enumerate(modeled.events)
++        if event.operation == "CALL_FUNCTION" and event.symbol == "bottom"
++    )
++    bottom_effect = next(
++        index
++        for index, event in enumerate(modeled.events)
++        if event.operation == "FUNCTION_LOCAL_IMPORT"
++        and event.target == "pkg.bottom_effect"
++    )
++    upper_call = next(
++        index
++        for index, event in enumerate(modeled.events)
++        if event.operation == "CALL_FUNCTION" and event.symbol == "upper"
++    )
++    upper_effect = next(
++        index
++        for index, event in enumerate(modeled.events)
++        if event.operation == "FUNCTION_LOCAL_IMPORT"
++        and event.target == "pkg.upper_effect"
++    )
++    assert bottom_call < bottom_effect < upper_call < upper_effect
++    _assert_unique_module_starts(modeled)
++
++    called = _with_f_call(sources)
++    assert called.outcome == "MODEL_PASS"
++    assert _calls(called)[-1] == ("pkg.app", "f")
++
++
++def test_two_foreign_decorators_execute_in_distinct_modules():
++    sources = {
++        "pkg.__init__": "pass\n",
++        "pkg.lower": (
++            "def lower(fn):\n"
++            "    import pkg.lower_effect\n"
++            "    return fn\n"
++        ),
++        "pkg.upper": (
++            "def upper(fn):\n"
++            "    import pkg.upper_effect\n"
++            "    return fn\n"
++        ),
++        "pkg.lower_effect": "pass\n",
++        "pkg.upper_effect": "pass\n",
++        "pkg.app": (
++            "from pkg.lower import lower\n"
++            "from pkg.upper import upper\n"
++            "@upper\n"
++            "@lower\n"
++            "def f():\n"
++            "    pass\n"
++        ),
++    }
++
++    modeled = _model(sources)
++    assert modeled.outcome == "MODEL_PASS"
++    assert _calls(modeled) == (
++        ("pkg.app", "lower"),
++        ("pkg.app", "upper"),
++    )
++    assert _starts(modeled) == (
++        ("pkg.app", "pkg.lower"),
++        ("pkg.app", "pkg.upper"),
++        ("pkg.lower", "pkg.lower_effect"),
++        ("pkg.upper", "pkg.upper_effect"),
++    )
++    assert _local_imports(modeled) == (
++        ("pkg.lower", "pkg.lower_effect", "pkg"),
++        ("pkg.upper", "pkg.upper_effect", "pkg"),
++    )
++    assert tuple(
++        event.symbol for event in _events(modeled, "FROM")
++    ) == ("lower", "upper")
++    _assert_unique_module_starts(modeled)
++
++    called = _with_f_call(sources)
++    assert called.outcome == "MODEL_PASS"
++    assert _calls(called)[-1] == ("pkg.app", "f")
++
++
++def test_foreign_bottom_natural_completion_passes_none_to_upper():
++    sources = {
++        "pkg.__init__": "pass\n",
++        "pkg.decorators": "def bottom(fn):\n    pass\n",
++        "pkg.app": (
++            "from pkg.decorators import bottom\n"
++            "def upper(value):\n"
++            "    return value\n"
++            "@upper\n"
++            "@bottom\n"
++            "def f():\n"
++            "    pass\n"
++        ),
++    }
++
++    modeled = _model(sources)
++    assert modeled.outcome == "MODEL_PASS"
++    assert _calls(modeled) == (
++        ("pkg.app", "bottom"),
++        ("pkg.app", "upper"),
++    )
++    _assert_unique_module_starts(modeled)
++
++    called = _with_f_call(sources)
++    assert called.outcome == "UNKNOWN"
++    assert _calls(called) == (
++        ("pkg.app", "bottom"),
++        ("pkg.app", "upper"),
++    )
++    assert not any(
++        event.operation == "CALL_FUNCTION" and event.symbol == "f"
++        for event in called.events
++    )
++
++
++def test_foreign_bottom_bare_return_passes_none_to_upper():
++    sources = {
++        "pkg.__init__": "pass\n",
++        "pkg.decorators": "def bottom(fn):\n    return\n",
++        "pkg.app": (
++            "from pkg.decorators import bottom\n"
++            "def upper(value):\n"
++            "    return value\n"
++            "@upper\n"
++            "@bottom\n"
++            "def f():\n"
++            "    pass\n"
++        ),
++    }
++
++    modeled = _model(sources)
++    assert modeled.outcome == "MODEL_PASS"
++    assert _calls(modeled) == (
++        ("pkg.app", "bottom"),
++        ("pkg.app", "upper"),
++    )
++    _assert_unique_module_starts(modeled)
++
++    called = _with_f_call(sources)
++    assert called.outcome == "UNKNOWN"
++    assert _calls(called) == (
++        ("pkg.app", "bottom"),
++        ("pkg.app", "upper"),
++    )
++    assert not any(
++        event.operation == "CALL_FUNCTION" and event.symbol == "f"
++        for event in called.events
++    )
++
++
++def test_snapshot_identity_survives_namespace_rebinding():
++    bottom = _RestrictedFunction(
++        defining_module="pkg.lower",
++        body=(),
++        parameters=("fn",),
++    )
++    upper = _RestrictedFunction(
++        defining_module="pkg.upper",
++        body=(),
++        parameters=("fn",),
++    )
++    replacement = _RestrictedFunction(
++        defining_module="pkg.replacement",
++        body=(),
++        parameters=("fn",),
++    )
++    namespace = {
++        "top_alias": upper,
++        "bottom_alias": bottom,
++    }
++
++    snapshot = _snapshot_named_decorators(
++        ("top_alias", "bottom_alias"),
++        namespace,
++    )
++    assert snapshot is not None
++
++    namespace["top_alias"] = replacement
++
++    assert snapshot.names == ("top_alias", "bottom_alias")
++    assert snapshot.values[0] is upper
++    assert snapshot.values[1] is bottom
++    assert namespace["top_alias"] is replacement
++
++    application_order = tuple(
++        reversed(tuple(zip(snapshot.names, snapshot.values)))
++    )
++    assert tuple(name for name, _value in application_order) == (
++        "bottom_alias",
++        "top_alias",
++    )
++    assert application_order[0][1] is bottom
++    assert application_order[1][1] is upper
++
++
++def test_noncallable_upper_stops_after_lower_effect_without_binding_f():
++    sources = {
++        "pkg.__init__": "pass\n",
++        "pkg.decorators": "def upper(fn):\n    return fn\n",
++        "pkg.bottom_effect": "pass\n",
++        "pkg.app": (
++            "from pkg.decorators import upper\n"
++            "upper = None\n"
++            "def bottom(fn):\n"
++            "    import pkg.bottom_effect\n"
++            "    return fn\n"
++            "@upper\n"
++            "@bottom\n"
++            "def f():\n"
++            "    pass\n"
++        ),
++    }
 +
 +    modeled = _model(sources)
 +    assert modeled.outcome == "UNKNOWN"
-+    assert modeled.evidence_scope == "RESTRICTED_REGULAR_PACKAGE_MODEL"
-+    assert tuple(event.symbol for event in _events(modeled, "CALL_FUNCTION")) == expected[
-+        "model_calls"
-+    ]
-+    assert tuple(event.symbol for event in _events(modeled, "FROM")) == expected[
-+        "from_symbols"
-+    ]
-+    assert tuple(
-+        event.target
-+        for event in _events(modeled, "START_IMPORT")
-+        if event.target in _TRACKED_IMPORTS
-+    ) == expected["model_starts"]
-+    local_imports = tuple(
-+        event
-+        for event in modeled.events
-+        if event.operation == "FUNCTION_LOCAL_IMPORT"
-+        and event.target in _TRACKED_EFFECTS
++    assert _calls(modeled) == (("pkg.app", "bottom"),)
++    assert _starts(modeled) == (
++        ("pkg.app", "pkg.decorators"),
++        ("pkg.app", "pkg.bottom_effect"),
 +    )
-+    assert tuple(event.target for event in local_imports) == expected["local_imports"]
-+    assert all(event.module == "pkg.app" for event in local_imports)
-+    if expected["model_calls"]:
-+        assert all(
-+            event.module == "pkg.app"
-+            for event in _events(modeled, "CALL_FUNCTION")
++    assert _local_imports(modeled) == (
++        ("pkg.app", "pkg.bottom_effect", "pkg"),
++    )
++    assert not any(
++        event.operation == "CALL_FUNCTION" and event.symbol == "upper"
++        for event in modeled.events
++    )
++    assert not any(
++        event.operation == "BIND" and event.symbol == "f"
++        for event in modeled.events
++    )
++    _assert_unique_module_starts(modeled)
++
++
++def test_same_module_stack_keeps_bottom_up_event_sequence():
++    sources = {
++        "pkg.__init__": "pass\n",
++        "pkg.a": "pass\n",
++        "pkg.b": "pass\n",
++        "pkg.c": "pass\n",
++        "pkg.app": (
++            "def top_decorator(fn):\n"
++            "    import pkg.a\n"
++            "    return fn\n"
++            "def middle_decorator(fn):\n"
++            "    import pkg.b\n"
++            "    return fn\n"
++            "def bottom_decorator(fn):\n"
++            "    import pkg.c\n"
++            "    return fn\n"
++            "@top_decorator\n"
++            "@middle_decorator\n"
++            "@bottom_decorator\n"
++            "def f():\n"
++            "    pass\n"
++        ),
++    }
++
++    modeled = _model(sources)
++    assert modeled.outcome == "MODEL_PASS"
++    relevant = tuple(
++        (event.operation, event.module, event.target, event.symbol)
++        for event in modeled.events
++        if (
++            event.operation == "CALL_FUNCTION"
++            or (
++                event.operation == "START_IMPORT"
++                and event.target in {"pkg.a", "pkg.b", "pkg.c"}
++            )
++            or (
++                event.operation == "FUNCTION_LOCAL_IMPORT"
++                and event.target in {"pkg.a", "pkg.b", "pkg.c"}
++            )
 +        )
-```
++    )
++    assert relevant == (
++        ("CALL_FUNCTION", "pkg.app", None, "bottom_decorator"),
++        ("START_IMPORT", "pkg.app", "pkg.c", None),
++        ("FUNCTION_LOCAL_IMPORT", "pkg.app", "pkg.c", "pkg"),
++        ("CALL_FUNCTION", "pkg.app", None, "middle_decorator"),
++        ("START_IMPORT", "pkg.app", "pkg.b", None),
++        ("FUNCTION_LOCAL_IMPORT", "pkg.app", "pkg.b", "pkg"),
++        ("CALL_FUNCTION", "pkg.app", None, "top_decorator"),
++        ("START_IMPORT", "pkg.app", "pkg.a", None),
++        ("FUNCTION_LOCAL_IMPORT", "pkg.app", "pkg.a", "pkg"),
++    )
++    _assert_unique_module_starts(modeled)
++
++    called = _with_f_call(sources)
++    assert called.outcome == "MODEL_PASS"
++    assert _calls(called)[-1] == ("pkg.app", "f")
++
++
++def test_single_imported_decorator_remains_model_pass():
++    modeled = _model(
++        {
++            "pkg.__init__": "pass\n",
++            "pkg.decorators": (
++                "def identity(fn):\n"
++                "    return fn\n"
++            ),
++            "pkg.app": (
++                "from pkg.decorators import identity\n"
++                "@identity\n"
++                "def f():\n"
++                "    pass\n"
++            ),
++        }
++    )
++
++    assert modeled.outcome == "MODEL_PASS"
++    assert _calls(modeled) == (("pkg.app", "identity"),)
++    _assert_unique_module_starts(modeled)
++
++
++def test_imported_class_decorator_remains_unknown():
++    modeled = _model(
++        {
++            "pkg.__init__": "pass\n",
++            "pkg.decorators": "def identity(cls):\n    return cls\n",
++            "pkg.app": (
++                "from pkg.decorators import identity\n"
++                "@identity\n"
++                "class C:\n"
++                "    pass\n"
++            ),
++        }
++    )
++
++    assert modeled.outcome == "UNKNOWN"
++    assert modeled.events == ()
++
++
++def test_external_functools_lru_cache_remains_unknown():
++    modeled = _model(
++        {
++            "pkg.__init__": "pass\n",
++            "pkg.app": (
++                "from functools import lru_cache\n"
++                "@lru_cache\n"
++                "def f():\n"
++                "    pass\n"
++            ),
++        }
++    )
++
++    assert modeled.outcome == "UNKNOWN"
++    assert modeled.target_module == "functools"
++    assert modeled.reached_unmodeled_import is not None
++    assert (
++        modeled.reached_unmodeled_import.operation,
++        modeled.reached_unmodeled_import.target,
++        modeled.reached_unmodeled_import.symbol,
++    ) == ("FROM", "functools", "lru_cache")
++    assert not any(
++        event.operation == "CALL_FUNCTION" and event.symbol == "lru_cache"
++        for event in modeled.events
++    )
+~~~
 
 ## FINAL_VERDICT
 
-**PASS for P5-M08-I10-T3 baseline scope.** All six cross-module stack cases match the specified CPython references and remain `UNKNOWN` in the model with the recorded event boundaries. The focused I10-I2, same-module stack, and external-decorator guards pass; `git diff --check` and the Contextor post-task audit pass.
+STOP after the required first test gate. Actual result: 5 failed, 12 passed. No independent fixes, second regression command, git diff --check, or post-change MCP audit were performed.
+

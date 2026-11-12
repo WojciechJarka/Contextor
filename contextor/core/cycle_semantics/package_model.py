@@ -1807,10 +1807,23 @@ def evaluate_package_import_order(
                         )
                         next_locals: dict[str, object | None] = {}
 
+                        if (
+                            not isinstance(
+                                next_object,
+                                _RestrictedFunction,
+                            )
+                            or len(next_object.parameters) != 1
+                            or next_object.defining_module
+                            not in logical_sources
+                            or next_object.defining_module
+                            not in programs
+                        ):
+                            return result("UNKNOWN", module, next_name)
+
                         next_body = _execute_restricted_object_call(
                             next_object,
                             None,
-                            module=module,
+                            module=next_object.defining_module,
                             local_bindings=next_locals,
                         )
 
@@ -1819,7 +1832,7 @@ def evaluate_package_import_order(
 
                         events.append(
                             PackageModelEvent(
-                                module,
+                                binding_module,
                                 "CALL_FUNCTION",
                                 symbol=next_name,
                             )
@@ -1827,7 +1840,7 @@ def evaluate_package_import_order(
 
                         frames.append(
                             _FunctionFrame(
-                                module=module,
+                                module=next_object.defining_module,
                                 index=0,
                                 steps=next_body,
                                 local_bindings=next_locals,
@@ -2185,10 +2198,18 @@ def evaluate_package_import_order(
             first_name, first_object = application_order[0]
             local_bindings: dict[str, object | None] = {}
 
+            if (
+                not isinstance(first_object, _RestrictedFunction)
+                or len(first_object.parameters) != 1
+                or first_object.defining_module not in logical_sources
+                or first_object.defining_module not in programs
+            ):
+                return result("UNKNOWN", module, first_name)
+
             body = _execute_restricted_object_call(
                 first_object,
                 decorated_function,
-                module=module,
+                module=first_object.defining_module,
                 local_bindings=local_bindings,
             )
 
@@ -2214,12 +2235,13 @@ def evaluate_package_import_order(
             frames[-1] = _advance_frame(frames[-1])
             frames.append(
                 _FunctionFrame(
-                    module=module,
+                    module=first_object.defining_module,
                     index=0,
                     steps=body,
                     local_bindings=local_bindings,
                     decorator_final_binding=step.binding,
                     remaining_decorators=application_order[1:],
+                    binding_module=module,
                 )
             )
             continue
@@ -2713,10 +2735,23 @@ def evaluate_package_import_order(
                     )
                     next_locals: dict[str, object | None] = {}
 
+                    if (
+                        not isinstance(
+                            next_object,
+                            _RestrictedFunction,
+                        )
+                        or len(next_object.parameters) != 1
+                        or next_object.defining_module
+                        not in logical_sources
+                        or next_object.defining_module
+                        not in programs
+                    ):
+                        return result("UNKNOWN", module, next_name)
+
                     next_body = _execute_restricted_object_call(
                         next_object,
                         returned_value,
-                        module=module,
+                        module=next_object.defining_module,
                         local_bindings=next_locals,
                     )
 
@@ -2725,7 +2760,7 @@ def evaluate_package_import_order(
 
                     events.append(
                         PackageModelEvent(
-                            module,
+                            binding_module,
                             "CALL_FUNCTION",
                             symbol=next_name,
                         )
@@ -2733,7 +2768,7 @@ def evaluate_package_import_order(
 
                     frames.append(
                         _FunctionFrame(
-                            module=module,
+                            module=next_object.defining_module,
                             index=0,
                             steps=next_body,
                             local_bindings=next_locals,

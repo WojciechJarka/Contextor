@@ -147,10 +147,18 @@ _EXPECTED = {
         "binding_type": "builtins.function",
         "binding_callable": True,
         "binding_is_first_input": True,
-        "model_calls": (),
+        "model_outcome": "MODEL_PASS",
+        "model_calls": ("bottom", "upper"),
         "from_symbols": ("bottom",),
-        "model_starts": ("pkg.decorators",),
-        "local_imports": (),
+        "model_starts": (
+            "pkg.decorators",
+            "pkg.bottom_effect",
+            "pkg.upper_effect",
+        ),
+        "local_imports": (
+            ("pkg.bottom_effect", "pkg.decorators"),
+            ("pkg.upper_effect", "pkg.app"),
+        ),
     },
     "B": {
         "error_type": None,
@@ -168,10 +176,18 @@ _EXPECTED = {
         "binding_type": "builtins.function",
         "binding_callable": True,
         "binding_is_first_input": True,
-        "model_calls": ("bottom",),
+        "model_outcome": "MODEL_PASS",
+        "model_calls": ("bottom", "upper"),
         "from_symbols": ("upper",),
-        "model_starts": ("pkg.decorators", "pkg.bottom_effect"),
-        "local_imports": ("pkg.bottom_effect",),
+        "model_starts": (
+            "pkg.decorators",
+            "pkg.bottom_effect",
+            "pkg.upper_effect",
+        ),
+        "local_imports": (
+            ("pkg.bottom_effect", "pkg.app"),
+            ("pkg.upper_effect", "pkg.decorators"),
+        ),
     },
     "C": {
         "error_type": None,
@@ -190,10 +206,19 @@ _EXPECTED = {
         "binding_type": "builtins.function",
         "binding_callable": True,
         "binding_is_first_input": True,
-        "model_calls": (),
+        "model_outcome": "MODEL_PASS",
+        "model_calls": ("lower", "upper"),
         "from_symbols": ("lower", "upper"),
-        "model_starts": ("pkg.lower", "pkg.upper"),
-        "local_imports": (),
+        "model_starts": (
+            "pkg.lower",
+            "pkg.upper",
+            "pkg.lower_effect",
+            "pkg.upper_effect",
+        ),
+        "local_imports": (
+            ("pkg.lower_effect", "pkg.lower"),
+            ("pkg.upper_effect", "pkg.upper"),
+        ),
     },
     "D": {
         "error_type": None,
@@ -212,10 +237,19 @@ _EXPECTED = {
         "binding_type": "builtins.function",
         "binding_callable": True,
         "binding_is_first_input": True,
-        "model_calls": (),
+        "model_outcome": "MODEL_PASS",
+        "model_calls": ("bottom_alias", "top_alias"),
         "from_symbols": ("lower", "upper"),
-        "model_starts": ("pkg.lower", "pkg.upper"),
-        "local_imports": (),
+        "model_starts": (
+            "pkg.lower",
+            "pkg.upper",
+            "pkg.lower_effect",
+            "pkg.upper_effect",
+        ),
+        "local_imports": (
+            ("pkg.lower_effect", "pkg.lower"),
+            ("pkg.upper_effect", "pkg.upper"),
+        ),
     },
     "E": {
         "error_type": None,
@@ -229,7 +263,8 @@ _EXPECTED = {
         "binding_type": "builtins.NoneType",
         "binding_callable": False,
         "binding_is_first_input": False,
-        "model_calls": (),
+        "model_outcome": "MODEL_PASS",
+        "model_calls": ("bottom", "upper"),
         "from_symbols": ("bottom",),
         "model_starts": ("pkg.decorators",),
         "local_imports": (),
@@ -243,6 +278,7 @@ _EXPECTED = {
         "binding_type": None,
         "binding_callable": False,
         "binding_is_first_input": False,
+        "model_outcome": "UNKNOWN",
         "model_calls": ("bottom",),
         "from_symbols": ("upper",),
         "model_starts": ("pkg.decorators", "pkg.bottom_effect"),
@@ -440,29 +476,59 @@ def test_cross_module_decorator_stack_cpython_and_model_baseline(tmp_path, case)
     )
 
     modeled = _model(sources)
-    assert modeled.outcome == "UNKNOWN"
+    assert modeled.outcome == expected["model_outcome"]
     assert modeled.evidence_scope == "RESTRICTED_REGULAR_PACKAGE_MODEL"
-    assert tuple(event.symbol for event in _events(modeled, "CALL_FUNCTION")) == expected[
-        "model_calls"
-    ]
+    calls = _events(modeled, "CALL_FUNCTION")
+    assert tuple(event.symbol for event in calls) == expected["model_calls"]
+    assert tuple(event.module for event in calls) == ("pkg.app",) * len(calls)
     assert tuple(event.symbol for event in _events(modeled, "FROM")) == expected[
         "from_symbols"
     ]
-    assert tuple(
+    model_starts = tuple(
         event.target
         for event in _events(modeled, "START_IMPORT")
         if event.target in _TRACKED_IMPORTS
-    ) == expected["model_starts"]
+    )
+    assert model_starts == expected["model_starts"]
+    assert len(model_starts) == len(set(model_starts))
     local_imports = tuple(
         event
         for event in modeled.events
         if event.operation == "FUNCTION_LOCAL_IMPORT"
         and event.target in _TRACKED_EFFECTS
     )
-    assert tuple(event.target for event in local_imports) == expected["local_imports"]
-    assert all(event.module == "pkg.app" for event in local_imports)
-    if expected["model_calls"]:
-        assert all(
-            event.module == "pkg.app"
-            for event in _events(modeled, "CALL_FUNCTION")
+    assert tuple(
+        (event.target, event.module)
+        for event in local_imports
+    ) == expected["local_imports"]
+    assert not any(
+        event.operation == "BIND" and event.symbol == "f"
+        for event in modeled.events
+    )
+
+    if case in {"A", "B", "C", "D"}:
+        model_only_sources = dict(sources)
+        model_only_sources["pkg.app"] += "f()\n"
+        called = _model(model_only_sources)
+        assert called.outcome == "MODEL_PASS"
+        called_events = _events(called, "CALL_FUNCTION")
+        assert tuple(event.symbol for event in called_events) == (
+            *expected["model_calls"],
+            "f",
+        )
+        assert tuple(event.module for event in called_events) == (
+            "pkg.app",
+        ) * len(called_events)
+
+    elif case == "E":
+        model_only_sources = dict(sources)
+        model_only_sources["pkg.app"] += "f()\n"
+        called = _model(model_only_sources)
+        assert called.outcome == "UNKNOWN"
+        assert tuple(
+            event.symbol for event in _events(called, "CALL_FUNCTION")
+        ) == expected["model_calls"]
+        assert not any(
+            event.operation == "CALL_FUNCTION" and event.symbol == "f"
+            for event in called.events
         )
