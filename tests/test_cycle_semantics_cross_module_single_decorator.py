@@ -220,7 +220,7 @@ def test_indexed_single_decorator_matches_cpython_and_binds_result(
     decorator_call = _single_imported_decorator_contract(
         modeled,
         imported_symbol,
-        decorator_name,
+        "alias" if case == "C" else decorator_name,
     )
     assert _relevant_start_imports(modeled) == expected_imports
 
@@ -249,7 +249,7 @@ def test_indexed_single_decorator_matches_cpython_and_binds_result(
     elif case == "G":
         relative_import = tuple(
             event
-            for event in local_imports
+            for event in _events(modeled, "FUNCTION_LOCAL_FROM")
             if event.target == "pkg.decorators.effect"
         )
         assert len(relative_import) == 1
@@ -539,7 +539,7 @@ def test_imported_class_decorator_remains_unknown():
     )
 
     assert modeled.outcome == "UNKNOWN"
-    assert any(event.operation == "FROM" for event in modeled.events)
+    assert modeled.events == ()
     assert not _events(modeled, "CALL_FUNCTION")
 
 
