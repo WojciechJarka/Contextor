@@ -431,7 +431,7 @@ def test_indexed_cross_module_decorator_reference_and_model_boundary(
         ),
     ],
 )
-def test_supported_body_imported_decorators_remain_unknown(
+def test_supported_body_imported_decorators_execute_when_supported(
     tmp_path,
     case,
     export_name,
@@ -468,7 +468,7 @@ def test_supported_body_imported_decorators_remain_unknown(
         {name: ast.parse(source) for name, source in sources.items()},
         "pkg.app",
     )
-    assert modeled.outcome == "UNKNOWN"
+    assert modeled.outcome == ("UNKNOWN" if case == "D2" else "MODEL_PASS")
     assert modeled.evidence_scope == "RESTRICTED_REGULAR_PACKAGE_MODEL"
     assert any(
         event.operation == "FROM"
@@ -477,14 +477,41 @@ def test_supported_body_imported_decorators_remain_unknown(
         and event.symbol == imported_symbol
         for event in modeled.events
     )
-    assert not any(
-        event.operation == "CALL_FUNCTION"
+    decorator_calls = tuple(
+        event
         for event in modeled.events
+        if event.operation == "CALL_FUNCTION"
+        and event.symbol == decorator_binding_name
     )
-    assert not any(
-        event.target == "pkg.effect"
-        for event in modeled.events
-    )
+    if case == "D2":
+        assert decorator_calls == ()
+        assert not any(
+            event.target == "pkg.effect"
+            for event in modeled.events
+        )
+    else:
+        assert len(decorator_calls) == 1
+        assert decorator_calls[0].module == "pkg.app"
+
+        if case == "B2":
+            effect_imports = tuple(
+                event
+                for event in modeled.events
+                if event.operation == "FUNCTION_LOCAL_IMPORT"
+                and event.target == "pkg.effect"
+            )
+            assert len(effect_imports) == 1
+            assert effect_imports[0].module == "pkg.decorators"
+            assert sum(
+                event.operation == "START_IMPORT"
+                and event.target == "pkg.effect"
+                for event in modeled.events
+            ) == 1
+        else:
+            assert not any(
+                event.target == "pkg.effect"
+                for event in modeled.events
+            )
 
 
 def test_cpython_relative_decorator_import_uses_defining_package_context(
@@ -603,7 +630,7 @@ def test_imported_decorator_body_effect_is_not_reported_as_model_execution():
     }
     modeled = evaluate_package_import_order(sources, "pkg.app")
 
-    assert modeled.outcome == "UNKNOWN"
+    assert modeled.outcome == "MODEL_PASS"
     assert modeled.evidence_scope == "RESTRICTED_REGULAR_PACKAGE_MODEL"
     assert any(
         event.operation == "FROM"
@@ -612,21 +639,30 @@ def test_imported_decorator_body_effect_is_not_reported_as_model_execution():
         and event.symbol == "apply_decorator"
         for event in modeled.events
     )
-    assert not any(
-        event.operation == "CALL_FUNCTION"
+    calls = tuple(
+        event
+        for event in modeled.events
+        if event.operation == "CALL_FUNCTION"
         and event.symbol == "apply_decorator"
-        for event in modeled.events
     )
-    assert not any(
-        event.operation == "START_IMPORT"
+    assert len(calls) == 1
+    assert calls[0].module == "pkg.app"
+    starts = tuple(
+        event
+        for event in modeled.events
+        if event.operation == "START_IMPORT"
         and event.target == "pkg.effect"
-        for event in modeled.events
     )
-    assert not any(
-        event.operation == "FUNCTION_LOCAL_IMPORT"
+    assert len(starts) == 1
+    local_imports = tuple(
+        event
+        for event in modeled.events
+        if event.operation == "FUNCTION_LOCAL_IMPORT"
         and event.target == "pkg.effect"
-        for event in modeled.events
     )
+    assert len(local_imports) == 1
+    assert local_imports[0].module == "pkg.decorators"
+    assert modeled.events.index(calls[0]) < modeled.events.index(local_imports[0])
 
 
 def test_external_functools_decorator_remains_unmodeled_without_assumptions():

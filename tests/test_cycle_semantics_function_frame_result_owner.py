@@ -163,7 +163,7 @@ def test_stacked_decorators_remain_bottom_to_top_without_duplicates():
     assert calls.count("upper") == 1
 
 
-def test_imported_decorator_remains_unknown_after_from():
+def test_imported_decorator_executes_in_defining_module():
     modeled = _evaluate_sources(
         {
             "pkg.__init__": "pass\n",
@@ -181,7 +181,7 @@ def test_imported_decorator_remains_unknown_after_from():
         "pkg.app",
     )
 
-    assert modeled.outcome == "UNKNOWN"
+    assert modeled.outcome == "MODEL_PASS"
     assert any(
         event.operation == "FROM"
         and event.module == "pkg.app"
@@ -189,11 +189,14 @@ def test_imported_decorator_remains_unknown_after_from():
         and event.symbol == "identity"
         for event in modeled.events
     )
-    assert not any(
-        event.operation == "CALL_FUNCTION"
-        and event.symbol == "identity"
+    calls = tuple(
+        event
         for event in modeled.events
+        if event.operation == "CALL_FUNCTION"
+        and event.symbol == "identity"
     )
+    assert len(calls) == 1
+    assert calls[0].module == "pkg.app"
 
 
 def test_external_functools_decorator_remains_unmodeled():

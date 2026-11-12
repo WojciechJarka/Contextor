@@ -2241,13 +2241,38 @@ def evaluate_package_import_order(
                 target=step.target,
                 call_argument_values=(decorated_function,),
             )
+            decorator_value = namespaces[module][step.target]
             local_bindings: dict[str, object | None] = {}
-            body = _execute_restricted_call(
-                decorator_call,
-                module=module,
-                namespaces=namespaces,
-                local_bindings=local_bindings,
-            )
+            function_module = module
+            binding_module = None
+
+            if (
+                isinstance(decorator_value, _RestrictedFunction)
+                and decorator_value.defining_module == module
+            ):
+                body = _execute_restricted_call(
+                    decorator_call,
+                    module=module,
+                    namespaces=namespaces,
+                    local_bindings=local_bindings,
+                )
+            elif (
+                isinstance(decorator_value, _RestrictedFunction)
+                and decorator_value.defining_module != module
+                and decorator_value.defining_module in logical_sources
+                and decorator_value.defining_module in programs
+                and len(decorator_value.parameters) == 1
+            ):
+                function_module = decorator_value.defining_module
+                binding_module = module
+                body = _execute_restricted_object_call(
+                    decorator_value,
+                    decorated_function,
+                    module=function_module,
+                    local_bindings=local_bindings,
+                )
+            else:
+                return result("UNKNOWN", module, step.target)
 
             if body is None:
                 return result("UNKNOWN", module, step.target)
@@ -2267,15 +2292,27 @@ def evaluate_package_import_order(
                 )
             )
             frames[-1] = _advance_frame(frames[-1])
-            frames.append(
-                _FunctionFrame(
-                    module,
-                    0,
-                    body,
-                    local_bindings,
-                    step.binding,
+            if binding_module is None:
+                frames.append(
+                    _FunctionFrame(
+                        module,
+                        0,
+                        body,
+                        local_bindings,
+                        step.binding,
+                    )
                 )
-            )
+            else:
+                frames.append(
+                    _FunctionFrame(
+                        function_module,
+                        0,
+                        body,
+                        local_bindings,
+                        step.binding,
+                        binding_module=binding_module,
+                    )
+                )
             continue
 
         elif step.op == "DEFINE_FUNCTION":
