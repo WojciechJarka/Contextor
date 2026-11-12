@@ -282,7 +282,9 @@ _EXPECTED = {
         "model_calls": ("bottom",),
         "from_symbols": ("upper",),
         "model_starts": ("pkg.decorators", "pkg.bottom_effect"),
-        "local_imports": ("pkg.bottom_effect",),
+        "local_imports": (
+            ("pkg.bottom_effect", "pkg.app"),
+        ),
     },
 }
 

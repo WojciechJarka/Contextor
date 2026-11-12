@@ -35,7 +35,11 @@ def _starts(model):
     return tuple(
         (event.module, event.target)
         for event in _events(model, "START_IMPORT")
-        if event.target is not None and event.target.startswith("pkg.")
+        if (
+            event.target is not None
+            and event.target.startswith("pkg.")
+            and event.module != "\x00ENTRY"
+        )
     )
 
 
