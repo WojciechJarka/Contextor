@@ -63,6 +63,7 @@ from .execution.lifecycle import (
     _start_module_frame,
 )
 from .execution.calls import (
+    _RestrictedFunction,
     _execute_restricted_call,
     _execute_restricted_object_call,
     _new_restricted_function,
