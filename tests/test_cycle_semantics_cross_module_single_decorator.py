@@ -543,7 +543,7 @@ def test_imported_class_decorator_remains_unknown():
     assert not _events(modeled, "CALL_FUNCTION")
 
 
-def test_imported_stacked_decorators_remain_unknown():
+def test_imported_stacked_decorators_execute_bottom_to_top():
     modeled = _model(
         {
             "pkg.__init__": "pass\n",
@@ -563,12 +563,23 @@ def test_imported_stacked_decorators_remain_unknown():
         }
     )
 
-    assert modeled.outcome == "UNKNOWN"
-    assert not any(
-        event.operation == "CALL_FUNCTION"
-        and event.symbol in {"lower", "upper"}
+    assert modeled.outcome == "MODEL_PASS"
+    calls = tuple(
+        (event.module, event.symbol)
         for event in modeled.events
+        if event.operation == "CALL_FUNCTION"
     )
+    assert calls == (
+        ("pkg.app", "lower"),
+        ("pkg.app", "upper"),
+    )
+    from_symbols = tuple(
+        event.symbol
+        for event in modeled.events
+        if event.operation == "FROM"
+        and event.target == "pkg.decorators"
+    )
+    assert from_symbols == ("lower", "upper")
 
 
 def test_external_lru_cache_remains_unknown():

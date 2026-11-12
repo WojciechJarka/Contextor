@@ -1,175 +1,165 @@
-# P5-M08-I10-I3-R1/R2 — cross-module decorator stacks
+# P5-M08-I10-I3-R1/R2/R3 — indexed cross-module decorator stacks
 
 ## PREFLIGHT
 
-- DIRECT_EVIDENCE: HEAD 103de3e85fd0c45b2fb3f41314de6347daf9de40; branch main, aligned with origin/main.
-- DIRECT_EVIDENCE: R2 preflight working tree was clean. Active interpreter was CPython 3.15.2.
-- DIRECT_EVIDENCE: Contextor LIVE revision 1388, provenance live. package_model.py and both test modules were workspace_sync=verified, canonical state fresh, no advisory warning.
-- DIRECT_EVIDENCE: Contextor syntax_errors=0 and structural DFS cycle count=16, semantics DFS_BACK_EDGE_PATHS_DEDUP_ROTATION_NOT_ALL_SIMPLE_CYCLES. cycle_semantics family was stale; no semantic refresh was done.
-- DIRECT_EVIDENCE: I3-R1 production and test changes are already committed in HEAD 103de3e. Commit 103de3e includes package_model.py, the T3 baseline test, the new continuation test, and walkthrough.md. The R1 production changes are not part of the current R2 diff.
-- DIRECT_EVIDENCE: exact R2 anchors matched: baseline F local_imports still had the string-only tuple at _EXPECTED["F"]; _starts still filtered START_IMPORT by non-None pkg.* target without excluding the internal entry module.
-- R2 changed only the two authorized test assertions/helper. No production source changed.
+- DIRECT_EVIDENCE: HEAD aa393a25bdfd254491f65716d6aa61dc742af4eb, main aligned with origin/main. Working tree was clean before R3 edits.
+- DIRECT_EVIDENCE: CPython 3.15.2.
+- DIRECT_EVIDENCE: Contextor preflight LIVE revision 1390, provenance live; package_model.py and the three relevant test modules were workspace_sync=verified. Canonical state fresh; syntax errors 0; cycle-semantics family stale.
+- DIRECT_EVIDENCE: I3-R1 implementation is present in HEAD. Commit 103de3e includes package_model.py plus R1's T3 baseline and continuation tests.
+- DIRECT_EVIDENCE: I3-R2 test corrections are present in HEAD. Commit aa393a2 contains the baseline F local-import expectation and continuation bootstrap-start filter.
+- DIRECT_EVIDENCE: the historical test source matched the reported fixture and old UNKNOWN/no-call assertions. R3 changed only that test and walkthrough.md.
 
 ## FILES_CHANGED
 
-- tests/test_cycle_semantics_cross_module_stacked_baseline.py — R2 F local-import expectation.
-- tests/test_cycle_semantics_cross_module_stack_continuation.py — R2 bootstrap START_IMPORT filter.
-- walkthrough.md — report only; excluded from source/test diff accounting.
+- tests/test_cycle_semantics_cross_module_single_decorator.py — R3 historical stacked-decorator contract.
+- walkthrough.md — report only, excluded from source/test diff accounting.
 
-R1 source/test files already committed at HEAD: contextor/core/cycle_semantics/package_model.py, tests/test_cycle_semantics_cross_module_stacked_baseline.py, and tests/test_cycle_semantics_cross_module_stack_continuation.py.
+Commit status:
+- I3-R1 committed in 103de3e: package_model.py, tests/test_cycle_semantics_cross_module_stacked_baseline.py, tests/test_cycle_semantics_cross_module_stack_continuation.py.
+- I3-R2 committed in aa393a2: corrections in the two I3 test modules above.
+- I3-R3 is currently uncommitted: the single-decorator test file only, plus this walkthrough report.
 
-## F_LOCAL_IMPORT_EXPECTATION_CORRECTION
+## STALE_TEST_ROOT_CAUSE
 
-The F expectation now matches the existing pair assertion: (event.target, event.module) equals (("pkg.bottom_effect", "pkg.app"),). F's CPython fixture, UNKNOWN outcome, bottom-only call sequence, and effect import expectations were unchanged.
+The prior assertion treated an indexed imported restricted stack as UNKNOWN even though I3-R1 supports these named restricted decorators and CPython executes them bottom-to-top. R2's full regression reported MODEL_PASS for this fixture; CPython independently called lower, then upper, and left f callable. The failure was a stale historical expectation, not a production regression.
 
-## BOOTSTRAP_START_FILTER_CORRECTION
+## EXACT_HISTORICAL_CONTRACT_CHANGE
 
-The _starts helper preserves (event.module, event.target), START_IMPORT, non-None target and pkg. prefix conditions. It excludes only event.module == "\x00ENTRY". Real pkg.* module starts remain selected; no target-specific filtering was added.
+Renamed test_imported_stacked_decorators_remain_unknown to test_imported_stacked_decorators_execute_bottom_to_top. Preserved its complete package fixture and model invocation. Replaced the UNKNOWN/no-call assertions with MODEL_PASS, exact CALL_FUNCTION records for pkg.app lower then upper, and FROM symbols lower then upper from pkg.decorators. No other test or fixture changed.
 
-## FOREIGN_DECORATOR_EXECUTION_MODULES
+## FOREIGN_DECORATOR_EXECUTION
 
-R1 targeted tests verified that CALL_FUNCTION is attributed to applying module pkg.app while decorator body effects execute in each decorator's defining module:
-- A: bottom in pkg.decorators; upper in pkg.app.
-- B: bottom in pkg.app; upper in pkg.decorators.
-- C: lower in pkg.lower; upper in pkg.upper.
-- D: aliases preserve the original lower/upper snapshot objects and execute in their defining modules.
+The R1 continuation suite verifies each decorator body runs in its defining module while CALL_FUNCTION remains attributed to pkg.app, the applying module:
+- A: bottom body in pkg.decorators; upper body in pkg.app.
+- B: bottom body in pkg.app; upper body in pkg.decorators.
+- C: lower body in pkg.lower; upper body in pkg.upper.
+- D: aliases retain the snapshotted objects from pkg.lower and pkg.upper.
 
-## DECORATOR_CONTINUATION
+## BOTTOM_UP_APPLICATION
 
-The R1 test gate verified explicit return, natural completion, and bare-return continuation cases. Intermediate results travel to the next stored object; natural completion and bare return pass None. The R1 noncallable-upper case remains UNKNOWN after lower effects, with no upper call.
+R1 and R3 tests assert the lower decorator is called before the upper decorator. The newly updated historical test verifies:
+~~~text
+("pkg.app", "lower")
+("pkg.app", "upper")
+~~~
 
-## APPLYING_MODULE_BINDING
+## DEFINING_MODULE_IMPORT_EFFECTS
 
-The committed R1 implementation retains binding_module as the final result owner, emits continuation CALL_FUNCTION under that module, and writes the decorated name after the stack completes. R2 made no evaluator or frame changes.
+The R1 tests verify decorator-local effects are emitted under each defining module. For example, the foreign bottom in case A imports pkg.bottom_effect under pkg.decorators, then the local upper imports pkg.upper_effect under pkg.app. Cases B-D similarly verify their module attribution and import order.
 
-## BOTTOM_UP_ORDER
+## APPLYING_MODULE_RESULT_BINDING
 
-R1 baseline and continuation tests verified bottom-to-top call order. The existing reversed snapshot order and exact captured objects remain unchanged by R2.
+The committed R1 implementation carries binding_module as the result owner, attributes continuation CALL_FUNCTION events to it, and writes the final decorated name after the last decorator completes. R3 made no production changes.
+
+## ALIAS_IDENTITY
+
+R1's alias case verifies bottom_alias/top_alias calls while preserving FROM exports lower/upper. The isolated snapshot unit test confirms namespace alias rebinding does not replace objects already captured in the snapshot.
 
 ## INTERMEDIATE_NONE
 
-R1 continuation tests for implicit natural completion and explicit bare return passed. Both definition-only cases were MODEL_PASS; the appended f() model-only checks were UNKNOWN, with no CALL_FUNCTION(f).
+R1 natural-completion and bare-return cases pass None to the next decorator. The definition-only model result is MODEL_PASS; the model-only f() call is UNKNOWN.
 
 ## NONCALLABLE_UPPER_BOUNDARY
 
-The R1 test passed for an upper snapshot value of None: the lower effect remained visible, outcome was UNKNOWN, and no upper CALL_FUNCTION was fabricated.
+R1 verifies a None upper decorator yields UNKNOWN after the lower effect and emits no upper CALL_FUNCTION.
 
-## SNAPSHOT_IDENTITY
+## UNCHANGED_CLASS_DECORATOR_BOUNDARY
 
-The R1 unit regression passed: after snapshot, rebinding a mutable namespace's upper alias did not alter the captured object identity or source-name order; reversing the stored pairs selected the original bottom and upper objects. This remains a unit-only snapshot identity check.
+The targeted regression includes class decorator execution, class baseline, and class identity counterexample modules. They passed. R1/R2/R3 make no class decorator or class compiler changes.
+
+## UNCHANGED_EXTERNAL_IMPORT_POLICY
+
+External functools.lru_cache remains UNKNOWN in the continuation test and targeted regression. No external callable execution or import-policy change was introduced.
 
 ## CPYTHON_PARITY_MATRIX
 
-All six unchanged T3 CPython reference fixtures passed in the first gate:
-| Case | Calls | Outcome/final binding |
+All six unchanged T3 subprocess references passed:
+| Case | CPython decorator call order | CPython result |
 |---|---|---|
-| A | bottom@pkg.decorators, upper@pkg.app | successful import; original function remains callable |
-| B | bottom@pkg.app, upper@pkg.decorators | successful import; original function remains callable |
-| C | lower@pkg.lower, upper@pkg.upper | successful import; original function remains callable |
-| D | lower@pkg.lower, upper@pkg.upper via aliases | successful import; original function remains callable |
-| E | bottom@pkg.decorators, upper@pkg.app receives None | successful import; f is None |
+| A | bottom@pkg.decorators, upper@pkg.app | import succeeds; f remains the original callable |
+| B | bottom@pkg.app, upper@pkg.decorators | import succeeds; f remains the original callable |
+| C | lower@pkg.lower, upper@pkg.upper | import succeeds; f remains the original callable |
+| D | lower@pkg.lower, upper@pkg.upper via aliases | import succeeds; f remains the original callable |
+| E | bottom@pkg.decorators, upper@pkg.app receives None | import succeeds; f is None |
 | F | bottom@pkg.app only | TypeError at upper=None; no final f binding |
 
-Independent CPython evidence for the later targeted-subset failure used the same imported stacked-decorator shape: calls were ["lower", "upper"], f was callable, and f() returned None. The existing UNKNOWN expectation conflicts with ordinary Python decorator application and with the I3-R1 indexed-stack behavior.
+The exact historical imported-stack fixture also has direct CPython evidence: calls are lower then upper, f is callable, and f() returns None.
 
 ## FIRST_GATE_RESULTS
 
-Exact command:
-.\.venv\Scripts\python.exe -m pytest -q tests/test_cycle_semantics_cross_module_stacked_baseline.py tests/test_cycle_semantics_cross_module_stack_continuation.py -rs
+Command:
+.\.venv\Scripts\python.exe -m pytest -q tests/test_cycle_semantics_cross_module_single_decorator.py tests/test_cycle_semantics_cross_module_stacked_baseline.py tests/test_cycle_semantics_cross_module_stack_continuation.py -rs
 
-DIRECT_EVIDENCE: 17 passed in 3.41s.
+DIRECT_EVIDENCE: 29 passed in 5.04s.
 
-## TARGETED_REGRESSION_RESULTS
+## FULL_TARGETED_RESULTS
 
-Exact R2 targeted regression subset ran and returned 317 passed, 1 failed in 28.06s.
+Exact R3 targeted command completed with 318 passed in 29.83s.
 
-Failure:
-tests/test_cycle_semantics_cross_module_single_decorator.py::test_imported_stacked_decorators_remain_unknown
-Source anchor: tests/test_cycle_semantics_cross_module_single_decorator.py:546-566; failing assertion at line 566.
+git diff --check exited 0. Git emitted only line-ending normalization warnings for modified walkthrough/test files.
 
-Original expected outcome: UNKNOWN.
-Actual model outcome: MODEL_PASS.
-Assertion traceback:
-~~~text
-_______________ test_imported_stacked_decorators_remain_unknown _______________
->       assert modeled.outcome == "UNKNOWN"
-E       AssertionError: assert 'MODEL_PASS' == 'UNKNOWN'
-E       AssertionError: tests\test_cycle_semantics_cross_module_single_decorator.py:566
-1 failed, 317 passed in 28.06s
-~~~
-
-Complete model events (outcome MODEL_PASS; target_module=None; symbol=None):
-~~~text
-PackageModelEvent(module='\x00ENTRY', operation='START_IMPORT', target='pkg', symbol=None)
-PackageModelEvent(module='pkg', operation='READY', target=None, symbol=None)
-PackageModelEvent(module='\x00ENTRY', operation='START_IMPORT', target='pkg.app', symbol=None)
-PackageModelEvent(module='pkg.app', operation='START_IMPORT', target='pkg.decorators', symbol=None)
-PackageModelEvent(module='pkg.decorators', operation='DEFINE_FUNCTION', target=None, symbol='lower')
-PackageModelEvent(module='pkg.decorators', operation='DEFINE_FUNCTION', target=None, symbol='upper')
-PackageModelEvent(module='pkg.decorators', operation='READY', target=None, symbol=None)
-PackageModelEvent(module='pkg', operation='BIND_CHILD', target='pkg.decorators', symbol='decorators')
-PackageModelEvent(module='pkg.app', operation='PREPARE_FROM_MEMBER', target='pkg.decorators', symbol='lower')
-PackageModelEvent(module='pkg.app', operation='PREPARE_FROM_MEMBER', target='pkg.decorators', symbol='upper')
-PackageModelEvent(module='pkg.app', operation='FROM', target='pkg.decorators', symbol='lower')
-PackageModelEvent(module='pkg.app', operation='FROM', target='pkg.decorators', symbol='upper')
-PackageModelEvent(module='pkg.app', operation='DEFINE_FUNCTION', target=None, symbol='f')
-PackageModelEvent(module='pkg.app', operation='CALL_FUNCTION', target=None, symbol='lower')
-PackageModelEvent(module='pkg.app', operation='CALL_FUNCTION', target=None, symbol='upper')
-PackageModelEvent(module='pkg.app', operation='READY', target=None, symbol=None)
-PackageModelEvent(module='pkg', operation='BIND_CHILD', target='pkg.app', symbol='app')
-~~~
-
-Failure classification:
-- DIRECT_EVIDENCE: this is the sole failing test in the targeted regression command.
-- DIRECT_EVIDENCE: the CPython fixture with the same import/decorator ordering calls lower then upper successfully and leaves f callable.
-- CONTRACT_PROVED: I3-R1 adds execution for named restricted stacks across indexed modules. The old UNKNOWN expectation is incompatible with this implemented contract.
-- No further test edit was authorized in R2, so work stops here. The remaining assertion forbidding CALL_FUNCTION(lower/upper) was not reached because the outcome assertion failed first.
-
-git diff --check exited 0. Git printed only line-ending normalization warnings for the two modified tests.
+No full pytest or SCC02 ran.
 
 ## MCP_POST_CHANGE_AUDIT
 
-NOT RUN. R2 requires the audit only after both gates pass; the targeted regression command had one failure. Preflight Contextor revision 1388 and sync evidence above are not post-change audit evidence.
+- DIRECT_EVIDENCE: post-change canonical LIVE revision 1391, provenance live.
+- Changed test module tests/test_cycle_semantics_cross_module_single_decorator.py: workspace_sync=verified, canonical state fresh, syntax_diagnostics checked_and_none.
+- Both I3 modules tests/test_cycle_semantics_cross_module_stacked_baseline.py and tests/test_cycle_semantics_cross_module_stack_continuation.py: workspace_sync=verified at revision 1391, syntax_diagnostics checked_and_none.
+- package_model.py: workspace_sync=verified at revision 1391, syntax_diagnostics checked_and_none. R3 made no production change.
+- Dependency direction: changed and I3 regression test modules import package_model; continuation also imports execution.calls for the snapshot unit contract. package_model's canonical context reports its existing execution/import dependencies and consumers; no production dependency direction was changed by R3.
+- Syntax errors: 0.
+- Structural DFS cycle count: 16, semantics DFS_BACK_EDGE_PATHS_DEDUP_ROTATION_NOT_ALL_SIMPLE_CYCLES.
+- cycle_semantics freshness is separate and remains stale. No semantic refresh, FULL, update_file, or backend restart was requested or performed.
 
 ## FULL_DIFFS
 
-The following are the complete R2 diffs from HEAD 103de3e. R1 implementation and test changes are committed in that HEAD. walkthrough.md is the report artifact.
+Complete current uncommitted R3 diff follows. R1 and R2 diffs are committed in 103de3e and aa393a2 respectively.
 
 ~~~diff
-diff --git a/tests/test_cycle_semantics_cross_module_stack_continuation.py b/tests/test_cycle_semantics_cross_module_stack_continuation.py
-index 823901e..6679107 100644
---- a/tests/test_cycle_semantics_cross_module_stack_continuation.py
-+++ b/tests/test_cycle_semantics_cross_module_stack_continuation.py
-@@ -35,7 +35,11 @@ def _starts(model):
-     return tuple(
-         (event.module, event.target)
-         for event in _events(model, "START_IMPORT")
--        if event.target is not None and event.target.startswith("pkg.")
-+        if (
-+            event.target is not None
-+            and event.target.startswith("pkg.")
-+            and event.module != "\x00ENTRY"
-+        )
+diff --git a/tests/test_cycle_semantics_cross_module_single_decorator.py b/tests/test_cycle_semantics_cross_module_single_decorator.py
+index 69647b4..cae7c9f 100644
+--- a/tests/test_cycle_semantics_cross_module_single_decorator.py
++++ b/tests/test_cycle_semantics_cross_module_single_decorator.py
+@@ -543,7 +543,7 @@ def test_imported_class_decorator_remains_unknown():
+     assert not _events(modeled, "CALL_FUNCTION")
+
+
+-def test_imported_stacked_decorators_remain_unknown():
++def test_imported_stacked_decorators_execute_bottom_to_top():
+     modeled = _model(
+         {
+             "pkg.__init__": "pass\n",
+@@ -563,12 +563,23 @@ def test_imported_stacked_decorators_remain_unknown():
+         }
      )
+
+-    assert modeled.outcome == "UNKNOWN"
+-    assert not any(
+-        event.operation == "CALL_FUNCTION"
+-        and event.symbol in {"lower", "upper"}
++    assert modeled.outcome == "MODEL_PASS"
++    calls = tuple(
++        (event.module, event.symbol)
+         for event in modeled.events
++        if event.operation == "CALL_FUNCTION"
++    )
++    assert calls == (
++        ("pkg.app", "lower"),
++        ("pkg.app", "upper"),
++    )
++    from_symbols = tuple(
++        event.symbol
++        for event in modeled.events
++        if event.operation == "FROM"
++        and event.target == "pkg.decorators"
+     )
++    assert from_symbols == ("lower", "upper")
  
  
-diff --git a/tests/test_cycle_semantics_cross_module_stacked_baseline.py b/tests/test_cycle_semantics_cross_module_stacked_baseline.py
-index 61791b2..e480c52 100644
---- a/tests/test_cycle_semantics_cross_module_stacked_baseline.py
-+++ b/tests/test_cycle_semantics_cross_module_stacked_baseline.py
-@@ -282,7 +282,9 @@ _EXPECTED = {
-         "model_calls": ("bottom",),
-         "from_symbols": ("upper",),
-         "model_starts": ("pkg.decorators", "pkg.bottom_effect"),
--        "local_imports": ("pkg.bottom_effect",),
-+        "local_imports": (
-+            ("pkg.bottom_effect", "pkg.app"),
-+        ),
-     },
- }
+ def test_external_lru_cache_remains_unknown():
 ~~~
 
 ## FINAL_VERDICT
 
-STOP after the targeted regression failure. First gate PASS (17 passed); targeted subset is not clean (317 passed, 1 failed). No additional test expectation was changed, no production code was modified in R2, and no post-change MCP audit was performed.
+FINAL PASS for the P5-M08-I10-I3-R1/R2/R3 targeted scope: the exact historical contract correction is in place, both requested gates pass, git diff --check passes, and the Contextor post-change audit is fresh for the changed source files. No other tests were changed and no production file changed in R3.
 
