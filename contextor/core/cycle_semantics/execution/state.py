@@ -43,6 +43,7 @@ class _FunctionFrame:
     remaining_decorators: tuple[
         tuple[str, object], ...
     ] = ()
+    binding_module: str | None = None
 
 
 def _frame_module(
@@ -73,6 +74,7 @@ def _advance_frame(
             frame.result_binding,
             frame.decorator_final_binding,
             frame.remaining_decorators,
+            frame.binding_module,
         )
     return (frame[0], frame[1] + 1)
 

@@ -1790,6 +1790,12 @@ def evaluate_package_import_order(
 
         if index >= len(steps):
             if isinstance(active_frame, _FunctionFrame):
+                binding_module = (
+                    active_frame.binding_module
+                    if active_frame.binding_module is not None
+                    else module
+                )
+
                 if active_frame.decorator_final_binding is not None:
                     frames.pop()
                     execution_cursor.step_budget += 1
@@ -1830,17 +1836,20 @@ def evaluate_package_import_order(
                                 remaining_decorators=(
                                     active_frame.remaining_decorators[1:]
                                 ),
+                                binding_module=binding_module,
                             )
                         )
                     else:
-                        namespaces[module][
+                        namespaces[binding_module][
                             active_frame.decorator_final_binding
                         ] = None
 
                     continue
 
                 if active_frame.result_binding is not None:
-                    namespaces[module][active_frame.result_binding] = None
+                    namespaces[binding_module][
+                        active_frame.result_binding
+                    ] = None
                 frames.pop()
                 execution_cursor.step_budget += 1
             else:
@@ -2641,6 +2650,12 @@ def evaluate_package_import_order(
             if not isinstance(active_frame, _FunctionFrame):
                 return result("UNKNOWN", module)
 
+            binding_module = (
+                active_frame.binding_module
+                if active_frame.binding_module is not None
+                else module
+            )
+
             returned_value = None
 
             if step.symbol is not None:
@@ -2690,17 +2705,18 @@ def evaluate_package_import_order(
                             remaining_decorators=(
                                 active_frame.remaining_decorators[1:]
                             ),
+                            binding_module=binding_module,
                         )
                     )
                 else:
-                    namespaces[module][
+                    namespaces[binding_module][
                         active_frame.decorator_final_binding
                     ] = returned_value
 
                 continue
 
             if result_binding is not None:
-                namespaces[module][result_binding] = returned_value
+                namespaces[binding_module][result_binding] = returned_value
 
             continue
 
