@@ -162,14 +162,6 @@ def _reference(
     }
 
 
-_UNKNOWN_COMPILE_REJECTION = {
-    "outcome": "UNKNOWN",
-    "target_module": "pkg.app",
-    "symbol": None,
-    "evidence_scope": "RESTRICTED_REGULAR_PACKAGE_MODEL",
-    "events": (),
-}
-
 _LOCAL_IDENTITY_EVENTS = (
     ("\x00ENTRY", "START_IMPORT", "pkg", None),
     ("pkg", "READY", None, None),
@@ -180,6 +172,18 @@ _LOCAL_IDENTITY_EVENTS = (
     ("pkg.app", "READY", None, None),
     ("pkg", "BIND_CHILD", "pkg.app", "app"),
 )
+
+
+def _model_expectation(
+    events, *, outcome="MODEL_PASS", target_module=None, symbol=None,
+):
+    return {
+        "outcome": outcome,
+        "target_module": target_module,
+        "symbol": symbol,
+        "evidence_scope": "RESTRICTED_REGULAR_PACKAGE_MODEL",
+        "events": events,
+    }
 
 
 CASES = [
@@ -197,7 +201,20 @@ CASES = [
         "reference": _reference(
             decorator_calls=(_call("identity", "pkg.decorators"),),
         ),
-        "model": _UNKNOWN_COMPILE_REJECTION,
+        "model": _model_expectation((
+            ("\x00ENTRY", "START_IMPORT", "pkg", None),
+            ("pkg", "READY", None, None),
+            ("\x00ENTRY", "START_IMPORT", "pkg.app", None),
+            ("pkg.app", "START_IMPORT", "pkg.decorators", None),
+            ("pkg.decorators", "DEFINE_FUNCTION", None, "identity"),
+            ("pkg.decorators", "READY", None, None),
+            ("pkg", "BIND_CHILD", "pkg.decorators", "decorators"),
+            ("pkg.app", "FROM", "pkg.decorators", "identity"),
+            ("pkg.app", "DEFINE_PASSIVE_CLASS", None, "C"),
+            ("pkg.app", "CALL_FUNCTION", None, "identity"),
+            ("pkg.app", "READY", None, None),
+            ("pkg", "BIND_CHILD", "pkg.app", "app"),
+        )),
     },
     {
         "id": "B-imported-identity-alias",
@@ -213,7 +230,20 @@ CASES = [
         "reference": _reference(
             decorator_calls=(_call("identity", "pkg.decorators"),),
         ),
-        "model": _UNKNOWN_COMPILE_REJECTION,
+        "model": _model_expectation((
+            ("\x00ENTRY", "START_IMPORT", "pkg", None),
+            ("pkg", "READY", None, None),
+            ("\x00ENTRY", "START_IMPORT", "pkg.app", None),
+            ("pkg.app", "START_IMPORT", "pkg.decorators", None),
+            ("pkg.decorators", "DEFINE_FUNCTION", None, "identity"),
+            ("pkg.decorators", "READY", None, None),
+            ("pkg", "BIND_CHILD", "pkg.decorators", "decorators"),
+            ("pkg.app", "FROM", "pkg.decorators", "identity"),
+            ("pkg.app", "DEFINE_PASSIVE_CLASS", None, "C"),
+            ("pkg.app", "CALL_FUNCTION", None, "alias"),
+            ("pkg.app", "READY", None, None),
+            ("pkg", "BIND_CHILD", "pkg.app", "app"),
+        )),
     },
     {
         "id": "C-imported-decorator-effect",
@@ -235,7 +265,24 @@ CASES = [
             decorator_calls=(_call("decorate", "pkg.decorators"),),
             effect_modules=("pkg.effect",),
         ),
-        "model": _UNKNOWN_COMPILE_REJECTION,
+        "model": _model_expectation((
+            ("\x00ENTRY", "START_IMPORT", "pkg", None),
+            ("pkg", "READY", None, None),
+            ("\x00ENTRY", "START_IMPORT", "pkg.app", None),
+            ("pkg.app", "START_IMPORT", "pkg.decorators", None),
+            ("pkg.decorators", "DEFINE_FUNCTION", None, "decorate"),
+            ("pkg.decorators", "READY", None, None),
+            ("pkg", "BIND_CHILD", "pkg.decorators", "decorators"),
+            ("pkg.app", "FROM", "pkg.decorators", "decorate"),
+            ("pkg.app", "DEFINE_PASSIVE_CLASS", None, "C"),
+            ("pkg.app", "CALL_FUNCTION", None, "decorate"),
+            ("pkg.decorators", "START_IMPORT", "pkg.effect", None),
+            ("pkg.effect", "READY", None, None),
+            ("pkg", "BIND_CHILD", "pkg.effect", "effect"),
+            ("pkg.decorators", "FUNCTION_LOCAL_IMPORT", "pkg.effect", "pkg"),
+            ("pkg.app", "READY", None, None),
+            ("pkg", "BIND_CHILD", "pkg.app", "app"),
+        )),
     },
     {
         "id": "D-imported-decorator-returns-none",
@@ -261,7 +308,20 @@ CASES = [
             is_class=False,
             same_as_input=False,
         ),
-        "model": _UNKNOWN_COMPILE_REJECTION,
+        "model": _model_expectation((
+            ("\x00ENTRY", "START_IMPORT", "pkg", None),
+            ("pkg", "READY", None, None),
+            ("\x00ENTRY", "START_IMPORT", "pkg.app", None),
+            ("pkg.app", "START_IMPORT", "pkg.decorators", None),
+            ("pkg.decorators", "DEFINE_FUNCTION", None, "replace"),
+            ("pkg.decorators", "READY", None, None),
+            ("pkg", "BIND_CHILD", "pkg.decorators", "decorators"),
+            ("pkg.app", "FROM", "pkg.decorators", "replace"),
+            ("pkg.app", "DEFINE_PASSIVE_CLASS", None, "C"),
+            ("pkg.app", "CALL_FUNCTION", None, "replace"),
+            ("pkg.app", "READY", None, None),
+            ("pkg", "BIND_CHILD", "pkg.app", "app"),
+        )),
     },
     {
         "id": "E-imported-decorator-nested-call",
@@ -286,7 +346,17 @@ CASES = [
             decorator_calls=(_call("decorate", "pkg.decorators"),),
             helper_calls=(_call("factory", "pkg.decorators"),),
         ),
-        "model": _UNKNOWN_COMPILE_REJECTION,
+        "model": _model_expectation((
+            ("\x00ENTRY", "START_IMPORT", "pkg", None),
+            ("pkg", "READY", None, None),
+            ("\x00ENTRY", "START_IMPORT", "pkg.app", None),
+            ("pkg.app", "START_IMPORT", "pkg.decorators", None),
+            ("pkg.decorators", "DEFINE_FUNCTION", None, "factory"),
+            ("pkg.decorators", "DEFINE_OPAQUE_FUNCTION", None, "decorate"),
+            ("pkg.decorators", "READY", None, None),
+            ("pkg", "BIND_CHILD", "pkg.decorators", "decorators"),
+            ("pkg.app", "FROM", "pkg.decorators", "decorate"),
+        ), outcome="UNKNOWN", target_module="pkg.app", symbol="decorate"),
     },
     {
         "id": "F-imported-decorator-rebound-to-none",
@@ -308,7 +378,17 @@ CASES = [
             is_class=False,
             same_as_input=None,
         ),
-        "model": _UNKNOWN_COMPILE_REJECTION,
+        "model": _model_expectation((
+            ("\x00ENTRY", "START_IMPORT", "pkg", None),
+            ("pkg", "READY", None, None),
+            ("\x00ENTRY", "START_IMPORT", "pkg.app", None),
+            ("pkg.app", "START_IMPORT", "pkg.decorators", None),
+            ("pkg.decorators", "DEFINE_FUNCTION", None, "identity"),
+            ("pkg.decorators", "READY", None, None),
+            ("pkg", "BIND_CHILD", "pkg.decorators", "decorators"),
+            ("pkg.app", "FROM", "pkg.decorators", "identity"),
+            ("pkg.app", "BIND", None, "identity"),
+        ), outcome="UNKNOWN", target_module="pkg.app", symbol="identity"),
     },
     {
         "id": "G-local-bottom-imported-upper",
@@ -331,7 +411,22 @@ CASES = [
                 _call("upper", "pkg.upper"),
             ),
         ),
-        "model": _UNKNOWN_COMPILE_REJECTION,
+        "model": _model_expectation((
+            ("\x00ENTRY", "START_IMPORT", "pkg", None),
+            ("pkg", "READY", None, None),
+            ("\x00ENTRY", "START_IMPORT", "pkg.app", None),
+            ("pkg.app", "DEFINE_FUNCTION", None, "bottom"),
+            ("pkg.app", "START_IMPORT", "pkg.upper", None),
+            ("pkg.upper", "DEFINE_FUNCTION", None, "upper"),
+            ("pkg.upper", "READY", None, None),
+            ("pkg", "BIND_CHILD", "pkg.upper", "upper"),
+            ("pkg.app", "FROM", "pkg.upper", "upper"),
+            ("pkg.app", "DEFINE_PASSIVE_CLASS", None, "C"),
+            ("pkg.app", "CALL_FUNCTION", None, "bottom"),
+            ("pkg.app", "CALL_FUNCTION", None, "upper"),
+            ("pkg.app", "READY", None, None),
+            ("pkg", "BIND_CHILD", "pkg.app", "app"),
+        )),
     },
     {
         "id": "H-imported-decorators-distinct-modules",
@@ -355,7 +450,26 @@ CASES = [
                 _call("upper", "pkg.upper"),
             ),
         ),
-        "model": _UNKNOWN_COMPILE_REJECTION,
+        "model": _model_expectation((
+            ("\x00ENTRY", "START_IMPORT", "pkg", None),
+            ("pkg", "READY", None, None),
+            ("\x00ENTRY", "START_IMPORT", "pkg.app", None),
+            ("pkg.app", "START_IMPORT", "pkg.lower", None),
+            ("pkg.lower", "DEFINE_FUNCTION", None, "lower"),
+            ("pkg.lower", "READY", None, None),
+            ("pkg", "BIND_CHILD", "pkg.lower", "lower"),
+            ("pkg.app", "FROM", "pkg.lower", "lower"),
+            ("pkg.app", "START_IMPORT", "pkg.upper", None),
+            ("pkg.upper", "DEFINE_FUNCTION", None, "upper"),
+            ("pkg.upper", "READY", None, None),
+            ("pkg", "BIND_CHILD", "pkg.upper", "upper"),
+            ("pkg.app", "FROM", "pkg.upper", "upper"),
+            ("pkg.app", "DEFINE_PASSIVE_CLASS", None, "C"),
+            ("pkg.app", "CALL_FUNCTION", None, "lower"),
+            ("pkg.app", "CALL_FUNCTION", None, "upper"),
+            ("pkg.app", "READY", None, None),
+            ("pkg", "BIND_CHILD", "pkg.app", "app"),
+        )),
     },
     {
         "id": "I-imported-identity-then-subclass",
@@ -378,7 +492,21 @@ CASES = [
                 "instantiable_as_base": True,
             },
         ),
-        "model": _UNKNOWN_COMPILE_REJECTION,
+        "model": _model_expectation((
+            ("\x00ENTRY", "START_IMPORT", "pkg", None),
+            ("pkg", "READY", None, None),
+            ("\x00ENTRY", "START_IMPORT", "pkg.app", None),
+            ("pkg.app", "START_IMPORT", "pkg.decorators", None),
+            ("pkg.decorators", "DEFINE_FUNCTION", None, "identity"),
+            ("pkg.decorators", "READY", None, None),
+            ("pkg", "BIND_CHILD", "pkg.decorators", "decorators"),
+            ("pkg.app", "FROM", "pkg.decorators", "identity"),
+            ("pkg.app", "DEFINE_PASSIVE_CLASS", None, "C"),
+            ("pkg.app", "CALL_FUNCTION", None, "identity"),
+            ("pkg.app", "DEFINE_PASSIVE_CLASS", None, "Child"),
+            ("pkg.app", "READY", None, None),
+            ("pkg", "BIND_CHILD", "pkg.app", "app"),
+        )),
     },
     {
         "id": "J-relative-import-in-defining-package",
@@ -401,7 +529,24 @@ CASES = [
             decorator_calls=(_call("decorate", "pkg.decorators"),),
             effect_modules=("pkg.decorators.effect",),
         ),
-        "model": _UNKNOWN_COMPILE_REJECTION,
+        "model": _model_expectation((
+            ("\x00ENTRY", "START_IMPORT", "pkg", None),
+            ("pkg", "READY", None, None),
+            ("\x00ENTRY", "START_IMPORT", "pkg.app", None),
+            ("pkg.app", "START_IMPORT", "pkg.decorators", None),
+            ("pkg.decorators", "DEFINE_FUNCTION", None, "decorate"),
+            ("pkg.decorators", "READY", None, None),
+            ("pkg", "BIND_CHILD", "pkg.decorators", "decorators"),
+            ("pkg.app", "FROM", "pkg.decorators", "decorate"),
+            ("pkg.app", "DEFINE_PASSIVE_CLASS", None, "C"),
+            ("pkg.app", "CALL_FUNCTION", None, "decorate"),
+            ("pkg.decorators", "START_IMPORT", "pkg.decorators.effect", None),
+            ("pkg.decorators.effect", "READY", None, None),
+            ("pkg.decorators", "BIND_CHILD", "pkg.decorators.effect", "effect"),
+            ("pkg.decorators", "FUNCTION_LOCAL_FROM", "pkg.decorators", "effect"),
+            ("pkg.app", "READY", None, None),
+            ("pkg", "BIND_CHILD", "pkg.app", "app"),
+        )),
     },
     {
         "id": "K-local-identity",
@@ -437,7 +582,11 @@ CASES = [
         "reference": _reference(
             decorator_calls=(_call("dataclass", "dataclasses"),),
         ),
-        "model": _UNKNOWN_COMPILE_REJECTION,
+        "model": _model_expectation((
+            ("\x00ENTRY", "START_IMPORT", "pkg", None),
+            ("pkg", "READY", None, None),
+            ("\x00ENTRY", "START_IMPORT", "pkg.app", None),
+        ), outcome="UNKNOWN", target_module="dataclasses"),
     },
 ]
 
@@ -472,11 +621,22 @@ def _cpython_reference(tmp_path: Path, case: dict) -> dict:
     return json.loads(completed.stdout)
 
 
-def _model_record(case: dict) -> dict:
+def _model_record(case: dict, *, app_suffix: str = "") -> dict:
+    model_sources = {
+        module: (
+            "pass\n"
+            if module in {"pkg.effect", "pkg.decorators.effect"}
+            and source == "__contextor_effect__ = True\n"
+            else source
+        )
+        for module, source in case["sources"].items()
+    }
+    if app_suffix:
+        model_sources["pkg.app"] += app_suffix
     modeled = evaluate_package_import_order(
         {
             module: ast.parse(source)
-            for module, source in case["sources"].items()
+            for module, source in model_sources.items()
         },
         "pkg.app",
     )
@@ -531,3 +691,11 @@ def test_cross_module_class_decorator_baseline(tmp_path: Path, case: dict):
 
     actual_model = _model_record(case)
     assert actual_model == case["model"], (case["id"], actual_model)
+
+    if case["id"] == "D-imported-decorator-returns-none":
+        called_result = _model_record(case, app_suffix="C()\n")
+        assert called_result["outcome"] == "UNKNOWN", called_result
+        assert not any(
+            event[1] == "CALL_FUNCTION" and event[3] == "C"
+            for event in called_result["events"]
+        ), called_result
