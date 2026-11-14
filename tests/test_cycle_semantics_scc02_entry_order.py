@@ -60,6 +60,62 @@ def _definition(tree, name):
     return found[0]
 
 
+def _gui_builder_lazy_import(tree):
+    gui_class = _definition(tree, "ContextorGUI")
+    methods = [
+        stmt
+        for stmt in gui_class.body
+        if isinstance(stmt, ast.FunctionDef)
+        and stmt.name == "open_repo_builder"
+    ]
+    assert len(methods) == 1
+    method = methods[0]
+
+    branches = [
+        stmt
+        for stmt in method.body
+        if isinstance(stmt, ast.If)
+    ]
+    assert len(branches) == 1
+    branch = branches[0]
+
+    imports = [
+        stmt
+        for stmt in branch.orelse
+        if isinstance(stmt, ast.ImportFrom)
+        and stmt.module == "contextor.repo_generator"
+        and stmt.level == 0
+        and len(stmt.names) == 1
+        and stmt.names[0].name == "run_repo_generator"
+        and stmt.names[0].asname is None
+    ]
+    assert len(imports) == 1
+
+    calls = [
+        stmt
+        for stmt in branch.orelse
+        if isinstance(stmt, ast.Assign)
+        and isinstance(stmt.value, ast.Call)
+        and isinstance(stmt.value.func, ast.Name)
+        and stmt.value.func.id == "run_repo_generator"
+    ]
+    assert len(calls) == 1
+
+    assert imports[0].lineno < calls[0].lineno
+
+    assert not any(
+        isinstance(stmt, ast.ImportFrom)
+        and stmt.module == "contextor.repo_generator"
+        and any(
+            alias.name == "run_repo_generator"
+            for alias in stmt.names
+        )
+        for stmt in tree.body
+    )
+
+    return imports[0], calls[0]
+
+
 def _projection():
     return {
         "contextor.__init__": "pass",
@@ -186,11 +242,7 @@ def test_scc02_source_chain_still_exists():
         "run",
         level=1,
     )
-    _from(
-        gui,
-        "contextor.repo_generator",
-        "run_repo_generator",
-    )
+    _gui_builder_lazy_import(gui)
 
 
 def test_scc02_reexport_bindings_follow_imports():
@@ -222,14 +274,8 @@ def test_scc02_reexport_bindings_follow_imports():
         "FilterWindow",
     ).lineno
 
-    assert _from(
-        gui,
-        "contextor.repo_generator",
-        "run_repo_generator",
-    ).lineno < _definition(
-        gui,
-        "run",
-    ).lineno
+    gui_import, gui_call = _gui_builder_lazy_import(gui)
+    assert gui_import.lineno < gui_call.lineno
 
 
 def test_scc02_projection_repo_generator_first_hazard():
