@@ -1,3 +1,28 @@
+## 2026-11-14 — Restricted Python Execution Model and Semantic Architecture
+
+### Added
+- Extended the restricted Python execution model with function frames, per-call local environments, positional argument binding, explicit and implicit return-value propagation, and function-object identity tracking.
+- Added semantic support for named and stacked function and class decorators, including imported decorators from indexed modules.
+- Implemented decorator object snapshots, bottom-to-top application, intermediate return-value propagation, and deferred final symbol binding.
+- Extended passive class modeling with class identity preservation, inheritance, MRO validation, and restricted decorator execution.
+- Added CPython 3.15.2 comparison tests and negative regression cases for unsupported or uncertain execution paths.
+
+### Changed
+- Modularized the package execution engine by extracting compiled steps, expression and definition checks, execution state, import resolution, lifecycle operations, restricted calls, and class facts into dedicated modules.
+- Preserved `package_model.py` as the central compiler and execution orchestrator.
+- Improved cross-module execution semantics by evaluating supported decorators in their defining modules while preserving result ownership in the applying module.
+- Updated historical regression contracts to reflect newly supported semantic behavior without weakening `UNKNOWN` boundaries.
+- Corrected outdated SCC02 source assertions to recognize the intentionally method-scoped repository-generator import in the GUI.
+
+### Validation
+- Completed the final decorator regression suite with **348 passing tests**.
+- Verified the corrected SCC02 source contracts and existing lazy-import regression: **3 passing tests**.
+- Confirmed successful post-change Contextor MCP audits, verified target-file synchronization, and zero syntax errors.
+- Preserved the structural cycle baseline of **16 DFS back-edge paths**.
+- Completed the planned execution-model modularization and semantic extensions.
+
+**Note:** Semantic cycle diagnostics remain stale in the current LIVE state. Final runtime cycle classification is a separate validation step.
+
 ## 2026-11-10 Patch - Improved Cycle Semantics Diagnostics and External Import Safety
 
 Enhanced diagnostic precision: Added UNMODELED_STATEMENT events identifying the exact AST statement type and source location where conditional import-order analysis stops. Previously modeled events remain preserved, and unsupported constructs continue to produce UNKNOWN.
