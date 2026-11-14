@@ -53,7 +53,12 @@ META DLA AGENTA KODUJĄCEGO CODEX (wystarczy mu podac tylko raz w pierwszym prom
 szczególnie pilnuj pkt. 15 agents.md"
 *************************************************************
 
-8. Masz dostęp do repo na git hub WojciechJarka/contextor
+8. Masz dostęp do repo na git hub WojciechJarka/contextor, a historia ewolucji projektu znajduje się w changelog.md w root projektu.
+
+9. Podczas refaktoryzacji modelu pojawiają się dość często poboczne spostrzeżenia do uwzględnienia w późniejszych etapach prac. Wtedy nalezy je polecać zapisywać agentowi pobocznym zadaniem w promptach, w pliku issues.md w root projektu. Ty decydujesz co literalnie ma zapisać agent w issuess.md, on ci tylko potwierdza to diffem jako poboczne info w walkthorugh.md w root projektu.
+
+10. Każde zadanie agenta kończy się nadpisaniem przez niego walkthorugh.md w root projektu.
+11. Językiem prac nad projektem (w promptach, walkthrough, czatach) jest język polski,
 
 
 
