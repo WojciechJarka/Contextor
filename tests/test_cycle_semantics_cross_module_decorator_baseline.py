@@ -400,9 +400,31 @@ def test_indexed_cross_module_decorator_reference_and_model_boundary(
         {name: ast.parse(source) for name, source in sources.items()},
         "pkg.app",
     )
-    assert modeled.outcome == "UNKNOWN"
     assert modeled.evidence_scope == "RESTRICTED_REGULAR_PACKAGE_MODEL"
-    assert modeled.events == ()
+    if case == "E":
+        assert modeled.outcome == "MODEL_PASS"
+        assert modeled.target_module is None
+        assert modeled.symbol is None
+        assert tuple(
+            (event.module, event.operation, event.target, event.symbol)
+            for event in modeled.events
+        ) == (
+            ("\x00ENTRY", "START_IMPORT", "pkg", None),
+            ("pkg", "READY", None, None),
+            ("\x00ENTRY", "START_IMPORT", "pkg.app", None),
+            ("pkg.app", "START_IMPORT", "pkg.decorators", None),
+            ("pkg.decorators", "DEFINE_FUNCTION", None, "identity"),
+            ("pkg.decorators", "READY", None, None),
+            ("pkg", "BIND_CHILD", "pkg.decorators", "decorators"),
+            ("pkg.app", "FROM", "pkg.decorators", "identity"),
+            ("pkg.app", "DEFINE_PASSIVE_CLASS", None, "C"),
+            ("pkg.app", "CALL_FUNCTION", None, "identity"),
+            ("pkg.app", "READY", None, None),
+            ("pkg", "BIND_CHILD", "pkg.app", "app"),
+        )
+    else:
+        assert modeled.outcome == "UNKNOWN"
+        assert modeled.events == ()
 
 
 @pytest.mark.parametrize(
@@ -694,7 +716,7 @@ def test_external_functools_decorator_remains_unmodeled_without_assumptions():
     )
 
 
-def test_imported_class_decorator_does_not_satisfy_local_compile_gate():
+def test_imported_class_decorator_satisfies_indexed_from_gate():
     sources = {
         "pkg.__init__": ast.parse("pass\n"),
         "pkg.decorators": ast.parse(
@@ -709,6 +731,24 @@ def test_imported_class_decorator_does_not_satisfy_local_compile_gate():
     }
     modeled = evaluate_package_import_order(sources, "pkg.app")
 
-    assert modeled.outcome == "UNKNOWN"
+    assert modeled.outcome == "MODEL_PASS"
+    assert modeled.target_module is None
+    assert modeled.symbol is None
     assert modeled.evidence_scope == "RESTRICTED_REGULAR_PACKAGE_MODEL"
-    assert modeled.events == ()
+    assert tuple(
+        (event.module, event.operation, event.target, event.symbol)
+        for event in modeled.events
+    ) == (
+        ("\x00ENTRY", "START_IMPORT", "pkg", None),
+        ("pkg", "READY", None, None),
+        ("\x00ENTRY", "START_IMPORT", "pkg.app", None),
+        ("pkg.app", "START_IMPORT", "pkg.decorators", None),
+        ("pkg.decorators", "DEFINE_FUNCTION", None, "identity"),
+        ("pkg.decorators", "READY", None, None),
+        ("pkg", "BIND_CHILD", "pkg.decorators", "decorators"),
+        ("pkg.app", "FROM", "pkg.decorators", "identity"),
+        ("pkg.app", "DEFINE_PASSIVE_CLASS", None, "C"),
+        ("pkg.app", "CALL_FUNCTION", None, "identity"),
+        ("pkg.app", "READY", None, None),
+        ("pkg", "BIND_CHILD", "pkg.app", "app"),
+    )

@@ -466,7 +466,7 @@ def test_single_imported_decorator_remains_model_pass():
     _assert_unique_module_starts(modeled)
 
 
-def test_imported_class_decorator_remains_unknown():
+def test_imported_class_decorator_executes_indexed_identity():
     modeled = _model(
         {
             "pkg.__init__": "pass\n",
@@ -480,8 +480,27 @@ def test_imported_class_decorator_remains_unknown():
         }
     )
 
-    assert modeled.outcome == "UNKNOWN"
-    assert modeled.events == ()
+    assert modeled.outcome == "MODEL_PASS"
+    assert modeled.target_module is None
+    assert modeled.symbol is None
+    assert modeled.evidence_scope == "RESTRICTED_REGULAR_PACKAGE_MODEL"
+    assert tuple(
+        (event.module, event.operation, event.target, event.symbol)
+        for event in modeled.events
+    ) == (
+        ("\x00ENTRY", "START_IMPORT", "pkg", None),
+        ("pkg", "READY", None, None),
+        ("\x00ENTRY", "START_IMPORT", "pkg.app", None),
+        ("pkg.app", "START_IMPORT", "pkg.decorators", None),
+        ("pkg.decorators", "DEFINE_FUNCTION", None, "identity"),
+        ("pkg.decorators", "READY", None, None),
+        ("pkg", "BIND_CHILD", "pkg.decorators", "decorators"),
+        ("pkg.app", "FROM", "pkg.decorators", "identity"),
+        ("pkg.app", "DEFINE_PASSIVE_CLASS", None, "C"),
+        ("pkg.app", "CALL_FUNCTION", None, "identity"),
+        ("pkg.app", "READY", None, None),
+        ("pkg", "BIND_CHILD", "pkg.app", "app"),
+    )
 
 
 def test_external_functools_lru_cache_remains_unknown():

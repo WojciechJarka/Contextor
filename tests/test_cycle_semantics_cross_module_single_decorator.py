@@ -524,7 +524,7 @@ def test_same_module_single_decorator_keeps_call_order():
     assert not any(event.operation == "FROM" for event in modeled.events)
 
 
-def test_imported_class_decorator_remains_unknown():
+def test_imported_class_decorator_preserves_class_identity():
     modeled = _model(
         {
             "pkg.__init__": "pass\n",
@@ -538,9 +538,32 @@ def test_imported_class_decorator_remains_unknown():
         }
     )
 
-    assert modeled.outcome == "UNKNOWN"
-    assert modeled.events == ()
-    assert not _events(modeled, "CALL_FUNCTION")
+    assert modeled.outcome == "MODEL_PASS"
+    assert modeled.target_module is None
+    assert modeled.symbol is None
+    assert modeled.evidence_scope == "RESTRICTED_REGULAR_PACKAGE_MODEL"
+    assert tuple(
+        (event.module, event.operation, event.target, event.symbol)
+        for event in modeled.events
+    ) == (
+        ("\x00ENTRY", "START_IMPORT", "pkg", None),
+        ("pkg", "READY", None, None),
+        ("\x00ENTRY", "START_IMPORT", "pkg.app", None),
+        ("pkg.app", "START_IMPORT", "pkg.decorators", None),
+        ("pkg.decorators", "DEFINE_FUNCTION", None, "identity"),
+        ("pkg.decorators", "READY", None, None),
+        ("pkg", "BIND_CHILD", "pkg.decorators", "decorators"),
+        ("pkg.app", "FROM", "pkg.decorators", "identity"),
+        ("pkg.app", "DEFINE_PASSIVE_CLASS", None, "C"),
+        ("pkg.app", "CALL_FUNCTION", None, "identity"),
+        ("pkg.app", "READY", None, None),
+        ("pkg", "BIND_CHILD", "pkg.app", "app"),
+    )
+    assert tuple(
+        (event.module, event.symbol)
+        for event in modeled.events
+        if event.operation == "CALL_FUNCTION"
+    ) == (("pkg.app", "identity"),)
 
 
 def test_imported_stacked_decorators_execute_bottom_to_top():
