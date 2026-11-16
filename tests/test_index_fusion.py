@@ -168,6 +168,63 @@ def test_new_format_cache_hit_reuses_cached_facts_without_ast_parse(
     assert result.lineage_facts_by_source["module.py"].source_key == "module.py"
 
 
+def test_legacy_cache_cannot_bypass_compilability(tmp_path, isolated_dirs, monkeypatch):
+    monkeypatch.setenv("CONTEXTOR_DISABLE_PROCESS_POOL", "1")
+    root = tmp_path / "repo"
+    root.mkdir()
+    source = root / "module.py"
+    source.write_text("value = 1\n", encoding="utf-8")
+    indexer.index_repository(str(root))
+
+    legacy = dict(_cache_payload(root, source)["data"])
+    legacy.pop("source_compilability_semantics_version")
+    bad_source = b"import os\nfrom __future__ import annotations\n"
+    source.write_bytes(bad_source)
+    CacheManager(str(root)).set(source, legacy, source_bytes=bad_source)
+
+    parse_calls = []
+    original_parse = indexer.parse_source_snapshot
+    monkeypatch.setattr(
+        indexer,
+        "parse_source_snapshot",
+        lambda snapshot, path: (
+            parse_calls.append(path) or original_parse(snapshot, path)
+        ),
+    )
+    result = indexer.index_repository(str(root))
+
+    assert len(parse_calls) == 1
+    assert "module" not in result.modules
+    assert len(result.skipped) == 1
+    assert result.skipped[0].path == "module.py"
+    assert "from __future__ imports must occur at the beginning of the file" in result.skipped[0].reason
+
+
+def test_compilability_cache_version_warm_hit_skips_parse(tmp_path, isolated_dirs, monkeypatch):
+    monkeypatch.setenv("CONTEXTOR_DISABLE_PROCESS_POOL", "1")
+    root = tmp_path / "repo"
+    root.mkdir()
+    source = root / "module.py"
+    source.write_text("value = 1\n", encoding="utf-8")
+    indexer.index_repository(str(root))
+    assert _cache_payload(root, source)["data"]["source_compilability_semantics_version"] == 1
+
+    parse_calls = []
+    original_parse = indexer.parse_source_snapshot
+    monkeypatch.setattr(
+        indexer,
+        "parse_source_snapshot",
+        lambda snapshot, path: (
+            parse_calls.append(path) or original_parse(snapshot, path)
+        ),
+    )
+    result = indexer.index_repository(str(root))
+
+    assert "module" in result.modules
+    assert parse_calls == []
+    assert _cache_payload(root, source)["data"]["source_compilability_semantics_version"] == 1
+
+
 def test_source_change_invalidates_symbol_facts_then_complete_warm_hit_skips_ast_parse(
     tmp_path, isolated_dirs, monkeypatch
 ):

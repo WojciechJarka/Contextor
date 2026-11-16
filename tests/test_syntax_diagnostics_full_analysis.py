@@ -148,6 +148,37 @@ def test_real_index_repository_materializes_source_scoped_syntax_facts(tmp_path,
     assert "module_name" not in facts["broken.py"]
 
 
+def test_index_rejects_source_that_ast_parses_but_cpython_cannot_compile(tmp_path, monkeypatch):
+    monkeypatch.setenv("CONTEXTOR_DISABLE_PROCESS_POOL", "1")
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(tmp_path / "cache"))
+    (repo / "valid.py").write_text(
+        "from __future__ import annotations\nvalue: list[int] = []\n",
+        encoding="utf-8",
+    )
+    (repo / "bad_future.py").write_text(
+        "import os\nfrom __future__ import annotations\n",
+        encoding="utf-8",
+    )
+    (repo / "bad_return.py").write_text("return 1\n", encoding="utf-8")
+
+    index = index_repository(str(repo))
+    diagnostics, family_state = build_syntax_diagnostics_from_index(index)
+
+    assert set(index.modules) == {"valid"}
+    skipped = {entry.path: entry for entry in index.skipped}
+    assert set(skipped) == {"bad_future.py", "bad_return.py"}
+    assert skipped["bad_future.py"].line_number == 2
+    assert skipped["bad_return.py"].line_number == 1
+    assert family_state == "fresh"
+    assert diagnostics["valid.py"] == {"status": "checked_and_none", "errors": []}
+    assert diagnostics["bad_future.py"]["status"] == "checked_with_errors"
+    assert diagnostics["bad_future.py"]["errors"][0]["line_number"] == 2
+    assert diagnostics["bad_return.py"]["status"] == "checked_with_errors"
+    assert diagnostics["bad_return.py"]["errors"][0]["line_number"] == 1
+
+
 def test_real_facade_materializes_real_index_syntax_facts(tmp_path, monkeypatch):
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -266,6 +297,44 @@ def test_live_incremental_syntax_lifecycle_is_source_scoped_and_revision_atomic(
             event["origin"] == "desktop_watcher" and event["status"] == "SYNTAX_ERROR"
             for event in events["events"]
         )
+    finally:
+        server.close()
+
+
+def test_live_rejects_compile_error_and_recovers(tmp_path, monkeypatch):
+    monkeypatch.setenv("CONTEXTOR_DISABLE_PROCESS_POOL", "1")
+    source, server, _ = _live_syntax_fixture(tmp_path)
+    try:
+        source.write_text(
+            "import os\nfrom __future__ import annotations\n",
+            encoding="utf-8",
+        )
+        invalid = server._dispatch({
+            "operation": "update_file",
+            "file_path": str(source),
+            "origin": "desktop_watcher",
+        })
+        assert invalid["result"].status == "SYNTAX_ERROR"
+        assert server._state.syntax_diagnostics_by_path["provider.py"] == {
+            "status": "checked_with_errors",
+            "errors": [{
+                "message": "from __future__ imports must occur at the beginning of the file",
+                "line_number": 2,
+                "column_number": 1,
+            }],
+        }
+
+        source.write_text("def value():\n    return 2\n", encoding="utf-8")
+        repaired = server._dispatch({
+            "operation": "update_file",
+            "file_path": str(source),
+            "origin": "desktop_watcher",
+        })
+        assert repaired["result"].status == "RECOVERED"
+        assert server._state.syntax_diagnostics_by_path["provider.py"] == {
+            "status": "checked_and_none",
+            "errors": [],
+        }
     finally:
         server.close()
 

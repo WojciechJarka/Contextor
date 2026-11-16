@@ -79,6 +79,7 @@ REFERENCE_FACTS_SCHEMA_VERSION = 1
 COLLISION_FACTS_SCHEMA_VERSION = 1
 TEST_FACTS_SCHEMA_VERSION = 1
 IMPORT_CLASSIFICATION_SEMANTICS_VERSION = 10
+SOURCE_COMPILABILITY_SEMANTICS_VERSION = 1
 _IMPORTABLE_BINARY_SUFFIXES = tuple(
     sorted(
         frozenset(BYTECODE_SUFFIXES)
@@ -955,6 +956,12 @@ def _process_single_file(
             is not int
             or cached_data.get("import_classification_semantics_version")
             != IMPORT_CLASSIFICATION_SEMANTICS_VERSION
+            or type(cached_data.get(
+                "source_compilability_semantics_version"
+            )) is not int
+            or cached_data[
+                "source_compilability_semantics_version"
+            ] != SOURCE_COMPILABILITY_SEMANTICS_VERSION
             or type(cached_data.get("imports")) is not list
             or any(
                 type(imp) is not dict
@@ -1409,6 +1416,9 @@ def _process_single_file(
             "lineage_facts": serialize_extracted_lineage_source_facts(lineage_facts),
             "import_classification_semantics_version": (
                 IMPORT_CLASSIFICATION_SEMANTICS_VERSION
+            ),
+            "source_compilability_semantics_version": (
+                SOURCE_COMPILABILITY_SEMANTICS_VERSION
             ),
             "typing_guard_initializer_passive": (
                 typing_guard_initializer_passive

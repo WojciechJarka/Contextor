@@ -93,6 +93,13 @@ def parse_source_snapshot(
 
     try:
         tree = ast.parse(source, filename=str(path))
+        compile(
+            tree,
+            str(path),
+            "exec",
+            dont_inherit=True,
+            optimize=0,
+        )
     except SyntaxError as exc:
         location = f"line {exc.lineno}"
         if exc.offset is not None:
