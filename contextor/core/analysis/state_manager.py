@@ -87,7 +87,10 @@ class AnalysisResult:
 class RepositoryAnalysisState:
     """Canonical runtime state of the repository analysis."""
     modules: Dict[str, Any] = field(default_factory=dict)
-    typing_guard_evidence: dict[str, object] = field(default_factory=dict)
+    typing_guard_evidence: dict[str, object] = field(
+        default_factory=dict,
+        kw_only=True,
+    )
     artifacts: Dict[str, Any] = field(default_factory=dict)
     reexport_facts_by_module: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     dependency_graph: Optional[Any] = None
@@ -172,6 +175,14 @@ class RepositoryAnalysisState:
         candidate.cycle_optional_source_publication = None
 
         for state_field in fields(self):
+            if state_field.name == "typing_guard_evidence":
+                evidence = getattr(self, "typing_guard_evidence", None)
+                candidate.typing_guard_evidence = (
+                    copy.copy(evidence)
+                    if type(evidence) is dict
+                    else {}
+                )
+                continue
             value = getattr(
                 self,
                 state_field.name,
