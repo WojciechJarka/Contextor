@@ -644,6 +644,141 @@ def _project_typing_imports_closed(
     return True
 
 
+def _classify_type_only_modules(
+    modules: dict[str, Module],
+    *,
+    source_fingerprints_by_module: dict[str, str],
+    initializer_passivity_by_module: dict[str, tuple[bool, str]],
+    marker_mutation_by_module: dict[str, tuple[bool, str]],
+    opaque_effects_by_module: dict[str, tuple[bool, str]],
+    skipped_source_paths: tuple[str, ...],
+    unindexed_python_sources_present: bool,
+    unindexed_import_artifacts_present: bool,
+) -> tuple[dict[str, Module], bool]:
+    classified = dict(modules)
+    typing_shadowed = (
+        "typing" in modules
+        or "typing.__init__" in modules
+    )
+    project_marker_safe = (
+        not skipped_source_paths
+        and len(marker_mutation_by_module)
+        == len(modules)
+        and all(
+            (
+                module_id
+                in marker_mutation_by_module
+                and type(
+                    marker_mutation_by_module[
+                        module_id
+                    ][0]
+                ) is bool
+                and marker_mutation_by_module[
+                    module_id
+                ][0] is False
+                and marker_mutation_by_module[
+                    module_id
+                ][1] == (
+                    source_fingerprints_by_module.get(
+                        module_id
+                    )
+                )
+            )
+            for module_id in modules
+        )
+    )
+    project_effects_closed = (
+        not skipped_source_paths
+        and not unindexed_python_sources_present
+        and not unindexed_import_artifacts_present
+        and len(opaque_effects_by_module)
+        == len(modules)
+        and all(
+            (
+                module_id
+                in opaque_effects_by_module
+                and type(
+                    opaque_effects_by_module[
+                        module_id
+                    ][0]
+                ) is bool
+                and opaque_effects_by_module[
+                    module_id
+                ][0] is False
+                and opaque_effects_by_module[
+                    module_id
+                ][1] == (
+                    source_fingerprints_by_module.get(
+                        module_id
+                    )
+                )
+            )
+            for module_id in modules
+        )
+        and _project_typing_imports_closed(
+            modules
+        )
+    )
+    global_policy_satisfied = (
+        not typing_shadowed
+        and project_marker_safe
+        and project_effects_closed
+    )
+
+    for module_id, module in modules.items():
+        if not any(
+            import_ref.type_only
+            for import_ref in module.imports
+        ):
+            continue
+
+        parents_proved = all(
+            (
+                parent_id in modules
+                and parent_id
+                in initializer_passivity_by_module
+                and type(
+                    initializer_passivity_by_module[
+                        parent_id
+                    ][0]
+                ) is bool
+                and initializer_passivity_by_module[
+                    parent_id
+                ][0] is True
+                and initializer_passivity_by_module[
+                    parent_id
+                ][1] == (
+                    source_fingerprints_by_module.get(
+                        parent_id
+                    )
+                )
+            )
+            for parent_id in (
+                _typing_guard_parent_initializers(
+                    module_id
+                )
+            )
+        )
+
+        if global_policy_satisfied and parents_proved:
+            continue
+
+        classified[module_id] = dataclasses.replace(
+            module,
+            imports=[
+                dataclasses.replace(
+                    import_ref,
+                    type_only=False,
+                )
+                if import_ref.type_only
+                else import_ref
+                for import_ref in module.imports
+            ],
+        )
+
+    return classified, global_policy_satisfied
+
+
 def read_imports(
     file_path: Path,
     *,
@@ -2662,126 +2797,33 @@ def index_repository(
                 for ref in module.imports
             )
 
-        typing_shadowed = (
-            "typing" in modules
-            or "typing.__init__" in modules
-        )
-        project_marker_safe = (
-            not skipped
-            and len(marker_mutation_by_module)
-            == len(modules)
-            and all(
-                (
-                    module_id
-                    in marker_mutation_by_module
-                    and type(
-                        marker_mutation_by_module[
-                            module_id
-                        ][0]
-                    ) is bool
-                    and marker_mutation_by_module[
-                        module_id
-                    ][0] is False
-                    and marker_mutation_by_module[
-                        module_id
-                    ][1] == (
-                        source_fingerprints_by_module.get(
-                            module_id
-                        )
-                    )
-                )
-                for module_id in modules
+        classified, global_policy_satisfied = (
+            _classify_type_only_modules(
+                modules,
+                source_fingerprints_by_module=(
+                    source_fingerprints_by_module
+                ),
+                initializer_passivity_by_module=(
+                    initializer_passivity_by_module
+                ),
+                marker_mutation_by_module=(
+                    marker_mutation_by_module
+                ),
+                opaque_effects_by_module=(
+                    opaque_effects_by_module
+                ),
+                skipped_source_paths=tuple(
+                    item.path for item in skipped
+                ),
+                unindexed_python_sources_present=(
+                    unindexed_python_sources_present
+                ),
+                unindexed_import_artifacts_present=(
+                    unindexed_import_artifacts_present
+                ),
             )
         )
-        project_effects_closed = (
-            not skipped
-            and not unindexed_python_sources_present
-            and not unindexed_import_artifacts_present
-            and len(opaque_effects_by_module)
-            == len(modules)
-            and all(
-                (
-                    module_id
-                    in opaque_effects_by_module
-                    and type(
-                        opaque_effects_by_module[
-                            module_id
-                        ][0]
-                    ) is bool
-                    and opaque_effects_by_module[
-                        module_id
-                    ][0] is False
-                    and opaque_effects_by_module[
-                        module_id
-                    ][1] == (
-                        source_fingerprints_by_module.get(
-                            module_id
-                        )
-                    )
-                )
-                for module_id in modules
-            )
-            and _project_typing_imports_closed(
-                modules
-            )
-        )
-
-        global_policy_satisfied = (
-            not typing_shadowed
-            and project_marker_safe
-            and project_effects_closed
-        )
-
-        for module_id, module in modules.items():
-            if not any(
-                import_ref.type_only
-                for import_ref in module.imports
-            ):
-                continue
-
-            parents_proved = all(
-                (
-                    parent_id in modules
-                    and parent_id
-                    in initializer_passivity_by_module
-                    and type(
-                        initializer_passivity_by_module[
-                            parent_id
-                        ][0]
-                    ) is bool
-                    and initializer_passivity_by_module[
-                        parent_id
-                    ][0] is True
-                    and initializer_passivity_by_module[
-                        parent_id
-                    ][1] == (
-                        source_fingerprints_by_module.get(
-                            parent_id
-                        )
-                    )
-                )
-                for parent_id in (
-                    _typing_guard_parent_initializers(
-                        module_id
-                    )
-                )
-            )
-
-            if global_policy_satisfied and parents_proved:
-                continue
-
-            modules[module_id] = dataclasses.replace(
-                module,
-                imports=[
-                    dataclasses.replace(
-                        import_ref,
-                        type_only=False,
-                    )
-                    if import_ref.type_only
-                    else import_ref
-                    for import_ref in module.imports
-                ],
-            )
+        modules.update(classified)
 
     if os.environ.get("CONTEXTOR_DISABLE_PROCESS_POOL") == "1":
         for path in files_to_process:

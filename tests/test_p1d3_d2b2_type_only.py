@@ -3159,3 +3159,162 @@ def test_sp_t4_i2b2c_t27_inline_process_pool_evidence_parity(
     assert inline.typing_guard_evidence["schema_version"] == 2
     assert pooled.typing_guard_evidence == inline.typing_guard_evidence
 
+
+def _i2b3_classify(index, evidence=None):
+    evidence = evidence or index.typing_guard_evidence
+    modules = dict(index.modules)
+    for module_id, candidate_imports in evidence[
+        "candidate_imports_by_module"
+    ].items():
+        modules[module_id] = replace(
+            modules[module_id],
+            imports=list(candidate_imports),
+        )
+    classified, policy = indexer._classify_type_only_modules(
+        modules,
+        source_fingerprints_by_module=evidence[
+            "source_fingerprints_by_module"
+        ],
+        initializer_passivity_by_module=evidence[
+            "initializer_passivity_by_module"
+        ],
+        marker_mutation_by_module=evidence[
+            "marker_mutation_by_module"
+        ],
+        opaque_effects_by_module=evidence[
+            "opaque_effects_by_module"
+        ],
+        skipped_source_paths=evidence["skipped_source_paths"],
+        unindexed_python_sources_present=evidence[
+            "unindexed_python_sources_present"
+        ],
+        unindexed_import_artifacts_present=evidence[
+            "unindexed_import_artifacts_present"
+        ],
+    )
+    return modules, classified, policy
+
+
+def _i2b3_graph_edges(modules):
+    graph = build_graph(modules)
+    return (
+        set(graph.hard_edges.get("pkg.a", set())),
+        set(graph.soft_edges.get("pkg.a", set())),
+    )
+
+
+def _i2b3_guarded_import(modules):
+    return next(
+        item for item in modules["pkg.a"].imports
+        if item.module == "pkg.b"
+    )
+
+
+def test_sp_t4_i2b3_t28_safe_classifier_matches_full(tmp_path, isolated_dirs):
+    root = write_synthetic_repository(tmp_path / "repo", _I1_SAFE)
+    index, _ = _index_graph(root)
+    _, classified, policy = _i2b3_classify(index)
+    assert policy is True
+    assert classified["pkg.a"].imports == index.modules["pkg.a"].imports
+    assert _i2b3_graph_edges(classified) == _i2b3_graph_edges(index.modules)
+
+
+def test_sp_t4_i2b3_t29_typing_shadow_veto_matches_full(tmp_path, isolated_dirs):
+    root = write_synthetic_repository(
+        tmp_path / "repo", {**_I1_SAFE, "typing.py": "pass\n"},
+    )
+    index, _ = _index_graph(root)
+    _, classified, policy = _i2b3_classify(index)
+    assert policy is False
+    assert _i2b3_guarded_import(classified).type_only is False
+    full_hard, full_soft = _i2b3_graph_edges(index.modules)
+    pure_hard, pure_soft = _i2b3_graph_edges(classified)
+    assert "pkg.b" in full_hard and "pkg.b" not in full_soft
+    assert (pure_hard, pure_soft) == (full_hard, full_soft)
+
+
+def test_sp_t4_i2b3_t30_skipped_veto_matches_full(tmp_path, isolated_dirs):
+    root = write_synthetic_repository(
+        tmp_path / "repo", {**_I1_SAFE, "broken.py": "def invalid(:\n"},
+    )
+    index, _ = _index_graph(root)
+    _, classified, policy = _i2b3_classify(index)
+    assert policy is False
+    assert _i2b3_guarded_import(classified).type_only is False
+    full_hard, full_soft = _i2b3_graph_edges(index.modules)
+    pure_hard, pure_soft = _i2b3_graph_edges(classified)
+    assert "pkg.b" in full_hard and "pkg.b" not in full_soft
+    assert (pure_hard, pure_soft) == (full_hard, full_soft)
+
+
+def test_sp_t4_i2b3_t31_parent_passivity_veto_is_preserved(
+    tmp_path, isolated_dirs,
+):
+    fixture = {**_I1_SAFE, "pkg/__init__.py": "import typing\n"}
+    root = write_synthetic_repository(tmp_path / "repo", fixture)
+    index, _ = _index_graph(root)
+    evidence = index.typing_guard_evidence
+    assert evidence["global_policy_satisfied"] is True
+    assert evidence["initializer_passivity_by_module"]["pkg.__init__"][0] is False
+    _, classified, policy = _i2b3_classify(index)
+    assert policy is True
+    assert _i2b3_guarded_import(classified).type_only is False
+    assert _i1_guarded_import(index).type_only is False
+
+
+@pytest.mark.parametrize(
+    "extra_source,evidence_key",
+    [
+        ("import typing\ntyping.TYPE_CHECKING = True\n", "marker_mutation_by_module"),
+        ("eval('0')\n", "opaque_effects_by_module"),
+    ],
+    ids=["marker-mutation", "opaque-effects"],
+)
+def test_sp_t4_i2b3_t32_project_veto_is_preserved(
+    tmp_path, isolated_dirs, extra_source, evidence_key,
+):
+    fixture = {**_I1_SAFE, "pkg/c.py": extra_source}
+    root = write_synthetic_repository(tmp_path / "repo", fixture)
+    index, _ = _index_graph(root)
+    evidence = index.typing_guard_evidence
+    assert evidence["global_policy_satisfied"] is False
+    assert evidence[evidence_key]["pkg.c"][0] is True
+    _, classified, policy = _i2b3_classify(index)
+    assert policy is False
+    assert _i2b3_guarded_import(classified).type_only is False
+    assert _i1_guarded_import(index).type_only is False
+
+
+def test_sp_t4_i2b3_t33_fingerprint_mismatch_fails_closed(
+    tmp_path, isolated_dirs,
+):
+    root = write_synthetic_repository(tmp_path / "repo", _I1_SAFE)
+    index, _ = _index_graph(root)
+    evidence = dict(index.typing_guard_evidence)
+    marker_facts = dict(evidence["marker_mutation_by_module"])
+    marker_facts["pkg.a"] = (False, "stale-fingerprint")
+    evidence["marker_mutation_by_module"] = marker_facts
+    _, classified, policy = _i2b3_classify(index, evidence)
+    assert policy is False
+    assert _i2b3_guarded_import(classified).type_only is False
+
+
+def test_sp_t4_i2b3_t34_classifier_is_copy_on_write(
+    tmp_path, isolated_dirs,
+):
+    root = write_synthetic_repository(
+        tmp_path / "repo", {**_I1_SAFE, "typing.py": "pass\n"},
+    )
+    index, _ = _index_graph(root)
+    modules, classified, policy = _i2b3_classify(index)
+    assert policy is False
+    assert classified is not modules
+    assert set(classified) == set(modules)
+    assert classified["pkg.a"] is not modules["pkg.a"]
+    assert _i2b3_guarded_import(modules).type_only is True
+    assert _i2b3_guarded_import(classified).type_only is False
+    for module_id in modules:
+        if module_id != "pkg.a":
+            assert classified[module_id] is modules[module_id]
+    assert _i2b3_guarded_import(modules).type_only is True
+
