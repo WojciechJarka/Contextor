@@ -1,229 +1,236 @@
-# SP-T4-I2A — incremental TYPE_ONLY source evidence
+# SP-T4-I2B1 — ImportRef semantic delta
 
 ## PREFLIGHT
 
-DIRECT_EVIDENCE: Contextor MCP first: `get_project_architecture(fields=[])` dla Contextora: LIVE revision 1415, canonical_state fresh, resync_required=false, module/graph/lineage fresh, cycle_semantics stale. `get_module_context` dla `contextor.core.analysis.incremental.preparation`, `contextor.core.symbol_engine.indexer`, `contextor.core.cycle_semantics.typing_guard`, `tests.test_p1d3_d2b2_type_only`: revision 1415 i `workspace_sync=verified` dla wszystkich. Git HEAD `ffd65ea2a2ac69f3271921c354b1bdc3b5bc94d6`, status czysty. Anchory przed edycją: `PreparedSourceUpdate` w `preparation.py:25-47`, `prepare_source_update` w `:147-332`, udane `read_imports` w `:229-262`, końcowy konstruktor w `:318-333`; predykaty FULL w `indexer.py:320-645,1142-1158` i passivity w `typing_guard.py:313`. Zaplanowano diff tylko w `preparation.py`, `tests/test_p1d3_d2b2_type_only.py` i raporcie.
+DIRECT_EVIDENCE: Contextor MCP first: `get_project_architecture(fields=[])` zwrócił LIVE revision 1417, canonical_state fresh, resync_required=false, syntax_errors=0/fresh. `get_module_context` dla `contextor.core.analysis.incremental.preparation`, `contextor.core.analysis.refresh_planner`, `contextor.core.domain.imports` i `tests.test_p1d3_d2b2_type_only`: revision 1417, `workspace_sync=verified` dla wszystkich. Git HEAD `0b3cdbe3b032e047b9ac789f9b5e4ac0404dfb75`, status czysty. Potwierdzone anchory: `calculate_file_delta` w `preparation.py:62-114`, `RefreshPlanner.plan_refresh` i `has_import_changes` w `refresh_planner.py:81-278`, `ImportRef` w `domain/imports.py:11-29`. Przed edycją plan diffu obejmował wyłącznie `preparation.py` po imports_added/imports_removed, `refresh_planner.py` przy has_import_changes, dopisanie T17–T21 do `tests/test_p1d3_d2b2_type_only.py` oraz raport.
 
 ## EXACT IMPLEMENTATION
 
-W `PreparedSourceUpdate` dodano końcowe, keyword-only `typing_guard_source_evidence: dict[str, object] | None` z `default=None`. Po udanym `read_imports` nowy słownik powstaje z istniejącego `parsed_tree` oraz `parsed_input.source_fingerprint`, przy użyciu tych samych trzech predykatów co FULL. Pole trafia wyłącznie do końcowego udanego konstruktora; wcześniejsze ścieżki błędu zachowują `None`. Nie zmieniono istniejących call sites, pól FileDelta, planowania RefreshPlan, grafu, finalizacji type_only ani definicji predykatów.
+Po wyznaczeniu zbiorów nazw w `calculate_file_delta` dodano literalne porównanie `old_imports != (new_imports or [])`, które ustawia `delta.metadata_changes['import_ref_payload_changed']=True`. W `RefreshPlanner` istniejące `has_import_changes` uwzględnia tę flagę; prowadzi do już istniejących rodzin `modules` i `dependency_graph` oraz przeliczeń metryk/cykli. Nie zmieniono `imports_changed`, API FileDelta, innych gałęzi planera, resolvera ani żadnej nowej patch family.
 
-## SOURCE EVIDENCE
+## IMPORTREF DELTA CONTRACT
 
-CONTRACT_PROVED: słownik zawiera dokładnie `schema_version=1`, `source_fingerprint`, `initializer_passive`, `marker_mutation`, `opaque_effects`. `initializer_passive` jest sprawdzane tylko dla nazwy modułu kończącej się `.__init__`. T13 potwierdza bezpieczny moduł: SHA-256 identyczny z bajtami źródła, marker_mutation=False, opaque_effects=False. T14 potwierdza mutację `typing.TYPE_CHECKING=True` oraz zgodność z mapą predykatu w syntetycznym FULL. T15 potwierdza pasywny i niepasywny initializer. T16: zmiana `if TYPE_CHECKING` na `if True` daje nowy fingerprint i `ImportRef.type_only` z True na False przy tych samych nazwach importów; `FileDelta.imports_added` pozostaje równe. To fakty przygotowania, bez twierdzenia o końcowej klasyfikacji/opublikowaniu incremental.
+CODE_PATH_PROVED: `ImportRef` jest `@dataclass(frozen=True)` z polami `module`, `level`, `names`, `is_from_import`, `is_local`, `type_only`, `is_lazy`; równość dataclass porównuje wszystkie wartości. Porównanie list importów obejmuje też kolejność i wielość rekordów. T17: zmiana strażnika przy tych samych nazwach daje puste `imports_added`/`imports_removed`, ale nową flagę payloadu. T20 parametryzuje zmiany `level`, `names`, `is_from_import`, `is_local`, `is_lazy` przy niezmienionym `module` i potwierdza tę samą drogę; nie ma wyjątku dla TYPE_CHECKING. T21: odrębne, ale wartościowo identyczne `ImportRef` nie ustawia flagi. `FileDelta.is_empty` już uwzględnia `metadata_changes`, więc zmiana payloadu nie zostaje uznana za no-op.
 
-## AST REUSE
+## REFRESH PLAN CONTRACT
 
-CODE_PATH_PROVED: `parse_source_with_fingerprint` jest wołane raz w udanej ścieżce (`preparation.py:167`); to samo `parsed_tree` przechodzi do `read_imports`, predykatów, symboli, kolizji i usage. T13 używa licznika wywołań parsera i przechwytuje argument `tree` w rzeczywistym `read_imports`: dokładnie jedno parsowanie i identyczna instancja AST. Kod produkcyjny nie dodaje odczytu źródła, `ast.parse` ani wykonania analizowanego kodu. Niezależny syntetyczny FULL w T14 jest porównaniem testowym, a nie ponownym parsowaniem wewnątrz `prepare_source_update`.
+DIRECT_EVIDENCE T17/T20: plan przy flagę payloadu obejmuje `modules`, `dependency_graph` i `cycles` w graph_recomputations. T21: identyczny payload nie planuje grafu. Istniejące testy `test_2_import_add`, `test_3_import_remove`, `test_7_reexport_retarget`, `test_10_noop_delta` przeszły. Ścieżki import add/remove oraz no-op pozostają czynne.
 
 ## TARGETED TESTS
 
-CPython 3.15.2, `C:\Temp\Contextor_Repo\.venv\Scripts\python.exe`: wyłącznie T13–T16 oraz T01, T05, T09, T10: `8 passed, 232 deselected` w 3.26 s. Polecenie: `pytest -q tests/test_p1d3_d2b2_type_only.py -k 'sp_t4_i2a_t13 or sp_t4_i2a_t14 or sp_t4_i2a_t15 or sp_t4_i2a_t16 or sp_t4_i1_t01 or sp_t4_i1_t05 or sp_t4_i1c_t09 or sp_t4_i1c_t10'`. `git diff --check` bez błędów whitespace. Nie uruchomiono pełnego pytest.
+CPython 3.15.2, `C:\Temp\Contextor_Repo\.venv\Scripts\python.exe`. Wybrane T17–T21 (T18/T19 dwa kierunki, T20 pięć pól) oraz cztery testy planera: `13 passed, 249 deselected` w 10.07 s. Dodatkowo dwa istniejące testy `tests/test_incremental_equivalence.py` dla add/import delta i `test_refresh_planner.py::test_10_noop_delta`: `3 passed` w 3.74 s. Łącznie 16 zaliczonych uruchomień przypadków, bez pełnego pytest. `git diff --check` bez błędów whitespace.
+
+## FULL/INCREMENTAL PARITY
+
+DIRECT_EVIDENCE T18: bezpieczny bazowy FULL na repo syntetycznym ma `pkg.a -> pkg.b` soft i `type_only=True`; zmiana samego warunku na `if True` dała rzeczywiste `update_file` status `UPDATED`, puste lists imports_added/removal, flagę payloadu, plan modules+dependency_graph, `type_only=False` i hard edge do `pkg.b`. Świeży FULL na oddzielnym końcowym repo miał identyczne flagi oraz całe hard_edges i soft_edges. T19 w przeciwnym kierunku dał `UPDATED`, `type_only=True`, hard→soft i tę samą parity ze świeżym FULL. Testy nie mockowały resolvera. To dowód dla tych dwóch izolowanych scenariuszy, nie dla wszystkich projektowych bramek bezpieczeństwa TYPE_CHECKING.
 
 ## MCP POST-CHANGE AUDIT
 
-DIRECT_EVIDENCE: MCP `get_project_architecture(fields=[])` po zmianach: LIVE revision 1417, resync_required=false, syntax_errors=0/fresh, hard cycles=16 deduplikowanych DFS paths/fresh, soft-dependent potential SCC=1/fresh; cycle_semantics stale. `get_module_context` w revision 1416: preparation/indexer/typing_guard `workspace_sync=verified`, test file początkowo `out_of_sync`; ponowny odczyt test file w revision 1417 `workspace_sync=verified`. Nie wywołano FULL rzeczywistego repo, MCP update_file, SCC02 ani restartu. LIVE revision i synchronizacja źródła nie są atestacją loaded-code backendu. Brak zmiany liczby cykli jest obserwacją odczytową, nie dowodem ogólnej semantyki grafu.
+DIRECT_EVIDENCE: `get_project_architecture(fields=[])` po zmianach: LIVE revision **1420**, resync_required=false, syntax_errors=0/fresh, hard cycles=16 deduplikowanych DFS paths/fresh, soft-dependent potential SCC=1/fresh; cycle_semantics stale. `get_module_context` dla preparation, refresh_planner i test file: revision 1420, `workspace_sync=verified`, graph/cycles fresh. Pełna projekcja dependencies_outbound dla preparation: 11 hard edges, bez soft; obejmuje istniejący indexer oraz typing_guard. Refresh_planner: 5 hard edges, bez soft. Nie wykonano MCP update_file, FULL Contextora ani restartu. Świeżość źródła LIVE nie atestuje loaded-code procesu.
 
 ## FINAL_VERDICT
 
-`I2A_PASS` dla literalnego przekazania source evidence i wskazanych testów. Dotyczy wyniku lokalnego kodu oraz odczytowej zgodności źródeł LIVE; adopcja nowego kodu przez proces backendu pozostaje nieatestowana.
+`I2B1_PASS` dla literalnego kontraktu import payload delta, planu i wskazanych porównań incremental/FULL. Zakres pozostałych projektowych bramek type_only nie jest objęty tym etapem.
 
 ## FILES_CHANGED
 
 - `contextor/core/analysis/incremental/preparation.py`
+- `contextor/core/analysis/refresh_planner.py`
 - `tests/test_p1d3_d2b2_type_only.py`
-- `walkthrough.md` — raport, bez własnego diffu zgodnie z AGENTS.md pkt 10.
+- `walkthrough.md` — raport bez własnego diffu zgodnie z AGENTS.md pkt 10.
 
-Nie zmieniono `indexer.py`, `typing_guard.py`, `issues.md`, `audyt.txt` ani Spiral Prophet.
+Nie zmieniono `domain/imports.py`, `issues.md`, `audyt.txt` ani Spiral Prophet.
 
 ## FULL_DIFFS
 
-Pełny rzeczywisty diff plików zmienionych w SP-T4-I2A:
+Pełny rzeczywisty diff plików zmienionych w SP-T4-I2B1:
 
 ```diff
 diff --git a/contextor/core/analysis/incremental/preparation.py b/contextor/core/analysis/incremental/preparation.py
-index 5287885..438ccc8 100644
+index 438ccc8..3afde46 100644
 --- a/contextor/core/analysis/incremental/preparation.py
 +++ b/contextor/core/analysis/incremental/preparation.py
-@@ -8,7 +8,7 @@ Source preparation and semantic delta construction for incremental updates:
- - PreparedModuleUpdate contract
- """
+@@ -88,6 +88,10 @@ def calculate_file_delta(
  
--from dataclasses import dataclass
-+from dataclasses import dataclass, field
- from pathlib import Path
- from typing import Optional, List, Set, Dict, Any, Tuple
+     delta.imports_added = sorted(new_import_names - old_import_names)
+     delta.imports_removed = sorted(old_import_names - new_import_names)
++    if old_imports != (new_imports or []):
++        delta.metadata_changes[
++            "import_ref_payload_changed"
++        ] = True
  
-@@ -39,6 +39,10 @@ class PreparedSourceUpdate:
-     error_message: Optional[str] = None
-     line_number: Optional[int] = None
-     column_number: Optional[int] = None
-+    typing_guard_source_evidence: dict[str, object] | None = field(
-+        default=None,
-+        kw_only=True,
-+    )
- 
-     @property
-     def has_error(self) -> bool:
-@@ -257,6 +261,29 @@ def prepare_source_update(
-             error_message=str(exc),
-         )
- 
-+    from contextor.core.symbol_engine.indexer import (
-+        _possible_project_typing_marker_mutation,
-+        _project_typing_opaque_effects,
-+    )
-+    from contextor.core.cycle_semantics.typing_guard import (
-+        _typing_guard_passive_initializer,
-+    )
-+
-+    typing_guard_source_evidence = {
-+        "schema_version": 1,
-+        "source_fingerprint": parsed_input.source_fingerprint,
-+        "initializer_passive": (
-+            module_path.endswith(".__init__")
-+            and _typing_guard_passive_initializer(parsed_tree)
-+        ),
-+        "marker_mutation": (
-+            _possible_project_typing_marker_mutation(parsed_tree)
-+        ),
-+        "opaque_effects": (
-+            _project_typing_opaque_effects(parsed_tree)
-+        ),
-+    }
-+
-     # 3. Extract symbols & artifacts
-     try:
-         from contextor.core.reporting_layer.artifact_usage_report import (
-@@ -327,6 +354,7 @@ def prepare_source_update(
-         collision_facts_changed=collision_facts_changed,
-         extracted_lineage_facts=extracted_lineage_facts,
-         new_reexport_facts=new_reexport_facts,
-+        typing_guard_source_evidence=typing_guard_source_evidence,
-     )
- 
+     new_artifact_names = extract_artifact_names(new_artifacts_dict)
+     old_artifact_names = extract_artifact_names(old_artifacts or {})
+diff --git a/contextor/core/analysis/refresh_planner.py b/contextor/core/analysis/refresh_planner.py
+index 973211f..6cff332 100644
+--- a/contextor/core/analysis/refresh_planner.py
++++ b/contextor/core/analysis/refresh_planner.py
+@@ -206,6 +206,10 @@ class RefreshPlanner:
+         has_import_changes = False
+         if delta and (delta.imports_added or delta.imports_removed or delta.imports_changed):
+             has_import_changes = True
++        if delta and delta.metadata_changes.get(
++            "import_ref_payload_changed"
++        ):
++            has_import_changes = True
+         if usage_delta and (usage_delta.added_imports or usage_delta.removed_imports):
+             has_import_changes = True
  
 diff --git a/tests/test_p1d3_d2b2_type_only.py b/tests/test_p1d3_d2b2_type_only.py
-index 44d610a..81c074e 100644
+index 81c074e..eec3654 100644
 --- a/tests/test_p1d3_d2b2_type_only.py
 +++ b/tests/test_p1d3_d2b2_type_only.py
-@@ -3,6 +3,7 @@
- from __future__ import annotations
+@@ -13,11 +13,13 @@ import sys
+ from dataclasses import replace
+ from importlib.machinery import EXTENSION_SUFFIXES, SOURCE_SUFFIXES
+ from pathlib import Path
++from types import SimpleNamespace
  
- import ast
-+import hashlib
- import importlib.util
- import json
- import pickle
-@@ -16,6 +17,7 @@ from pathlib import Path
  import pytest
  
  from contextor.core.analysis.cache_manager import CacheManager
-+from contextor.core.analysis.incremental import preparation
+ from contextor.core.analysis.incremental import preparation
++from contextor.core.analysis.refresh_planner import RefreshPlanner
  from contextor.core.analysis.state_manager import RepositoryAnalysisState, load_engine_state
  from contextor.core.api.facade import ContextorFacade
  from contextor.core.live_state.hydration import hydrate_repository_engine
-@@ -2799,3 +2801,102 @@ def test_sp_t4_i1c_t12_valid_evidence_copy():
-     candidate.typing_guard_evidence["global_policy_satisfied"] = False
-     assert state.typing_guard_evidence["global_policy_satisfied"] is True
+@@ -26,6 +28,7 @@ from contextor.core.paths import repo_cache_dir
+ from contextor.core.cycle_semantics.original_worker_reindex_planning import plan_original_worker_reindex
+ from contextor.core.cycle_semantics.package_model import evaluate_package_import_order
+ from contextor.core.cycle_semantics.scenarios import analyze_cycle_scenarios
++from contextor.core.domain.imports import ImportRef
+ from contextor.core.graph.graph import build_graph
+ from contextor.core.graph.resolver import build_trie, detect_package_root
+ from contextor.core.reference.shared import materialize_reexport_facts_by_module
+@@ -2900,3 +2903,130 @@ def test_sp_t4_i2a_t16_guard_change_same_import_names(tmp_path):
+     assert after.typing_guard_source_evidence["marker_mutation"] is False
+     assert after.typing_guard_source_evidence["opaque_effects"] is False
  
 +
-+def _i2a_prepare(path: Path, module_path: str):
-+    return preparation.prepare_source_update(
-+        file_path=path,
-+        module_path=module_path,
-+        is_new=True,
-+        old_module=None,
-+        old_artifacts=None,
-+        old_usage=None,
-+    )
-+
-+
-+def test_sp_t4_i2a_t13_safe_source_evidence(tmp_path, monkeypatch):
-+    source = (
++def _i2b1_source(*, guarded: bool) -> str:
++    condition = "TYPE_CHECKING" if guarded else "True"
++    return (
 +        "from typing import TYPE_CHECKING\n"
-+        "if TYPE_CHECKING:\n"
++        f"if {condition}:\n"
 +        "    import pkg.b\n"
 +        "value = 1\n"
 +    )
-+    path = tmp_path / "a.py"
-+    path.write_text(source, encoding="utf-8")
-+    parse_calls = []
-+    import_trees = []
-+    original_parse = preparation.parse_source_with_fingerprint
-+    original_read_imports = indexer.read_imports
 +
-+    def recorded_parse(file_path):
-+        parsed = original_parse(file_path)
-+        parse_calls.append(parsed)
-+        return parsed
 +
-+    def recorded_read_imports(file_path, *, tree=None):
-+        import_trees.append(tree)
-+        return original_read_imports(file_path, tree=tree)
-+
-+    monkeypatch.setattr(preparation, "parse_source_with_fingerprint", recorded_parse)
-+    monkeypatch.setattr(indexer, "read_imports", recorded_read_imports)
-+    prepared = _i2a_prepare(path, "pkg.a")
++def test_sp_t4_i2b1_t17_same_names_semantic_delta_plans_graph(
++    tmp_path, isolated_dirs,
++):
++    root = write_synthetic_repository(tmp_path / "repo", _I1_SAFE)
++    _, engine = _i1_full_engine(root)
++    target = root / "pkg/a.py"
++    target.write_text(_i2b1_source(guarded=False), encoding="utf-8")
++    prepared = preparation.prepare_source_update(
++        file_path=target,
++        module_path="pkg.a",
++        is_new=False,
++        old_module=engine.state.modules["pkg.a"],
++        old_artifacts=engine.state.artifacts.get("pkg.a"),
++        old_usage=engine.state.module_usages.get("pkg.a"),
++        persistent_id=engine.registry.get_module_id("pkg.a"),
++        old_collision_facts=engine.state.collision_facts.get("pkg.a"),
++        old_reexport_facts=engine.state.reexport_facts_by_module.get("pkg.a"),
++    )
 +    assert not prepared.has_error
-+    assert len(parse_calls) == 1
-+    assert import_trees == [parse_calls[0].tree]
-+    evidence = prepared.typing_guard_source_evidence
-+    assert evidence["schema_version"] == 1
-+    assert evidence["source_fingerprint"] == hashlib.sha256(path.read_bytes()).hexdigest()
-+    assert evidence["initializer_passive"] is False
-+    assert evidence["marker_mutation"] is False
-+    assert evidence["opaque_effects"] is False
-+
-+
-+def test_sp_t4_i2a_t14_marker_mutation_matches_full_predicate(tmp_path):
-+    path = tmp_path / "other.py"
-+    path.write_text("import typing\ntyping.TYPE_CHECKING = True\n", encoding="utf-8")
-+    prepared = _i2a_prepare(path, "pkg.other")
-+    assert not prepared.has_error
-+    evidence = prepared.typing_guard_source_evidence
-+    assert evidence["marker_mutation"] is True
-+    full_index, _ = _index_graph(tmp_path)
-+    assert full_index.typing_guard_evidence["marker_mutation_by_module"]["other"][0] is True
-+
-+
-+def test_sp_t4_i2a_t15_initializer_passivity(tmp_path):
-+    path = tmp_path / "__init__.py"
-+    path.write_text("pass\n", encoding="utf-8")
-+    passive = _i2a_prepare(path, "pkg.__init__")
-+    assert not passive.has_error
-+    assert passive.typing_guard_source_evidence["initializer_passive"] is True
-+    path.write_text("import typing\ntyping.TYPE_CHECKING = True\n", encoding="utf-8")
-+    active = _i2a_prepare(path, "pkg.__init__")
-+    assert not active.has_error
-+    assert active.typing_guard_source_evidence["initializer_passive"] is False
-+    assert active.typing_guard_source_evidence["source_fingerprint"] != (
-+        passive.typing_guard_source_evidence["source_fingerprint"]
++    assert prepared.delta.imports_added == []
++    assert prepared.delta.imports_removed == []
++    assert prepared.delta.metadata_changes["import_ref_payload_changed"] is True
++    plan = RefreshPlanner.plan_refresh(
++        prepared.delta,
++        usage_delta=prepared.usage_delta,
++        module_usages=engine.state.module_usages,
++        collision_facts_changed=prepared.collision_facts_changed,
 +    )
++    assert "modules" in plan.patch_families
++    assert "dependency_graph" in plan.patch_families
++    assert "cycles" in plan.graph_recomputations
 +
 +
-+def test_sp_t4_i2a_t16_guard_change_same_import_names(tmp_path):
-+    path = tmp_path / "a.py"
-+    guarded = (
-+        "from typing import TYPE_CHECKING\n"
-+        "if TYPE_CHECKING:\n"
-+        "    import pkg.b\n"
-+        "value = 1\n"
++@pytest.mark.parametrize("initial_guarded", [True, False], ids=["t18-soft-to-hard", "t19-hard-to-soft"])
++def test_sp_t4_i2b1_t18_t19_direct_incremental_full_parity(
++    tmp_path, isolated_dirs, initial_guarded,
++):
++    initial_fixture = {
++        **_I1_SAFE,
++        "pkg/a.py": _i2b1_source(guarded=initial_guarded),
++    }
++    root = write_synthetic_repository(tmp_path / "repo", initial_fixture)
++    _, engine = _i1_full_engine(root)
++    before = _i1_guarded_import(engine.state)
++    assert before.type_only is initial_guarded
++    assert ("pkg.b" in engine.state.dependency_graph.soft_edges.get("pkg.a", set())) is initial_guarded
++    target = root / "pkg/a.py"
++    final_source = _i2b1_source(guarded=not initial_guarded)
++    target.write_text(final_source, encoding="utf-8")
++    result = engine.update_file(str(target.resolve()))
++    assert result.status == "UPDATED"
++    assert result.delta.imports_added == []
++    assert result.delta.imports_removed == []
++    assert result.delta.metadata_changes["import_ref_payload_changed"] is True
++    assert "modules" in result.shadow_plan.patch_families
++    assert "dependency_graph" in result.shadow_plan.patch_families
++    incremental = engine.state
++    assert _i1_guarded_import(incremental).type_only is not initial_guarded
++    assert ("pkg.b" in incremental.dependency_graph.hard_edges.get("pkg.a", set())) is initial_guarded
++    assert ("pkg.b" in incremental.dependency_graph.soft_edges.get("pkg.a", set())) is not initial_guarded
++
++    fresh_root = write_synthetic_repository(
++        tmp_path / "fresh", {**initial_fixture, "pkg/a.py": final_source},
 +    )
-+    path.write_text(guarded, encoding="utf-8")
-+    before = _i2a_prepare(path, "pkg.a")
-+    path.write_text(guarded.replace("if TYPE_CHECKING:", "if True:"), encoding="utf-8")
-+    after = _i2a_prepare(path, "pkg.a")
-+    assert not before.has_error and not after.has_error
-+    before_import = next(item for item in before.new_imports if item.module == "pkg.b")
-+    after_import = next(item for item in after.new_imports if item.module == "pkg.b")
-+    assert before_import.type_only is True
-+    assert after_import.type_only is False
-+    assert before.delta.imports_added == after.delta.imports_added
-+    assert before.typing_guard_source_evidence["source_fingerprint"] != (
-+        after.typing_guard_source_evidence["source_fingerprint"]
++    fresh, _ = _i1_full_engine(fresh_root)
++    assert _i1_guarded_import(incremental).type_only == _i1_guarded_import(fresh).type_only
++    assert incremental.dependency_graph.hard_edges == fresh.dependency_graph.hard_edges
++    assert incremental.dependency_graph.soft_edges == fresh.dependency_graph.soft_edges
++
++
++@pytest.mark.parametrize(
++    "changes",
++    [
++        {"level": 1},
++        {"names": ["Other"]},
++        {"is_from_import": True},
++        {"is_local": True},
++        {"is_lazy": True},
++    ],
++    ids=["level", "names", "from", "local", "lazy"],
++)
++def test_sp_t4_i2b1_t20_other_import_ref_field_changes(changes):
++    original = ImportRef(
++        module="pkg.b", level=0, names=[], is_from_import=False,
 +    )
-+    assert after.typing_guard_source_evidence["marker_mutation"] is False
-+    assert after.typing_guard_source_evidence["opaque_effects"] is False
++    changed = replace(original, **changes)
++    assert original != changed
++    delta = preparation.calculate_file_delta(
++        module_path="pkg.a", persistent_id="M1", is_new=False,
++        old_module=SimpleNamespace(imports=[original]),
++        old_artifacts={}, new_imports=[changed], new_artifacts_dict={},
++    )
++    assert delta.imports_added == []
++    assert delta.imports_removed == []
++    assert delta.metadata_changes["import_ref_payload_changed"] is True
++    plan = RefreshPlanner.plan_refresh(delta)
++    assert "modules" in plan.patch_families
++    assert "dependency_graph" in plan.patch_families
++
++
++def test_sp_t4_i2b1_t21_identical_import_ref_no_graph_plan():
++    original = ImportRef(
++        module="pkg.b", level=0, names=[], is_from_import=False,
++    )
++    delta = preparation.calculate_file_delta(
++        module_path="pkg.a", persistent_id="M1", is_new=False,
++        old_module=SimpleNamespace(imports=[original]),
++        old_artifacts={}, new_imports=[replace(original)], new_artifacts_dict={},
++    )
++    assert delta.imports_added == []
++    assert delta.imports_removed == []
++    assert "import_ref_payload_changed" not in delta.metadata_changes
++    plan = RefreshPlanner.plan_refresh(delta)
++    assert "dependency_graph" not in plan.patch_families
++    assert plan.graph_recomputations == ()
 +
 ```

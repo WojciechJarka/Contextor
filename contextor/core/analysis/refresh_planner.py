@@ -206,6 +206,10 @@ class RefreshPlanner:
         has_import_changes = False
         if delta and (delta.imports_added or delta.imports_removed or delta.imports_changed):
             has_import_changes = True
+        if delta and delta.metadata_changes.get(
+            "import_ref_payload_changed"
+        ):
+            has_import_changes = True
         if usage_delta and (usage_delta.added_imports or usage_delta.removed_imports):
             has_import_changes = True
 

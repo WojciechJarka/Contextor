@@ -88,6 +88,10 @@ def calculate_file_delta(
 
     delta.imports_added = sorted(new_import_names - old_import_names)
     delta.imports_removed = sorted(old_import_names - new_import_names)
+    if old_imports != (new_imports or []):
+        delta.metadata_changes[
+            "import_ref_payload_changed"
+        ] = True
 
     new_artifact_names = extract_artifact_names(new_artifacts_dict)
     old_artifact_names = extract_artifact_names(old_artifacts or {})

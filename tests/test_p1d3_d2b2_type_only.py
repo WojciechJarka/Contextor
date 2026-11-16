@@ -13,11 +13,13 @@ import sys
 from dataclasses import replace
 from importlib.machinery import EXTENSION_SUFFIXES, SOURCE_SUFFIXES
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from contextor.core.analysis.cache_manager import CacheManager
 from contextor.core.analysis.incremental import preparation
+from contextor.core.analysis.refresh_planner import RefreshPlanner
 from contextor.core.analysis.state_manager import RepositoryAnalysisState, load_engine_state
 from contextor.core.api.facade import ContextorFacade
 from contextor.core.live_state.hydration import hydrate_repository_engine
@@ -26,6 +28,7 @@ from contextor.core.paths import repo_cache_dir
 from contextor.core.cycle_semantics.original_worker_reindex_planning import plan_original_worker_reindex
 from contextor.core.cycle_semantics.package_model import evaluate_package_import_order
 from contextor.core.cycle_semantics.scenarios import analyze_cycle_scenarios
+from contextor.core.domain.imports import ImportRef
 from contextor.core.graph.graph import build_graph
 from contextor.core.graph.resolver import build_trie, detect_package_root
 from contextor.core.reference.shared import materialize_reexport_facts_by_module
@@ -2899,4 +2902,131 @@ def test_sp_t4_i2a_t16_guard_change_same_import_names(tmp_path):
     )
     assert after.typing_guard_source_evidence["marker_mutation"] is False
     assert after.typing_guard_source_evidence["opaque_effects"] is False
+
+
+def _i2b1_source(*, guarded: bool) -> str:
+    condition = "TYPE_CHECKING" if guarded else "True"
+    return (
+        "from typing import TYPE_CHECKING\n"
+        f"if {condition}:\n"
+        "    import pkg.b\n"
+        "value = 1\n"
+    )
+
+
+def test_sp_t4_i2b1_t17_same_names_semantic_delta_plans_graph(
+    tmp_path, isolated_dirs,
+):
+    root = write_synthetic_repository(tmp_path / "repo", _I1_SAFE)
+    _, engine = _i1_full_engine(root)
+    target = root / "pkg/a.py"
+    target.write_text(_i2b1_source(guarded=False), encoding="utf-8")
+    prepared = preparation.prepare_source_update(
+        file_path=target,
+        module_path="pkg.a",
+        is_new=False,
+        old_module=engine.state.modules["pkg.a"],
+        old_artifacts=engine.state.artifacts.get("pkg.a"),
+        old_usage=engine.state.module_usages.get("pkg.a"),
+        persistent_id=engine.registry.get_module_id("pkg.a"),
+        old_collision_facts=engine.state.collision_facts.get("pkg.a"),
+        old_reexport_facts=engine.state.reexport_facts_by_module.get("pkg.a"),
+    )
+    assert not prepared.has_error
+    assert prepared.delta.imports_added == []
+    assert prepared.delta.imports_removed == []
+    assert prepared.delta.metadata_changes["import_ref_payload_changed"] is True
+    plan = RefreshPlanner.plan_refresh(
+        prepared.delta,
+        usage_delta=prepared.usage_delta,
+        module_usages=engine.state.module_usages,
+        collision_facts_changed=prepared.collision_facts_changed,
+    )
+    assert "modules" in plan.patch_families
+    assert "dependency_graph" in plan.patch_families
+    assert "cycles" in plan.graph_recomputations
+
+
+@pytest.mark.parametrize("initial_guarded", [True, False], ids=["t18-soft-to-hard", "t19-hard-to-soft"])
+def test_sp_t4_i2b1_t18_t19_direct_incremental_full_parity(
+    tmp_path, isolated_dirs, initial_guarded,
+):
+    initial_fixture = {
+        **_I1_SAFE,
+        "pkg/a.py": _i2b1_source(guarded=initial_guarded),
+    }
+    root = write_synthetic_repository(tmp_path / "repo", initial_fixture)
+    _, engine = _i1_full_engine(root)
+    before = _i1_guarded_import(engine.state)
+    assert before.type_only is initial_guarded
+    assert ("pkg.b" in engine.state.dependency_graph.soft_edges.get("pkg.a", set())) is initial_guarded
+    target = root / "pkg/a.py"
+    final_source = _i2b1_source(guarded=not initial_guarded)
+    target.write_text(final_source, encoding="utf-8")
+    result = engine.update_file(str(target.resolve()))
+    assert result.status == "UPDATED"
+    assert result.delta.imports_added == []
+    assert result.delta.imports_removed == []
+    assert result.delta.metadata_changes["import_ref_payload_changed"] is True
+    assert "modules" in result.shadow_plan.patch_families
+    assert "dependency_graph" in result.shadow_plan.patch_families
+    incremental = engine.state
+    assert _i1_guarded_import(incremental).type_only is not initial_guarded
+    assert ("pkg.b" in incremental.dependency_graph.hard_edges.get("pkg.a", set())) is initial_guarded
+    assert ("pkg.b" in incremental.dependency_graph.soft_edges.get("pkg.a", set())) is not initial_guarded
+
+    fresh_root = write_synthetic_repository(
+        tmp_path / "fresh", {**initial_fixture, "pkg/a.py": final_source},
+    )
+    fresh, _ = _i1_full_engine(fresh_root)
+    assert _i1_guarded_import(incremental).type_only == _i1_guarded_import(fresh).type_only
+    assert incremental.dependency_graph.hard_edges == fresh.dependency_graph.hard_edges
+    assert incremental.dependency_graph.soft_edges == fresh.dependency_graph.soft_edges
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"level": 1},
+        {"names": ["Other"]},
+        {"is_from_import": True},
+        {"is_local": True},
+        {"is_lazy": True},
+    ],
+    ids=["level", "names", "from", "local", "lazy"],
+)
+def test_sp_t4_i2b1_t20_other_import_ref_field_changes(changes):
+    original = ImportRef(
+        module="pkg.b", level=0, names=[], is_from_import=False,
+    )
+    changed = replace(original, **changes)
+    assert original != changed
+    delta = preparation.calculate_file_delta(
+        module_path="pkg.a", persistent_id="M1", is_new=False,
+        old_module=SimpleNamespace(imports=[original]),
+        old_artifacts={}, new_imports=[changed], new_artifacts_dict={},
+    )
+    assert delta.imports_added == []
+    assert delta.imports_removed == []
+    assert delta.metadata_changes["import_ref_payload_changed"] is True
+    plan = RefreshPlanner.plan_refresh(delta)
+    assert "modules" in plan.patch_families
+    assert "dependency_graph" in plan.patch_families
+
+
+def test_sp_t4_i2b1_t21_identical_import_ref_no_graph_plan():
+    original = ImportRef(
+        module="pkg.b", level=0, names=[], is_from_import=False,
+    )
+    delta = preparation.calculate_file_delta(
+        module_path="pkg.a", persistent_id="M1", is_new=False,
+        old_module=SimpleNamespace(imports=[original]),
+        old_artifacts={}, new_imports=[replace(original)], new_artifacts_dict={},
+    )
+    assert delta.imports_added == []
+    assert delta.imports_removed == []
+    assert "import_ref_payload_changed" not in delta.metadata_changes
+    plan = RefreshPlanner.plan_refresh(delta)
+    assert "dependency_graph" not in plan.patch_families
+    assert plan.graph_recomputations == ()
 
