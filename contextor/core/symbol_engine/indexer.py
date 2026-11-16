@@ -2628,10 +2628,14 @@ def index_repository(
     completed = 0
 
     global_policy_satisfied = False
+    candidate_imports_by_module = {}
 
     def typing_guard_evidence() -> dict[str, object]:
         return {
-            "schema_version": 1,
+            "schema_version": 2,
+            "candidate_imports_by_module": dict(
+                sorted(candidate_imports_by_module.items())
+            ),
             "source_fingerprints_by_module": dict(sorted(source_fingerprints_by_module.items())),
             "initializer_passivity_by_module": dict(sorted(initializer_passivity_by_module.items())),
             "marker_mutation_by_module": dict(sorted(marker_mutation_by_module.items())),
@@ -2644,6 +2648,20 @@ def index_repository(
 
     def _finalize_type_only_imports() -> None:
         nonlocal global_policy_satisfied
+        for module_id, module in modules.items():
+            if not any(
+                ref.type_only for ref in module.imports
+            ):
+                continue
+
+            candidate_imports_by_module[module_id] = tuple(
+                dataclasses.replace(
+                    ref,
+                    names=list(ref.names),
+                )
+                for ref in module.imports
+            )
+
         typing_shadowed = (
             "typing" in modules
             or "typing.__init__" in modules

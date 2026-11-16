@@ -2663,7 +2663,7 @@ def test_sp_t4_i1_t01_safe_full_evidence(tmp_path, isolated_dirs):
     root = write_synthetic_repository(tmp_path / "repo", _I1_SAFE)
     index, graph = _index_graph(root)
     evidence = index.typing_guard_evidence
-    assert evidence["schema_version"] == 1
+    assert evidence["schema_version"] == 2
     assert evidence["global_policy_satisfied"] is True
     assert evidence["skipped_source_paths"] == ()
     assert evidence["unindexed_python_sources_present"] is False
@@ -3029,4 +3029,133 @@ def test_sp_t4_i2b1_t21_identical_import_ref_no_graph_plan():
     plan = RefreshPlanner.plan_refresh(delta)
     assert "dependency_graph" not in plan.patch_families
     assert plan.graph_recomputations == ()
+
+
+def _i2b2_candidates(index, module_id="pkg.a"):
+    evidence = index.typing_guard_evidence
+    assert evidence["schema_version"] == 2
+    return evidence["candidate_imports_by_module"][module_id]
+
+
+def test_sp_t4_i2b2c_t22_safe_full_candidate_matches_final_imports(
+    tmp_path, isolated_dirs,
+):
+    root = write_synthetic_repository(tmp_path / "repo", _I1_SAFE)
+    index, graph = _index_graph(root)
+    candidate = _i2b2_candidates(index)
+    final_imports = index.modules["pkg.a"].imports
+    assert _i1_guarded_import(index).type_only is True
+    assert graph.soft_edges["pkg.a"] == {"pkg.b"}
+    assert candidate == tuple(final_imports)
+    for before, after in zip(candidate, final_imports):
+        assert before == after
+        assert before.names is not after.names
+
+
+def test_sp_t4_i2b2c_t23_shadow_keeps_pre_finalization_candidate(
+    tmp_path, isolated_dirs,
+):
+    root = write_synthetic_repository(
+        tmp_path / "repo", {**_I1_SAFE, "typing.py": "pass\n"},
+    )
+    index, graph = _index_graph(root)
+    candidate = _i2b2_candidates(index)
+    final_import = _i1_guarded_import(index)
+    saved_import = next(ref for ref in candidate if ref.module == "pkg.b")
+    assert final_import.type_only is False
+    assert saved_import.type_only is True
+    assert "pkg.b" in graph.hard_edges["pkg.a"]
+
+
+def test_sp_t4_i2b2c_t24_skipped_keeps_pre_finalization_candidate(
+    tmp_path, isolated_dirs,
+):
+    root = write_synthetic_repository(
+        tmp_path / "repo", {**_I1_SAFE, "broken.py": "def invalid(:\n"},
+    )
+    index, graph = _index_graph(root)
+    candidate = _i2b2_candidates(index)
+    final_import = _i1_guarded_import(index)
+    saved_import = next(ref for ref in candidate if ref.module == "pkg.b")
+    assert final_import.type_only is False
+    assert saved_import.type_only is True
+    assert index.typing_guard_evidence["skipped_source_paths"] == ("broken.py",)
+    assert "pkg.b" in graph.hard_edges["pkg.a"]
+
+
+@pytest.mark.parametrize(
+    "ordinary_import",
+    [
+        "import pkg.c as helper\n",
+        "from pkg.d import Symbol as Alias\n",
+    ],
+    ids=["import-alias-not-in-importref", "from-alias-not-in-importref"],
+)
+def test_sp_t4_i2b2c_t25_all_existing_importrefs_in_order(
+    tmp_path, isolated_dirs, ordinary_import,
+):
+    fixture = {
+        "pkg/__init__.py": "pass\n",
+        "pkg/a.py": (
+            "from typing import TYPE_CHECKING\n"
+            "if TYPE_CHECKING:\n"
+            "    import pkg.b\n"
+            + ordinary_import
+        ),
+        "pkg/b.py": "pass\n",
+        "pkg/c.py": "pass\n",
+        "pkg/d.py": "pass\n",
+    }
+    root = write_synthetic_repository(tmp_path / "repo", fixture)
+    index, _ = _index_graph(root)
+    candidate = _i2b2_candidates(index)
+    extracted, error = indexer.read_imports(root / "pkg/a.py")
+    assert error is None
+    assert len(candidate) == len(extracted) == 3
+    assert candidate == tuple(extracted)
+    assert [ref.module for ref in candidate] == [
+        ref.module for ref in extracted
+    ]
+    for captured, parsed in zip(candidate, extracted):
+        assert captured == parsed
+        assert captured.names == parsed.names
+        assert captured.names is not parsed.names
+    final_imports = index.modules["pkg.a"].imports
+    assert len(final_imports) == 3
+    assert [ref.module for ref in candidate] == [
+        "typing", "pkg.b",
+        "pkg.c" if ordinary_import.startswith("import") else "pkg.d",
+    ]
+    assert all(
+        captured.names is not final.names
+        for captured, final in zip(candidate, final_imports)
+    )
+
+
+def test_sp_t4_i2b2c_t26_snapshot_roundtrip_keeps_rejected_candidates(
+    tmp_path, isolated_dirs,
+):
+    root = write_synthetic_repository(
+        tmp_path / "repo", {**_I1_SAFE, "typing.py": "pass\n"},
+    )
+    index, _ = _index_graph(root)
+    persisted, engine = _i1_full_engine(root)
+    candidate = _i2b2_candidates(index)
+    assert _i1_guarded_import(index).type_only is False
+    assert next(ref for ref in candidate if ref.module == "pkg.b").type_only is True
+    assert persisted.typing_guard_evidence == index.typing_guard_evidence
+    assert engine.state.typing_guard_evidence == index.typing_guard_evidence
+
+
+def test_sp_t4_i2b2c_t27_inline_process_pool_evidence_parity(
+    tmp_path, isolated_dirs, monkeypatch,
+):
+    inline_root = write_synthetic_repository(tmp_path / "inline", _I1_SAFE)
+    monkeypatch.setenv("CONTEXTOR_DISABLE_PROCESS_POOL", "1")
+    inline, _ = _index_graph(inline_root)
+    pool_root = write_synthetic_repository(tmp_path / "pool", _I1_SAFE)
+    monkeypatch.delenv("CONTEXTOR_DISABLE_PROCESS_POOL", raising=False)
+    pooled, _ = _index_graph(pool_root)
+    assert inline.typing_guard_evidence["schema_version"] == 2
+    assert pooled.typing_guard_evidence == inline.typing_guard_evidence
 
