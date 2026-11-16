@@ -87,6 +87,7 @@ class AnalysisResult:
 class RepositoryAnalysisState:
     """Canonical runtime state of the repository analysis."""
     modules: Dict[str, Any] = field(default_factory=dict)
+    typing_guard_evidence: dict[str, object] = field(default_factory=dict)
     artifacts: Dict[str, Any] = field(default_factory=dict)
     reexport_facts_by_module: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     dependency_graph: Optional[Any] = None

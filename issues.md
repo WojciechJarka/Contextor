@@ -42,26 +42,40 @@ Nie zatwierdzono implementacji.
 
 ### Walidacja AST a kompilowalność CPython
 
-Audyt Spiral Prophet wykazał rozbieżność między
-ast.parse a kompilowalnością CPython dla modułu
+Potwierdzono rozbieżność między ast.parse
+a kompilowalnością CPython dla rzeczywistego
+modułu Spiral Prophet:
 core.validators.event.event_actor_validator.
 
-W SP-R5 potwierdzono także obejście parsera
-przez kompletny historyczny cache oraz wspólną
-ścieżkę parsera dla indeksowania i incremental.
+Naprawiono ją przez compile(AST) we wspólnym
+parserze bez wykonywania analizowanego kodu.
+Dodano wersjonowanie walidacji źródła,
+unieważniające historyczne wpisy cache
+bez nowego kontraktu kompilowalności.
 
-Wdrożono walidację compile(AST) bez wykonywania
-kodu i bez ponownego parsowania źródła.
-Wprowadzono osobną wersję semantyki walidacji
-źródła, która odrzuca wcześniejsze wpisy cache.
+SP-R6: 33 testy ukierunkowane PASS,
+CPython 3.15.2.
 
-Wyniki regresji produkcyjnych i testów są
-dokumentowane w walkthrough.md bieżącego zadania.
+SP-R7: oryginalny plik o potwierdzonym
+SHA-256 został prawidłowo odrzucony przez
+parser i izolowane indeksowanie.
 
-Do zamknięcia pozostaje potwierdzenie adopcji
-nowego kodu przez właściwy backend oraz
-ponownej diagnostyki rzeczywistego repozytorium
-Spiral Prophet. Nie oznaczono jako FINAL PASS LIVE.
+SP-R14: pełna analiza rzeczywistego
+Spiral Prophet przez Contextor MCP zakończona
+sukcesem. Nowy kanoniczny snapshot revision 9,
+state_id=20261116_140314, zapisany i odczytany.
+1048 modułów przyjętych, 23 pliki odrzucone.
+Oryginalny moduł otrzymał checked_with_errors,
+błąd CPython w linii 5 i nie trafił do indeksu.
+
+Publikacja do osobnej usługi LIVE Spiral Prophet
+nie była wykonywana, ponieważ usługa nie była
+aktywna. LIVE_PUBLICATION=NOT_ATTEMPTED.
+Nie stanowi to potwierdzenia FINAL_PASS_LIVE.
+
+STATUS: ZAMKNIĘTE — FULL/PERSISTENCE VERIFIED.
+Zakres funkcjonalnej naprawy kompilowalności
+został potwierdzony na rzeczywistym projekcie.
 
 ### Wywołania metod przez pola instancji
 

@@ -1560,6 +1560,8 @@ class RepositoryIndex:
         dataclasses.field(default_factory=dict)
     )
 
+    typing_guard_evidence: dict[str, object] = dataclasses.field(default_factory=dict)
+
     # Optional original worker-read evidence. Not a publication receipt,
     # generation binding, or cross-file atomic source snapshot.
     original_worker_source_snapshots: dict[str, SourceSnapshot] = (
@@ -2625,7 +2627,23 @@ def index_repository(
 
     completed = 0
 
+    global_policy_satisfied = False
+
+    def typing_guard_evidence() -> dict[str, object]:
+        return {
+            "schema_version": 1,
+            "source_fingerprints_by_module": dict(sorted(source_fingerprints_by_module.items())),
+            "initializer_passivity_by_module": dict(sorted(initializer_passivity_by_module.items())),
+            "marker_mutation_by_module": dict(sorted(marker_mutation_by_module.items())),
+            "opaque_effects_by_module": dict(sorted(opaque_effects_by_module.items())),
+            "skipped_source_paths": tuple(sorted(item.path for item in skipped)),
+            "unindexed_python_sources_present": unindexed_python_sources_present,
+            "unindexed_import_artifacts_present": unindexed_import_artifacts_present,
+            "global_policy_satisfied": global_policy_satisfied,
+        }
+
     def _finalize_type_only_imports() -> None:
+        nonlocal global_policy_satisfied
         typing_shadowed = (
             "typing" in modules
             or "typing.__init__" in modules
@@ -2690,6 +2708,12 @@ def index_repository(
             )
         )
 
+        global_policy_satisfied = (
+            not typing_shadowed
+            and project_marker_safe
+            and project_effects_closed
+        )
+
         for module_id, module in modules.items():
             if not any(
                 import_ref.type_only
@@ -2725,12 +2749,7 @@ def index_repository(
                 )
             )
 
-            if (
-                not typing_shadowed
-                and parents_proved
-                and project_marker_safe
-                and project_effects_closed
-            ):
+            if global_policy_satisfied and parents_proved:
                 continue
 
             modules[module_id] = dataclasses.replace(
@@ -2813,6 +2832,7 @@ def index_repository(
                     source_fingerprints_by_module.items()
                 )
             ),
+            typing_guard_evidence=typing_guard_evidence(),
             **capture_result_fields(),
         )
 
@@ -3066,6 +3086,7 @@ def index_repository(
                 source_fingerprints_by_module.items()
             )
         ),
+        typing_guard_evidence=typing_guard_evidence(),
         **capture_result_fields(),
     )
 

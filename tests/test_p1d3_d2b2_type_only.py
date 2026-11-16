@@ -15,6 +15,11 @@ from pathlib import Path
 import pytest
 
 from contextor.core.analysis.cache_manager import CacheManager
+from contextor.core.analysis.state_manager import load_engine_state
+from contextor.core.api.facade import ContextorFacade
+from contextor.core.live_state.hydration import hydrate_repository_engine
+from contextor.core.live_state.store import read_metadata
+from contextor.core.paths import repo_cache_dir
 from contextor.core.cycle_semantics.original_worker_reindex_planning import plan_original_worker_reindex
 from contextor.core.cycle_semantics.package_model import evaluate_package_import_order
 from contextor.core.cycle_semantics.scenarios import analyze_cycle_scenarios
@@ -2611,4 +2616,151 @@ def test_d2b2_r2_original_worker_reindex_retains_hard_graph(
     assert captured_graph.soft_edges == graph.soft_edges
     assert captured_graph.hard_edges["pkg.a"] == {"pkg.b"}
     assert captured_graph.hard_edges["pkg.b"] == {"pkg.a"}
+
+
+_I1_SAFE = {
+    "pkg/__init__.py": "pass\n",
+    "pkg/a.py": (
+        "from typing import TYPE_CHECKING\n"
+        "if TYPE_CHECKING:\n"
+        "    import pkg.b\n"
+        "value = 1\n"
+    ),
+    "pkg/b.py": "pass\n",
+    "pkg/c.py": "pass\n",
+}
+
+
+def _i1_full_engine(root):
+    errors, _ = ContextorFacade.analyze_project(str(root))
+    assert not errors
+    metadata = read_metadata(repo_cache_dir(root))
+    assert metadata is not None
+    persisted = load_engine_state(
+        str(repo_cache_dir(root)), metadata.state_id,
+        expected_repo_id=metadata.repo_id,
+        expected_root_path=str(root.resolve()),
+    )
+    hydrated = hydrate_repository_engine(root)
+    assert hydrated is not None
+    return persisted, hydrated.engine
+
+
+def _i1_guarded_import(state):
+    return next(
+        item for item in state.modules["pkg.a"].imports
+        if item.module == "pkg.b"
+    )
+
+
+def test_sp_t4_i1_t01_safe_full_evidence(tmp_path, isolated_dirs):
+    root = write_synthetic_repository(tmp_path / "repo", _I1_SAFE)
+    index, graph = _index_graph(root)
+    evidence = index.typing_guard_evidence
+    assert evidence["schema_version"] == 1
+    assert evidence["global_policy_satisfied"] is True
+    assert evidence["skipped_source_paths"] == ()
+    assert evidence["unindexed_python_sources_present"] is False
+    assert evidence["unindexed_import_artifacts_present"] is False
+    fingerprints = evidence["source_fingerprints_by_module"]
+    assert fingerprints == index.source_fingerprints_by_module
+    assert set(fingerprints) == set(index.modules)
+    for key in ("marker_mutation_by_module", "opaque_effects_by_module"):
+        facts = evidence[key]
+        assert set(facts) == set(index.modules)
+        assert all(value == (False, fingerprints[name]) for name, value in facts.items())
+    assert set(evidence["initializer_passivity_by_module"]) == {"pkg.__init__"}
+    assert evidence["initializer_passivity_by_module"]["pkg.__init__"] == (
+        True, fingerprints["pkg.__init__"]
+    )
+    assert _i1_guarded_import(index).type_only is True
+    assert graph.soft_edges["pkg.a"] == {"pkg.b"}
+
+
+def test_sp_t4_i1_t02_shadow_policy_false(tmp_path, isolated_dirs):
+    root = write_synthetic_repository(tmp_path / "repo", {**_I1_SAFE, "typing.py": "pass\n"})
+    index, graph = _index_graph(root)
+    assert index.typing_guard_evidence["global_policy_satisfied"] is False
+    assert "typing" in index.modules
+    assert _i1_guarded_import(index).type_only is False
+    assert "pkg.b" in graph.hard_edges["pkg.a"]
+
+
+def test_sp_t4_i1_t03_skipped_policy_false(tmp_path, isolated_dirs):
+    root = write_synthetic_repository(tmp_path / "repo", {**_I1_SAFE, "broken.py": "def invalid(:\n"})
+    index, graph = _index_graph(root)
+    assert index.typing_guard_evidence["global_policy_satisfied"] is False
+    assert index.typing_guard_evidence["skipped_source_paths"] == ("broken.py",)
+    assert _i1_guarded_import(index).type_only is False
+    assert "pkg.b" in graph.hard_edges["pkg.a"]
+
+
+def test_sp_t4_i1_t04_inline_pool_evidence_parity(tmp_path, isolated_dirs, monkeypatch):
+    inline_root = write_synthetic_repository(tmp_path / "inline", _I1_SAFE)
+    monkeypatch.setenv("CONTEXTOR_DISABLE_PROCESS_POOL", "1")
+    inline, _ = _index_graph(inline_root)
+    pool_root = write_synthetic_repository(tmp_path / "pool", _I1_SAFE)
+    monkeypatch.delenv("CONTEXTOR_DISABLE_PROCESS_POOL", raising=False)
+    pooled, _ = _index_graph(pool_root)
+    assert pooled.typing_guard_evidence == inline.typing_guard_evidence
+
+
+def test_sp_t4_i1_t05_snapshot_roundtrip(tmp_path, isolated_dirs):
+    root = write_synthetic_repository(tmp_path / "repo", _I1_SAFE)
+    index, _ = _index_graph(root)
+    persisted, engine = _i1_full_engine(root)
+    assert persisted.typing_guard_evidence == index.typing_guard_evidence
+    assert engine.state.typing_guard_evidence == index.typing_guard_evidence
+
+
+def test_sp_t4_i1_t06_updated_invalidates_evidence(tmp_path, isolated_dirs):
+    root = write_synthetic_repository(tmp_path / "repo", _I1_SAFE)
+    persisted, engine = _i1_full_engine(root)
+    assert persisted.typing_guard_evidence["global_policy_satisfied"] is True
+    before_import = _i1_guarded_import(engine.state)
+    before_hard = dict(engine.state.dependency_graph.hard_edges)
+    before_soft = dict(engine.state.dependency_graph.soft_edges)
+    target = root / "pkg/c.py"
+    target.write_text("pass\nVALUE = 2\n", encoding="utf-8")
+    result = engine.update_file(str(target.resolve()))
+    assert result.status == "UPDATED"
+    assert engine.state.typing_guard_evidence == {}
+    assert _i1_guarded_import(engine.state).type_only == before_import.type_only
+    assert engine.state.dependency_graph.hard_edges == before_hard
+    assert engine.state.dependency_graph.soft_edges == before_soft
+
+
+def test_sp_t4_i1_t07_syntax_error_invalidates_evidence(tmp_path, isolated_dirs):
+    root = write_synthetic_repository(tmp_path / "repo", _I1_SAFE)
+    persisted, engine = _i1_full_engine(root)
+    assert persisted.typing_guard_evidence["global_policy_satisfied"] is True
+    before_graph = engine.state.dependency_graph
+    target = root / "broken.py"
+    target.write_text("def invalid(:\n", encoding="utf-8")
+    result = engine.update_file(str(target.resolve()))
+    assert result.status == "SYNTAX_ERROR"
+    assert engine.state.typing_guard_evidence == {}
+    assert engine.state.dependency_graph is before_graph
+    assert engine.state.module_parse_freshness["broken"]["state"] == "stale"
+
+
+def test_sp_t4_i1_t08_rejected_transaction_preserves_evidence(
+    tmp_path, isolated_dirs, monkeypatch,
+):
+    root = write_synthetic_repository(tmp_path / "repo", _I1_SAFE)
+    _, engine = _i1_full_engine(root)
+    evidence_before = dict(engine.state.typing_guard_evidence)
+    graph_before = engine.state.dependency_graph
+    target = root / "new_module.py"
+    target.write_text("pass\n", encoding="utf-8")
+
+    def reject(*args, **kwargs):
+        raise RuntimeError("I1 transaction rejection witness")
+
+    monkeypatch.setattr(engine.registry, "sync_with_workspace", reject)
+    with pytest.raises(RuntimeError, match="I1 transaction rejection witness"):
+        engine.update_file(str(target.resolve()))
+    assert engine.state.typing_guard_evidence == evidence_before
+    assert engine.state.dependency_graph is graph_before
+    assert "new_module" not in engine.state.modules
 

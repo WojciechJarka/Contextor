@@ -313,6 +313,7 @@ class IncrementalAnalysisEngine:
         self.state.syntax_diagnostics_by_path = candidate.syntax_diagnostics_by_path
         self.state.syntax_diagnostics_state = candidate.syntax_diagnostics_state
         self.state.module_parse_freshness = candidate.module_parse_freshness
+        self.state.typing_guard_evidence = {}
         self.state.lineage_facts_by_source = candidate.lineage_facts_by_source
         self.state.lineage_facts_state = candidate.lineage_facts_state
         self.state.lineage_facts_semantic_version = (
@@ -1127,6 +1128,7 @@ class IncrementalAnalysisEngine:
         if clear_parse_module is not None:
             clear_module_parse_failure(candidate, clear_parse_module)
         self.state.modules = candidate.modules
+        self.state.typing_guard_evidence = {}
         self.state.reexport_facts_by_module = (
             candidate.reexport_facts_by_module
         )

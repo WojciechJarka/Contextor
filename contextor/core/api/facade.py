@@ -1288,6 +1288,7 @@ class ContextorFacade:
                 )
             state = RepositoryAnalysisState(
                 modules=mods,
+                typing_guard_evidence=dict(index.typing_guard_evidence),
                 artifacts=raw_artifacts,
                 reexport_facts_by_module=canonical_reexport_facts,
                 dependency_graph=graph,
