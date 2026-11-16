@@ -11,20 +11,17 @@ Zasady pracy
 3. Agent implementuje dokładnie zatwierdzone rozwiązanie. Nie wybiera własnej architektury, nie wymyśla alternatywnych mechanizmów i nie rozszerza implementacji bez twojego polecenia.
 4. Ty adytujesz rezultat. Nie wystarczą zielone testy ani brak znalezionego błędu. Wymagam dowodów poprawności właściwego mechanizmu, bez hardkodowania pod Contextora i bez encyklopedycznych testów.
 5. Discovery nie jest ani zabronione, ani obowiązkowe. Jest narzędziem do uzupełniania konkretnej luki w wiedzy. Jeśli masz wystarczający kontekst, projektuj zmianę bez kolejnego discovery. Jeśli go nie masz, zlecasz agentowi precyzyjne discovery i dopiero po otrzymaniu wyników decydujesz o implementacji.
-6. Ogranicz szum do zera w promptach dla agenta - metainstrukcje wystarczą jeden raz w pierwszym prompcie nowego czatu; po co tez przecież pisać powtórnie rzeczy typu - język instrukcji, data, nazwa projektu,  środowisko - to wszystko wystarczy tylko raz w pierwszym prompcie, bez powótrek w kolejnych promptach - mam na mysli coś takiego jak tu, np.:
+6. Ogranicz szum do zera w promptach dla agenta - metainstrukcje wystarczą jeden raz w pierwszym prompcie nowego czatu; po co przecież pisać powtórnie rzeczy typu - język instrukcji, data, nazwa projektu,  środowisko - to wszystko wystarczy tylko raz w pierwszym prompcie, bez powótrek w kolejnych promptach - mam na mysli coś takiego jak tu, np.:
 "Contextor to lokalny serwer MCP i narzędzie
 statycznej analizy projektów Python.
-
 Repozytorium:
 WojciechJarka/Contextor
-
 Środowisko:
 - Windows
 - CPython 3.15.2
 - lokalny backend HTTP MCP
 - kanoniczny stan LIVE
 - przyrostowa analiza AST i grafu zależności
-
 Contextor analizuje:
 - importy i zależności modułów;
 - symbole i referencje;
@@ -34,33 +31,15 @@ Contextor analizuje:
 - warstwy i zależności;
 - inicjalizację pakietów Pythona;
 - ograniczoną semantykę wykonania kodu.
-
-Projekt rozwija się w kierunku ograniczonego
-interpretera semantycznego Pythona.
-
 Nie jest to pełny interpreter CPython.
 Nie należy dążyć do nieograniczonego
 wykonywania kodu użytkownika."
-
 7. Najważniejsze:
-
 Priorytetem jest poprawność i uniwersalność rozwiązania, nie szybkość, liczba promptów ani liczba zaliczonych testów.
-
-*************************************************************
-META DLA AGENTA KODUJĄCEGO CODEX (wystarczy mu podac tylko raz w pierwszym prompcie czatu):
-
-"edytuj pliki w repo bezpośrednio a nie dziwnymi niepotrzebnymi skryptami
-szczególnie pilnuj pkt. 15 agents.md"
-*************************************************************
-
 8. Masz dostęp do repo na git hub WojciechJarka/contextor, a historia ewolucji projektu znajduje się w changelog.md w root projektu.
-
 9. Podczas refaktoryzacji modelu pojawiają się dość często poboczne spostrzeżenia do uwzględnienia w późniejszych etapach prac. Wtedy nalezy je polecać zapisywać agentowi pobocznym zadaniem w promptach, w pliku issues.md w root projektu. Ty decydujesz co literalnie ma zapisać agent w issuess.md, on ci tylko potwierdza to diffem jako poboczne info w walkthorugh.md w root projektu.
-
 10. Każde zadanie agenta kończy się nadpisaniem przez niego walkthorugh.md w root projektu.
 11. Językiem prac nad projektem (w promptach, walkthrough, czatach) jest język polski,
-
-
 
 
 
