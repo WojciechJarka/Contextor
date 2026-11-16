@@ -22,6 +22,22 @@ bezpieczne rozpoznawanie pochodzenia strażnika oraz
 konserwatywną granicę dla niepewnych przypadków.
 Nie zatwierdzono jeszcze implementacji.
 
+### Walidacja AST a kompilowalność CPython
+
+Audyt Spiral Prophet ujawnił moduł
+core.validators.event.event_actor_validator,
+który pozostaje w kanonicznym indeksie,
+mimo że CPython compile odrzuca jego źródło
+z powodu nieprawidłowego położenia instrukcji
+from __future__ import annotations.
+Dotychczasowa diagnostyka oparta na ast.parse
+nie wykrywa tego przypadku, a plik nie wystąpił
+wśród zgłoszonych skipped_files.
+Należy osobno zweryfikować kontrakt diagnostyki
+składni, zakres kontroli kompilowalności oraz
+spójność faktów FULL i LIVE.
+Nie zatwierdzono jeszcze implementacji.
+
 ### Wywołania metod przez pola instancji
 
 Audyt Spiral Prophet wykazał niepełne przypisywanie
