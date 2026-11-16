@@ -1,44 +1,68 @@
-# SP-R4 — walidacja kompilacji i granicy type_only
+# SP-R5 — kontrakt walidacji kompilacji i korekta issues
 
 ## PREFLIGHT
 
-Contextor MCP `get_project_architecture(fields=[])`: LIVE dotyczy `C:/Temp/Spiral-Prophet_Repo`, revision 8, activity_epoch `7a9d2291ba26492e9732e8aa93544fd3`, module_count 1065, resync_required=false. repo_id `ctx_2611e91a` pochodzi z wcześniejszego preflightu; bieżące użyte projekcje nie udostępniły repo_id, zatem ponowne potwierdzenie jest NIEUSTALONE. Aggregate canonical_state=stale, workspace_sync=unverified; rodziny: module=stale, graph=fresh, topology=fresh, artifact_consumption=fresh, cycles=fresh, cycle_semantics=stale, collisions=fresh, lineage=stale. syntax_errors=6, availability=fresh. `get_live_events(after_revision=7)` zwróciło jedynie revision 8: desktop_watcher, `agents/app.py:66`, SYNTAX_ERROR.
+Contextor MCP FIRST: `get_project_architecture(fields=[])` wskazuje `C:/Temp/Spiral-Prophet_Repo`, LIVE revision 8, provenance=live, module_count=1065, resync_required=false, parse_stale_modules={}. Aggregate canonical_state=stale, workspace_sync=unverified; rodziny module=stale, graph=fresh, topology=fresh, artifact_consumption=fresh, cycles=fresh, cycle_semantics=stale, collisions=fresh, lineage=stale. syntax_errors=6, availability=fresh. Bieżący overlay nie wystawia repo_id; wcześniejszy odczyt `ctx_2611e91a` nie jest ponownym potwierdzeniem.
 
-Ukończony raport `summary` (2026-11-16T08:37:07, historyczny względem overlay LIVE) wymienia skipped_files: `agents/app.py:66`; `data_preprocessing/core/contracts/contracts_manifest_contract.py:23776`; `data_preprocessing/core/contracts/registry/registry_aggregate_snapshot_contract.py:71`; `data_preprocessing/core/contracts/registry/registry_manifest_contract.py:98`; `data_preprocessing/core/fingerprint/fingerprint_sha256.py:36`; `data_preprocessing/core/performance/date_perf.py:250`. Liczba zgadza się z bieżącym LIVE, lecz bieżąca pełna lista skipped_files nie jest wystawiana przez użyte projekcje, więc jej identyczność pozostaje NIEUSTALONA. Badany plik nie jest na liście raportu.
+Odczyt Git: Spiral Prophet HEAD `694ffbe211aa6132dcfd6ea3504e334ea59dc41f`; przed audytem: M `core/contracts/event/__init__.py`, D `core/contracts/event/event_core_manifest_contract.py`, trzy nieśledzone pliki manifestów event/transport. Contextor HEAD `a141388f4bc4b2b4a5037fa91e218310cce5d924`; przed audytem czysty status. Nie przełączano LIVE. `contextor_fact_lineage(family=syntax_diagnostics)` zwróciło snapshot Contextora revision 1402 i potwierdzone ścieżki od indeksu i incremental do kanonicznej diagnostyki oraz projekcji `get_file_edit_context`; ta projekcja ma własną świeżość i nie dowodzi kompilowalności.
 
-Odczyt Git: Spiral Prophet HEAD `694ffbe211aa6132dcfd6ea3504e334ea59dc41f`; wcześniejsze zmiany w `core/contracts/event/__init__.py`, usunięcie `event_core_manifest_contract.py` i trzy nieśledzone pliki manifestów pozostawiono. Contextor HEAD `7641d85ab66dfdbc546a8f230fa5cf602a0546f3`. `audyt.txt` nie edytowano.
+## PARSER / AST / COMPILE
 
-## DOWODY CPYTHON I MCP
+DIRECT_EVIDENCE — CPython 3.15.2, trzy izolowane źródła pod tymczasowym `C:/Temp/sp_r5_*`, bajty UTF-8. `compile` wywołano z `dont_inherit=True`; żadnego obiektu kodu nie uruchomiono. Parser Contextora: `parse_source_snapshot(SourceSnapshot(raw, sha256(raw)), path)`.
 
-DIRECT_EVIDENCE — `C:/Temp/Spiral-Prophet_Repo/core/validators/event/event_actor_validator.py`: 986 bajtów, SHA-256 `40d91e6feeeecc792c08af3b7eb7436c20cd45d7a043312385cf7d940aa6ef60`. Linia 1: `from core.errors.contracts.event.event_contract_errors import EventActorContractError`; linia 5: `from __future__ import annotations`. CPython 3.15.2 na tych samych bajtach: `ast.parse(source, filename)` — OK; `compile(source, path, "exec")` — `SyntaxError: from __future__ imports must occur at the beginning of the file`, linia 5. Kod nie został wykonany.
+| Przypadek | Źródło | ast.parse | compile(AST, ..., dont_inherit=True) | compile(source, ..., dont_inherit=True) | parse_source_snapshot |
+|---|---|---|---|---|---|
+| A | `from __future__ import annotations; x: list[int] = []` | OK | OK | OK | OK |
+| B | `import os; from __future__ import annotations; x = 1` | OK | SyntaxError, future import poza początkiem, linia 2 | ten sam SyntaxError, linia 2 | OK |
+| C | `return 1` na poziomie modułu | OK | SyntaxError: 'return' outside function, linia 1 | ten sam SyntaxError, linia 1 | OK |
 
-MCP `query_canonical_projection(root=modules, module_name eq core.validators.event.event_actor_validator)`: jeden rekord modułu, path `core/validators/event/event_actor_validator.py`, sześć ImportRef, w tym `__future__(annotations)`. `get_module_context` zwróciło revision 8, canonical_state=fresh, workspace_sync=verified dla pliku. Według kontraktu oznacza to zgodność dysku z kanonicznym snapshotem SHA-256; projekcja nie ujawniła osobnego kanonicznego hasha. `get_file_edit_context` zwróciło `syntax_diagnostics={status:checked_and_none,availability:fresh,materialized:true,errors:[],total:0}`.
+Hash SHA-256 bajtów: A `8e08b431e65913c51d5dd1f6a9d410ecd16dcaf1dbaa4fd9dc45fc0e305cecee`; B `c737b106b3f6f83fae1d4c4a9395853cc3b705b01caa1e2811c33d42dfaaa110`; C `0805bfdc02e872ed322a4a4e440ae985f3a4335f4dd59f3d373dfaf2a68a4a3c`. `contextor/core/source.py:58-71` oblicza fingerprint SHA-256 surowych bajtów, `:74-108` dekoduje je i używa `ast.parse`; nie wywołuje `compile`. `parse_source_with_fingerprint` (`:111-118`) deleguje do tej samej funkcji.
 
-## ŚCIEŻKA WYKONANIA CONTEXTORA
+## COLD INDEX
 
-CODE_PATH_PROVED — `C:/Temp/Contextor_Repo/contextor/core/source.py:85-108`: `parse_source_snapshot` dekoduje bajty i wywołuje `ast.parse`; brak `compile`. `contextor/core/symbol_engine/indexer.py:1096-1133`: `_process_single_file` przyjmuje AST lub zwraca błąd `SourceError`. `indexer.py:2751-2767,2903-2920`: wynik z `error` trafia do `skipped`, pozostały staje się `Module`. `contextor/core/analysis/state_manager.py:210-249`: `build_syntax_diagnostics_from_index` wpisuje indeksowane moduły jako `checked_and_none`; błędy pochodzą ze `skipped`; bez ponownej kompilacji. `contextor_fact_lineage(family=syntax_diagnostics)` potwierdza index parse results → builder → stan kanoniczny → `get_file_edit_context`, a także osobną gałąź incremental `_commit_syntax_candidate`. Narzędzie projekcyjne nie parsuje źródła przy odczycie.
+CODE_PATH_PROVED — `contextor/core/symbol_engine/indexer.py:881-949`: worker czyta jeden `SourceSnapshot` i pyta `CacheManager.get` z jego bajtami. Gdy nie ma kompletnego cache, `:1096-1133` wywołuje `parse_source_snapshot` na tym samym snapshotcie. `indexer.py:2751-2767,2903-2920`: wynik z `error` trafia do `skipped`, bez błędu do `modules`. Nie jest prawdą, że każdy odczyt `index_repository` bezwarunkowo parsuje; zimny odczyt z brakiem kompletnego cache tak.
 
-Werdykt hipotezy kompilacji: POTWIERDZONE — ten plik jest zaakceptowany w modelu AST i ma pustą diagnostykę LIVE, choć CPython compile odrzuca go na linii 5. To jest granica aktualnego kontraktu AST, nie dowód, że samo użycie AST jest przypadkową usterką. Globalne twierdzenie o kompilowalności wszystkich modułów pozostaje NIEUSTALONE.
+DIRECT_EVIDENCE — w izolowanym jedno plikowym repo dla B, `CONTEXTOR_DISABLE_PROCESS_POOL=1`, świeży cache poza repo: pierwszy `index_repository` wywołał `parse_source_snapshot` dokładnie raz, zaakceptował moduł `B`, `skipped=[]`, fingerprint modułu `c737b106b3f6f83fae1d4c4a9395853cc3b705b01caa1e2811c33d42dfaaa110`. Cache zawierał `error=null`, importy, symbol/reference/collision/lineage facts, trzy pola typing-guard i `import_classification_semantics_version=10`. W syntetycznym źródle nie było zmian bajtów między odczytami.
 
-## TYPE_CHECKING — PONOWNA OCENA SP-R2
+## WARM CACHE
 
-DIRECT_EVIDENCE — `C:/Temp/Spiral-Prophet_Repo/agents/data_processing_states.py:21`: `from typing import Any, Dict, TYPE_CHECKING, Union`; linie 29-31: `if TYPE_CHECKING: from .data_agent import DataAgent; from .processing_context import ProcessingContext`. MCP `query_canonical_projection`: `ImportRef(module=data_agent,level=1,names=[DataAgent],is_from_import=true,type_only=false)`. `get_module_context`, revision 8, workspace_sync=verified: `agents.data_processing_states → agents.data_agent` jako `hard_dependency`. `get_live_events` pokazuje dwumodułowy cykl strukturalny.
+CODE_PATH_PROVED — `contextor/core/analysis/cache_manager.py:120-158` porównuje BLAKE2b-16 bajtów źródła i rozwiązaną ścieżkę z wrapperem cache. `indexer.py:951-982` sprawdza wersję klasyfikacji importów 10, kształt importów i trzy pola typing-guard; `:1002-1046` waliduje lineage oraz schematy symbol/reference/collision/test facts. Kompletny wpis zwraca wynik w `:1047-1094` przed parserem, z `source_parse_called=False`, `cache_hit=True` i `CACHE_SHA256_EQUIVALENT`.
 
-A. Źródłowy AST zawiera strażnika, ale `recognize_typing_guard` w `contextor/core/cycle_semantics/typing_guard.py:46-66` wymaga pojedynczej nazwy w markerze `from typing import TYPE_CHECKING`. Tutaj są cztery nazwy. Funkcja nie rozpoznaje więc tego strażnika. Sam zapis `if TYPE_CHECKING` nie spełnia jej kontraktu.
+Wersje sterujące ponowną ekstrakcją: `SYMBOL_FACTS_SCHEMA_VERSION=2`, `REFERENCE_FACTS_SCHEMA_VERSION=1`, `COLLISION_FACTS_SCHEMA_VERSION=1`, `TEST_FACTS_SCHEMA_VERSION=1`, `IMPORT_CLASSIFICATION_SEMANTICS_VERSION=10` (`indexer.py:74-81,117-181,951-1046`). Deserializacja lineage wymaga `LINEAGE_EXTRACTION_CACHE_SCHEMA_VERSION=1` oraz zgodnych `source_key` i SHA-256 (`analysis/lineage_extraction.py:79,283-304`); odrębny `LINEAGE_FACTS_SEMANTIC_VERSION="1"` jest w `domain/lineage_facts.py:17`. `ENGINE_CACHE_SCHEMA_VERSION="1.1"` (`analysis/state_manager.py:529`) dotyczy osobnej serializacji stanu silnika, nie wrappera per-file `CacheManager`.
 
-B. `type_only_candidate_statement_ids` (`typing_guard.py:401-485`) zwraca pusty zbiór bez rozpoznanego markera. Ponadto wybiera tylko `ast.Import`, nigdy `ast.ImportFrom`. `AdvancedImportVisitor.visit_Import` (`indexer.py:264-293`) może oznaczyć wybrane importy type_only; `visit_ImportFrom` (`:296-315`) nie przekazuje tego pola. Badany ImportRef jest false już przy tworzeniu. Zachowany literalnie wcześniejszy wpis w issues.md mówi o rozpoznanym strażniku; dla tego konkretnego pliku aktualny kod tego nie potwierdza.
+DIRECT_EVIDENCE — drugi `index_repository` na identycznych bajtach B: `parse_source_snapshot` wywołany zero razy, moduł `B` nadal przyjęty, `skipped=[]`, ten sam SHA-256, cache obecny z `error=null` i wersją importów 10. Tym samym pełny cache omija nie tylko `compile`, lecz także `ast.parse`. Katalog tymczasowego repo i cache syntetycznego usunięto po próbie; oba repozytoria audytu pozostały nietknięte.
 
-C. `_finalize_type_only_imports` (`indexer.py:2618-2736`) może cofnąć wyłącznie istniejące true; badanego false nie zmienia. `project_marker_safe` (`:2623-2649`) i `project_effects_closed` (`:2650-2681`) wymagają `not skipped`. Raport wykazuje sześć pominiętych plików, więc hipotetyczne true w takim przebiegu zostałoby cofnięte. Pozostałe warunki: brak shadowing `typing`, pasywność inicjalizatorów rodziców, zgodność fingerprintów markerów i efektów, brak nieindeksowanych źródeł/artefaktów oraz zamknięcie importów; ich wszystkich wartości dla aktualnego przebiegu nie ustalono.
+## INCREMENTAL / LIVE
 
-D. `contextor/core/graph/graph.py:52-66,185-230`: `_is_type_only_import` odczytuje flagę; false z rozstrzygnięciem MODULE daje hard edge. Wynik hard potwierdza MCP. Konkretny wewnętrzny wynik `resolve_internal` jest wnioskowany z tej ścieżki, nie zaobserwowany osobno.
+CODE_PATH_PROVED — `contextor/core/analysis/incremental/preparation.py:147-184`: `prepare_source_update` używa `parse_source_with_fingerprint`, więc dalej `parse_source_snapshot`; `SourceError` wypełnia `error_status`, message, line i column. Aktualizacja istniejącego/nowego pliku przez incremental nie idzie przez warm cache `index_repository`. `analysis/incremental/engine.py:699-746`: wynik błędu SYNTAX_ERROR tworzy `checked_with_errors`; `:754-835`: poprawne AST tworzy `checked_and_none`. `_commit_syntax_candidate` (`:240-315`) aktualizuje rodzinę diagnostyk i świeżość modułu. Usunięcie pliku usuwa fakt diagnostyczny.
 
-E. Hard oznacza klasyfikację grafu strukturalnego. Przy standardowym `typing.TYPE_CHECKING=False` import w ciele `if` nie wykonuje się; hard nie dowodzi runtime dependency ani błędu wykonania. Werdykt: POTWIERDZONE są false i hard; FAŁSZYWE jako wyjaśnienie tego konkretnego przypadku jest twierdzenie, że true zostało dopiero cofnięte przez finalizer. NIEUSTALONE pozostają inne warunki bezpieczeństwa oraz rzeczywisty przebieg runtime.
+FULL: `analysis/state_manager.py:210-249` buduje `checked_and_none` dla indeksowanych modułów, `checked_with_errors` dla składniowych `skipped`, a dla pominięć innych niż składniowe odracza rodzinę. `contextor_fact_lineage` potwierdza wejście index parse results do buildera i niezależną gałąź incremental do stanu oraz projekcji. Wskazane ścieżki akceptacji omijające bezpośrednie wywołanie `parse_source_snapshot`: kompletny warm cache indeksatora; wrapper `parse_source_with_fingerprint` nie omija funkcji, tylko do niej deleguje. Nie dowodzono braku wszystkich innych ścieżek w całym kodzie Contextora.
+
+## ISTNIEJĄCE KONTRAKTY TESTÓW
+
+Odczytano wskazane przypadki; nie uruchamiano pytest i nie dopisywano testów.
+
+- `tests/test_syntax_diagnostics_full_analysis.py:29-86,122-171`: FULL mapuje indeksowany plik do `checked_and_none`, parserowo pominięty do `checked_with_errors`, nieczytelny do deferred; rzeczywisty indeks/facade utrwala te fakty. `:204-262`: LIVE aktualizuje diagnostykę i revision dla valid→syntax error→recovered, dodania i usunięcia.
+- `tests/test_no_double_parse.py:20-47`: przygotowanie incremental czyta jeden raw snapshot i wywołuje ast.parse raz. `:50-105`: MODIFY/ADD mają `reparse_modules=()`; `:108-134`: DELETE nie parsuje.
+- `tests/test_index_fusion.py:131-169`: kompletny warm cache nie parsuje i nie wyciąga ponownie symboli. `:171-203`: zmiana bajtów wymusza parse i odświeżenie faktów, kolejny warm hit już nie parsuje. `:275-324`: stary symbol schema version odświeża symbole. Te testy nie sprawdzają `compile(AST)` ani `compile(source)` dla B/C.
+
+## POTWIERDZONE FAKTY
+
+POTWIERDZONE: AST parser dopuszcza B/C, oba tryby compile je odrzucają na wskazanych liniach; obecny parser Contextora przyjmuje oba. POTWIERDZONE: zimny indeks B wykonuje parser i przyjmuje moduł; kompletny cache po niezmienionych bajtach przyjmuje moduł bez parsera. POTWIERDZONE: FULL i incremental korzystają z tej samej podstawowej funkcji AST przez różne wejścia; SourceError propaguje do skipped lub diagnostyki incremental. POTWIERDZONE: wcześniejszy opis TYPE_CHECKING wymagał literalnej korekty, wykonanej w issues.md bez zmiany pozostałych sekcji.
+
+## NIEUSTALONE
+
+NIEUSTALONE: ogólna kompilowalność wszystkich modułów Spiral Prophet, pełna aktualna lista skipped_files niezależna od historycznego raportu, oraz brak jakichkolwiek innych prywatnych ścieżek akceptacji źródła w całym projekcie Contextor. Snapshot Contextora revision 1402 z lineage nie jest dowodem bieżącego załadowania kodu przez proces serwera. Izolowana próba używała aktualnego kodu repo przez lokalny Python 3.15.2.
+
+## WERDYKT
+
+Obecny kontrakt przyjęcia źródła w zbadanych ścieżkach to skuteczny `ast.parse` lub kompletny cache związany z niezmienionymi bajtami i zgodnymi faktami. Nie jest on kontraktem kompilowalności CPython. Przypadki B i C są konkretnymi kontrprzykładami; semantyka FULL i LIVE na tej granicy jest opisana przez źródło i istniejące testy, bez wykonywania pełnej analizy Spiral Prophet.
 
 ## FILES_CHANGED
 
-- `C:/Temp/Contextor_Repo/issues.md`: jeden dosłowny wpis SP-R4; trzy wcześniejsze zachowane.
-- `C:/Temp/Contextor_Repo/walkthrough.md`: bieżący raport.
-- Produkcja i testy obu repozytoriów: NONE. Nie wykonano pytest, FULL, SCC02, restartu ani operacji Git zapisującej.
+- `C:/Temp/Contextor_Repo/issues.md` — wyłącznie literalna wymiana opisu sekcji TYPE_CHECKING.
+- `C:/Temp/Contextor_Repo/walkthrough.md` — raport SP-R5.
+- Pliki produkcyjne i testowe obu repozytoriów: NONE. `audyt.txt` i Spiral Prophet nie były edytowane. Nie wykonano FULL, SCC02, restartu, pytest ani zapisującej operacji Git.
 
 ## FULL_DIFFS
 
@@ -46,32 +70,56 @@ Pełny rzeczywisty diff `issues.md` względem HEAD:
 
 ```diff
 diff --git a/issues.md b/issues.md
-index a12faa8..a904320 100644
+index a904320..2b03e30 100644
 --- a/issues.md
 +++ b/issues.md
-@@ -22,6 +22,22 @@ bezpieczne rozpoznawanie pochodzenia strażnika oraz
- konserwatywną granicę dla niepewnych przypadków.
- Nie zatwierdzono jeszcze implementacji.
+@@ -10,17 +10,35 @@ jeszcze rozwiązania implementacyjnego.
  
-+### Walidacja AST a kompilowalność CPython
-+
-+Audyt Spiral Prophet ujawnił moduł
-+core.validators.event.event_actor_validator,
-+który pozostaje w kanonicznym indeksie,
-+mimo że CPython compile odrzuca jego źródło
-+z powodu nieprawidłowego położenia instrukcji
-+from __future__ import annotations.
-+Dotychczasowa diagnostyka oparta na ast.parse
-+nie wykrywa tego przypadku, a plik nie wystąpił
-+wśród zgłoszonych skipped_files.
-+Należy osobno zweryfikować kontrakt diagnostyki
-+składni, zakres kontroli kompilowalności oraz
-+spójność faktów FULL i LIVE.
-+Nie zatwierdzono jeszcze implementacji.
-+
- ### Wywołania metod przez pola instancji
+ ### TYPE_CHECKING — ImportFrom i klasyfikacja zależności
  
- Audyt Spiral Prophet wykazał niepełne przypisywanie
+-W audycie Spiral Prophet potwierdzono, że importy
+-ast.ImportFrom umieszczone pod rozpoznanym strażnikiem
+-TYPE_CHECKING mogą otrzymać type_only=false i utworzyć
+-hard dependency. AdvancedImportVisitor.visit_ImportFrom
+-nie przenosi obecnie informacji type_only, podczas gdy
+-wybrane przypadki ast.Import są obsługiwane. Mechanizm
+-może generować fałszywe strukturalne cykle wykonania
+-w projekcji hard graph. Przyszła korekta musi zachować
+-bezpieczne rozpoznawanie pochodzenia strażnika oraz
+-konserwatywną granicę dla niepewnych przypadków.
+-Nie zatwierdzono jeszcze implementacji.
++Audyt Spiral Prophet wykazał, że import DataAgent
++w agents/data_processing_states.py znajduje się
++pod if TYPE_CHECKING, jednak marker importujący
++TYPE_CHECKING wraz z trzema innymi nazwami
++nie spełnia ograniczonego kontraktu
++recognize_typing_guard.
++
++Dodatkowo type_only_candidate_statement_ids
++wybiera wybrane ast.Import, ale nie ast.ImportFrom,
++a AdvancedImportVisitor.visit_ImportFrom
++pozostawia type_only=false.
++
++W tym konkretnym przypadku flaga jest false
++już przy ekstrakcji. Nie została cofnięta
++z true przez _finalize_type_only_imports.
++
++Finalizacja ma także odrębną konserwatywną
++granicę: wymaga między innymi not skipped
++i może cofać istniejące type_only=true
++przy niekompletnym obrazie projektu.
++
++Krawędź hard jest faktem grafu strukturalnego,
++ale sama nie dowodzi wykonania importu
++podczas inicjalizacji modułu.
++
++Należy osobno rozstrzygnąć kontrakt
++rozpoznawania strażnika, zakres ImportFrom
++i warunki bezpieczeństwa całego projektu.
++Nie zatwierdzono implementacji.
+ 
+ ### Walidacja AST a kompilowalność CPython
+ 
 ```
 
 ACTUAL_DIFF produkcji/testów: NONE. `walkthrough.md` jest niniejszym raportem; jego własny diff nie jest dublowany.

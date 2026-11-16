@@ -10,17 +10,35 @@ jeszcze rozwiązania implementacyjnego.
 
 ### TYPE_CHECKING — ImportFrom i klasyfikacja zależności
 
-W audycie Spiral Prophet potwierdzono, że importy
-ast.ImportFrom umieszczone pod rozpoznanym strażnikiem
-TYPE_CHECKING mogą otrzymać type_only=false i utworzyć
-hard dependency. AdvancedImportVisitor.visit_ImportFrom
-nie przenosi obecnie informacji type_only, podczas gdy
-wybrane przypadki ast.Import są obsługiwane. Mechanizm
-może generować fałszywe strukturalne cykle wykonania
-w projekcji hard graph. Przyszła korekta musi zachować
-bezpieczne rozpoznawanie pochodzenia strażnika oraz
-konserwatywną granicę dla niepewnych przypadków.
-Nie zatwierdzono jeszcze implementacji.
+Audyt Spiral Prophet wykazał, że import DataAgent
+w agents/data_processing_states.py znajduje się
+pod if TYPE_CHECKING, jednak marker importujący
+TYPE_CHECKING wraz z trzema innymi nazwami
+nie spełnia ograniczonego kontraktu
+recognize_typing_guard.
+
+Dodatkowo type_only_candidate_statement_ids
+wybiera wybrane ast.Import, ale nie ast.ImportFrom,
+a AdvancedImportVisitor.visit_ImportFrom
+pozostawia type_only=false.
+
+W tym konkretnym przypadku flaga jest false
+już przy ekstrakcji. Nie została cofnięta
+z true przez _finalize_type_only_imports.
+
+Finalizacja ma także odrębną konserwatywną
+granicę: wymaga między innymi not skipped
+i może cofać istniejące type_only=true
+przy niekompletnym obrazie projektu.
+
+Krawędź hard jest faktem grafu strukturalnego,
+ale sama nie dowodzi wykonania importu
+podczas inicjalizacji modułu.
+
+Należy osobno rozstrzygnąć kontrakt
+rozpoznawania strażnika, zakres ImportFrom
+i warunki bezpieczeństwa całego projektu.
+Nie zatwierdzono implementacji.
 
 ### Walidacja AST a kompilowalność CPython
 
