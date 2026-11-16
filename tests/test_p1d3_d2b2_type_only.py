@@ -3318,3 +3318,609 @@ def test_sp_t4_i2b3_t34_classifier_is_copy_on_write(
             assert classified[module_id] is modules[module_id]
     assert _i2b3_guarded_import(modules).type_only is True
 
+
+def _i2b4_verify_case(
+    tmp_path, initial, final, changed_path, *, deleted=False
+):
+    from contextor.core.analysis.incremental.type_only_policy import (
+        reclassify_incremental_type_only,
+    )
+    from contextor.core.domain.module import Module
+
+    old_root = write_synthetic_repository(
+        tmp_path / "initial", initial
+    )
+    old_index, _ = _index_graph(old_root)
+
+    new_root = write_synthetic_repository(
+        tmp_path / "final", final
+    )
+    new_index, new_graph = _index_graph(new_root)
+
+    module_id = ".".join(
+        Path(changed_path).with_suffix("").parts
+    )
+
+    candidate_modules = dict(old_index.modules)
+    changed_imports = []
+    source_evidence = None
+
+    if deleted:
+        candidate_modules.pop(module_id, None)
+    else:
+        prepared = _i2a_prepare(
+            new_root / changed_path, module_id
+        )
+        assert not prepared.has_error
+
+        changed_imports = prepared.new_imports
+        source_evidence = (
+            prepared.typing_guard_source_evidence
+        )
+
+        prior = candidate_modules.get(module_id)
+
+        if prior is None:
+            candidate_modules[module_id] = Module(
+                module_id=module_id,
+                path=changed_path,
+                absolute_path=str(
+                    (new_root / changed_path).resolve()
+                ),
+                imports=changed_imports,
+            )
+        else:
+            candidate_modules[module_id] = replace(
+                prior,
+                imports=list(changed_imports),
+            )
+
+    previous_imports = {
+        key: tuple(
+            (ref, tuple(ref.names))
+            for ref in module.imports
+        )
+        for key, module in old_index.modules.items()
+    }
+
+    previous_evidence = old_index.typing_guard_evidence
+
+    before_candidate_names = {
+        key: tuple(
+            tuple(ref.names)
+            for ref in refs
+        )
+        for key, refs in previous_evidence[
+            "candidate_imports_by_module"
+        ].items()
+    }
+
+    classified, evidence = (
+        reclassify_incremental_type_only(
+            candidate_modules,
+            previous_modules=old_index.modules,
+            previous_evidence=previous_evidence,
+            changed_module_id=module_id,
+            changed_source_path=changed_path,
+            changed_imports=changed_imports,
+            changed_source_evidence=source_evidence,
+            deleted=deleted,
+        )
+    )
+
+    assert evidence["schema_version"] == 2
+    assert set(classified) == set(new_index.modules)
+
+    assert all(
+        classified[key].imports
+        == new_index.modules[key].imports
+        for key in new_index.modules
+    )
+
+    trie = build_trie(classified.keys())
+    package_root = detect_package_root(classified, trie)
+
+    candidate_graph = build_graph(
+        classified,
+        trie=trie,
+        package_root=package_root,
+        reexport_facts_by_module=(
+            materialize_reexport_facts_by_module(
+                classified,
+                new_index.reference_facts_by_module,
+            )
+        ),
+    )
+
+    assert (
+        candidate_graph.hard_edges
+        == new_graph.hard_edges
+    )
+    assert (
+        candidate_graph.soft_edges
+        == new_graph.soft_edges
+    )
+
+    assert evidence[
+        "global_policy_satisfied"
+    ] == new_index.typing_guard_evidence[
+        "global_policy_satisfied"
+    ]
+
+    assert (
+        old_index.typing_guard_evidence
+        == previous_evidence
+    )
+
+    assert all(
+        tuple(
+            (ref, tuple(ref.names))
+            for ref in old_index.modules[key].imports
+        ) == old_imports
+        for key, old_imports in previous_imports.items()
+    )
+
+    assert {
+        key: tuple(
+            tuple(ref.names)
+            for ref in refs
+        )
+        for key, refs in previous_evidence[
+            "candidate_imports_by_module"
+        ].items()
+    } == before_candidate_names
+
+    return classified, evidence, old_index, new_index
+
+
+def test_sp_t4_i2b4_t35_safe_module_change(
+    tmp_path, isolated_dirs
+):
+    final = {
+        **_I1_SAFE,
+        "pkg/c.py": "pass\nVALUE = 2\n",
+    }
+    _i2b4_verify_case(
+        tmp_path, _I1_SAFE, final, "pkg/c.py"
+    )
+
+
+def test_sp_t4_i2b4_t36_new_typing_shadow(
+    tmp_path, isolated_dirs
+):
+    final = {
+        **_I1_SAFE,
+        "typing.py": "pass\n",
+    }
+    classified, _, _, _ = _i2b4_verify_case(
+        tmp_path, _I1_SAFE, final, "typing.py"
+    )
+    assert not _i2b3_guarded_import(
+        classified
+    ).type_only
+
+
+def test_sp_t4_i2b4_t37_deleted_shadow_restores_soft(
+    tmp_path, isolated_dirs
+):
+    initial = {
+        **_I1_SAFE,
+        "typing.py": "pass\n",
+    }
+    classified, _, _, _ = _i2b4_verify_case(
+        tmp_path,
+        initial,
+        _I1_SAFE,
+        "typing.py",
+        deleted=True,
+    )
+    assert _i2b3_guarded_import(
+        classified
+    ).type_only
+
+
+def test_sp_t4_i2b4_t38_parent_becomes_active(
+    tmp_path, isolated_dirs
+):
+    final = {
+        **_I1_SAFE,
+        "pkg/__init__.py": "import typing\n",
+    }
+    classified, _, _, _ = _i2b4_verify_case(
+        tmp_path,
+        _I1_SAFE,
+        final,
+        "pkg/__init__.py",
+    )
+    assert not _i2b3_guarded_import(
+        classified
+    ).type_only
+
+
+def test_sp_t4_i2b4_t39_parent_restored(
+    tmp_path, isolated_dirs
+):
+    initial = {
+        **_I1_SAFE,
+        "pkg/__init__.py": "import typing\n",
+    }
+    classified, _, _, _ = _i2b4_verify_case(
+        tmp_path,
+        initial,
+        _I1_SAFE,
+        "pkg/__init__.py",
+    )
+    assert _i2b3_guarded_import(
+        classified
+    ).type_only
+
+
+def test_sp_t4_i2b4_t40_marker_mutation_other_module(
+    tmp_path, isolated_dirs
+):
+    final = {
+        **_I1_SAFE,
+        "pkg/c.py": (
+            "import typing\n"
+            "typing.TYPE_CHECKING = True\n"
+        ),
+    }
+    classified, evidence, _, _ = _i2b4_verify_case(
+        tmp_path, _I1_SAFE, final, "pkg/c.py"
+    )
+    assert not evidence["global_policy_satisfied"]
+    assert not _i2b3_guarded_import(
+        classified
+    ).type_only
+
+
+def test_sp_t4_i2b4_t41_opaque_effect_other_module(
+    tmp_path, isolated_dirs
+):
+    final = {
+        **_I1_SAFE,
+        "pkg/c.py": "eval('0')\n",
+    }
+    classified, evidence, _, _ = _i2b4_verify_case(
+        tmp_path, _I1_SAFE, final, "pkg/c.py"
+    )
+    assert not evidence["global_policy_satisfied"]
+    assert not _i2b3_guarded_import(
+        classified
+    ).type_only
+
+
+@pytest.mark.parametrize(
+    "damage",
+    [
+        "missing",
+        "legacy",
+        "wrong-fingerprint",
+        "wrong-candidate",
+    ],
+    ids=[
+        "missing",
+        "legacy",
+        "fingerprint",
+        "candidate",
+    ],
+)
+def test_sp_t4_i2b4_t42_invalid_evidence_fails_closed(
+    tmp_path, isolated_dirs, damage
+):
+    from contextor.core.analysis.incremental.type_only_policy import (
+        reclassify_incremental_type_only,
+    )
+
+    root = write_synthetic_repository(
+        tmp_path / "repo", _I1_SAFE
+    )
+    baseline, _ = _index_graph(root)
+    evidence = dict(baseline.typing_guard_evidence)
+
+    if damage == "missing":
+        evidence = None
+    elif damage == "legacy":
+        evidence["schema_version"] = 1
+    elif damage == "wrong-fingerprint":
+        marker = dict(
+            evidence["marker_mutation_by_module"]
+        )
+        marker["pkg.a"] = (False, "invalid")
+        evidence["marker_mutation_by_module"] = marker
+    else:
+        raw = dict(
+            evidence["candidate_imports_by_module"]
+        )
+        raw["pkg.a"] = (
+            ImportRef(
+                "pkg.z",
+                0,
+                [],
+                False,
+                type_only=True,
+            ),
+        )
+        evidence["candidate_imports_by_module"] = raw
+
+    changed = root / "pkg/c.py"
+    changed.write_text(
+        "pass\nVALUE = 2\n", encoding="utf-8"
+    )
+
+    prepared = _i2a_prepare(changed, "pkg.c")
+    assert not prepared.has_error
+
+    candidate = dict(baseline.modules)
+    candidate["pkg.c"] = replace(
+        candidate["pkg.c"],
+        imports=list(prepared.new_imports),
+    )
+
+    classified, new_evidence = (
+        reclassify_incremental_type_only(
+            candidate,
+            previous_modules=baseline.modules,
+            previous_evidence=evidence,
+            changed_module_id="pkg.c",
+            changed_source_path="pkg/c.py",
+            changed_imports=prepared.new_imports,
+            changed_source_evidence=(
+                prepared.typing_guard_source_evidence
+            ),
+        )
+    )
+
+    assert new_evidence == {}
+    assert not any(
+        ref.type_only
+        for module in classified.values()
+        for ref in module.imports
+    )
+    assert _i2b3_guarded_import(
+        baseline.modules
+    ).type_only
+
+
+def test_sp_t4_i2b4_t43_skipped_recovers(
+    tmp_path, isolated_dirs
+):
+    initial = {
+        **_I1_SAFE,
+        "broken.py": "def invalid(:\n",
+    }
+    final = {
+        **_I1_SAFE,
+        "broken.py": "pass\n",
+    }
+
+    classified, evidence, _, _ = _i2b4_verify_case(
+        tmp_path,
+        initial,
+        final,
+        "broken.py",
+    )
+
+    assert evidence["skipped_source_paths"] == ()
+    assert _i2b3_guarded_import(
+        classified
+    ).type_only
+
+
+def test_sp_t4_i2b4_t44_no_input_mutation_on_benign_change(
+    tmp_path, isolated_dirs
+):
+    final = {
+        **_I1_SAFE,
+        "pkg/c.py": "pass\nVALUE = 2\n",
+    }
+
+    classified, evidence, old, _ = (
+        _i2b4_verify_case(
+            tmp_path,
+            _I1_SAFE,
+            final,
+            "pkg/c.py",
+        )
+    )
+
+    assert evidence is not old.typing_guard_evidence
+
+    assert (
+        evidence["candidate_imports_by_module"]
+        is not old.typing_guard_evidence[
+            "candidate_imports_by_module"
+        ]
+    )
+
+    assert _i2b3_guarded_import(
+        classified
+    ).type_only
+
+
+@pytest.mark.parametrize(
+    "invalid_value", [1, "true", 0],
+)
+def test_sp_t4_i2b4c_t45_malformed_saved_candidate(
+    tmp_path, isolated_dirs, invalid_value,
+):
+    from contextor.core.analysis.incremental.type_only_policy import (
+        reclassify_incremental_type_only,
+    )
+
+    initial = {
+        **_I1_SAFE,
+        "typing.py": "pass\n",
+    }
+    root = write_synthetic_repository(
+        tmp_path / "repo", initial
+    )
+    baseline, _ = _index_graph(root)
+
+    evidence = dict(baseline.typing_guard_evidence)
+    candidates = dict(
+        evidence["candidate_imports_by_module"]
+    )
+    candidates["pkg.a"] = tuple(
+        replace(ref, type_only=invalid_value)
+        if ref.type_only else ref
+        for ref in candidates["pkg.a"]
+    )
+    evidence["candidate_imports_by_module"] = candidates
+
+    modules = dict(baseline.modules)
+    modules.pop("typing")
+
+    classified, updated = reclassify_incremental_type_only(
+        modules,
+        previous_modules=baseline.modules,
+        previous_evidence=evidence,
+        changed_module_id="typing",
+        changed_source_path="typing.py",
+        changed_imports=[],
+        changed_source_evidence=None,
+        deleted=True,
+    )
+
+    assert updated == {}
+    assert all(
+        ref.type_only is False
+        for module in classified.values()
+        for ref in module.imports
+    )
+
+
+def test_sp_t4_i2b4c_t46_malformed_changed_import(
+    tmp_path, isolated_dirs,
+):
+    from contextor.core.analysis.incremental.type_only_policy import (
+        reclassify_incremental_type_only,
+    )
+
+    root = write_synthetic_repository(
+        tmp_path / "repo", _I1_SAFE
+    )
+    baseline, _ = _index_graph(root)
+    prepared = _i2a_prepare(root / "pkg/a.py", "pkg.a")
+
+    malformed = [
+        replace(ref, type_only=1)
+        if ref.type_only else ref
+        for ref in prepared.new_imports
+    ]
+    assert any(
+        type(ref.type_only) is int
+        for ref in malformed
+    )
+
+    modules = dict(baseline.modules)
+    modules["pkg.a"] = replace(
+        modules["pkg.a"],
+        imports=list(malformed),
+    )
+
+    classified, updated = reclassify_incremental_type_only(
+        modules,
+        previous_modules=baseline.modules,
+        previous_evidence=baseline.typing_guard_evidence,
+        changed_module_id="pkg.a",
+        changed_source_path="pkg/a.py",
+        changed_imports=malformed,
+        changed_source_evidence=(
+            prepared.typing_guard_source_evidence
+        ),
+    )
+
+    assert updated == {}
+    assert all(
+        ref.type_only is False
+        for module in classified.values()
+        for ref in module.imports
+    )
+
+
+def test_sp_t4_i2b4c_t47_malformed_previous_final(
+    tmp_path, isolated_dirs,
+):
+    from contextor.core.analysis.incremental.type_only_policy import (
+        reclassify_incremental_type_only,
+    )
+
+    root = write_synthetic_repository(
+        tmp_path / "repo", _I1_SAFE
+    )
+    baseline, _ = _index_graph(root)
+
+    previous = dict(baseline.modules)
+    previous["pkg.a"] = replace(
+        previous["pkg.a"],
+        imports=[
+            replace(ref, type_only=1)
+            if ref.type_only else ref
+            for ref in previous["pkg.a"].imports
+        ],
+    )
+
+    prepared = _i2a_prepare(root / "pkg/c.py", "pkg.c")
+    classified, updated = reclassify_incremental_type_only(
+        dict(previous),
+        previous_modules=previous,
+        previous_evidence=baseline.typing_guard_evidence,
+        changed_module_id="pkg.c",
+        changed_source_path="pkg/c.py",
+        changed_imports=prepared.new_imports,
+        changed_source_evidence=(
+            prepared.typing_guard_source_evidence
+        ),
+    )
+
+    assert updated == {}
+    assert all(
+        ref.type_only is False
+        for module in classified.values()
+        for ref in module.imports
+    )
+
+
+def test_sp_t4_i2b4c_t48_unrelated_module_tampering(
+    tmp_path, isolated_dirs,
+):
+    from contextor.core.analysis.incremental.type_only_policy import (
+        reclassify_incremental_type_only,
+    )
+
+    root = write_synthetic_repository(
+        tmp_path / "repo", _I1_SAFE
+    )
+    baseline, _ = _index_graph(root)
+
+    modules = dict(baseline.modules)
+    modules["pkg.a"] = replace(
+        modules["pkg.a"],
+        imports=[
+            replace(ref, type_only=False)
+            if ref.type_only else ref
+            for ref in modules["pkg.a"].imports
+        ],
+    )
+
+    prepared = _i2a_prepare(root / "pkg/c.py", "pkg.c")
+    classified, updated = reclassify_incremental_type_only(
+        modules,
+        previous_modules=baseline.modules,
+        previous_evidence=baseline.typing_guard_evidence,
+        changed_module_id="pkg.c",
+        changed_source_path="pkg/c.py",
+        changed_imports=prepared.new_imports,
+        changed_source_evidence=(
+            prepared.typing_guard_source_evidence
+        ),
+    )
+
+    assert updated == {}
+    assert all(
+        ref.type_only is False
+        for module in classified.values()
+        for ref in module.imports
+    )
+
