@@ -8,7 +8,7 @@ Source preparation and semantic delta construction for incremental updates:
 - PreparedModuleUpdate contract
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, List, Set, Dict, Any, Tuple
 
@@ -39,6 +39,10 @@ class PreparedSourceUpdate:
     error_message: Optional[str] = None
     line_number: Optional[int] = None
     column_number: Optional[int] = None
+    typing_guard_source_evidence: dict[str, object] | None = field(
+        default=None,
+        kw_only=True,
+    )
 
     @property
     def has_error(self) -> bool:
@@ -257,6 +261,29 @@ def prepare_source_update(
             error_message=str(exc),
         )
 
+    from contextor.core.symbol_engine.indexer import (
+        _possible_project_typing_marker_mutation,
+        _project_typing_opaque_effects,
+    )
+    from contextor.core.cycle_semantics.typing_guard import (
+        _typing_guard_passive_initializer,
+    )
+
+    typing_guard_source_evidence = {
+        "schema_version": 1,
+        "source_fingerprint": parsed_input.source_fingerprint,
+        "initializer_passive": (
+            module_path.endswith(".__init__")
+            and _typing_guard_passive_initializer(parsed_tree)
+        ),
+        "marker_mutation": (
+            _possible_project_typing_marker_mutation(parsed_tree)
+        ),
+        "opaque_effects": (
+            _project_typing_opaque_effects(parsed_tree)
+        ),
+    }
+
     # 3. Extract symbols & artifacts
     try:
         from contextor.core.reporting_layer.artifact_usage_report import (
@@ -327,6 +354,7 @@ def prepare_source_update(
         collision_facts_changed=collision_facts_changed,
         extracted_lineage_facts=extracted_lineage_facts,
         new_reexport_facts=new_reexport_facts,
+        typing_guard_source_evidence=typing_guard_source_evidence,
     )
 
 

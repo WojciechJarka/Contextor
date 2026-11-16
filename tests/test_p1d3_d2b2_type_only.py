@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import hashlib
 import importlib.util
 import json
 import pickle
@@ -16,6 +17,7 @@ from pathlib import Path
 import pytest
 
 from contextor.core.analysis.cache_manager import CacheManager
+from contextor.core.analysis.incremental import preparation
 from contextor.core.analysis.state_manager import RepositoryAnalysisState, load_engine_state
 from contextor.core.api.facade import ContextorFacade
 from contextor.core.live_state.hydration import hydrate_repository_engine
@@ -2798,4 +2800,103 @@ def test_sp_t4_i1c_t12_valid_evidence_copy():
     assert candidate.typing_guard_evidence is not state.typing_guard_evidence
     candidate.typing_guard_evidence["global_policy_satisfied"] = False
     assert state.typing_guard_evidence["global_policy_satisfied"] is True
+
+
+def _i2a_prepare(path: Path, module_path: str):
+    return preparation.prepare_source_update(
+        file_path=path,
+        module_path=module_path,
+        is_new=True,
+        old_module=None,
+        old_artifacts=None,
+        old_usage=None,
+    )
+
+
+def test_sp_t4_i2a_t13_safe_source_evidence(tmp_path, monkeypatch):
+    source = (
+        "from typing import TYPE_CHECKING\n"
+        "if TYPE_CHECKING:\n"
+        "    import pkg.b\n"
+        "value = 1\n"
+    )
+    path = tmp_path / "a.py"
+    path.write_text(source, encoding="utf-8")
+    parse_calls = []
+    import_trees = []
+    original_parse = preparation.parse_source_with_fingerprint
+    original_read_imports = indexer.read_imports
+
+    def recorded_parse(file_path):
+        parsed = original_parse(file_path)
+        parse_calls.append(parsed)
+        return parsed
+
+    def recorded_read_imports(file_path, *, tree=None):
+        import_trees.append(tree)
+        return original_read_imports(file_path, tree=tree)
+
+    monkeypatch.setattr(preparation, "parse_source_with_fingerprint", recorded_parse)
+    monkeypatch.setattr(indexer, "read_imports", recorded_read_imports)
+    prepared = _i2a_prepare(path, "pkg.a")
+    assert not prepared.has_error
+    assert len(parse_calls) == 1
+    assert import_trees == [parse_calls[0].tree]
+    evidence = prepared.typing_guard_source_evidence
+    assert evidence["schema_version"] == 1
+    assert evidence["source_fingerprint"] == hashlib.sha256(path.read_bytes()).hexdigest()
+    assert evidence["initializer_passive"] is False
+    assert evidence["marker_mutation"] is False
+    assert evidence["opaque_effects"] is False
+
+
+def test_sp_t4_i2a_t14_marker_mutation_matches_full_predicate(tmp_path):
+    path = tmp_path / "other.py"
+    path.write_text("import typing\ntyping.TYPE_CHECKING = True\n", encoding="utf-8")
+    prepared = _i2a_prepare(path, "pkg.other")
+    assert not prepared.has_error
+    evidence = prepared.typing_guard_source_evidence
+    assert evidence["marker_mutation"] is True
+    full_index, _ = _index_graph(tmp_path)
+    assert full_index.typing_guard_evidence["marker_mutation_by_module"]["other"][0] is True
+
+
+def test_sp_t4_i2a_t15_initializer_passivity(tmp_path):
+    path = tmp_path / "__init__.py"
+    path.write_text("pass\n", encoding="utf-8")
+    passive = _i2a_prepare(path, "pkg.__init__")
+    assert not passive.has_error
+    assert passive.typing_guard_source_evidence["initializer_passive"] is True
+    path.write_text("import typing\ntyping.TYPE_CHECKING = True\n", encoding="utf-8")
+    active = _i2a_prepare(path, "pkg.__init__")
+    assert not active.has_error
+    assert active.typing_guard_source_evidence["initializer_passive"] is False
+    assert active.typing_guard_source_evidence["source_fingerprint"] != (
+        passive.typing_guard_source_evidence["source_fingerprint"]
+    )
+
+
+def test_sp_t4_i2a_t16_guard_change_same_import_names(tmp_path):
+    path = tmp_path / "a.py"
+    guarded = (
+        "from typing import TYPE_CHECKING\n"
+        "if TYPE_CHECKING:\n"
+        "    import pkg.b\n"
+        "value = 1\n"
+    )
+    path.write_text(guarded, encoding="utf-8")
+    before = _i2a_prepare(path, "pkg.a")
+    path.write_text(guarded.replace("if TYPE_CHECKING:", "if True:"), encoding="utf-8")
+    after = _i2a_prepare(path, "pkg.a")
+    assert not before.has_error and not after.has_error
+    before_import = next(item for item in before.new_imports if item.module == "pkg.b")
+    after_import = next(item for item in after.new_imports if item.module == "pkg.b")
+    assert before_import.type_only is True
+    assert after_import.type_only is False
+    assert before.delta.imports_added == after.delta.imports_added
+    assert before.typing_guard_source_evidence["source_fingerprint"] != (
+        after.typing_guard_source_evidence["source_fingerprint"]
+    )
+    assert after.typing_guard_source_evidence["marker_mutation"] is False
+    assert after.typing_guard_source_evidence["opaque_effects"] is False
 
