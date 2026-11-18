@@ -4790,3 +4790,57 @@ def test_sp_t4_i2b5_i4b_t65_invalid_baseline_fails_closed(
         .soft_edges["pkg.a"]
     )
 
+
+def test_sp_t4_i2b5_i4b_t66_noop_evidence_refresh(
+    tmp_path, isolated_dirs,
+):
+    root = write_synthetic_repository(
+        tmp_path / "repo", _I1_SAFE
+    )
+    _, engine = _i1_full_engine(root)
+
+    before_modules = engine.state.modules
+    before_evidence = engine.state.typing_guard_evidence
+    before_graph = engine.state.dependency_graph
+
+    assert before_evidence["schema_version"] == 2
+    assert before_evidence[
+        "global_policy_satisfied"
+    ] is True
+
+    before_fingerprint = before_evidence[
+        "source_fingerprints_by_module"
+    ]["pkg.c"]
+
+    target = root / "pkg/c.py"
+    with target.open("a", encoding="utf-8") as stream:
+        stream.write("\n# unrelated comment\n")
+
+    result = engine.update_file(str(target.resolve()))
+
+    assert result.status == "UNCHANGED"
+
+    after_evidence = engine.state.typing_guard_evidence
+
+    assert after_evidence["schema_version"] == 2
+    assert after_evidence[
+        "global_policy_satisfied"
+    ] is True
+
+    assert after_evidence[
+        "source_fingerprints_by_module"
+    ]["pkg.c"] != before_fingerprint
+
+    assert after_evidence is not before_evidence
+
+    assert before_evidence[
+        "source_fingerprints_by_module"
+    ]["pkg.c"] == before_fingerprint
+
+    assert engine.state.modules is before_modules
+    assert engine.state.dependency_graph is before_graph
+
+    assert _i1_guarded_import(
+        engine.state
+    ).type_only is True
+
