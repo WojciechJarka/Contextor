@@ -4691,3 +4691,97 @@ def test_sp_t4_i2b5_i4b_t63_consecutive_updates(
         "global_policy_satisfied"
     ] is False
 
+
+def test_sp_t4_i2b5_i4b_t64_deletion_restores_soft(
+    tmp_path, isolated_dirs,
+):
+    root = write_synthetic_repository(
+        tmp_path / "repo", _I1_SAFE
+    )
+    target = root / "pkg/c.py"
+    target.write_text(
+        "import typing\n"
+        "typing.TYPE_CHECKING = True\n",
+        encoding="utf-8",
+    )
+    _, engine = _i1_full_engine(root)
+
+    assert engine.state.typing_guard_evidence[
+        "schema_version"
+    ] == 2
+    assert engine.state.typing_guard_evidence[
+        "global_policy_satisfied"
+    ] is False
+    assert _i1_guarded_import(
+        engine.state
+    ).type_only is False
+    assert "pkg.b" in (
+        engine.state.dependency_graph
+        .hard_edges["pkg.a"]
+    )
+
+    target.unlink()
+    result = engine.update_file(str(target.resolve()))
+
+    assert result.status == "DELETED"
+    assert "pkg.c" not in engine.state.modules
+    assert engine.state.typing_guard_evidence[
+        "schema_version"
+    ] == 2
+    assert engine.state.typing_guard_evidence[
+        "global_policy_satisfied"
+    ] is True
+    assert _i1_guarded_import(
+        engine.state
+    ).type_only is True
+    assert "pkg.b" in (
+        engine.state.dependency_graph
+        .soft_edges["pkg.a"]
+    )
+    assert "pkg.b" not in (
+        engine.state.dependency_graph
+        .hard_edges["pkg.a"]
+    )
+
+
+def test_sp_t4_i2b5_i4b_t65_invalid_baseline_fails_closed(
+    tmp_path, isolated_dirs,
+):
+    root = write_synthetic_repository(
+        tmp_path / "repo", _I1_SAFE
+    )
+    _, engine = _i1_full_engine(root)
+
+    assert _i1_guarded_import(
+        engine.state
+    ).type_only is True
+    assert "pkg.b" in (
+        engine.state.dependency_graph
+        .soft_edges["pkg.a"]
+    )
+
+    engine.state.typing_guard_evidence = {}
+
+    target = root / "pkg/c.py"
+    target.write_text(
+        "import typing\n"
+        "typing.TYPE_CHECKING = True\n",
+        encoding="utf-8",
+    )
+
+    result = engine.update_file(str(target.resolve()))
+    assert result.status == "UPDATED"
+
+    assert engine.state.typing_guard_evidence == {}
+    assert _i1_guarded_import(
+        engine.state
+    ).type_only is False
+    assert "pkg.b" in (
+        engine.state.dependency_graph
+        .hard_edges["pkg.a"]
+    )
+    assert "pkg.b" not in (
+        engine.state.dependency_graph
+        .soft_edges["pkg.a"]
+    )
+
