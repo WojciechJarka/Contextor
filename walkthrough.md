@@ -1,74 +1,70 @@
-# SP-T4-I2B5-I2 — Type Only Graph Refresh Scope
+# SP-T4-I2B5-I3 — Graph Executor Full-Rebuild Switch
 
 ## PREFLIGHT
 
-- DIRECT_EVIDENCE — HEAD before edits: 576b0060e632fae7d4f790dd93943aec9897e35b; branch main...origin/main; git status clean.
-- DIRECT_EVIDENCE — pre-change LIVE revision 1436, provenance live, canonical_state=fresh, resync_required=false.
-- DIRECT_EVIDENCE — target files type_only_policy.py and tests/test_p1d3_d2b2_type_only.py had workspace_sync=verified at revision 1436 and fresh checked_and_none syntax diagnostics.
-- DIRECT_EVIDENCE — exact production anchors matched: the Module import at line 7; the existing reclassify_incremental_type_only ends at line 458, the file EOF. The test file imports dataclasses.replace and pytest; T51 ends at line 4049 of 4050, followed by EOF.
-- DIRECT_EVIDENCE — _I1_SAFE contains pkg.a, pkg.b, and pkg.c for the supplied synthetic tests. No T52-T56 names or helper names existed before the append.
-- CONTRACT_PROVED — RefreshPlan is frozen; its allowed patch families include modules, dependency_graph, cached_analytics, artifact_consumption, collision_facts, and collisions. Its allowed graph_recomputations include macro_metrics, reverse_blast_radius, advanced_graph_metrics, and cycles. Every family/recomputation string in the requested helper is in those current contract sets.
-- CODE_PATH_PROVED — the current RefreshPlanner import-change paths include modules and dependency_graph and schedule graph recomputations; PlanExecutor pre-populates candidate.modules when the modules family is present, then applies dependency_graph, and refreshes graph-derived metrics/cycles. The new helper remains a pure planner and is not connected to update_file in this stage.
-- DIRECT_EVIDENCE — Contextor file context reports one existing test consumer for type_only_policy.py. Lineage preview for reclassify_incremental_type_only showed large sections; fetching calls/connections was guarded by the MCP output-size confirmation. No production caller is changed in this task.
-- DIRECT_EVIDENCE — repository virtual environment is CPython 3.15.2.
+- DIRECT_EVIDENCE — HEAD before edit: 4196228a3a57a46120070ae33d4b6162296dd32c; branch main...origin/main; git status clean.
+- DIRECT_EVIDENCE — pre-change LIVE revision 1438, provenance live, canonical_state=fresh, resync_required=false.
+- DIRECT_EVIDENCE — plan_executor.py and tests/test_p1d3_d2b2_type_only.py had workspace_sync=verified at revision 1438; both had fresh checked_and_none syntax diagnostics.
+- DIRECT_EVIDENCE — execute_refresh_plan matched the requested signature anchor at lines 1136-1148; new_reexport_facts was the last parameter. Its docstring ended immediately before path = Path(file_path). The dependency_graph condition began with delta.is_deleted at line 1385; all listed existing alternatives were present and unchanged.
+- DIRECT_EVIDENCE — T56 ended at line 4236 of the test file (source_total_lines=4237); T57 and T58 were absent before the append. The repository virtual environment is CPython 3.15.2.
+- DIRECT_EVIDENCE — Contextor artifact blast radius resolved execute_refresh_plan as A1292/1 with 8 direct static consumers, including 6 test consumers; no cross-layer production consumer was reported. The new optional parameter was appended after the existing last defaulted argument, preserving prior parameter positions.
+- CONTRACT_PROVED — current executor pre-populates candidate.modules only when the modules family is in the plan; the I2 type-only planner adds that family for graph changes. T57 uses a planner-generated import-change plan.
 
 ## EXACT_IMPLEMENTATION
 
-- DIRECT_EVIDENCE — added the RefreshPlan import immediately after the existing Module import.
-- CODE_PATH_PROVED — appended the exact requested plan_type_only_graph_refresh implementation after reclassify_incremental_type_only. The existing reclassification function is unchanged.
-- DIRECT_EVIDENCE — appended the two requested test helpers and T52-T56 verbatim at EOF. Existing tests are unchanged.
-- DIRECT_EVIDENCE — no changes to engine.py, plan_executor.py, RefreshPlanner, graph construction, or runtime wiring. Production logic contains no repository module IDs; pkg.a/pkg.b/pkg.c occur only in the existing synthetic fixture/tests.
+- DIRECT_EVIDENCE — added force_full_graph: bool = False after new_reexport_facts.
+- DIRECT_EVIDENCE — added the exact requested bool and dependency_graph preconditions immediately after the function docstring.
+- CODE_PATH_PROVED — added force_full_graph as the first existing dependency_graph rebuild condition. The delta.is_deleted, delta.is_new, package-initializer, and reexport_facts_changed conditions remain unchanged.
+- DIRECT_EVIDENCE — appended exactly T57-T58. No existing tests were modified. build_graph, resolve_module_edges, PATCH/GRAPH ordering, and other patch families were not changed.
 
-## LOCAL_GRAPH_SCOPE
+## FULL_GRAPH_EXECUTION
 
-- CODE_PATH_PROVED — unchanged module membership and equal imports returns the original plan object with full=False.
-- CODE_PATH_PROVED — when imports change only for changed_module_id, the helper adds modules, dependency_graph, cached_analytics and the full graph-derived recomputation tuple while returning full=False.
-- DIRECT_EVIDENCE — T52 and T53 assert the no-op and local-import cases, including that the input RefreshPlan remains empty.
+- CODE_PATH_PROVED — with force_full_graph=True and dependency_graph in the plan, execution enters the existing full branch: it rebuilds the trie, package root, and candidate dependency graph using build_graph.
+- DIRECT_EVIDENCE — T57 observes one build_graph call and no resolve_module_edges call when true; the candidate graph contains the updated hard edge to pkg.b.
+- INFERENCE / REVIEW LIMIT — the guard checks dependency_graph but not modules. The intended I2 planner output includes modules for graph deltas, and T57's RefreshPlanner import-change plan exercises that shape. A direct force_full_graph=True call with a graph-only plan is not covered; candidate.modules is only updated for an existing-module import change when modules is in the plan. No extra guard was added because the prompt specified the exact validation.
 
-## GLOBAL_GRAPH_SCOPE
+## PARTIAL_GRAPH_COMPATIBILITY
 
-- CODE_PATH_PROVED — any module membership change forces full=True. Import-list changes in a module other than changed_module_id also force full=True.
-- DIRECT_EVIDENCE — T54 covers an import change in another module; T55 covers module addition and deletion.
-- INFERENCE / SCOPE LIMIT — this helper compares module membership and imports only. It is scoped to type-only import planning and is not a substitute for RefreshPlanner's handling of unrelated Module field changes.
-- DIRECT_EVIDENCE — force_full_graph is only returned as a planning decision here. Because integration is explicitly out of scope, this task does not prove that a runtime graph rebuild consumes the boolean.
+- CODE_PATH_PROVED — the default false value leaves existing rebuild conditions unchanged and retains the existing resolve_module_edges path for ordinary in-place module changes.
+- DIRECT_EVIDENCE — T57 observes resolve_module_edges once for pkg.a and no build_graph call when false.
+- DIRECT_EVIDENCE — T17-T21 and T49-T56 passed with the new parameter default, covering existing planner/executor behavior and type-only plan scope.
+- DIRECT_EVIDENCE — no call sites were modified; the appended defaulted parameter preserves existing callers' positional arguments.
 
-## REFRESH_PLAN_CONTRACT
+## INVALID_REQUEST_FAIL_CLOSED
 
-- CONTRACT_PROVED — added patch family and graph recomputation values match RefreshPlan's current VALID_PATCH_FAMILIES and VALID_GRAPH_RECOMPUTATIONS.
-- CODE_PATH_PROVED — the helper uses a separate list and dataclasses.replace to create a new RefreshPlan; it does not mutate the input plan. Existing refresh_completeness, semantic_certainty, and reason values are retained by replace.
-- CODE_PATH_PROVED — the helper enforces dependency_graph before cached_analytics. PlanExecutor's family loop uses that order for graph inputs before analytics.
-- DIRECT_EVIDENCE — T56 checks preserved plan metadata and verifies that the original plan's patch_families and graph_recomputations remain unchanged.
+- CODE_PATH_PROVED — non-exact-bool inputs raise TypeError before path construction or candidate creation.
+- CODE_PATH_PROVED — force_full_graph=True without dependency_graph in plan.patch_families raises ValueError before candidate creation.
+- DIRECT_EVIDENCE — T58 covers 1 and "yes" as TypeError cases and True with an empty RefreshPlan as ValueError.
 
-## NEGATIVE_AND_COW_REGRESSIONS
+## CANDIDATE_ISOLATION
 
-- DIRECT_EVIDENCE — the requested exact-type validation rejects invalid outer inputs and module mappings before membership/import comparison. The exact test addition does not add cases for malformed outer inputs.
-- INFERENCE / REVIEW NOTE — the helper checks that mapping keys are strings and values are Module instances, but does not check that each key equals Module.module_id or validate each item inside Module.imports. Whether malformed mappings/import records can reach a future caller is UNKNOWN; no production caller is connected in this stage. The tests use canonical indexer-produced module mappings.
-- DIRECT_EVIDENCE — T35-T51 regression tests and T52-T56 new tests passed. T53/T56 verify input RefreshPlan copy-on-write behavior; T52 verifies the no-op returns the same object.
+- DIRECT_EVIDENCE — T57 records the original engine graph identity and verifies it is unchanged after execution while outcome.candidate_state contains the rebuilt or partially updated graph.
+- CODE_PATH_PROVED — execute_refresh_plan returns a PlanExecutionOutcome containing candidate state; this patch does not publish candidate graph state to RepositoryAnalysisState.
 
 ## TARGETED_TESTS
 
-- DIRECT_EVIDENCE — ran CPython 3.15.2 from the repository .venv, using explicit test nodes for T35-T56 in tests/test_p1d3_d2b2_type_only.py.
-- DIRECT_EVIDENCE — result: 28 passed in 9.40s. Parametrized existing/new nodes expanded to 28 cases.
+- DIRECT_EVIDENCE — ran explicit nodes T57-T58, T49-T56, and T17-T21 using repository .venv CPython 3.15.2.
+- DIRECT_EVIDENCE — result: 23 passed in 10.96s.
 - DIRECT_EVIDENCE — no full pytest suite was run.
 
 ## MCP_POST_CHANGE_AUDIT
 
-- DIRECT_EVIDENCE — canonical LIVE revision 1438, provenance live, canonical_state=fresh, resync_required=false.
-- DIRECT_EVIDENCE — continuous desktop_watcher events: revision 1437 UPDATED type_only_policy.py; revision 1438 UPDATED tests/test_p1d3_d2b2_type_only.py.
-- DIRECT_EVIDENCE — workspace_sync=verified for both changed files at revision 1438.
-- DIRECT_EVIDENCE — both files have fresh checked_and_none syntax diagnostics with errors=[]. Global syntax error count is 0 and fresh.
-- DIRECT_EVIDENCE — graph and cycles are fresh.
-- UNKNOWN — workspace sync proves disk/LIVE source freshness, not that a running process adopted the new code. Runtime adoption was not checked. No restart or MCP update_file was performed.
+- DIRECT_EVIDENCE — canonical LIVE revision 1440, provenance live, canonical_state=fresh, resync_required=false.
+- DIRECT_EVIDENCE — continuous desktop_watcher events: revision 1439 UPDATED plan_executor.py; revision 1440 UPDATED tests/test_p1d3_d2b2_type_only.py.
+- DIRECT_EVIDENCE — workspace_sync=verified for both changed files at revision 1440.
+- DIRECT_EVIDENCE — both files have fresh checked_and_none syntax diagnostics with errors=[]. Global syntax diagnostic count is 0 and fresh.
+- DIRECT_EVIDENCE — graph and cycles are fresh at revision 1440.
+- UNKNOWN — workspace sync does not prove the running process adopted the code. Runtime adoption was not inspected; no restart or MCP update_file was performed.
 
 ## FINAL_VERDICT
 
-I2B5_I2_PASS
+I2B5_I3_PASS
 
-The specified pure graph-refresh planner and tests are present, the focused regressions pass, and post-change LIVE checks are fresh. This verdict covers planning scope only; it does not claim Incremental update_file integration or runtime graph rebuild behavior.
+The exact executor switch and fail-closed preconditions are present, requested focused tests pass, and post-change LIVE evidence is fresh. This verdict covers executor behavior with the tested RefreshPlan shapes; it does not claim engine wiring or runtime process adoption.
 
 ## FILES_CHANGED
 
-- contextor/core/analysis/incremental/type_only_policy.py
+- contextor/core/analysis/incremental/plan_executor.py
 - tests/test_p1d3_d2b2_type_only.py
 
 walkthrough.md is overwritten as the required report artifact and is not counted as an implementation/test file.
@@ -77,315 +73,165 @@ walkthrough.md is overwritten as the required report artifact and is not counted
 
 Complete changed-line diff from git diff --unified=0:
 
-### contextor/core/analysis/incremental/type_only_policy.py
-
 ~~~~diff
-diff --git a/contextor/core/analysis/incremental/type_only_policy.py b/contextor/core/analysis/incremental/type_only_policy.py
-index 78521d7..2260b3f 100644
---- a/contextor/core/analysis/incremental/type_only_policy.py
-+++ b/contextor/core/analysis/incremental/type_only_policy.py
-@@ -7,0 +8 @@ from contextor.core.domain.module import Module
-+from contextor.core.domain.refresh_plan import RefreshPlan
-@@ -458,0 +460,108 @@ def reclassify_incremental_type_only(
-+
-+
-+def plan_type_only_graph_refresh(
-+    plan: RefreshPlan,
-+    *,
-+    changed_module_id: str,
-+    previous_modules: dict[str, Module],
-+    classified_modules: dict[str, Module],
-+) -> tuple[RefreshPlan, bool]:
-+    """Expand existing refresh families for changed import semantics."""
+diff --git a/contextor/core/analysis/incremental/plan_executor.py b/contextor/core/analysis/incremental/plan_executor.py
+index 521e722..c27a8ff 100644
+--- a/contextor/core/analysis/incremental/plan_executor.py
++++ b/contextor/core/analysis/incremental/plan_executor.py
+@@ -1147,0 +1148 @@ def execute_refresh_plan(
++    force_full_graph: bool = False,
+@@ -1152,0 +1154,12 @@ def execute_refresh_plan(
++    if type(force_full_graph) is not bool:
++        raise TypeError(
++            "force_full_graph must be bool"
++        )
 +    if (
-+        type(plan) is not RefreshPlan
-+        or type(changed_module_id) is not str
-+        or not changed_module_id
-+        or type(previous_modules) is not dict
-+        or type(classified_modules) is not dict
-+    ):
-+        raise TypeError("Invalid type-only graph planning inputs")
-+
-+    for modules in (previous_modules, classified_modules):
-+        if any(
-+            type(module_id) is not str
-+            or type(module) is not Module
-+            or type(module.imports) is not list
-+            for module_id, module in modules.items()
-+        ):
-+            raise TypeError("Invalid type-only module mapping")
-+
-+    before_ids = set(previous_modules)
-+    after_ids = set(classified_modules)
-+
-+    membership_changed = before_ids != after_ids
-+
-+    import_changes = {
-+        module_id
-+        for module_id in before_ids & after_ids
-+        if (
-+            previous_modules[module_id].imports
-+            != classified_modules[module_id].imports
-+        )
-+    }
-+
-+    if not membership_changed and not import_changes:
-+        return plan, False
-+
-+    force_full_graph = (
-+        membership_changed
-+        or any(
-+            module_id != changed_module_id
-+            for module_id in import_changes
-+        )
-+    )
-+
-+    families = list(plan.patch_families)
-+
-+    if "modules" not in families:
-+        families.insert(0, "modules")
-+
-+    if "dependency_graph" not in families:
-+        insertion = next(
-+            (
-+                families.index(name)
-+                for name in (
-+                    "artifact_consumption",
-+                    "cached_analytics",
-+                    "collision_facts",
-+                    "collisions",
-+                )
-+                if name in families
-+            ),
-+            len(families),
-+        )
-+        families.insert(insertion, "dependency_graph")
-+
-+    if "cached_analytics" not in families:
-+        insertion = next(
-+            (
-+                families.index(name)
-+                for name in ("collision_facts", "collisions")
-+                if name in families
-+            ),
-+            len(families),
-+        )
-+        families.insert(insertion, "cached_analytics")
-+
-+    if (
-+        families.index("dependency_graph")
-+        > families.index("cached_analytics")
++        force_full_graph
++        and "dependency_graph" not in plan.patch_families
 +    ):
 +        raise ValueError(
-+            "Dependency graph must precede cached analytics"
++            "Full graph rebuild requires dependency_graph patch"
 +        )
 +
-+    graph_recomputations = (
-+        "macro_metrics",
-+        "reverse_blast_radius",
-+        "advanced_graph_metrics",
-+        "cycles",
-+    )
-+
-+    return (
-+        replace(
-+            plan,
-+            patch_families=tuple(families),
-+            graph_recomputations=graph_recomputations,
-+        ),
-+        force_full_graph,
-+    )
+@@ -1385 +1398,2 @@ def execute_refresh_plan(
+-                delta.is_deleted
++                force_full_graph
++                or delta.is_deleted
 diff --git a/tests/test_p1d3_d2b2_type_only.py b/tests/test_p1d3_d2b2_type_only.py
-index 61fea0e..0057522 100644
+index 0057522..829a0e8 100644
 --- a/tests/test_p1d3_d2b2_type_only.py
 +++ b/tests/test_p1d3_d2b2_type_only.py
-@@ -4050,0 +4051,187 @@ def test_sp_t4_i2b5_i1_t51_candidate_is_not_published(
+@@ -4237,0 +4238,131 @@ def test_sp_t4_i2b5_i2_t56_preserve_plan_contract(
 +
-+def _i2b5_i2_fixture(tmp_path):
++@pytest.mark.parametrize(
++    "force_full_graph", [False, True]
++)
++def test_sp_t4_i2b5_i3_t57_executor_graph_switch(
++    tmp_path, isolated_dirs, monkeypatch,
++    force_full_graph,
++):
++    from contextor.core.analysis.incremental import (
++        plan_executor as executor,
++    )
++
 +    root = write_synthetic_repository(
 +        tmp_path / "repo", _I1_SAFE
 +    )
-+    index, _ = _index_graph(root)
-+    return dict(index.modules)
++    _, engine = _i1_full_engine(root)
 +
-+
-+def _i2b5_i2_change_guard(modules):
-+    changed = dict(modules)
-+    current = changed["pkg.a"]
-+    changed["pkg.a"] = replace(
-+        current,
-+        imports=[
-+            replace(ref, type_only=False)
-+            if ref.module == "pkg.b" else ref
-+            for ref in current.imports
-+        ],
++    target = root / "pkg/a.py"
++    target.write_text(
++        _i2b1_source(guarded=False),
++        encoding="utf-8",
 +    )
-+    return changed
++
++    prepared = preparation.prepare_source_update(
++        file_path=target,
++        module_path="pkg.a",
++        is_new=False,
++        old_module=engine.state.modules["pkg.a"],
++        old_artifacts=engine.state.artifacts.get("pkg.a"),
++        old_usage=engine.state.module_usages.get("pkg.a"),
++        persistent_id=engine.registry.get_module_id("pkg.a"),
++        old_collision_facts=engine.state.collision_facts.get("pkg.a"),
++        old_reexport_facts=engine.state.reexport_facts_by_module.get(
++            "pkg.a"
++        ),
++        source_key="pkg/a.py",
++    )
++    assert not prepared.has_error
++
++    plan = RefreshPlanner.plan_refresh(
++        prepared.delta,
++        usage_delta=prepared.usage_delta,
++        module_usages=engine.state.module_usages,
++        collision_facts_changed=prepared.collision_facts_changed,
++    )
++    assert "dependency_graph" in plan.patch_families
++
++    original_build = executor.build_graph
++    original_resolve = executor.resolve_module_edges
++    build_calls = []
++    resolve_calls = []
++
++    def observed_build(*args, **kwargs):
++        build_calls.append(True)
++        return original_build(*args, **kwargs)
++
++    def observed_resolve(*args, **kwargs):
++        resolve_calls.append(args[0])
++        return original_resolve(*args, **kwargs)
++
++    monkeypatch.setattr(
++        executor, "build_graph", observed_build
++    )
++    monkeypatch.setattr(
++        executor, "resolve_module_edges", observed_resolve
++    )
++
++    previous_graph = engine.state.dependency_graph
++
++    outcome = executor.execute_refresh_plan(
++        state=engine.state,
++        delta=prepared.delta,
++        usage_delta=prepared.usage_delta,
++        plan=plan,
++        new_imports=prepared.new_imports,
++        new_artifacts=prepared.new_artifacts,
++        new_usage=prepared.new_usage,
++        root_path=root,
++        file_path=str(target.resolve()),
++        new_collision_facts=prepared.new_collision_facts,
++        new_reexport_facts=prepared.new_reexport_facts,
++        force_full_graph=force_full_graph,
++    )
++
++    assert len(build_calls) == int(force_full_graph)
++    assert resolve_calls == (
++        [] if force_full_graph else ["pkg.a"]
++    )
++    assert (
++        outcome.candidate_state.dependency_graph
++        is not None
++    )
++    assert engine.state.dependency_graph is previous_graph
++    assert (
++        "pkg.b"
++        in outcome.candidate_state.dependency_graph
++        .hard_edges["pkg.a"]
++    )
 +
 +
-+def test_sp_t4_i2b5_i2_t52_no_graph_delta(
-+    tmp_path, isolated_dirs,
++@pytest.mark.parametrize(
++    "force_full_graph,expected_exception",
++    [
++        (1, TypeError),
++        ("yes", TypeError),
++        (True, ValueError),
++    ],
++)
++def test_sp_t4_i2b5_i3_t58_invalid_graph_request(
++    tmp_path, force_full_graph, expected_exception,
 +):
++    from contextor.core.analysis.incremental import (
++        plan_executor as executor,
++    )
++    from contextor.core.analysis.state_manager import FileDelta
 +    from contextor.core.domain.refresh_plan import RefreshPlan
-+    from contextor.core.analysis.incremental.type_only_policy import (
-+        plan_type_only_graph_refresh,
-+    )
 +
-+    modules = _i2b5_i2_fixture(tmp_path)
-+    plan = RefreshPlan()
-+
-+    result, full = plan_type_only_graph_refresh(
-+        plan,
-+        changed_module_id="pkg.c",
-+        previous_modules=modules,
-+        classified_modules=dict(modules),
-+    )
-+
-+    assert result is plan
-+    assert full is False
-+    assert result.is_empty
-+
-+
-+def test_sp_t4_i2b5_i2_t53_local_import_delta(
-+    tmp_path, isolated_dirs,
-+):
-+    from contextor.core.domain.refresh_plan import RefreshPlan
-+    from contextor.core.analysis.incremental.type_only_policy import (
-+        plan_type_only_graph_refresh,
-+    )
-+
-+    before = _i2b5_i2_fixture(tmp_path)
-+    after = _i2b5_i2_change_guard(before)
-+    plan = RefreshPlan()
-+
-+    result, full = plan_type_only_graph_refresh(
-+        plan,
-+        changed_module_id="pkg.a",
-+        previous_modules=before,
-+        classified_modules=after,
-+    )
-+
-+    assert full is False
-+    assert "modules" in result.patch_families
-+    assert "dependency_graph" in result.patch_families
-+    assert "cached_analytics" in result.patch_families
-+    assert result.patch_families.index(
-+        "dependency_graph"
-+    ) < result.patch_families.index("cached_analytics")
-+    assert result.graph_recomputations == (
-+        "macro_metrics",
-+        "reverse_blast_radius",
-+        "advanced_graph_metrics",
-+        "cycles",
-+    )
-+    assert plan.is_empty
-+
-+
-+def test_sp_t4_i2b5_i2_t54_unrelated_import_delta(
-+    tmp_path, isolated_dirs,
-+):
-+    from contextor.core.domain.refresh_plan import RefreshPlan
-+    from contextor.core.analysis.incremental.type_only_policy import (
-+        plan_type_only_graph_refresh,
-+    )
-+
-+    before = _i2b5_i2_fixture(tmp_path)
-+    after = _i2b5_i2_change_guard(before)
-+
-+    result, full = plan_type_only_graph_refresh(
-+        RefreshPlan(),
-+        changed_module_id="pkg.c",
-+        previous_modules=before,
-+        classified_modules=after,
-+    )
-+
-+    assert full is True
-+    assert "dependency_graph" in result.patch_families
-+    assert "cycles" in result.graph_recomputations
-+
-+
-+@pytest.mark.parametrize("deleted", [False, True])
-+def test_sp_t4_i2b5_i2_t55_module_membership(
-+    tmp_path, isolated_dirs, deleted,
-+):
-+    from contextor.core.domain.refresh_plan import RefreshPlan
-+    from contextor.core.analysis.incremental.type_only_policy import (
-+        plan_type_only_graph_refresh,
-+    )
-+
-+    before = _i2b5_i2_fixture(tmp_path)
-+    after = dict(before)
-+
-+    if deleted:
-+        after.pop("pkg.c")
-+    else:
-+        after["other"] = replace(
-+            after["pkg.c"],
-+            module_id="other",
++    with pytest.raises(expected_exception):
++        executor.execute_refresh_plan(
++            state=RepositoryAnalysisState(),
++            delta=FileDelta(module_path="pkg.a"),
++            usage_delta=None,
++            plan=RefreshPlan(),
++            new_imports=[],
++            new_artifacts={},
++            new_usage=None,
++            root_path=tmp_path,
++            file_path=str(tmp_path / "a.py"),
++            force_full_graph=force_full_graph,
 +        )
-+
-+    result, full = plan_type_only_graph_refresh(
-+        RefreshPlan(),
-+        changed_module_id=(
-+            "pkg.c" if deleted else "other"
-+        ),
-+        previous_modules=before,
-+        classified_modules=after,
-+    )
-+
-+    assert full is True
-+    assert "dependency_graph" in result.patch_families
-+
-+
-+def test_sp_t4_i2b5_i2_t56_preserve_plan_contract(
-+    tmp_path, isolated_dirs,
-+):
-+    from contextor.core.domain.refresh_plan import RefreshPlan
-+    from contextor.core.analysis.incremental.type_only_policy import (
-+        plan_type_only_graph_refresh,
-+    )
-+
-+    before = _i2b5_i2_fixture(tmp_path)
-+    after = _i2b5_i2_change_guard(before)
-+
-+    plan = RefreshPlan(
-+        patch_families=(
-+            "definitions",
-+            "artifact_consumption",
-+            "cached_analytics",
-+        ),
-+        graph_recomputations=("cycles",),
-+        refresh_completeness="conservative",
-+        semantic_certainty="runtime_unresolved",
-+        reason="synthetic",
-+    )
-+
-+    result, full = plan_type_only_graph_refresh(
-+        plan,
-+        changed_module_id="pkg.c",
-+        previous_modules=before,
-+        classified_modules=after,
-+    )
-+
-+    assert full is True
-+    assert result.refresh_completeness == "conservative"
-+    assert result.semantic_certainty == "runtime_unresolved"
-+    assert result.reason == "synthetic"
-+    assert result.patch_families.index(
-+        "dependency_graph"
-+    ) < result.patch_families.index("cached_analytics")
-+    assert result.graph_recomputations == (
-+        "macro_metrics",
-+        "reverse_blast_radius",
-+        "advanced_graph_metrics",
-+        "cycles",
-+    )
-+    assert plan.patch_families == (
-+        "definitions",
-+        "artifact_consumption",
-+        "cached_analytics",
-+    )
-+    assert plan.graph_recomputations == ("cycles",)
 +
 
 ~~~~

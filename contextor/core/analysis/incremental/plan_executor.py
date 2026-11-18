@@ -1145,11 +1145,24 @@ def execute_refresh_plan(
     file_path: str,
     new_collision_facts: Optional[List[Dict[str, Any]]] = None,
     new_reexport_facts: Optional[Dict[str, Any]] = None,
+    force_full_graph: bool = False,
 ) -> PlanExecutionOutcome:
     """
     Executes the phases of a RefreshPlan (REPARSE, RECOMPUTE, PATCH, GRAPH)
     on an isolated Copy-on-Write candidate state without performing disk I/O or state mutation.
     """
+    if type(force_full_graph) is not bool:
+        raise TypeError(
+            "force_full_graph must be bool"
+        )
+    if (
+        force_full_graph
+        and "dependency_graph" not in plan.patch_families
+    ):
+        raise ValueError(
+            "Full graph rebuild requires dependency_graph patch"
+        )
+
     path = Path(file_path)
     mod_id = Path(delta.module_path).stem if delta.module_path.endswith(".py") else delta.module_path
     old_graph = state.dependency_graph
@@ -1382,7 +1395,8 @@ def execute_refresh_plan(
 
         elif family == "dependency_graph":
             if (
-                delta.is_deleted
+                force_full_graph
+                or delta.is_deleted
                 or delta.is_new
                 or (
                     delta.module_path.endswith(".__init__")

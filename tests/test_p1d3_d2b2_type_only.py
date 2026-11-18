@@ -4235,3 +4235,134 @@ def test_sp_t4_i2b5_i2_t56_preserve_plan_contract(
     )
     assert plan.graph_recomputations == ("cycles",)
 
+
+@pytest.mark.parametrize(
+    "force_full_graph", [False, True]
+)
+def test_sp_t4_i2b5_i3_t57_executor_graph_switch(
+    tmp_path, isolated_dirs, monkeypatch,
+    force_full_graph,
+):
+    from contextor.core.analysis.incremental import (
+        plan_executor as executor,
+    )
+
+    root = write_synthetic_repository(
+        tmp_path / "repo", _I1_SAFE
+    )
+    _, engine = _i1_full_engine(root)
+
+    target = root / "pkg/a.py"
+    target.write_text(
+        _i2b1_source(guarded=False),
+        encoding="utf-8",
+    )
+
+    prepared = preparation.prepare_source_update(
+        file_path=target,
+        module_path="pkg.a",
+        is_new=False,
+        old_module=engine.state.modules["pkg.a"],
+        old_artifacts=engine.state.artifacts.get("pkg.a"),
+        old_usage=engine.state.module_usages.get("pkg.a"),
+        persistent_id=engine.registry.get_module_id("pkg.a"),
+        old_collision_facts=engine.state.collision_facts.get("pkg.a"),
+        old_reexport_facts=engine.state.reexport_facts_by_module.get(
+            "pkg.a"
+        ),
+        source_key="pkg/a.py",
+    )
+    assert not prepared.has_error
+
+    plan = RefreshPlanner.plan_refresh(
+        prepared.delta,
+        usage_delta=prepared.usage_delta,
+        module_usages=engine.state.module_usages,
+        collision_facts_changed=prepared.collision_facts_changed,
+    )
+    assert "dependency_graph" in plan.patch_families
+
+    original_build = executor.build_graph
+    original_resolve = executor.resolve_module_edges
+    build_calls = []
+    resolve_calls = []
+
+    def observed_build(*args, **kwargs):
+        build_calls.append(True)
+        return original_build(*args, **kwargs)
+
+    def observed_resolve(*args, **kwargs):
+        resolve_calls.append(args[0])
+        return original_resolve(*args, **kwargs)
+
+    monkeypatch.setattr(
+        executor, "build_graph", observed_build
+    )
+    monkeypatch.setattr(
+        executor, "resolve_module_edges", observed_resolve
+    )
+
+    previous_graph = engine.state.dependency_graph
+
+    outcome = executor.execute_refresh_plan(
+        state=engine.state,
+        delta=prepared.delta,
+        usage_delta=prepared.usage_delta,
+        plan=plan,
+        new_imports=prepared.new_imports,
+        new_artifacts=prepared.new_artifacts,
+        new_usage=prepared.new_usage,
+        root_path=root,
+        file_path=str(target.resolve()),
+        new_collision_facts=prepared.new_collision_facts,
+        new_reexport_facts=prepared.new_reexport_facts,
+        force_full_graph=force_full_graph,
+    )
+
+    assert len(build_calls) == int(force_full_graph)
+    assert resolve_calls == (
+        [] if force_full_graph else ["pkg.a"]
+    )
+    assert (
+        outcome.candidate_state.dependency_graph
+        is not None
+    )
+    assert engine.state.dependency_graph is previous_graph
+    assert (
+        "pkg.b"
+        in outcome.candidate_state.dependency_graph
+        .hard_edges["pkg.a"]
+    )
+
+
+@pytest.mark.parametrize(
+    "force_full_graph,expected_exception",
+    [
+        (1, TypeError),
+        ("yes", TypeError),
+        (True, ValueError),
+    ],
+)
+def test_sp_t4_i2b5_i3_t58_invalid_graph_request(
+    tmp_path, force_full_graph, expected_exception,
+):
+    from contextor.core.analysis.incremental import (
+        plan_executor as executor,
+    )
+    from contextor.core.analysis.state_manager import FileDelta
+    from contextor.core.domain.refresh_plan import RefreshPlan
+
+    with pytest.raises(expected_exception):
+        executor.execute_refresh_plan(
+            state=RepositoryAnalysisState(),
+            delta=FileDelta(module_path="pkg.a"),
+            usage_delta=None,
+            plan=RefreshPlan(),
+            new_imports=[],
+            new_artifacts={},
+            new_usage=None,
+            root_path=tmp_path,
+            file_path=str(tmp_path / "a.py"),
+            force_full_graph=force_full_graph,
+        )
+
