@@ -1,162 +1,131 @@
-# SP-T4-I2B5-I4B-I2A — semantic no-op
+# SP-T4-I2B5-I4B-T67 — fail-closed przed no-op
 
 ## PREFLIGHT
 
-- **DIRECT_EVIDENCE:** Contextor MCP przed edycją raportował revision `1450`, `provenance=live`, `canonical_state=fresh`, `workspace_sync=verified` dla `engine.py`; syntax=0/fresh, graph/cycles fresh, cycles=16, `cycle_semantics=stale`, `resync_required=false`.
-- **DIRECT_EVIDENCE:** blok klasyfikacji znajdował się po warunku `if plan.is_empty and not is_new and not delta.is_deleted`; no-op wywoływał `_commit_syntax_candidate`, następnie `state_manager.update_state`. `_commit_syntax_candidate` zeruje evidence do `{}`.
-- **DIRECT_EVIDENCE:** `_failed_commit_guard` zapisuje kopię `vars(state)` oraz state manager mappingu i odtwarza oba przy wyjątku.
-- **UNKNOWN:** HEAD i `git status` nie zostały zapisane przed edycją. Po edycji HEAD wynosił `679095ed5a56d855dd66fd890db8e785ff44671a`, a status wskazywał wyłącznie `engine.py` jako zmieniony plik produkcyjny.
+- **DIRECT_EVIDENCE:** Contextor MCP source range pokazał koniec `tests/test_p1d3_d2b2_type_only.py` na T66 (`source_total_lines=4846`); T67 nie istniał. Engine freshness envelope w preflight wskazywał revision `1451`, `provenance=live`, `workspace_sync=verified`.
+- **DIRECT_EVIDENCE:** `FileDelta.is_empty` zwraca `True`, gdy nie ma zmian membership, importów, artefaktów ani metadanych.
+- **CODE_PATH_PROVED:** przy invalid baseline helper działa fail-closed. Gdy zmienia importy zachowanego modułu, planner rozszerza plan o `modules`/`dependency_graph`; wtedy semantic no-op warunek widzi rozszerzony plan i przepuszcza operację do executora mimo `delta.is_empty=True`.
+- **DIRECT_EVIDENCE:** HEAD przed zmianą: `7ae3c229d91303cc1736fbd296be221aefefae16`; working tree czysty, plik testowy bez wcześniejszego diffu. Interpreter: CPython 3.15.2.
 
-## EXACT IMPLEMENTATION
+## CHANGE
 
-- Przeniesiono istniejący blok `provisional` → warunkowy `Module` → `reclassify_incremental_type_only` → `plan_type_only_graph_refresh` bez zmian treści, bezpośrednio po `RefreshPlanner.plan_refresh` i przed warunek semantic no-op. Poprzednią kopię bloku usunięto.
-- Warunek `if plan.is_empty and not is_new and not delta.is_deleted` pozostał bez zmian i teraz korzysta z planu po plannerze type-only.
-- W no-op guardzie, bezpośrednio po `_commit_syntax_candidate(...)`, dodano `self.state.typing_guard_evidence = updated_evidence`, przed `state_manager.update_state(file_path)`.
-- Gałąź deletion, pozostałe przypisania stanu, argumenty executora i `_commit_syntax_candidate` pozostały bez zmian.
-- **CODE_PATH_PROVED:** gdy planner zostawia plan pusty, no-op nadal pomija executor. Po wyczyszczeniu evidence przez `_commit_syntax_candidate` przypisuje wynik helpera; oba przypisania wykonują się w `_failed_commit_guard`.
+- Dopisano na końcu dokładnie jeden test `test_sp_t4_i2b5_i4b_t67_invalid_baseline_noop` zgodnie z podanym ciałem.
+- Nie zmieniono kodu produkcyjnego, istniejących asercji, helperów ani monkeypatchy.
+- **DIRECT_EVIDENCE:** finalny Git diff zawiera wyłącznie dopisany test T67.
+- **NOTATKA WYKONAWCZA:** pierwszy anchor patcha był niejednoznaczny i tymczasowo umieścił test przed końcem pliku. Błąd wykryto przed uruchomieniem testów, tę kopię usunięto i dopisano T67 za unikalnym ogonem T66. Przywrócono też jedną pustą linię T63 do stanu bazowego. Finalny diff potwierdza brak zmian istniejących testów. Feed MCP odnotował pośrednie zdarzenia pliku; końcowy stan potwierdzono osobno na revision `1455`.
 
-## T66 EVIDENCE / NO-OP
+## TESTS
 
-- **DIRECT_EVIDENCE:** T66 zakończył się PASS. Assercje potwierdzają schema-v2, `global_policy_satisfied is True`, zmianę fingerprintu `pkg.c`, nowy obiekt evidence oraz zachowanie starego fingerprintu w `before_evidence`.
-- **DIRECT_EVIDENCE:** T66 potwierdza także `engine.state.modules is before_modules`, `engine.state.dependency_graph is before_graph` oraz guarded import `type_only is True` po statusie `UNCHANGED`.
-- **LIMITATION / INFERENCE:** fingerprint został sprawdzony asercją nierówności; test nie raportuje jego wartości. To jeden syntetyczny przypadek komentarza dopisanego do `pkg/c.py`, nie dowód dla wszystkich możliwych semantycznych no-op.
+Uruchomiono wyłącznie wskazane testy, na CPython 3.15.2, w dwóch parach i kolejności z promptu.
 
-## TARGETED TESTS
+Pierwsza para: T67, następnie T66.
 
-CPython 3.15.2, uruchomiono wyłącznie wskazane testy z `tests/test_p1d3_d2b2_type_only.py`:
+```text
+2 passed in 5.90s
+```
+
+Druga para: T62, następnie T65.
+
+```text
+2 passed in 2.97s
+```
 
 | Test | Wynik |
 |---|---|
+| T67 `invalid_baseline_noop` | PASS |
 | T66 `noop_evidence_refresh` | PASS |
-| T06 `updated_invalidates_evidence` | PASS |
 | T62 `engine_global_reclassification` | PASS |
-| T63 `consecutive_updates` | PASS |
-| T64 `deletion_restores_soft` | PASS |
 | T65 `invalid_baseline_fails_closed` | PASS |
-| T07 `syntax_error_invalidates_evidence` | PASS |
-| T08 `rejected_transaction_preserves_evidence` | PASS |
 
-```text
-8 passed in 9.87s
-```
+Brak tracebacków. Nie uruchamiano innych testów, pełnego pytest ani FULL.
 
-Nie uruchamiano pełnego pytest ani FULL. Brak tracebacków.
+## T67 EVIDENCE
+
+- **DIRECT_EVIDENCE:** T67 przechodzi z `result.delta.is_empty is True` i `result.status == "UPDATED"`.
+- **DIRECT_EVIDENCE:** po update evidence pozostaje `{}`, guarded import jest `type_only=False`, a `pkg.b` przechodzi z soft edge do hard edge.
+- **DIRECT_EVIDENCE:** nowe `modules` i `dependency_graph` mają inną tożsamość. Zachowane referencje `before_modules`/`before_graph` nadal mają `type_only=True` i soft edge.
+- **INFERENCE:** w tym świadku status `UPDATED` wynika z planu poszerzonego przez fail-closed reclassyfikację, mimo pustego surowego `FileDelta`; asercje T67 oraz ścieżka helper→planner→executor są z tym zgodne.
+- **LIMITATION:** jest to jeden syntetyczny świadek `_I1_SAFE`; nie dowodzi zachowania dla wszystkich postaci repozytoriów ani wszystkich zmian źródeł, które dają pusty `FileDelta`.
 
 ## MCP POST-CHANGE AUDIT
 
-- **DIRECT_EVIDENCE:** event `desktop_watcher`, `operation=update_file`, `status=UPDATED` dla `engine.py`, revision `1451`; continuity=`continuous`, `resync_required=false`, `resync_reason=null`.
-- **DIRECT_EVIDENCE:** MCP `update_file` symbol response: canonical revision `1451`, provenance=`live`, workspace_sync=`verified`, canonical_state=`fresh`.
-- **DIRECT_EVIDENCE:** syntax diagnostics=0/fresh. Graph/module/topology/artifact-consumption/cycles/collisions/lineage families fresh. Cycles=16/fresh; cycle warning view fresh, active warnings=16. `cycle_semantics=stale`.
-- **LIMITATION:** synchronizacja źródła przez watcher nie dowodzi adopcji kodu przez proces. Restartu nie wykonywano.
-
-## I2A SCOPE LIMITATIONS
-
-- Zmiana obejmuje ścieżkę add/update, która po reclassyfikacji nadal ma `plan.is_empty`; deletion nie została zmieniona.
-- T66 sprawdza jedną zmianę źródła bez wpływu na importy/graf. Pozostałe wskazane testy sprawdzają globalną reclassyfikację, kolejne commity, deletion, fail-closed, parse-error i odrzuconą transakcję w ich syntetycznych przypadkach.
-- **LIMITATION:** nie uruchamiano FULL ani pełnego pytest; wynik nie stanowi certyfikacji wszystkich repozytoriów i wszystkich form semantycznego no-op.
+- **DIRECT_EVIDENCE:** końcowy event `desktop_watcher`, `operation=update_file`, `status=UPDATED` dla pliku testowego, revision `1455`; continuity=`continuous`, `resync_required=false`, `resync_reason=null`; `blast_radius_state=deferred`, affected modules=0.
+- **DIRECT_EVIDENCE:** MCP odczytał pełny T67 z `canonical_state=fresh`, `workspace_sync=verified`, `provenance=live`, revision `1455`.
+- **DIRECT_EVIDENCE:** syntax diagnostics=0/fresh; graph/module/topology/artifact-consumption/cycles/collisions/lineage families fresh. Cycles=16/fresh; cycle warning view fresh, active warnings=16. `cycle_semantics=stale`.
+- Źródło zostało zsynchronizowane przez watcher; `update_file` MCP nie wywoływano. Restartu nie wykonywano.
 
 ## FINAL VERDICT
 
-**I2A_IMPLEMENTED; TARGETED_TESTS_PASS.** Dokładny blok przeniesiono, no-op zachowuje odświeżone evidence, a wskazane osiem testów przeszło. Ograniczenia zakresu pozostają jak wyżej.
+**T67_PASS** — dodany test i pozostałe wskazane testy przeszły; końcowy source jest verified w LIVE. Zakres pozostaje ograniczony do T67 i wskazanego subsetu.
 
 ## FILES_CHANGED
 
-- `contextor/core/analysis/incremental/engine.py` — jedyny zmieniony plik produkcyjny.
-- `walkthrough.md` — wymagany raport; nie zawiera własnego diffu.
+- `tests/test_p1d3_d2b2_type_only.py` — jedyny zmieniony plik testowy.
+- `walkthrough.md` — wymagany raport; bez własnego diffu.
 
 ## FULL_DIFFS
 
-### `contextor/core/analysis/incremental/engine.py`
+### `tests/test_p1d3_d2b2_type_only.py`
 
 ```diff
-diff --git a/contextor/core/analysis/incremental/engine.py b/contextor/core/analysis/incremental/engine.py
-index a0a0740..502baf7 100644
---- a/contextor/core/analysis/incremental/engine.py
-+++ b/contextor/core/analysis/incremental/engine.py
-@@ -800,6 +800,38 @@ class IncrementalAnalysisEngine:
-                 collision_facts_changed=prep.collision_facts_changed,
-             )
+diff --git a/tests/test_p1d3_d2b2_type_only.py b/tests/test_p1d3_d2b2_type_only.py
+index 09eabef..74448b5 100644
+--- a/tests/test_p1d3_d2b2_type_only.py
++++ b/tests/test_p1d3_d2b2_type_only.py
+@@ -4844,3 +4844,55 @@ def test_sp_t4_i2b5_i4b_t66_noop_evidence_refresh(
+         engine.state
+     ).type_only is True
  
-+            provisional = dict(self.state.modules)
 +
-+            if "modules" in plan.patch_families:
-+                path = Path(file_path)
-+                provisional[module_path] = Module(
-+                    module_id=module_path,
-+                    path=str(path.relative_to(self.root_path)),
-+                    absolute_path=str(path.resolve()),
-+                    imports=list(new_imports),
-+                )
++def test_sp_t4_i2b5_i4b_t67_invalid_baseline_noop(
++    tmp_path, isolated_dirs,
++):
++    root = write_synthetic_repository(
++        tmp_path / "repo", _I1_SAFE
++    )
++    _, engine = _i1_full_engine(root)
 +
-+            classified_modules, updated_evidence = (
-+                reclassify_incremental_type_only(
-+                    provisional,
-+                    previous_modules=self.state.modules,
-+                    previous_evidence=self.state.typing_guard_evidence,
-+                    changed_module_id=module_path,
-+                    changed_source_path=source_path,
-+                    changed_imports=new_imports,
-+                    changed_source_evidence=(
-+                        prep.typing_guard_source_evidence
-+                    ),
-+                )
-+            )
++    before_modules = engine.state.modules
++    before_graph = engine.state.dependency_graph
 +
-+            plan, force_full_graph = plan_type_only_graph_refresh(
-+                plan,
-+                changed_module_id=module_path,
-+                previous_modules=self.state.modules,
-+                classified_modules=classified_modules,
-+            )
++    assert _i1_guarded_import(
++        engine.state
++    ).type_only is True
++    assert "pkg.b" in before_graph.soft_edges["pkg.a"]
 +
-             # Check if true no-op
-             if plan.is_empty and not is_new and not delta.is_deleted:
-                 # Parsing proved the tracked source is semantically unchanged.
-@@ -815,6 +847,7 @@ class IncrementalAnalysisEngine:
-                             "SOURCE_CHANGED"
-                         ),
-                     )
-+                    self.state.typing_guard_evidence = updated_evidence
-                     self.state_manager.update_state(file_path)
-                     self.state.module_usages_manifest = _updated_module_usage_manifest(
-                         self.state.module_usages_manifest,
-@@ -847,38 +880,6 @@ class IncrementalAnalysisEngine:
-                     },
-                 )
- 
--            provisional = dict(self.state.modules)
--
--            if "modules" in plan.patch_families:
--                path = Path(file_path)
--                provisional[module_path] = Module(
--                    module_id=module_path,
--                    path=str(path.relative_to(self.root_path)),
--                    absolute_path=str(path.resolve()),
--                    imports=list(new_imports),
--                )
--
--            classified_modules, updated_evidence = (
--                reclassify_incremental_type_only(
--                    provisional,
--                    previous_modules=self.state.modules,
--                    previous_evidence=self.state.typing_guard_evidence,
--                    changed_module_id=module_path,
--                    changed_source_path=source_path,
--                    changed_imports=new_imports,
--                    changed_source_evidence=(
--                        prep.typing_guard_source_evidence
--                    ),
--                )
--            )
--
--            plan, force_full_graph = plan_type_only_graph_refresh(
--                plan,
--                changed_module_id=module_path,
--                previous_modules=self.state.modules,
--                classified_modules=classified_modules,
--            )
--
-             # 3. Apply and Commit driven by RefreshPlan
-             _trace_incremental_phase(
-                 "INCREMENTAL_APPLY_START",
++    engine.state.typing_guard_evidence = {}
++
++    target = root / "pkg/c.py"
++    with target.open("a", encoding="utf-8") as stream:
++        stream.write("\n# evidence fallback\n")
++
++    result = engine.update_file(str(target.resolve()))
++
++    assert result.delta.is_empty is True
++    assert result.status == "UPDATED"
++
++    assert engine.state.typing_guard_evidence == {}
++    assert _i1_guarded_import(
++        engine.state
++    ).type_only is False
++
++    assert "pkg.b" in (
++        engine.state.dependency_graph
++        .hard_edges["pkg.a"]
++    )
++    assert "pkg.b" not in (
++        engine.state.dependency_graph
++        .soft_edges["pkg.a"]
++    )
++
++    assert engine.state.modules is not before_modules
++    assert engine.state.dependency_graph is not before_graph
++
++    before_guarded = next(
++        ref for ref in before_modules["pkg.a"].imports
++        if ref.module == "pkg.b"
++    )
++    assert before_guarded.type_only is True
++    assert "pkg.b" in before_graph.soft_edges["pkg.a"]
++
 ```

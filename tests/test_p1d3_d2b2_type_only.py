@@ -4844,3 +4844,55 @@ def test_sp_t4_i2b5_i4b_t66_noop_evidence_refresh(
         engine.state
     ).type_only is True
 
+
+def test_sp_t4_i2b5_i4b_t67_invalid_baseline_noop(
+    tmp_path, isolated_dirs,
+):
+    root = write_synthetic_repository(
+        tmp_path / "repo", _I1_SAFE
+    )
+    _, engine = _i1_full_engine(root)
+
+    before_modules = engine.state.modules
+    before_graph = engine.state.dependency_graph
+
+    assert _i1_guarded_import(
+        engine.state
+    ).type_only is True
+    assert "pkg.b" in before_graph.soft_edges["pkg.a"]
+
+    engine.state.typing_guard_evidence = {}
+
+    target = root / "pkg/c.py"
+    with target.open("a", encoding="utf-8") as stream:
+        stream.write("\n# evidence fallback\n")
+
+    result = engine.update_file(str(target.resolve()))
+
+    assert result.delta.is_empty is True
+    assert result.status == "UPDATED"
+
+    assert engine.state.typing_guard_evidence == {}
+    assert _i1_guarded_import(
+        engine.state
+    ).type_only is False
+
+    assert "pkg.b" in (
+        engine.state.dependency_graph
+        .hard_edges["pkg.a"]
+    )
+    assert "pkg.b" not in (
+        engine.state.dependency_graph
+        .soft_edges["pkg.a"]
+    )
+
+    assert engine.state.modules is not before_modules
+    assert engine.state.dependency_graph is not before_graph
+
+    before_guarded = next(
+        ref for ref in before_modules["pkg.a"].imports
+        if ref.module == "pkg.b"
+    )
+    assert before_guarded.type_only is True
+    assert "pkg.b" in before_graph.soft_edges["pkg.a"]
+
