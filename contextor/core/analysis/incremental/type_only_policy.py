@@ -5,6 +5,7 @@ import re
 
 from contextor.core.domain.imports import ImportRef
 from contextor.core.domain.module import Module
+from contextor.core.domain.refresh_plan import RefreshPlan
 from contextor.core.symbol_engine.indexer import (
     _classify_type_only_modules,
 )
@@ -456,3 +457,111 @@ def reclassify_incremental_type_only(
         evidence[key] = dict(sorted(evidence[key].items()))
 
     return classified, evidence
+
+
+def plan_type_only_graph_refresh(
+    plan: RefreshPlan,
+    *,
+    changed_module_id: str,
+    previous_modules: dict[str, Module],
+    classified_modules: dict[str, Module],
+) -> tuple[RefreshPlan, bool]:
+    """Expand existing refresh families for changed import semantics."""
+    if (
+        type(plan) is not RefreshPlan
+        or type(changed_module_id) is not str
+        or not changed_module_id
+        or type(previous_modules) is not dict
+        or type(classified_modules) is not dict
+    ):
+        raise TypeError("Invalid type-only graph planning inputs")
+
+    for modules in (previous_modules, classified_modules):
+        if any(
+            type(module_id) is not str
+            or type(module) is not Module
+            or type(module.imports) is not list
+            for module_id, module in modules.items()
+        ):
+            raise TypeError("Invalid type-only module mapping")
+
+    before_ids = set(previous_modules)
+    after_ids = set(classified_modules)
+
+    membership_changed = before_ids != after_ids
+
+    import_changes = {
+        module_id
+        for module_id in before_ids & after_ids
+        if (
+            previous_modules[module_id].imports
+            != classified_modules[module_id].imports
+        )
+    }
+
+    if not membership_changed and not import_changes:
+        return plan, False
+
+    force_full_graph = (
+        membership_changed
+        or any(
+            module_id != changed_module_id
+            for module_id in import_changes
+        )
+    )
+
+    families = list(plan.patch_families)
+
+    if "modules" not in families:
+        families.insert(0, "modules")
+
+    if "dependency_graph" not in families:
+        insertion = next(
+            (
+                families.index(name)
+                for name in (
+                    "artifact_consumption",
+                    "cached_analytics",
+                    "collision_facts",
+                    "collisions",
+                )
+                if name in families
+            ),
+            len(families),
+        )
+        families.insert(insertion, "dependency_graph")
+
+    if "cached_analytics" not in families:
+        insertion = next(
+            (
+                families.index(name)
+                for name in ("collision_facts", "collisions")
+                if name in families
+            ),
+            len(families),
+        )
+        families.insert(insertion, "cached_analytics")
+
+    if (
+        families.index("dependency_graph")
+        > families.index("cached_analytics")
+    ):
+        raise ValueError(
+            "Dependency graph must precede cached analytics"
+        )
+
+    graph_recomputations = (
+        "macro_metrics",
+        "reverse_blast_radius",
+        "advanced_graph_metrics",
+        "cycles",
+    )
+
+    return (
+        replace(
+            plan,
+            patch_families=tuple(families),
+            graph_recomputations=graph_recomputations,
+        ),
+        force_full_graph,
+    )

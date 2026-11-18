@@ -4048,3 +4048,190 @@ def test_sp_t4_i2b5_i1_t51_candidate_is_not_published(
     assert state.typing_guard_evidence is original
     assert state.typing_guard_evidence["schema_version"] == 2
 
+
+def _i2b5_i2_fixture(tmp_path):
+    root = write_synthetic_repository(
+        tmp_path / "repo", _I1_SAFE
+    )
+    index, _ = _index_graph(root)
+    return dict(index.modules)
+
+
+def _i2b5_i2_change_guard(modules):
+    changed = dict(modules)
+    current = changed["pkg.a"]
+    changed["pkg.a"] = replace(
+        current,
+        imports=[
+            replace(ref, type_only=False)
+            if ref.module == "pkg.b" else ref
+            for ref in current.imports
+        ],
+    )
+    return changed
+
+
+def test_sp_t4_i2b5_i2_t52_no_graph_delta(
+    tmp_path, isolated_dirs,
+):
+    from contextor.core.domain.refresh_plan import RefreshPlan
+    from contextor.core.analysis.incremental.type_only_policy import (
+        plan_type_only_graph_refresh,
+    )
+
+    modules = _i2b5_i2_fixture(tmp_path)
+    plan = RefreshPlan()
+
+    result, full = plan_type_only_graph_refresh(
+        plan,
+        changed_module_id="pkg.c",
+        previous_modules=modules,
+        classified_modules=dict(modules),
+    )
+
+    assert result is plan
+    assert full is False
+    assert result.is_empty
+
+
+def test_sp_t4_i2b5_i2_t53_local_import_delta(
+    tmp_path, isolated_dirs,
+):
+    from contextor.core.domain.refresh_plan import RefreshPlan
+    from contextor.core.analysis.incremental.type_only_policy import (
+        plan_type_only_graph_refresh,
+    )
+
+    before = _i2b5_i2_fixture(tmp_path)
+    after = _i2b5_i2_change_guard(before)
+    plan = RefreshPlan()
+
+    result, full = plan_type_only_graph_refresh(
+        plan,
+        changed_module_id="pkg.a",
+        previous_modules=before,
+        classified_modules=after,
+    )
+
+    assert full is False
+    assert "modules" in result.patch_families
+    assert "dependency_graph" in result.patch_families
+    assert "cached_analytics" in result.patch_families
+    assert result.patch_families.index(
+        "dependency_graph"
+    ) < result.patch_families.index("cached_analytics")
+    assert result.graph_recomputations == (
+        "macro_metrics",
+        "reverse_blast_radius",
+        "advanced_graph_metrics",
+        "cycles",
+    )
+    assert plan.is_empty
+
+
+def test_sp_t4_i2b5_i2_t54_unrelated_import_delta(
+    tmp_path, isolated_dirs,
+):
+    from contextor.core.domain.refresh_plan import RefreshPlan
+    from contextor.core.analysis.incremental.type_only_policy import (
+        plan_type_only_graph_refresh,
+    )
+
+    before = _i2b5_i2_fixture(tmp_path)
+    after = _i2b5_i2_change_guard(before)
+
+    result, full = plan_type_only_graph_refresh(
+        RefreshPlan(),
+        changed_module_id="pkg.c",
+        previous_modules=before,
+        classified_modules=after,
+    )
+
+    assert full is True
+    assert "dependency_graph" in result.patch_families
+    assert "cycles" in result.graph_recomputations
+
+
+@pytest.mark.parametrize("deleted", [False, True])
+def test_sp_t4_i2b5_i2_t55_module_membership(
+    tmp_path, isolated_dirs, deleted,
+):
+    from contextor.core.domain.refresh_plan import RefreshPlan
+    from contextor.core.analysis.incremental.type_only_policy import (
+        plan_type_only_graph_refresh,
+    )
+
+    before = _i2b5_i2_fixture(tmp_path)
+    after = dict(before)
+
+    if deleted:
+        after.pop("pkg.c")
+    else:
+        after["other"] = replace(
+            after["pkg.c"],
+            module_id="other",
+        )
+
+    result, full = plan_type_only_graph_refresh(
+        RefreshPlan(),
+        changed_module_id=(
+            "pkg.c" if deleted else "other"
+        ),
+        previous_modules=before,
+        classified_modules=after,
+    )
+
+    assert full is True
+    assert "dependency_graph" in result.patch_families
+
+
+def test_sp_t4_i2b5_i2_t56_preserve_plan_contract(
+    tmp_path, isolated_dirs,
+):
+    from contextor.core.domain.refresh_plan import RefreshPlan
+    from contextor.core.analysis.incremental.type_only_policy import (
+        plan_type_only_graph_refresh,
+    )
+
+    before = _i2b5_i2_fixture(tmp_path)
+    after = _i2b5_i2_change_guard(before)
+
+    plan = RefreshPlan(
+        patch_families=(
+            "definitions",
+            "artifact_consumption",
+            "cached_analytics",
+        ),
+        graph_recomputations=("cycles",),
+        refresh_completeness="conservative",
+        semantic_certainty="runtime_unresolved",
+        reason="synthetic",
+    )
+
+    result, full = plan_type_only_graph_refresh(
+        plan,
+        changed_module_id="pkg.c",
+        previous_modules=before,
+        classified_modules=after,
+    )
+
+    assert full is True
+    assert result.refresh_completeness == "conservative"
+    assert result.semantic_certainty == "runtime_unresolved"
+    assert result.reason == "synthetic"
+    assert result.patch_families.index(
+        "dependency_graph"
+    ) < result.patch_families.index("cached_analytics")
+    assert result.graph_recomputations == (
+        "macro_metrics",
+        "reverse_blast_radius",
+        "advanced_graph_metrics",
+        "cycles",
+    )
+    assert plan.patch_families == (
+        "definitions",
+        "artifact_consumption",
+        "cached_analytics",
+    )
+    assert plan.graph_recomputations == ("cycles",)
+
