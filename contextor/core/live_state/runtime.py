@@ -461,6 +461,33 @@ class AuthorityLivenessVerifier:
                 endpoint_alive = None
                 endpoint_creation = None
             endpoint_is_dead = endpoint_alive is False
+            endpoint_pid_reused = (
+                endpoint_matches
+                and isinstance(exc, ConnectionRefusedError)
+                and alive is True
+                and creation_time is not None
+                and not process_matches
+                and endpoint_alive is True
+                and endpoint_creation is not None
+                and str(endpoint_creation)
+                != endpoint.process_start_identity
+            )
+            if endpoint_pid_reused:
+                return finish(
+                    LivenessResult.stale(
+                        process_alive=True,
+                        process_identity_matches=False,
+                        endpoint_available=False,
+                        endpoint_matches=True,
+                        reason=(
+                            "recorded authority PID identity was "
+                            "replaced and endpoint refused connection"
+                        ),
+                        endpoint_evidence_verified=True,
+                    ),
+                    endpoint,
+                    exc,
+                )
             if not endpoint_matches and process_stale and endpoint_is_dead:
                 return finish(LivenessResult.stale(
                     process_alive=bool(alive),

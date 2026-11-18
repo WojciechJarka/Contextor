@@ -478,3 +478,180 @@ def test_runtime_lease_serialization_round_trip_and_test_root_isolation(tmp_path
 def test_process_identity_requires_start_token_and_is_not_pid_only():
     with pytest.raises(RuntimeLeaseError):
         ProcessIdentity(os.getpid(), "")
+
+
+def _sp_live_r3_verify_case(
+    monkeypatch,
+    *,
+    before,
+    after,
+    before_alive=True,
+    after_alive=True,
+    error_type=ConnectionRefusedError,
+    domain_matches=True,
+    lease=None,
+):
+    from types import SimpleNamespace
+    from contextor.core.live_state import runtime
+
+    if lease is None:
+        lease = SimpleNamespace(
+            service_pid=45123,
+            service_instance_id="synthetic-instance",
+            lease_generation=7,
+            process_start_identity="100",
+        )
+
+    endpoint = SimpleNamespace(
+        pid=lease.service_pid,
+        service_instance_id=lease.service_instance_id,
+        lease_generation=lease.lease_generation,
+        process_start_identity=lease.process_start_identity,
+        fingerprint=lambda: "synthetic-fingerprint",
+    )
+
+    observations = iter([
+        (before, before_alive),
+        (after, after_alive),
+    ])
+    observed_pids = []
+
+    def process_identity(pid):
+        observed_pids.append(pid)
+        creation, alive = next(observations)
+        return "synthetic-process", creation, alive
+
+    class RefusingClient:
+        def __init__(self, _endpoint):
+            pass
+
+        def authority_status(self):
+            raise error_type("synthetic transport failure")
+
+    monkeypatch.setattr(
+        runtime, "_process_identity", process_identity
+    )
+    monkeypatch.setattr(
+        runtime, "_read_endpoint",
+        lambda _root, strict=True: endpoint,
+    )
+    monkeypatch.setattr(
+        runtime, "_endpoint_matches_domain",
+        lambda _endpoint, _domain: domain_matches,
+    )
+    monkeypatch.setattr(
+        runtime, "LiveStateClient", RefusingClient,
+    )
+    monkeypatch.setattr(
+        runtime, "_safe_trace_event",
+        lambda *_args, **_kwargs: None,
+    )
+
+    result = runtime.AuthorityLivenessVerifier(
+        SimpleNamespace(repo_root="synthetic-root")
+    ).verify(lease)
+
+    assert observed_pids == [
+        lease.service_pid, lease.service_pid
+    ]
+    return result
+
+
+@pytest.mark.parametrize(
+    "before,after,error_type,matches,expected",
+    [
+        (
+            "200", "200", ConnectionRefusedError,
+            True, LivenessStatus.STALE,
+        ),
+        (
+            "100", "100", ConnectionRefusedError,
+            True, LivenessStatus.UNKNOWN,
+        ),
+        (
+            None, "200", ConnectionRefusedError,
+            True, LivenessStatus.UNKNOWN,
+        ),
+        (
+            "200", None, ConnectionRefusedError,
+            True, LivenessStatus.UNKNOWN,
+        ),
+        (
+            "200", "100", ConnectionRefusedError,
+            True, LivenessStatus.UNKNOWN,
+        ),
+        (
+            "200", "200", TimeoutError,
+            True, LivenessStatus.UNKNOWN,
+        ),
+        (
+            "200", "200", ConnectionResetError,
+            True, LivenessStatus.UNKNOWN,
+        ),
+        (
+            "200", "200", ConnectionRefusedError,
+            False, LivenessStatus.UNKNOWN,
+        ),
+    ],
+)
+def test_sp_live_r3_pid_identity_and_transport_gate(
+    monkeypatch, before, after,
+    error_type, matches, expected,
+):
+    result = _sp_live_r3_verify_case(
+        monkeypatch,
+        before=before,
+        after=after,
+        error_type=error_type,
+        domain_matches=matches,
+    )
+    assert result.status is expected
+    assert result.confirmed_stale is (
+        expected is LivenessStatus.STALE
+    )
+
+
+def test_sp_live_r3_dead_pid_existing_contract(
+    monkeypatch,
+):
+    result = _sp_live_r3_verify_case(
+        monkeypatch,
+        before=None,
+        after=None,
+        before_alive=False,
+        after_alive=False,
+    )
+    assert result.status is LivenessStatus.STALE
+    assert result.confirmed_stale is True
+
+
+def test_sp_live_r3_reused_pid_fences_old_generation(
+    tmp_path, monkeypatch,
+):
+    domain = _domain(tmp_path)
+    old_manager = _manager(domain)
+    old_lease = old_manager.acquire()
+
+    result = _sp_live_r3_verify_case(
+        monkeypatch,
+        before="different-process-start",
+        after="different-process-start",
+        lease=old_lease,
+    )
+
+    assert result.status is LivenessStatus.STALE
+    assert result.confirmed_stale is True
+
+    verifier = ScriptedVerifier(result)
+    new_manager = _manager(domain, verifier=verifier)
+    new_lease = new_manager.acquire()
+
+    assert verifier.calls == [old_lease]
+    assert (
+        new_lease.lease_generation
+        == old_lease.lease_generation + 1
+    )
+    assert (
+        new_lease.service_instance_id
+        != old_lease.service_instance_id
+    )
