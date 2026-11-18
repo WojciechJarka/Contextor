@@ -1,294 +1,230 @@
-# SP-LIVE-R3 — PID REUSE RECOVERY FIX
+# SP-T4-I2B5-I1 — Candidate Evidence Isolation
 
 ## PREFLIGHT
 
-- Zaakceptowany preflight SP-LIVE-R3: HEAD `97d5e824b638c0152fac6d7ef48b551ad9ba74ba`; przed edycją jedyną zmianą w worktree było wcześniejsze `walkthrough.md`. Oba pliki docelowe były czyste, a literalne anchory zgadzały się z preflightem.
-- Contextor MCP preflight: `repo_id=ctx_8efc50d8`, revision 1431, canonical state fresh, provenance `snapshot`, global `workspace_sync=unverified`, `resync_required=false`. Konteksty obu plików wskazywały revision 1431, per-file `workspace_sync=verified` przed zmianą, syntax `checked_and_none`.
-- Po zmianie testy wykonano przez `C:\Temp\Contextor_Repo\.venv\Scripts\python.exe` — CPython 3.15.2.
+- DIRECT_EVIDENCE — HEAD before implementation: 5cdda2adc2e62b4bec6b68fd682192b76235032e; branch main...origin/main.
+- DIRECT_EVIDENCE — git status before implementation: walkthrough.md was already modified as the report artifact; both allowed source/test targets were clean.
+- DIRECT_EVIDENCE — pre-change LIVE: canonical revision 1433, provenance live, canonical_state fresh, resync_required=false. Graph and cycles were fresh; syntax diagnostics reported zero errors. cycle_semantics was stale and outside this task.
+- DIRECT_EVIDENCE — pre-change workspace_sync: plan_executor.py and tests/test_p1d3_d2b2_type_only.py were verified at revision 1433.
+- DIRECT_EVIDENCE — interpreter: CPython 3.15.2 is available in the repository virtual environment. The system py -3.15 interpreter is also 3.15.2 but has no pytest installed.
+- DIRECT_EVIDENCE — requested anchors matched current LIVE/source: plan_executor imports at lines 12-13; CandidateState final default field at line 87; return CandidateState at line 700. The test file ended after line 3926, following T48.
+- DIRECT_EVIDENCE — fixtures and selected existing tests: _I1_SAFE, RepositoryAnalysisState, write_synthetic_repository, and _index_graph exist; T01, T05-T08, and T22-T27 are present.
+- DIRECT_EVIDENCE — pre-edit diff scope: plan_executor.py import replacement, one appended CandidateState field, and one first keyword argument in _prepare_candidate_state; append only the exact T49-T51 tests at EOF. No other implementation files were in scope.
 
 ## EXACT_IMPLEMENTATION
 
-- `contextor/core/live_state/runtime.py`: w `AuthorityLivenessVerifier.verify()`, bezpośrednio po `endpoint_is_dead = endpoint_alive is False`, wstawiono dokładnie zatwierdzony warunek `endpoint_pid_reused` i wynik `LivenessResult.stale`. Pozostałe gałęzie verifiera są bez zmian.
-- `tests/live_state/test_runtime_lease.py`: dokładny helper i trzy definicje testowe przekazane w SP-R3 dopisano na końcu, po istniejącym teście w linii 480. Istniejące testy/asercje pozostawiono bez zmian.
-- `contextor/core/live_state/runtime_lease.py` nie zmieniano. `issues.md`, `audyt.txt` i Spiral Prophet nie zmieniano.
-- Rzeczywisty diff Git zawiera tylko wskazany blok produkcyjny i dodany blok testowy. Git wyświetlił ostrzeżenie o roboczych LF normalizowanych do CRLF; diff treści nie pokazuje innych zmian.
+- CODE_PATH_PROVED — plan_executor.py imports deepcopy and dataclasses.field; CandidateState receives typing_guard_evidence with default_factory=dict after all pre-existing fields; _prepare_candidate_state initializes that field with the exact requested deepcopy expression.
+- DIRECT_EVIDENCE — only the requested T49-T51 functions were appended to tests/test_p1d3_d2b2_type_only.py. Existing tests were not edited.
+- DIRECT_EVIDENCE — engine.py, refresh_planner.py, graph construction, classification policy, and existing clear assignments were not changed. No MCP update_file, restart, FULL, commit, push, or staging operation was performed.
+- DIRECT_EVIDENCE — no repository-specific production branch or constant was introduced.
 
-## PID_REUSE_MECHANISM
+## CANDIDATE_EVIDENCE_ISOLATION
 
-- Nowy warunek wymaga jednocześnie: metadanych endpointu dopasowanych do lease; `ConnectionRefusedError`; pierwszego probe żywego PID z dostępnym CreationTime różnym od lease; drugiego probe żywego PID endpointu z dostępnym CreationTime różnym od zapisanej tożsamości endpointu.
-- `LiveStateClient.request()` wywołuje `multiprocessing.connection.Client` i po trace re-raise zachowuje typ błędu (`contextor/core/live_state/ipc.py:2937-2969`); `authority_status()` deleguje do request (`:2977-2978`). To pozwala warunkowi odróżnić odmowę połączenia od timeout/reset i innych błędów.
-- Wynik ustawia `STALE` z `process_alive=True`, `process_identity_matches=False`, endpoint niedostępny i `endpoint_evidence_verified=True`. Istniejący kontrakt `confirmed_stale` w `runtime_lease.py:266-271` uznaje to za potwierdzony stale bez zmiany API lease.
-- Nie dodano identyfikatora repozytorium, ścieżki ani wyjątku specyficznego dla Contextora do logiki warunku.
+- CODE_PATH_PROVED — _prepare_candidate_state recursively copies the input evidence before placing it on the candidate.
+- DIRECT_EVIDENCE — T49 checks equal contents with distinct top-level and nested mapping identities. It also checks distinct candidate ImportRef objects and distinct mutable names lists.
+- DIRECT_EVIDENCE — T49 mutates the candidate fingerprint mapping and candidate ImportRef.names list, then verifies the original state's corresponding values remain unchanged.
+- DIRECT_EVIDENCE — no classification, graph, or publication behavior was changed in this stage.
+- INFERENCE / REVIEW NOTE — the exact requested expression uses getattr(state, "typing_guard_evidence", {}) or {}, so any falsey value is normalized to an empty mapping. The declared evidence field is a dict and the prompt requires this expression; whether a falsey malformed non-dict can occur in persisted state is UNKNOWN. No change was made.
 
-## FAIL_CLOSED_NEGATIVE_CASES
+## INPUT_MUTATION_REGRESSIONS
 
-Nowy test parametryzowany pokrywa osiem przypadków: nowa tożsamość PID + refused/dopasowany endpoint daje STALE; zgodna tożsamość, brak któregokolwiek CreationTime, druga tożsamość zgodna z endpointem, timeout, reset oraz niedopasowany endpoint dają UNKNOWN. Osobny test utrzymuje istniejący kontrakt martwego PID i refused endpoint jako STALE/confirmed.
+- DIRECT_EVIDENCE — T49 covers candidate-side nested mutations leaving the input state unchanged; T51 covers replacing the candidate evidence mapping without publishing it to the input state.
+- INFERENCE / COVERAGE LIMIT — the new tests do not directly mutate the input after candidate preparation and assert the candidate remains unchanged. deepcopy provides isolation in that direction by its operation, but that direction is not separately asserted by T49-T51.
+- DIRECT_EVIDENCE — T50 starts from RepositoryAnalysisState() with its declared default field. It verifies an empty candidate mapping is separate from the state mapping; it does not directly instantiate a legacy object with no typing_guard_evidence attribute.
+- These are coverage boundaries of the exact requested test addition, not observed failures. The literal test block was not expanded.
 
-To są syntetyczne wejścia verifiera. Testy nie wykonują rzeczywistego połączenia do LIVE ani nie ingerują w trwałe lease. Test fencingowy używa `_domain(tmp_path)` i `_manager` z istniejącego pliku; weryfikuje realny acquire/fence na izolowanym stanie testowym.
+## CONSTRUCTOR_COMPATIBILITY
 
-## LEASE_FENCING_REGRESSION
-
-- `RuntimeLeaseManager.acquire()` przechodzi do fencing wyłącznie, gdy `evidence.confirmed_stale` (`contextor/core/live_state/runtime_lease.py:1427-1441`). `_fence_stale_lease` sprawdza zgodność generation i service instance, zapisuje fenced record, usuwa claim/lease i emituje event (`:1279-1305`).
-- `test_sp_live_r3_reused_pid_fences_old_generation` otrzymuje stale z nowego verifier-helpera, przekazuje ten wynik do `ScriptedVerifier` i sprawdza wywołanie verifiera dla starej lease, generation +1 oraz nowy service instance. Potwierdza ścieżkę fencing bez uruchamiania rzeczywistego LIVE.
+- CODE_PATH_PROVED — the new CandidateState field is appended after pre-existing fields; no existing field order or default was changed. Existing positional parameter positions therefore remain in place, with one new trailing defaulted parameter.
+- CODE_PATH_PROVED — the constructor call in _prepare_candidate_state supplies the new value by keyword; existing keyword arguments are unchanged.
+- DIRECT_EVIDENCE — default_factory=dict gives separate empty mappings for separately constructed candidates; T50 verifies candidate/state mapping non-aliasing for the empty default.
+- DIRECT_EVIDENCE — getattr with a {} fallback is present for state objects without the attribute, but a legacy object lacking that attribute was not part of the exact added tests.
 
 ## TARGETED_TESTS
 
-Uruchomiono wyłącznie wskazany plik testowy i testy pasujące do:
-
-```text
-sp_live_r3
-stale_recovery_increments_generation_and_fences_old_service
-pid_reuse_with_same_pid_but_different_start_identity_is_stale
-ambiguous_timeout_or_busy_liveness_rejects_takeover
-confirmed_dead_process_and_unavailable_endpoint_allow_stale_takeover
-default_liveness_does_not_fabricate_endpoint_stale_evidence
-```
-
-Wynik: **18 passed, 20 deselected in 1.88s** na CPython 3.15.2. Nie uruchomiono pełnego pytest.
+- DIRECT_EVIDENCE — executed on repository .venv CPython 3.15.2 using pytest 9.1.1.
+- DIRECT_EVIDENCE — selectors were exactly T49-T51, T01, T05-T08, and T22-T27 in tests/test_p1d3_d2b2_type_only.py.
+- DIRECT_EVIDENCE — result: 15 passed in 9.53s. One selector expands to a parametrized case, yielding 15 collected cases.
+- DIRECT_EVIDENCE — an initial invocation through system py -3.15 could not start because that interpreter lacks pytest; the requested selection was then run successfully via the repository virtual environment. No full pytest suite was run.
 
 ## MCP_POST_CHANGE_AUDIT
 
-- Odczytowy `get_project_architecture(fields=[])`: revision nadal 1431; `provenance=snapshot`, canonical state fresh, global `workspace_sync=unverified`, `resync_required=false`. Zbiorcze syntax errors: 0 (availability fresh); cycles: 16 (availability fresh); cycle semantics: 2 cyclic SCC, 53 cyclic modules, status fresh — wszystkie te wartości pochodzą ze snapshotu revision 1431.
-- `get_file_edit_context` obu plików po zmianie: `workspace_sync=out_of_sync`, revision 1431, provenance snapshot; advisory mówi, że pliki na dysku zmieniły się po utworzeniu canonical revision. Syntax projection nadal pokazuje `checked_and_none`, ale jej revision/snapshot nie uwzględnia tych zmian i nie jest post-change LIVE syntax proof.
-- MCP `get_source_range` dla `runtime.py:457-491` zwrócił nowy blok w aktualnym widoku źródła; potwierdza to literalny anchor/tekst, nie adopcję przez załadowany proces. Nie wywołano `update_file`, FULL ani restartu. Runtime loaded-code adoption pozostaje **NOT_CONFIRMED**; przeładowanie procesu będzie wymagane, aby dowieść adopcji kodu runtime.
-- Graf, cykle i resync z revision 1431 są raportowane jako stan snapshotu; `resync_required=false` nie znosi per-file `out_of_sync` i nie oznacza LIVE-ready.
+- DIRECT_EVIDENCE — canonical LIVE revision 1435, provenance live, canonical_state fresh, resync_required=false.
+- DIRECT_EVIDENCE — desktop_watcher emitted update_file UPDATED at revision 1434 for contextor/core/analysis/incremental/plan_executor.py and at revision 1435 for tests/test_p1d3_d2b2_type_only.py. Event continuity from revision 1433 was continuous; no resync was required.
+- DIRECT_EVIDENCE — per-file workspace_sync for both changed implementation/test files is verified at revision 1435.
+- DIRECT_EVIDENCE — per-file syntax diagnostics are checked_and_none with errors=[]. Global syntax diagnostic count is 0 and fresh.
+- DIRECT_EVIDENCE — graph and cycles are fresh at revision 1435; module_count=670; structural cycle count=16; soft-dependent potential cycle count=1.
+- DIRECT_EVIDENCE — cycle_semantics remains stale. This is unrelated to the patch; the task did not request FULL or a runtime reload.
+- DIRECT_EVIDENCE — current git HEAD remains 5cdda2adc2e62b4bec6b68fd682192b76235032e on main. Status shows only the requested source file, test file, and walkthrough.md modified; no staged changes.
+- DIRECT_EVIDENCE — actual source/test diff was inspected in full and is reproduced below.
 
 ## FINAL_VERDICT
 
-**R3_PASS** — literalny patch trafił w zatwierdzony anchor, testy nowych i wskazanych istniejących przypadków przeszły, a niezależna kontrola kodu potwierdza ograniczenie nowej klasyfikacji do potwierdzonej różnicy start identity i odmowy połączenia. PASS dotyczy implementacji oraz ukierunkowanego zestawu testów, nie wdrożenia do procesu LIVE. `LIVE_ADOPTION=NOT_CONFIRMED`; MCP post-change pozostaje snapshot revision 1431 z targetami `out_of_sync`.
+I2B5_I1_PASS
+
+The exact candidate evidence isolation change is present, the specified focused tests passed, and post-change LIVE synchronization and syntax checks are fresh. This verdict covers I1 candidate isolation only; it does not claim that the I2B4C reclassification helper is integrated into Incremental.
 
 ## FILES_CHANGED
 
-- `C:\Temp\Contextor_Repo\contextor\core\live_state\runtime.py`
-- `C:\Temp\Contextor_Repo\tests\live_state\test_runtime_lease.py`
-- `C:\Temp\Contextor_Repo\walkthrough.md` — raport wymagany zadaniem.
+- contextor/core/analysis/incremental/plan_executor.py
+- tests/test_p1d3_d2b2_type_only.py
+
+walkthrough.md is overwritten as the required report artifact and is not counted as an implementation/test file in this inventory.
 
 ## FULL_DIFFS
 
-Poniżej pełny rzeczywisty diff Git plików produkcyjnego i testowego. Diff walkthrough pominięty jako diff samego raportu.
+The following complete source/test diff is from git diff --unified=0. All changed lines are included; unchanged context lines are omitted by the selected diff mode.
 
-```diff
-diff --git a/contextor/core/live_state/runtime.py b/contextor/core/live_state/runtime.py
-index 64a4ff6..0276375 100644
---- a/contextor/core/live_state/runtime.py
-+++ b/contextor/core/live_state/runtime.py
-@@ -461,6 +461,33 @@ class AuthorityLivenessVerifier:
-                 endpoint_alive = None
-                 endpoint_creation = None
-             endpoint_is_dead = endpoint_alive is False
-+            endpoint_pid_reused = (
-+                endpoint_matches
-+                and isinstance(exc, ConnectionRefusedError)
-+                and alive is True
-+                and creation_time is not None
-+                and not process_matches
-+                and endpoint_alive is True
-+                and endpoint_creation is not None
-+                and str(endpoint_creation)
-+                != endpoint.process_start_identity
-+            )
-+            if endpoint_pid_reused:
-+                return finish(
-+                    LivenessResult.stale(
-+                        process_alive=True,
-+                        process_identity_matches=False,
-+                        endpoint_available=False,
-+                        endpoint_matches=True,
-+                        reason=(
-+                            "recorded authority PID identity was "
-+                            "replaced and endpoint refused connection"
-+                        ),
-+                        endpoint_evidence_verified=True,
-+                    ),
-+                    endpoint,
-+                    exc,
-+                )
-             if not endpoint_matches and process_stale and endpoint_is_dead:
-                 return finish(LivenessResult.stale(
-                     process_alive=bool(alive),
-diff --git a/tests/live_state/test_runtime_lease.py b/tests/live_state/test_runtime_lease.py
-index 97bcb47..8e27f0c 100644
---- a/tests/live_state/test_runtime_lease.py
-+++ b/tests/live_state/test_runtime_lease.py
-@@ -478,3 +478,180 @@ def test_runtime_lease_serialization_round_trip_and_test_root_isolation(tmp_path
- def test_process_identity_requires_start_token_and_is_not_pid_only():
-     with pytest.raises(RuntimeLeaseError):
-         ProcessIdentity(os.getpid(), "")
+### contextor/core/analysis/incremental/plan_executor.py
+
+~~~~diff
+diff --git a/contextor/core/analysis/incremental/plan_executor.py b/contextor/core/analysis/incremental/plan_executor.py
+index 6ce7638..521e722 100644
+--- a/contextor/core/analysis/incremental/plan_executor.py
++++ b/contextor/core/analysis/incremental/plan_executor.py
+@@ -13 +13,2 @@ from collections import deque
+-from dataclasses import dataclass
++from copy import deepcopy
++from dataclasses import dataclass, field
+@@ -87,0 +89,3 @@ class CandidateState:
++    typing_guard_evidence: Dict[str, object] = field(
++        default_factory=dict
++    )
+@@ -700,0 +705,3 @@ def _prepare_candidate_state(state: RepositoryAnalysisState) -> CandidateState:
++        typing_guard_evidence=deepcopy(
++            getattr(state, "typing_guard_evidence", {}) or {}
++        ),
+~~~~
+
+### tests/test_p1d3_d2b2_type_only.py
+
+~~~~diff
+diff --git a/tests/test_p1d3_d2b2_type_only.py b/tests/test_p1d3_d2b2_type_only.py
+index 4280887..61fea0e 100644
+--- a/tests/test_p1d3_d2b2_type_only.py
++++ b/tests/test_p1d3_d2b2_type_only.py
+@@ -3926,0 +3927,124 @@ def test_sp_t4_i2b4c_t48_unrelated_module_tampering(
 +
-+
-+def _sp_live_r3_verify_case(
-+    monkeypatch,
-+    *,
-+    before,
-+    after,
-+    before_alive=True,
-+    after_alive=True,
-+    error_type=ConnectionRefusedError,
-+    domain_matches=True,
-+    lease=None,
++def test_sp_t4_i2b5_i1_t49_candidate_evidence_isolated(
++    tmp_path, isolated_dirs,
 +):
-+    from types import SimpleNamespace
-+    from contextor.core.live_state import runtime
-+
-+    if lease is None:
-+        lease = SimpleNamespace(
-+            service_pid=45123,
-+            service_instance_id="synthetic-instance",
-+            lease_generation=7,
-+            process_start_identity="100",
-+        )
-+
-+    endpoint = SimpleNamespace(
-+        pid=lease.service_pid,
-+        service_instance_id=lease.service_instance_id,
-+        lease_generation=lease.lease_generation,
-+        process_start_identity=lease.process_start_identity,
-+        fingerprint=lambda: "synthetic-fingerprint",
++    from contextor.core.analysis.incremental.plan_executor import (
++        _prepare_candidate_state,
 +    )
 +
-+    observations = iter([
-+        (before, before_alive),
-+        (after, after_alive),
-+    ])
-+    observed_pids = []
-+
-+    def process_identity(pid):
-+        observed_pids.append(pid)
-+        creation, alive = next(observations)
-+        return "synthetic-process", creation, alive
-+
-+    class RefusingClient:
-+        def __init__(self, _endpoint):
-+            pass
-+
-+        def authority_status(self):
-+            raise error_type("synthetic transport failure")
-+
-+    monkeypatch.setattr(
-+        runtime, "_process_identity", process_identity
++    root = write_synthetic_repository(
++        tmp_path / "repo", _I1_SAFE
 +    )
-+    monkeypatch.setattr(
-+        runtime, "_read_endpoint",
-+        lambda _root, strict=True: endpoint,
-+    )
-+    monkeypatch.setattr(
-+        runtime, "_endpoint_matches_domain",
-+        lambda _endpoint, _domain: domain_matches,
-+    )
-+    monkeypatch.setattr(
-+        runtime, "LiveStateClient", RefusingClient,
-+    )
-+    monkeypatch.setattr(
-+        runtime, "_safe_trace_event",
-+        lambda *_args, **_kwargs: None,
++    index, _ = _index_graph(root)
++    state = RepositoryAnalysisState(
++        modules=dict(index.modules),
++        typing_guard_evidence=index.typing_guard_evidence,
 +    )
 +
-+    result = runtime.AuthorityLivenessVerifier(
-+        SimpleNamespace(repo_root="synthetic-root")
-+    ).verify(lease)
++    original = state.typing_guard_evidence
++    candidate = _prepare_candidate_state(state)
++    copied = candidate.typing_guard_evidence
 +
-+    assert observed_pids == [
-+        lease.service_pid, lease.service_pid
-+    ]
-+    return result
++    assert copied == original
++    assert copied is not original
 +
++    for key in (
++        "candidate_imports_by_module",
++        "source_fingerprints_by_module",
++        "initializer_passivity_by_module",
++        "marker_mutation_by_module",
++        "opaque_effects_by_module",
++    ):
++        assert copied[key] is not original[key]
 +
-+@pytest.mark.parametrize(
-+    "before,after,error_type,matches,expected",
-+    [
-+        (
-+            "200", "200", ConnectionRefusedError,
-+            True, LivenessStatus.STALE,
-+        ),
-+        (
-+            "100", "100", ConnectionRefusedError,
-+            True, LivenessStatus.UNKNOWN,
-+        ),
-+        (
-+            None, "200", ConnectionRefusedError,
-+            True, LivenessStatus.UNKNOWN,
-+        ),
-+        (
-+            "200", None, ConnectionRefusedError,
-+            True, LivenessStatus.UNKNOWN,
-+        ),
-+        (
-+            "200", "100", ConnectionRefusedError,
-+            True, LivenessStatus.UNKNOWN,
-+        ),
-+        (
-+            "200", "200", TimeoutError,
-+            True, LivenessStatus.UNKNOWN,
-+        ),
-+        (
-+            "200", "200", ConnectionResetError,
-+            True, LivenessStatus.UNKNOWN,
-+        ),
-+        (
-+            "200", "200", ConnectionRefusedError,
-+            False, LivenessStatus.UNKNOWN,
-+        ),
-+    ],
-+)
-+def test_sp_live_r3_pid_identity_and_transport_gate(
-+    monkeypatch, before, after,
-+    error_type, matches, expected,
-+):
-+    result = _sp_live_r3_verify_case(
-+        monkeypatch,
-+        before=before,
-+        after=after,
-+        error_type=error_type,
-+        domain_matches=matches,
++    original_fingerprint = original[
++        "source_fingerprints_by_module"
++    ]["pkg.a"]
++
++    copied["source_fingerprints_by_module"][
++        "pkg.a"
++    ] = "0" * 64
++
++    assert original[
++        "source_fingerprints_by_module"
++    ]["pkg.a"] == original_fingerprint
++
++    copied_refs = copied[
++        "candidate_imports_by_module"
++    ]["pkg.a"]
++
++    original_refs = original[
++        "candidate_imports_by_module"
++    ]["pkg.a"]
++
++    copied_guarded = next(
++        ref for ref in copied_refs if ref.type_only
 +    )
-+    assert result.status is expected
-+    assert result.confirmed_stale is (
-+        expected is LivenessStatus.STALE
++    original_guarded = next(
++        ref for ref in original_refs if ref.type_only
 +    )
 +
++    assert copied_guarded is not original_guarded
++    assert copied_guarded.names is not original_guarded.names
 +
-+def test_sp_live_r3_dead_pid_existing_contract(
-+    monkeypatch,
-+):
-+    result = _sp_live_r3_verify_case(
-+        monkeypatch,
-+        before=None,
-+        after=None,
-+        before_alive=False,
-+        after_alive=False,
-+    )
-+    assert result.status is LivenessStatus.STALE
-+    assert result.confirmed_stale is True
++    names_before = tuple(original_guarded.names)
++    copied_guarded.names.append("isolated-test-marker")
 +
-+
-+def test_sp_live_r3_reused_pid_fences_old_generation(
-+    tmp_path, monkeypatch,
-+):
-+    domain = _domain(tmp_path)
-+    old_manager = _manager(domain)
-+    old_lease = old_manager.acquire()
-+
-+    result = _sp_live_r3_verify_case(
-+        monkeypatch,
-+        before="different-process-start",
-+        after="different-process-start",
-+        lease=old_lease,
-+    )
-+
-+    assert result.status is LivenessStatus.STALE
-+    assert result.confirmed_stale is True
-+
-+    verifier = ScriptedVerifier(result)
-+    new_manager = _manager(domain, verifier=verifier)
-+    new_lease = new_manager.acquire()
-+
-+    assert verifier.calls == [old_lease]
++    assert tuple(original_guarded.names) == names_before
 +    assert (
-+        new_lease.lease_generation
-+        == old_lease.lease_generation + 1
++        "isolated-test-marker"
++        not in original_guarded.names
 +    )
++
++    assert state.typing_guard_evidence is original
++
++
++def test_sp_t4_i2b5_i1_t50_missing_evidence_default(
++    tmp_path, isolated_dirs,
++):
++    from contextor.core.analysis.incremental.plan_executor import (
++        _prepare_candidate_state,
++    )
++
++    state = RepositoryAnalysisState()
++
++    candidate = _prepare_candidate_state(state)
++
++    assert candidate.typing_guard_evidence == {}
 +    assert (
-+        new_lease.service_instance_id
-+        != old_lease.service_instance_id
++        candidate.typing_guard_evidence
++        is not state.typing_guard_evidence
 +    )
-```
++
++    candidate.typing_guard_evidence["probe"] = True
++
++    assert state.typing_guard_evidence == {}
++
++
++def test_sp_t4_i2b5_i1_t51_candidate_is_not_published(
++    tmp_path, isolated_dirs,
++):
++    from contextor.core.analysis.incremental.plan_executor import (
++        _prepare_candidate_state,
++    )
++
++    root = write_synthetic_repository(
++        tmp_path / "repo", _I1_SAFE
++    )
++    index, _ = _index_graph(root)
++
++    state = RepositoryAnalysisState(
++        modules=dict(index.modules),
++        typing_guard_evidence=index.typing_guard_evidence,
++    )
++
++    original = state.typing_guard_evidence
++    candidate = _prepare_candidate_state(state)
++
++    candidate.typing_guard_evidence = {
++        "schema_version": 999,
++    }
++
++    assert state.typing_guard_evidence is original
++    assert state.typing_guard_evidence["schema_version"] == 2
+~~~~

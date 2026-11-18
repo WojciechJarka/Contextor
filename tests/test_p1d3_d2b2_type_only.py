@@ -3924,3 +3924,127 @@ def test_sp_t4_i2b4c_t48_unrelated_module_tampering(
         for ref in module.imports
     )
 
+
+def test_sp_t4_i2b5_i1_t49_candidate_evidence_isolated(
+    tmp_path, isolated_dirs,
+):
+    from contextor.core.analysis.incremental.plan_executor import (
+        _prepare_candidate_state,
+    )
+
+    root = write_synthetic_repository(
+        tmp_path / "repo", _I1_SAFE
+    )
+    index, _ = _index_graph(root)
+    state = RepositoryAnalysisState(
+        modules=dict(index.modules),
+        typing_guard_evidence=index.typing_guard_evidence,
+    )
+
+    original = state.typing_guard_evidence
+    candidate = _prepare_candidate_state(state)
+    copied = candidate.typing_guard_evidence
+
+    assert copied == original
+    assert copied is not original
+
+    for key in (
+        "candidate_imports_by_module",
+        "source_fingerprints_by_module",
+        "initializer_passivity_by_module",
+        "marker_mutation_by_module",
+        "opaque_effects_by_module",
+    ):
+        assert copied[key] is not original[key]
+
+    original_fingerprint = original[
+        "source_fingerprints_by_module"
+    ]["pkg.a"]
+
+    copied["source_fingerprints_by_module"][
+        "pkg.a"
+    ] = "0" * 64
+
+    assert original[
+        "source_fingerprints_by_module"
+    ]["pkg.a"] == original_fingerprint
+
+    copied_refs = copied[
+        "candidate_imports_by_module"
+    ]["pkg.a"]
+
+    original_refs = original[
+        "candidate_imports_by_module"
+    ]["pkg.a"]
+
+    copied_guarded = next(
+        ref for ref in copied_refs if ref.type_only
+    )
+    original_guarded = next(
+        ref for ref in original_refs if ref.type_only
+    )
+
+    assert copied_guarded is not original_guarded
+    assert copied_guarded.names is not original_guarded.names
+
+    names_before = tuple(original_guarded.names)
+    copied_guarded.names.append("isolated-test-marker")
+
+    assert tuple(original_guarded.names) == names_before
+    assert (
+        "isolated-test-marker"
+        not in original_guarded.names
+    )
+
+    assert state.typing_guard_evidence is original
+
+
+def test_sp_t4_i2b5_i1_t50_missing_evidence_default(
+    tmp_path, isolated_dirs,
+):
+    from contextor.core.analysis.incremental.plan_executor import (
+        _prepare_candidate_state,
+    )
+
+    state = RepositoryAnalysisState()
+
+    candidate = _prepare_candidate_state(state)
+
+    assert candidate.typing_guard_evidence == {}
+    assert (
+        candidate.typing_guard_evidence
+        is not state.typing_guard_evidence
+    )
+
+    candidate.typing_guard_evidence["probe"] = True
+
+    assert state.typing_guard_evidence == {}
+
+
+def test_sp_t4_i2b5_i1_t51_candidate_is_not_published(
+    tmp_path, isolated_dirs,
+):
+    from contextor.core.analysis.incremental.plan_executor import (
+        _prepare_candidate_state,
+    )
+
+    root = write_synthetic_repository(
+        tmp_path / "repo", _I1_SAFE
+    )
+    index, _ = _index_graph(root)
+
+    state = RepositoryAnalysisState(
+        modules=dict(index.modules),
+        typing_guard_evidence=index.typing_guard_evidence,
+    )
+
+    original = state.typing_guard_evidence
+    candidate = _prepare_candidate_state(state)
+
+    candidate.typing_guard_evidence = {
+        "schema_version": 999,
+    }
+
+    assert state.typing_guard_evidence is original
+    assert state.typing_guard_evidence["schema_version"] == 2
+

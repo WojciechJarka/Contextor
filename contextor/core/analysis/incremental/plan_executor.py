@@ -10,7 +10,8 @@ RefreshPlan execution pipeline for incremental updates:
 """
 
 from collections import deque
-from dataclasses import dataclass
+from copy import deepcopy
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, List, Set, Dict, Tuple, Any, Mapping
 
@@ -85,6 +86,9 @@ class CandidateState:
     cycle_semantics: CycleSemanticsSnapshot | None = None
     cycle_semantics_state: str = "deferred"
     cycle_semantics_invalidation_reason: str | None = None
+    typing_guard_evidence: Dict[str, object] = field(
+        default_factory=dict
+    )
 
 
 @dataclass(frozen=True)
@@ -698,6 +702,9 @@ def _prepare_candidate_state(state: RepositoryAnalysisState) -> CandidateState:
             "fresh full analysis is required."
         )
     return CandidateState(
+        typing_guard_evidence=deepcopy(
+            getattr(state, "typing_guard_evidence", {}) or {}
+        ),
         modules=dict(state.modules),
         reexport_facts_by_module=dict(
             getattr(
