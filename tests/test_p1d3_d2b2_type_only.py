@@ -4567,3 +4567,50 @@ def test_sp_t4_i2b5_i4a_t61_invalid_candidate_payload(
             updated_typing_guard_evidence=evidence,
         )
 
+
+def test_sp_t4_i2b5_i4b_t62_engine_global_reclassification(
+    tmp_path, isolated_dirs,
+):
+    root = write_synthetic_repository(
+        tmp_path / "repo", _I1_SAFE
+    )
+    _, engine = _i1_full_engine(root)
+
+    before_modules = engine.state.modules
+    before_evidence = engine.state.typing_guard_evidence
+    before_graph = engine.state.dependency_graph
+
+    assert before_evidence["schema_version"] == 2
+    assert _i1_guarded_import(engine.state).type_only is True
+    assert "pkg.b" in before_graph.soft_edges["pkg.a"]
+
+    before_guarded = next(
+        ref for ref in before_modules["pkg.a"].imports
+        if ref.module == "pkg.b"
+    )
+    assert before_guarded.type_only is True
+
+    target = root / "pkg/c.py"
+    target.write_text(
+        "import typing\ntyping.TYPE_CHECKING = True\n",
+        encoding="utf-8",
+    )
+    result = engine.update_file(str(target.resolve()))
+    assert result.status == "UPDATED"
+
+    assert engine.state.typing_guard_evidence["schema_version"] == 2
+    assert engine.state.typing_guard_evidence[
+        "global_policy_satisfied"
+    ] is False
+    assert _i1_guarded_import(engine.state).type_only is False
+    assert "pkg.b" in engine.state.dependency_graph.hard_edges["pkg.a"]
+    assert "pkg.b" not in engine.state.dependency_graph.soft_edges["pkg.a"]
+
+    assert engine.state.modules is not before_modules
+    assert engine.state.typing_guard_evidence is not before_evidence
+    assert engine.state.dependency_graph is not before_graph
+
+    assert before_evidence["schema_version"] == 2
+    assert before_guarded.type_only is True
+    assert "pkg.b" in before_graph.soft_edges["pkg.a"]
+
