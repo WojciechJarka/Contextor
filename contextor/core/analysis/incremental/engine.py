@@ -800,53 +800,6 @@ class IncrementalAnalysisEngine:
                 collision_facts_changed=prep.collision_facts_changed,
             )
 
-            # Check if true no-op
-            if plan.is_empty and not is_new and not delta.is_deleted:
-                # Parsing proved the tracked source is semantically unchanged.
-                # Acknowledge its current fingerprint so restart reconciliation
-                # does not repeatedly queue the same canonical module.
-                with self._failed_commit_guard():
-                    self._commit_syntax_candidate(
-                        source_path=source_path,
-                        syntax_fact=checked_and_none,
-                        clear_parse_module=module_path,
-                        extracted_lineage_facts=prep.extracted_lineage_facts,
-                        invalidate_cycle_semantics_reason=(
-                            "SOURCE_CHANGED"
-                        ),
-                    )
-                    self.state_manager.update_state(file_path)
-                    self.state.module_usages_manifest = _updated_module_usage_manifest(
-                        self.state.module_usages_manifest,
-                        module_path,
-                        file_path,
-                        is_deleted=False,
-                        tracked_sha256=self.state_manager.get_tracked_sha256(file_path),
-                    )
-                return IncrementalUpdateResult(
-                    status="RECOVERED" if recovered_from_parse_failure else "UNCHANGED",
-                    file_path=file_path,
-                    delta=delta,
-                    graph_state="fresh",
-                    dependencies_state="fresh",
-                    blast_radius_state="deferred",
-                    local_metrics_state="deferred",
-                    global_metrics_state="deferred",
-                    topology_metrics_state=getattr(self.state, "topology_metrics_state", "fresh" if bool(getattr(self.state, "topology_analytics", None)) else "deferred"),
-                    cached_analytics_state=getattr(self.state, "cached_analytics_state", "fresh" if bool(getattr(self.state, "cached_analytics", None)) else "deferred"),
-                    cycles_state=getattr(self.state, "cycles_state", "fresh" if hasattr(self.state, "cycles") else "deferred"),
-                    collisions_state=getattr(self.state, "collisions_state", "deferred"),
-                    artifact_consumption_state="fresh" if artifact_consumption_is_fresh(self.state) else "stale",
-                    affected_modules=[],
-                    shadow_plan=plan,
-                    execution_trace={
-                        "reparse_modules": (),
-                        "recompute_modules": (),
-                        "patch_families": (),
-                        "graph_recomputations": (),
-                    },
-                )
-
             provisional = dict(self.state.modules)
 
             if "modules" in plan.patch_families:
@@ -878,6 +831,54 @@ class IncrementalAnalysisEngine:
                 previous_modules=self.state.modules,
                 classified_modules=classified_modules,
             )
+
+            # Check if true no-op
+            if plan.is_empty and not is_new and not delta.is_deleted:
+                # Parsing proved the tracked source is semantically unchanged.
+                # Acknowledge its current fingerprint so restart reconciliation
+                # does not repeatedly queue the same canonical module.
+                with self._failed_commit_guard():
+                    self._commit_syntax_candidate(
+                        source_path=source_path,
+                        syntax_fact=checked_and_none,
+                        clear_parse_module=module_path,
+                        extracted_lineage_facts=prep.extracted_lineage_facts,
+                        invalidate_cycle_semantics_reason=(
+                            "SOURCE_CHANGED"
+                        ),
+                    )
+                    self.state.typing_guard_evidence = updated_evidence
+                    self.state_manager.update_state(file_path)
+                    self.state.module_usages_manifest = _updated_module_usage_manifest(
+                        self.state.module_usages_manifest,
+                        module_path,
+                        file_path,
+                        is_deleted=False,
+                        tracked_sha256=self.state_manager.get_tracked_sha256(file_path),
+                    )
+                return IncrementalUpdateResult(
+                    status="RECOVERED" if recovered_from_parse_failure else "UNCHANGED",
+                    file_path=file_path,
+                    delta=delta,
+                    graph_state="fresh",
+                    dependencies_state="fresh",
+                    blast_radius_state="deferred",
+                    local_metrics_state="deferred",
+                    global_metrics_state="deferred",
+                    topology_metrics_state=getattr(self.state, "topology_metrics_state", "fresh" if bool(getattr(self.state, "topology_analytics", None)) else "deferred"),
+                    cached_analytics_state=getattr(self.state, "cached_analytics_state", "fresh" if bool(getattr(self.state, "cached_analytics", None)) else "deferred"),
+                    cycles_state=getattr(self.state, "cycles_state", "fresh" if hasattr(self.state, "cycles") else "deferred"),
+                    collisions_state=getattr(self.state, "collisions_state", "deferred"),
+                    artifact_consumption_state="fresh" if artifact_consumption_is_fresh(self.state) else "stale",
+                    affected_modules=[],
+                    shadow_plan=plan,
+                    execution_trace={
+                        "reparse_modules": (),
+                        "recompute_modules": (),
+                        "patch_families": (),
+                        "graph_recomputations": (),
+                    },
+                )
 
             # 3. Apply and Commit driven by RefreshPlan
             _trace_incremental_phase(

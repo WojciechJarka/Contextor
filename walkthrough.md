@@ -1,163 +1,162 @@
-# SP-T4-I2B5-I4B-T66 — evidence przy no-op
+# SP-T4-I2B5-I4B-I2A — semantic no-op
 
 ## PREFLIGHT
 
-- **DIRECT_EVIDENCE:** HEAD przed zmianą: `9fef807afccd21df3f07b64c1582f2036adf37fb`; working tree był czysty, a plik testowy nie miał diffu.
-- **DIRECT_EVIDENCE:** CPython `.venv\Scripts\python.exe` ma wersję 3.15.2.
-- **DIRECT_EVIDENCE:** Contextor MCP przed zmianą raportował revision `1449`, `provenance=live`, `canonical_state=fresh`, `workspace_sync=verified` dla `engine.py` i pliku testowego; syntax errors=0, graph/cycles fresh, cycles=16, `cycle_semantics=stale`, `resync_required=false`.
-- **DIRECT_EVIDENCE:** koniec testowego źródła zajmował linie 4750–4792 i kończył się T65. T66 nie występował; dokładna nazwa nowego testu nie miała trafień.
-- **CODE_PATH_PROVED:** aktualny no-op branch `update_file` wywołuje `_commit_syntax_candidate`, aktualizuje fingerprint w `state_manager`, po czym zwraca status `UNCHANGED`. `_commit_syntax_candidate` publikuje `self.state.typing_guard_evidence = {}`. Ten przepływ wyjaśnia oczekiwany czerwony witness bez modyfikowania produkcji.
-- **SEMANTIC CHECK:** dopisanie komentarza nie zmienia wykonywanej treści Python, ale zmienia fingerprint źródła. Test sprawdza ograniczony kontrakt: no-op zachowuje tożsamość modułów i grafu, a evidence aktualizuje fingerprint w nowym Copy-on-Write mappingu. Nie generalizuje tego jednego przypadku na wszystkie możliwe semantyczne no-op.
+- **DIRECT_EVIDENCE:** Contextor MCP przed edycją raportował revision `1450`, `provenance=live`, `canonical_state=fresh`, `workspace_sync=verified` dla `engine.py`; syntax=0/fresh, graph/cycles fresh, cycles=16, `cycle_semantics=stale`, `resync_required=false`.
+- **DIRECT_EVIDENCE:** blok klasyfikacji znajdował się po warunku `if plan.is_empty and not is_new and not delta.is_deleted`; no-op wywoływał `_commit_syntax_candidate`, następnie `state_manager.update_state`. `_commit_syntax_candidate` zeruje evidence do `{}`.
+- **DIRECT_EVIDENCE:** `_failed_commit_guard` zapisuje kopię `vars(state)` oraz state manager mappingu i odtwarza oba przy wyjątku.
+- **UNKNOWN:** HEAD i `git status` nie zostały zapisane przed edycją. Po edycji HEAD wynosił `679095ed5a56d855dd66fd890db8e785ff44671a`, a status wskazywał wyłącznie `engine.py` jako zmieniony plik produkcyjny.
 
-## CHANGE
+## EXACT IMPLEMENTATION
 
-- Dopisano na końcu pliku dokładnie jeden test `test_sp_t4_i2b5_i4b_t66_noop_evidence_refresh`, zgodnie z podanym ciałem.
-- Nie zmieniono produkcji, pozostałych testów, helperów ani monkeypatchy.
+- Przeniesiono istniejący blok `provisional` → warunkowy `Module` → `reclassify_incremental_type_only` → `plan_type_only_graph_refresh` bez zmian treści, bezpośrednio po `RefreshPlanner.plan_refresh` i przed warunek semantic no-op. Poprzednią kopię bloku usunięto.
+- Warunek `if plan.is_empty and not is_new and not delta.is_deleted` pozostał bez zmian i teraz korzysta z planu po plannerze type-only.
+- W no-op guardzie, bezpośrednio po `_commit_syntax_candidate(...)`, dodano `self.state.typing_guard_evidence = updated_evidence`, przed `state_manager.update_state(file_path)`.
+- Gałąź deletion, pozostałe przypisania stanu, argumenty executora i `_commit_syntax_candidate` pozostały bez zmian.
+- **CODE_PATH_PROVED:** gdy planner zostawia plan pusty, no-op nadal pomija executor. Po wyczyszczeniu evidence przez `_commit_syntax_candidate` przypisuje wynik helpera; oba przypisania wykonują się w `_failed_commit_guard`.
 
-## TARGETED TEST
+## T66 EVIDENCE / NO-OP
 
-Uruchomiono wyłącznie T66:
+- **DIRECT_EVIDENCE:** T66 zakończył się PASS. Assercje potwierdzają schema-v2, `global_policy_satisfied is True`, zmianę fingerprintu `pkg.c`, nowy obiekt evidence oraz zachowanie starego fingerprintu w `before_evidence`.
+- **DIRECT_EVIDENCE:** T66 potwierdza także `engine.state.modules is before_modules`, `engine.state.dependency_graph is before_graph` oraz guarded import `type_only is True` po statusie `UNCHANGED`.
+- **LIMITATION / INFERENCE:** fingerprint został sprawdzony asercją nierówności; test nie raportuje jego wartości. To jeden syntetyczny przypadek komentarza dopisanego do `pkg/c.py`, nie dowód dla wszystkich możliwych semantycznych no-op.
+
+## TARGETED TESTS
+
+CPython 3.15.2, uruchomiono wyłącznie wskazane testy z `tests/test_p1d3_d2b2_type_only.py`:
+
+| Test | Wynik |
+|---|---|
+| T66 `noop_evidence_refresh` | PASS |
+| T06 `updated_invalidates_evidence` | PASS |
+| T62 `engine_global_reclassification` | PASS |
+| T63 `consecutive_updates` | PASS |
+| T64 `deletion_restores_soft` | PASS |
+| T65 `invalid_baseline_fails_closed` | PASS |
+| T07 `syntax_error_invalidates_evidence` | PASS |
+| T08 `rejected_transaction_preserves_evidence` | PASS |
 
 ```text
-& .\.venv\Scripts\python.exe -m pytest -q --tb=long tests/test_p1d3_d2b2_type_only.py::test_sp_t4_i2b5_i4b_t66_noop_evidence_refresh
+8 passed in 9.87s
 ```
 
-Pełny wynik:
-
-```text
-F                                                                        [100%]
-================================== FAILURES ===================================
-________________ test_sp_t4_i2b5_i4b_t66_noop_evidence_refresh ________________
-
-tmp_path = WindowsPath('C:/Users/DafoO/AppData/Local/Temp/pytest-of-DafoO/pytest-1285/test_sp_t4_i2b5_i4b_t66_noop_e0')
-isolated_dirs = WindowsPath('C:/Users/DafoO/AppData/Local/Temp/pytest-of-DafoO/pytest-1285/test_sp_t4_i2b5_i4b_t66_noop_e0')
-
-    def test_sp_t4_i2b5_i4b_t66_noop_evidence_refresh(
-        tmp_path, isolated_dirs,
-    ):
-        root = write_synthetic_repository(
-            tmp_path / "repo", _I1_SAFE
-        )
-        _, engine = _i1_full_engine(root)
-    
-        before_modules = engine.state.modules
-        before_evidence = engine.state.typing_guard_evidence
-        before_graph = engine.state.dependency_graph
-    
-        assert before_evidence["schema_version"] == 2
-        assert before_evidence[
-            "global_policy_satisfied"
-        ] is True
-    
-        before_fingerprint = before_evidence[
-            "source_fingerprints_by_module"
-        ]["pkg.c"]
-    
-        target = root / "pkg/c.py"
-        with target.open("a", encoding="utf-8") as stream:
-            stream.write("\n# unrelated comment\n")
-    
-        result = engine.update_file(str(target.resolve()))
-    
-        assert result.status == "UNCHANGED"
-    
-        after_evidence = engine.state.typing_guard_evidence
-    
->       assert after_evidence["schema_version"] == 2
-               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-E       KeyError: 'schema_version'
-
-tests\test_p1d3_d2b2_type_only.py:4825: KeyError
-=========================== short test summary info ============================
-FAILED tests/test_p1d3_d2b2_type_only.py::test_sp_t4_i2b5_i4b_t66_noop_evidence_refresh
-1 failed in 4.26s
-```
-
-- **DIRECT_EVIDENCE:** awaria nastąpiła przy odczycie `after_evidence["schema_version"]` po `assert result.status == "UNCHANGED"`. Zatem faktyczny status zwrócony przez `update_file` w tym przebiegu to `UNCHANGED`.
-- **CODE_PATH_PROVED:** traceback potwierdza, że po no-op `typing_guard_evidence` nie zawiera klucza `schema_version`; źródło `_commit_syntax_candidate` wskazuje, że jest ono zerowane do `{}`.
-- Test zakończył się oczekiwanym FAIL; zgodnie z poleceniem nie wykonywano poprawek.
+Nie uruchamiano pełnego pytest ani FULL. Brak tracebacków.
 
 ## MCP POST-CHANGE AUDIT
 
-- **DIRECT_EVIDENCE:** event `desktop_watcher`, `operation=update_file`, `status=UPDATED` dla `tests/test_p1d3_d2b2_type_only.py`, revision `1450`; `continuity=continuous`, `resync_required=false`, `resync_reason=null`; `blast_radius_state=deferred`, `affected_modules.total=0`.
-- **DIRECT_EVIDENCE:** MCP pobrał pełny T66 z `workspace_sync=verified`, `canonical_state=fresh`, `provenance=live`, revision `1450`.
-- **DIRECT_EVIDENCE:** syntax diagnostics=0/fresh; graph/module/topology/artifact-consumption/cycles/collisions/lineage families fresh; cycles=16/fresh; cycle warning view fresh. `cycle_semantics=stale`.
-- **LIMITATION:** synchronizacja źródła przez watcher nie jest dowodem adopcji kodu przez proces; tu zmieniono wyłącznie test. Restartu nie wykonywano.
+- **DIRECT_EVIDENCE:** event `desktop_watcher`, `operation=update_file`, `status=UPDATED` dla `engine.py`, revision `1451`; continuity=`continuous`, `resync_required=false`, `resync_reason=null`.
+- **DIRECT_EVIDENCE:** MCP `update_file` symbol response: canonical revision `1451`, provenance=`live`, workspace_sync=`verified`, canonical_state=`fresh`.
+- **DIRECT_EVIDENCE:** syntax diagnostics=0/fresh. Graph/module/topology/artifact-consumption/cycles/collisions/lineage families fresh. Cycles=16/fresh; cycle warning view fresh, active warnings=16. `cycle_semantics=stale`.
+- **LIMITATION:** synchronizacja źródła przez watcher nie dowodzi adopcji kodu przez proces. Restartu nie wykonywano.
+
+## I2A SCOPE LIMITATIONS
+
+- Zmiana obejmuje ścieżkę add/update, która po reclassyfikacji nadal ma `plan.is_empty`; deletion nie została zmieniona.
+- T66 sprawdza jedną zmianę źródła bez wpływu na importy/graf. Pozostałe wskazane testy sprawdzają globalną reclassyfikację, kolejne commity, deletion, fail-closed, parse-error i odrzuconą transakcję w ich syntetycznych przypadkach.
+- **LIMITATION:** nie uruchamiano FULL ani pełnego pytest; wynik nie stanowi certyfikacji wszystkich repozytoriów i wszystkich form semantycznego no-op.
 
 ## FINAL VERDICT
 
-**T66_FAIL_REPRODUCED** — test został dodany dokładnie w wymaganym zakresie; ujawnia brak odświeżenia evidence w no-op branch. Brak zmian produkcyjnych.
+**I2A_IMPLEMENTED; TARGETED_TESTS_PASS.** Dokładny blok przeniesiono, no-op zachowuje odświeżone evidence, a wskazane osiem testów przeszło. Ograniczenia zakresu pozostają jak wyżej.
 
 ## FILES_CHANGED
 
-- `tests/test_p1d3_d2b2_type_only.py` — jedyny zmieniony plik testowy.
-- `walkthrough.md` — wymagany raport, bez własnego diffu.
+- `contextor/core/analysis/incremental/engine.py` — jedyny zmieniony plik produkcyjny.
+- `walkthrough.md` — wymagany raport; nie zawiera własnego diffu.
 
 ## FULL_DIFFS
 
-### `tests/test_p1d3_d2b2_type_only.py`
+### `contextor/core/analysis/incremental/engine.py`
 
 ```diff
-diff --git a/tests/test_p1d3_d2b2_type_only.py b/tests/test_p1d3_d2b2_type_only.py
-index c53f911..09eabef 100644
---- a/tests/test_p1d3_d2b2_type_only.py
-+++ b/tests/test_p1d3_d2b2_type_only.py
-@@ -4790,3 +4790,57 @@ def test_sp_t4_i2b5_i4b_t65_invalid_baseline_fails_closed(
-         .soft_edges["pkg.a"]
-     )
+diff --git a/contextor/core/analysis/incremental/engine.py b/contextor/core/analysis/incremental/engine.py
+index a0a0740..502baf7 100644
+--- a/contextor/core/analysis/incremental/engine.py
++++ b/contextor/core/analysis/incremental/engine.py
+@@ -800,6 +800,38 @@ class IncrementalAnalysisEngine:
+                 collision_facts_changed=prep.collision_facts_changed,
+             )
  
++            provisional = dict(self.state.modules)
 +
-+def test_sp_t4_i2b5_i4b_t66_noop_evidence_refresh(
-+    tmp_path, isolated_dirs,
-+):
-+    root = write_synthetic_repository(
-+        tmp_path / "repo", _I1_SAFE
-+    )
-+    _, engine = _i1_full_engine(root)
++            if "modules" in plan.patch_families:
++                path = Path(file_path)
++                provisional[module_path] = Module(
++                    module_id=module_path,
++                    path=str(path.relative_to(self.root_path)),
++                    absolute_path=str(path.resolve()),
++                    imports=list(new_imports),
++                )
 +
-+    before_modules = engine.state.modules
-+    before_evidence = engine.state.typing_guard_evidence
-+    before_graph = engine.state.dependency_graph
++            classified_modules, updated_evidence = (
++                reclassify_incremental_type_only(
++                    provisional,
++                    previous_modules=self.state.modules,
++                    previous_evidence=self.state.typing_guard_evidence,
++                    changed_module_id=module_path,
++                    changed_source_path=source_path,
++                    changed_imports=new_imports,
++                    changed_source_evidence=(
++                        prep.typing_guard_source_evidence
++                    ),
++                )
++            )
 +
-+    assert before_evidence["schema_version"] == 2
-+    assert before_evidence[
-+        "global_policy_satisfied"
-+    ] is True
++            plan, force_full_graph = plan_type_only_graph_refresh(
++                plan,
++                changed_module_id=module_path,
++                previous_modules=self.state.modules,
++                classified_modules=classified_modules,
++            )
 +
-+    before_fingerprint = before_evidence[
-+        "source_fingerprints_by_module"
-+    ]["pkg.c"]
-+
-+    target = root / "pkg/c.py"
-+    with target.open("a", encoding="utf-8") as stream:
-+        stream.write("\n# unrelated comment\n")
-+
-+    result = engine.update_file(str(target.resolve()))
-+
-+    assert result.status == "UNCHANGED"
-+
-+    after_evidence = engine.state.typing_guard_evidence
-+
-+    assert after_evidence["schema_version"] == 2
-+    assert after_evidence[
-+        "global_policy_satisfied"
-+    ] is True
-+
-+    assert after_evidence[
-+        "source_fingerprints_by_module"
-+    ]["pkg.c"] != before_fingerprint
-+
-+    assert after_evidence is not before_evidence
-+
-+    assert before_evidence[
-+        "source_fingerprints_by_module"
-+    ]["pkg.c"] == before_fingerprint
-+
-+    assert engine.state.modules is before_modules
-+    assert engine.state.dependency_graph is before_graph
-+
-+    assert _i1_guarded_import(
-+        engine.state
-+    ).type_only is True
-+
+             # Check if true no-op
+             if plan.is_empty and not is_new and not delta.is_deleted:
+                 # Parsing proved the tracked source is semantically unchanged.
+@@ -815,6 +847,7 @@ class IncrementalAnalysisEngine:
+                             "SOURCE_CHANGED"
+                         ),
+                     )
++                    self.state.typing_guard_evidence = updated_evidence
+                     self.state_manager.update_state(file_path)
+                     self.state.module_usages_manifest = _updated_module_usage_manifest(
+                         self.state.module_usages_manifest,
+@@ -847,38 +880,6 @@ class IncrementalAnalysisEngine:
+                     },
+                 )
+ 
+-            provisional = dict(self.state.modules)
+-
+-            if "modules" in plan.patch_families:
+-                path = Path(file_path)
+-                provisional[module_path] = Module(
+-                    module_id=module_path,
+-                    path=str(path.relative_to(self.root_path)),
+-                    absolute_path=str(path.resolve()),
+-                    imports=list(new_imports),
+-                )
+-
+-            classified_modules, updated_evidence = (
+-                reclassify_incremental_type_only(
+-                    provisional,
+-                    previous_modules=self.state.modules,
+-                    previous_evidence=self.state.typing_guard_evidence,
+-                    changed_module_id=module_path,
+-                    changed_source_path=source_path,
+-                    changed_imports=new_imports,
+-                    changed_source_evidence=(
+-                        prep.typing_guard_source_evidence
+-                    ),
+-                )
+-            )
+-
+-            plan, force_full_graph = plan_type_only_graph_refresh(
+-                plan,
+-                changed_module_id=module_path,
+-                previous_modules=self.state.modules,
+-                classified_modules=classified_modules,
+-            )
+-
+             # 3. Apply and Commit driven by RefreshPlan
+             _trace_incremental_phase(
+                 "INCREMENTAL_APPLY_START",
 ```
