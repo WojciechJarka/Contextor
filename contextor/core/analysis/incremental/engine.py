@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Optional, List, Set, Dict, Iterable, Tuple, Any
 
 from contextor.core.domain.graph import ProjectGraph
+from contextor.core.domain.module import Module
 from contextor.core.analysis.state_manager import FileStateManager, RepositoryAnalysisState, FileDelta
 from contextor.core.cycle_semantics.lifecycle import (
     invalidate_cycle_semantics,
@@ -36,6 +37,10 @@ from contextor.core.analysis.incremental.preparation import (
 from contextor.core.analysis.incremental.plan_executor import (
     _prepare_candidate_state,
     execute_refresh_plan,
+)
+from contextor.core.analysis.incremental.type_only_policy import (
+    reclassify_incremental_type_only,
+    plan_type_only_graph_refresh,
 )
 from contextor.core.analysis.state_manager import (
     artifact_consumption_is_fresh,
@@ -646,6 +651,28 @@ class IncrementalAnalysisEngine:
                     module_usages=self.state.module_usages,
                     collision_facts_changed=collision_facts_changed,
                 )
+                provisional = dict(self.state.modules)
+                provisional.pop(module_path, None)
+
+                classified_modules, updated_evidence = (
+                    reclassify_incremental_type_only(
+                        provisional,
+                        previous_modules=self.state.modules,
+                        previous_evidence=self.state.typing_guard_evidence,
+                        changed_module_id=module_path,
+                        changed_source_path=source_path,
+                        changed_imports=[],
+                        changed_source_evidence=None,
+                        deleted=True,
+                    )
+                )
+
+                plan, force_full_graph = plan_type_only_graph_refresh(
+                    plan,
+                    changed_module_id=module_path,
+                    previous_modules=self.state.modules,
+                    classified_modules=classified_modules,
+                )
                 _trace_incremental_phase(
                     "INCREMENTAL_APPLY_START",
                     result=(
@@ -662,6 +689,9 @@ class IncrementalAnalysisEngine:
                     syntax_source_path=source_path,
                     remove_syntax_fact=True,
                     clear_parse_module=module_path,
+                    force_full_graph=force_full_graph,
+                    classified_modules=classified_modules,
+                    updated_typing_guard_evidence=updated_evidence,
                 )
                 blast_radius_state = "fresh" if blast_radius_complete else "deferred"
                 affected_modules = sorted(affected_set) if blast_radius_complete else []
@@ -817,6 +847,38 @@ class IncrementalAnalysisEngine:
                     },
                 )
 
+            provisional = dict(self.state.modules)
+
+            if "modules" in plan.patch_families:
+                path = Path(file_path)
+                provisional[module_path] = Module(
+                    module_id=module_path,
+                    path=str(path.relative_to(self.root_path)),
+                    absolute_path=str(path.resolve()),
+                    imports=list(new_imports),
+                )
+
+            classified_modules, updated_evidence = (
+                reclassify_incremental_type_only(
+                    provisional,
+                    previous_modules=self.state.modules,
+                    previous_evidence=self.state.typing_guard_evidence,
+                    changed_module_id=module_path,
+                    changed_source_path=source_path,
+                    changed_imports=new_imports,
+                    changed_source_evidence=(
+                        prep.typing_guard_source_evidence
+                    ),
+                )
+            )
+
+            plan, force_full_graph = plan_type_only_graph_refresh(
+                plan,
+                changed_module_id=module_path,
+                previous_modules=self.state.modules,
+                classified_modules=classified_modules,
+            )
+
             # 3. Apply and Commit driven by RefreshPlan
             _trace_incremental_phase(
                 "INCREMENTAL_APPLY_START",
@@ -835,6 +897,9 @@ class IncrementalAnalysisEngine:
                 syntax_source_path=source_path,
                 syntax_fact=checked_and_none,
                 clear_parse_module=module_path,
+                force_full_graph=force_full_graph,
+                classified_modules=classified_modules,
+                updated_typing_guard_evidence=updated_evidence,
             )
 
             if plan.refresh_completeness == "requires_resync":
@@ -927,6 +992,9 @@ class IncrementalAnalysisEngine:
         syntax_fact: Dict[str, Any] | None = None,
         remove_syntax_fact: bool = False,
         clear_parse_module: str | None = None,
+        force_full_graph: bool = False,
+        classified_modules: dict[str, Module] | None = None,
+        updated_typing_guard_evidence: dict[str, object] | None = None,
     ) -> tuple[Set[str], bool, dict]:
         """
         Executes planned RefreshPlan phases and performs atomic persistent & RAM commit.
@@ -949,6 +1017,9 @@ class IncrementalAnalysisEngine:
                 file_path=file_path,
                 new_collision_facts=new_collision_facts,
                 new_reexport_facts=new_reexport_facts,
+                force_full_graph=force_full_graph,
+                classified_modules=classified_modules,
+                updated_typing_guard_evidence=updated_typing_guard_evidence,
             )
         except Exception as exc:
             _trace_incremental_phase(
@@ -1128,7 +1199,9 @@ class IncrementalAnalysisEngine:
         if clear_parse_module is not None:
             clear_module_parse_failure(candidate, clear_parse_module)
         self.state.modules = candidate.modules
-        self.state.typing_guard_evidence = {}
+        self.state.typing_guard_evidence = (
+            candidate.typing_guard_evidence
+        )
         self.state.reexport_facts_by_module = (
             candidate.reexport_facts_by_module
         )
