@@ -2730,7 +2730,12 @@ def test_sp_t4_i1_t06_updated_invalidates_evidence(tmp_path, isolated_dirs):
     target.write_text("pass\nVALUE = 2\n", encoding="utf-8")
     result = engine.update_file(str(target.resolve()))
     assert result.status == "UPDATED"
-    assert engine.state.typing_guard_evidence == {}
+    assert engine.state.typing_guard_evidence[
+        "schema_version"
+    ] == 2
+    assert engine.state.typing_guard_evidence[
+        "global_policy_satisfied"
+    ] is True
     assert _i1_guarded_import(engine.state).type_only == before_import.type_only
     assert engine.state.dependency_graph.hard_edges == before_hard
     assert engine.state.dependency_graph.soft_edges == before_soft
