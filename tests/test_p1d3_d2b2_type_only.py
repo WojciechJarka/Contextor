@@ -4397,3 +4397,173 @@ def test_sp_t4_i2b5_i3g_t59_full_graph_requires_modules(
             force_full_graph=True,
         )
 
+
+def test_sp_t4_i2b5_i4a_t60_global_classification_before_graph(
+    tmp_path, isolated_dirs,
+):
+    from contextor.core.analysis.incremental import (
+        plan_executor as executor,
+    )
+    from contextor.core.analysis.incremental.type_only_policy import (
+        reclassify_incremental_type_only,
+        plan_type_only_graph_refresh,
+    )
+
+    root = write_synthetic_repository(
+        tmp_path / "repo", _I1_SAFE
+    )
+    _, engine = _i1_full_engine(root)
+
+    before_modules = engine.state.modules
+    before_evidence = engine.state.typing_guard_evidence
+    before_graph = engine.state.dependency_graph
+
+    assert _i1_guarded_import(engine.state).type_only
+
+    target = root / "pkg/c.py"
+    target.write_text(
+        "import typing\ntyping.TYPE_CHECKING = True\n",
+        encoding="utf-8",
+    )
+
+    prepared = preparation.prepare_source_update(
+        file_path=target,
+        module_path="pkg.c",
+        is_new=False,
+        old_module=engine.state.modules["pkg.c"],
+        old_artifacts=engine.state.artifacts.get("pkg.c"),
+        old_usage=engine.state.module_usages.get("pkg.c"),
+        persistent_id=engine.registry.get_module_id("pkg.c"),
+        old_collision_facts=engine.state.collision_facts.get(
+            "pkg.c"
+        ),
+        old_reexport_facts=engine.state.reexport_facts_by_module.get(
+            "pkg.c"
+        ),
+        source_key="pkg/c.py",
+    )
+    assert not prepared.has_error
+
+    provisional = dict(before_modules)
+    provisional["pkg.c"] = replace(
+        provisional["pkg.c"],
+        imports=list(prepared.new_imports),
+    )
+
+    classified, evidence = reclassify_incremental_type_only(
+        provisional,
+        previous_modules=before_modules,
+        previous_evidence=before_evidence,
+        changed_module_id="pkg.c",
+        changed_source_path="pkg/c.py",
+        changed_imports=prepared.new_imports,
+        changed_source_evidence=(
+            prepared.typing_guard_source_evidence
+        ),
+    )
+
+    assert evidence["schema_version"] == 2
+    assert evidence["global_policy_satisfied"] is False
+
+    plan = RefreshPlanner.plan_refresh(
+        prepared.delta,
+        usage_delta=prepared.usage_delta,
+        module_usages=engine.state.module_usages,
+        collision_facts_changed=prepared.collision_facts_changed,
+    )
+
+    plan, force_full_graph = plan_type_only_graph_refresh(
+        plan,
+        changed_module_id="pkg.c",
+        previous_modules=before_modules,
+        classified_modules=classified,
+    )
+
+    assert force_full_graph is True
+
+    call_args = dict(
+        state=engine.state,
+        delta=prepared.delta,
+        usage_delta=prepared.usage_delta,
+        plan=plan,
+        new_imports=prepared.new_imports,
+        new_artifacts=prepared.new_artifacts,
+        new_usage=prepared.new_usage,
+        root_path=root,
+        file_path=str(target.resolve()),
+        new_collision_facts=prepared.new_collision_facts,
+        new_reexport_facts=prepared.new_reexport_facts,
+        force_full_graph=force_full_graph,
+        classified_modules=classified,
+        updated_typing_guard_evidence=evidence,
+    )
+
+    outcome = executor.execute_refresh_plan(**call_args)
+    candidate = outcome.candidate_state
+
+    guarded = next(
+        ref for ref in candidate.modules["pkg.a"].imports
+        if ref.module == "pkg.b"
+    )
+
+    assert guarded.type_only is False
+    assert "pkg.b" in candidate.dependency_graph.hard_edges[
+        "pkg.a"
+    ]
+    assert "pkg.b" not in candidate.dependency_graph.soft_edges[
+        "pkg.a"
+    ]
+
+    assert candidate.typing_guard_evidence == evidence
+    assert candidate.typing_guard_evidence is not evidence
+
+    assert engine.state.modules is before_modules
+    assert engine.state.typing_guard_evidence is before_evidence
+    assert engine.state.dependency_graph is before_graph
+    assert _i1_guarded_import(engine.state).type_only
+
+    with pytest.raises(
+        ValueError,
+        match="Classified module domain mismatch",
+    ):
+        executor.execute_refresh_plan(
+            **{
+                **call_args,
+                "classified_modules": {},
+            }
+        )
+
+
+@pytest.mark.parametrize(
+    "modules,evidence,error",
+    [
+        (None, {}, ValueError),
+        ({}, None, ValueError),
+        ("invalid", {}, TypeError),
+        ({}, "invalid", TypeError),
+    ],
+)
+def test_sp_t4_i2b5_i4a_t61_invalid_candidate_payload(
+    tmp_path, modules, evidence, error,
+):
+    from contextor.core.analysis.incremental import (
+        plan_executor as executor,
+    )
+    from contextor.core.analysis.state_manager import FileDelta
+    from contextor.core.domain.refresh_plan import RefreshPlan
+
+    with pytest.raises(error):
+        executor.execute_refresh_plan(
+            state=RepositoryAnalysisState(),
+            delta=FileDelta(module_path="pkg.a"),
+            usage_delta=None,
+            plan=RefreshPlan(),
+            new_imports=[],
+            new_artifacts={},
+            new_usage=None,
+            root_path=tmp_path,
+            file_path=str(tmp_path / "a.py"),
+            classified_modules=modules,
+            updated_typing_guard_evidence=evidence,
+        )
+

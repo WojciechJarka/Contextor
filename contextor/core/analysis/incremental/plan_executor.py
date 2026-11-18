@@ -1146,11 +1146,30 @@ def execute_refresh_plan(
     new_collision_facts: Optional[List[Dict[str, Any]]] = None,
     new_reexport_facts: Optional[Dict[str, Any]] = None,
     force_full_graph: bool = False,
+    classified_modules: Optional[Dict[str, Module]] = None,
+    updated_typing_guard_evidence: Optional[
+        Dict[str, object]
+    ] = None,
 ) -> PlanExecutionOutcome:
     """
     Executes the phases of a RefreshPlan (REPARSE, RECOMPUTE, PATCH, GRAPH)
     on an isolated Copy-on-Write candidate state without performing disk I/O or state mutation.
     """
+    if (
+        (classified_modules is None)
+        != (updated_typing_guard_evidence is None)
+    ):
+        raise ValueError(
+            "Classified modules and typing guard evidence "
+            "must be supplied together"
+        )
+    if classified_modules is not None and (
+        type(classified_modules) is not dict
+        or type(updated_typing_guard_evidence) is not dict
+    ):
+        raise TypeError(
+            "Invalid classified candidate payload"
+        )
     if type(force_full_graph) is not bool:
         raise TypeError(
             "force_full_graph must be bool"
@@ -1265,6 +1284,32 @@ def execute_refresh_plan(
         candidate.reexport_facts_by_module[
             delta.module_path
         ] = new_reexport_facts
+
+    if classified_modules is not None:
+        if set(classified_modules) != set(candidate.modules):
+            raise ValueError(
+                "Classified module domain mismatch"
+            )
+
+        for module_id, module in classified_modules.items():
+            current = candidate.modules[module_id]
+            if (
+                type(module_id) is not str
+                or type(module) is not Module
+                or type(current) is not Module
+                or module.module_id != module_id
+                or module.path != current.path
+                or module.absolute_path != current.absolute_path
+                or type(module.imports) is not list
+            ):
+                raise ValueError(
+                    "Invalid classified module identity"
+                )
+
+        candidate.modules = dict(classified_modules)
+        candidate.typing_guard_evidence = deepcopy(
+            updated_typing_guard_evidence
+        )
 
     if not validate_reexport_facts_by_module(
         candidate.reexport_facts_by_module,
