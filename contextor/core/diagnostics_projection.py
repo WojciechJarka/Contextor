@@ -36,9 +36,13 @@ def _soft_dependent_cycle_diagnostic(state: Any) -> dict[str, Any]:
         return unavailable
     cycle_state = getattr(state, "cycles_state", None)
     if cycle_state != "fresh":
-        availability = cycle_state if cycle_state in {
-            "stale", "deferred", "unavailable",
-        } else "unavailable"
+        availability = (
+            cycle_state
+            if type(cycle_state) is str and cycle_state in {
+                "stale", "deferred", "unavailable",
+            }
+            else "unavailable"
+        )
         return {**unavailable, "availability": availability}
     graph = getattr(state, "dependency_graph", None)
     hard = getattr(graph, "hard_edges", None)
