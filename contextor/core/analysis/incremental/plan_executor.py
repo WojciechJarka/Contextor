@@ -1162,6 +1162,13 @@ def execute_refresh_plan(
         raise ValueError(
             "Full graph rebuild requires dependency_graph patch"
         )
+    if (
+        force_full_graph
+        and "modules" not in plan.patch_families
+    ):
+        raise ValueError(
+            "Full graph rebuild requires modules patch"
+        )
 
     path = Path(file_path)
     mod_id = Path(delta.module_path).stem if delta.module_path.endswith(".py") else delta.module_path

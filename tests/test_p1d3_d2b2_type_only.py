@@ -4366,3 +4366,34 @@ def test_sp_t4_i2b5_i3_t58_invalid_graph_request(
             force_full_graph=force_full_graph,
         )
 
+
+def test_sp_t4_i2b5_i3g_t59_full_graph_requires_modules(
+    tmp_path,
+):
+    from contextor.core.analysis.incremental import (
+        plan_executor as executor,
+    )
+    from contextor.core.analysis.state_manager import FileDelta
+    from contextor.core.domain.refresh_plan import RefreshPlan
+
+    plan = RefreshPlan(
+        patch_families=("dependency_graph",),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="Full graph rebuild requires modules patch",
+    ):
+        executor.execute_refresh_plan(
+            state=RepositoryAnalysisState(),
+            delta=FileDelta(module_path="pkg.a"),
+            usage_delta=None,
+            plan=plan,
+            new_imports=[],
+            new_artifacts={},
+            new_usage=None,
+            root_path=tmp_path,
+            file_path=str(tmp_path / "a.py"),
+            force_full_graph=True,
+        )
+
