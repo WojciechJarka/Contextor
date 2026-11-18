@@ -4614,3 +4614,80 @@ def test_sp_t4_i2b5_i4b_t62_engine_global_reclassification(
     assert before_guarded.type_only is True
     assert "pkg.b" in before_graph.soft_edges["pkg.a"]
 
+
+def test_sp_t4_i2b5_i4b_t63_consecutive_updates(
+    tmp_path, isolated_dirs,
+):
+    root = write_synthetic_repository(
+        tmp_path / "repo", _I1_SAFE
+    )
+    _, engine = _i1_full_engine(root)
+
+    target = root / "pkg/c.py"
+    original_source = target.read_bytes()
+
+    assert engine.state.typing_guard_evidence[
+        "schema_version"
+    ] == 2
+    assert _i1_guarded_import(
+        engine.state
+    ).type_only is True
+
+    target.write_text(
+        "import typing\n"
+        "typing.TYPE_CHECKING = True\n",
+        encoding="utf-8",
+    )
+
+    first = engine.update_file(str(target.resolve()))
+    assert first.status == "UPDATED"
+
+    assert engine.state.typing_guard_evidence[
+        "schema_version"
+    ] == 2
+    assert engine.state.typing_guard_evidence[
+        "global_policy_satisfied"
+    ] is False
+    assert _i1_guarded_import(
+        engine.state
+    ).type_only is False
+
+    assert "pkg.b" in (
+        engine.state.dependency_graph
+        .hard_edges["pkg.a"]
+    )
+
+    first_evidence = engine.state.typing_guard_evidence
+
+    target.write_bytes(original_source)
+
+    second = engine.update_file(str(target.resolve()))
+    assert second.status == "UPDATED"
+
+    assert engine.state.typing_guard_evidence[
+        "schema_version"
+    ] == 2
+    assert engine.state.typing_guard_evidence[
+        "global_policy_satisfied"
+    ] is True
+    assert _i1_guarded_import(
+        engine.state
+    ).type_only is True
+
+    assert "pkg.b" in (
+        engine.state.dependency_graph
+        .soft_edges["pkg.a"]
+    )
+    assert "pkg.b" not in (
+        engine.state.dependency_graph
+        .hard_edges["pkg.a"]
+    )
+
+    assert (
+        engine.state.typing_guard_evidence
+        is not first_evidence
+    )
+    assert first_evidence[
+        "global_policy_satisfied"
+    ] is False
+
