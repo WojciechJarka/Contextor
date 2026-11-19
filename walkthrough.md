@@ -1,59 +1,63 @@
-# SP-T4-REMAINING-R2B — KOREKTA RECOVERY AVAILABILITY
+# SP-T4-REMAINING-R4 — OLD EVIDENCE REJECTION
 
 ## PRECHECK
 
-- DIRECT_EVIDENCE — Contextor MCP przed zmianą: LIVE revision 1458, provenance live, canonical state fresh, global workspace_sync unverified, resync_required=false. Syntax diagnostics 0/fresh; graph fresh; structural cycles 16/fresh.
-- DIRECT_EVIDENCE — MCP symbol preview dla test_resync_diagnostics_summary_hides_fresh_payloads_without_mutation: workspace_sync=verified, canonical revision 1458, provenance live. Source anchor w LIVE pasował dokładnie do podanego bloku recovery.
-- DIRECT_EVIDENCE — Git przed zmianą: HEAD 4c3578c344882e141d22cca5277a433d008e875e; status czysty. Plik testowy nie miał wcześniejszego diffu.
-- CPython target: 3.15.2; repo .venv.
+- DIRECT_EVIDENCE — Contextor MCP przed zmianą: LIVE revision 1459, provenance live, canonical state fresh, global workspace_sync unverified, resync_required=false. Syntax diagnostics 0/fresh; graph fresh; cycles 16/fresh; cycle_semantics stale.
+- DIRECT_EVIDENCE — test_c16_p0_old_evidence_semantic_version_rejected miał per-file workspace_sync=verified na revision 1459. Dokładny anchor zgadzał się z promptem.
+- DIRECT_EVIDENCE — Git przed zmianą: HEAD 1b5900d351a5c2d0263bf331d7087846d392082d. Zmieniany test nie miał wcześniejszego diffu; status zawierał wcześniejsze M walkthrough.md.
+- Interpreter docelowy: CPython 3.15.2.
 
 ## EXACT_CHANGE
 
-Zmieniono wyłącznie drugą asercję availability w test_resync_diagnostics_summary_hides_fresh_payloads_without_mutation, dodając:
+W tests/test_p1d3_package_cycle_integration.py, wyłącznie w test_c16_p0_old_evidence_semantic_version_rejected:
+- zmieniono asercję baseline z cycle-semantics-evidence/3 na cycle-semantics-evidence/4;
+- pozostawiono OLD jako cycle-semantics-evidence/2;
+- bezpośrednio po asercji reason dodano sprawdzenia evidence_state=EVIDENCE_MISMATCH oraz model_classification=INDETERMINATE.
 
-    "soft_dependent_potential_cycles": "unavailable",
+Nie zmieniono innych testów, fixture, produkcji ani issues.md.
 
-Pozostałe asercje, testy i kod produkcyjny pozostały bez zmian.
+## TARGETED_RESULT
 
-## TARGETED_RESULTS
+Uruchomiono wyłącznie:
+tests/test_p1d3_package_cycle_integration.py::test_c16_p0_old_evidence_semantic_version_rejected
 
-Uruchomiono wyłącznie poniższe node IDs z tests/test_mcp_diagnostics.py na CPython 3.15.2, z --tb=long:
-
-| Node ID | Wynik |
-|---|---|
-| tests/test_mcp_diagnostics.py::test_resync_diagnostics_summary_hides_fresh_payloads_without_mutation | PASS |
-| tests/test_mcp_diagnostics.py::test_get_name_collisions_hides_fresh_details_during_resync | PASS |
-| tests/test_mcp_diagnostics.py::test_wrapper_diagnostics_exception_cannot_replace_successful_tool_result | PASS |
-
-Wynik: 3 passed, 2 warnings in 4.66s. Dwa ostrzeżenia to AuthlibDeprecationWarning z importów Authlib/JWT i Authlib HTTPX. Brak tracebacków. Nie uruchamiano pełnego pytest ani FULL.
+Komenda użyła CPython 3.15.2 z --tb=long. Wynik: 1 passed in 1.88s. Brak tracebacku. Nie uruchomiono pełnego pytest ani FULL.
 
 ## CONTRACT_VERIFICATION
 
-- CODE_PATH_PROVED — MCP odczytał contextor/core/diagnostics_projection.py:22-64. Po resync_required=False funkcja wymaga cycles_state=fresh i dependency_graph.hard_edges/soft_edges typu Mapping; w przeciwnym razie zwraca availability=unavailable.
-- DIRECT_EVIDENCE — test tworzy SimpleNamespace z resync_required oraz markerami składni/collisions/cycles, ale bez dependency_graph (tests/test_mcp_diagnostics.py:119-171). Zatem po usunięciu resync, trzy rodziny raportują fresh, a soft-dependent potential-cycle diagnostyka pozostaje unavailable.
-- CONTRACT_PROVED — dodana wartość odpowiada aktualnej gałęzi źródła dla syntetycznego stanu bez dependency_graph; wszystkie trzy wskazane testy przechodzą.
-- MCP post-change audit: LIVE revision 1459, provenance live, canonical state fresh, global workspace_sync unverified, resync_required=false; syntax diagnostics 0/fresh; graph fresh; cycles 16/fresh.
-- Per-file MCP audit: tests/test_mcp_diagnostics.py ma workspace_sync=verified na revision 1459. MCP get_source_range odczytał zmieniony anchor dokładnie w żądanej postaci.
-- HEAD po zadaniu pozostał 4c3578c344882e141d22cca5277a433d008e875e. Zmiana pliku testowego jest niezacommitowana, zgodnie z instrukcją.
+- CODE_PATH_PROVED — bieżący Contextor MCP odczytał contextor/core/cycle_semantics/evidence.py na revision 1460, workspace_sync=verified. EVIDENCE_SEMANTIC_VERSION w linii 32 wynosi cycle-semantics-evidence/4.
+- CODE_PATH_PROVED — assess_index_bound_scc_models w liniach 107-363 porównuje source_evidence.semantic_version z EVIDENCE_SEMANTIC_VERSION po wcześniejszych kontrolach graph fingerprint i topology. Różnica ustawia reason EVIDENCE_SEMANTIC_VERSION_MISMATCH.
+- CODE_PATH_PROVED — dla global_reason assessor tworzy SCCModelEvidenceAssessment z model_classification=INDETERMINATE, domyślnym evidence_state=EVIDENCE_MISMATCH i podanym reason.
+- DIRECT_EVIDENCE — test pozostawia OLD=/2, a PASS potwierdza końcowe asercje reason, evidence_state i model_classification dla tego syntetycznego przypadku.
+- MCP post-change audit: LIVE revision 1460, provenance live, canonical state fresh, global workspace_sync unverified, resync_required=false; syntax diagnostics 0/fresh; graph fresh; cycles 16/fresh.
+- Per-file MCP audit: tests/test_p1d3_package_cycle_integration.py ma workspace_sync=verified na revision 1460. MCP source range zwrócił dokładnie zmieniony test.
+- HEAD pozostał 1b5900d351a5c2d0263bf331d7087846d392082d. Nie wykonywano staging, commit ani push.
 
 ## FILES_CHANGED
 
-- tests/test_mcp_diagnostics.py
+- tests/test_p1d3_package_cycle_integration.py
 - walkthrough.md — nadpisany raport; wyłączony z własnego diffu.
 
 ## FULL_DIFFS
 
 ~~~diff
-diff --git a/tests/test_mcp_diagnostics.py b/tests/test_mcp_diagnostics.py
-index d92f950..b04d364 100644
---- a/tests/test_mcp_diagnostics.py
-+++ b/tests/test_mcp_diagnostics.py
-@@ -164,6 +164,7 @@ def test_resync_diagnostics_summary_hides_fresh_payloads_without_mutation():
-         "syntax_errors": "fresh",
-         "name_collisions": "fresh",
-         "cycles": "fresh",
-+        "soft_dependent_potential_cycles": "unavailable",
-     }
-     assert recovered["syntax_errors"]["count"] == 1
-     assert recovered["name_collisions"]["count"] == 1
+diff --git a/tests/test_p1d3_package_cycle_integration.py b/tests/test_p1d3_package_cycle_integration.py
+index 4456279..5e69606 100644
+--- a/tests/test_p1d3_package_cycle_integration.py
++++ b/tests/test_p1d3_package_cycle_integration.py
+@@ -2991,7 +2991,7 @@ def test_c16_p0_old_evidence_semantic_version_rejected(
+         tmp_path / "repo", D2A_ACTIVE_CHAIN,
+     )
+     _, graph, captured, _, evidence, snapshot = _d2a_source_evidence(root)
+-    assert evidence.semantic_version == "cycle-semantics-evidence/3"
++    assert evidence.semantic_version == "cycle-semantics-evidence/4"
+     previous = replace(
+         evidence, semantic_version="cycle-semantics-evidence/2",
+     )
+@@ -3002,3 +3002,5 @@ def test_c16_p0_old_evidence_semantic_version_rejected(
+         previous,
+     )
+     assert assessment[0].reason == "EVIDENCE_SEMANTIC_VERSION_MISMATCH"
++    assert assessment[0].evidence_state == "EVIDENCE_MISMATCH"
++    assert assessment[0].model_classification == "INDETERMINATE"
 ~~~

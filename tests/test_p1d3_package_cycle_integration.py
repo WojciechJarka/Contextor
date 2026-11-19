@@ -2991,7 +2991,7 @@ def test_c16_p0_old_evidence_semantic_version_rejected(
         tmp_path / "repo", D2A_ACTIVE_CHAIN,
     )
     _, graph, captured, _, evidence, snapshot = _d2a_source_evidence(root)
-    assert evidence.semantic_version == "cycle-semantics-evidence/3"
+    assert evidence.semantic_version == "cycle-semantics-evidence/4"
     previous = replace(
         evidence, semantic_version="cycle-semantics-evidence/2",
     )
@@ -3002,3 +3002,5 @@ def test_c16_p0_old_evidence_semantic_version_rejected(
         previous,
     )
     assert assessment[0].reason == "EVIDENCE_SEMANTIC_VERSION_MISMATCH"
+    assert assessment[0].evidence_state == "EVIDENCE_MISMATCH"
+    assert assessment[0].model_classification == "INDETERMINATE"
