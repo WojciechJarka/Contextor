@@ -164,6 +164,7 @@ def test_resync_diagnostics_summary_hides_fresh_payloads_without_mutation():
         "syntax_errors": "fresh",
         "name_collisions": "fresh",
         "cycles": "fresh",
+        "soft_dependent_potential_cycles": "unavailable",
     }
     assert recovered["syntax_errors"]["count"] == 1
     assert recovered["name_collisions"]["count"] == 1
