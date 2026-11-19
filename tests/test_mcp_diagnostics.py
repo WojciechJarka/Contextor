@@ -138,6 +138,7 @@ def test_resync_diagnostics_summary_hides_fresh_payloads_without_mutation():
         "syntax_errors": "stale",
         "name_collisions": "stale",
         "cycles": "stale",
+        "soft_dependent_potential_cycles": "stale",
     }
     assert summary["syntax_errors"] == {"count": None, "availability": "stale"}
     assert summary["name_collisions"] == {
@@ -227,6 +228,7 @@ def test_get_name_collisions_hides_fresh_details_during_resync(tmp_path, monkeyp
         "syntax_errors": "stale",
         "name_collisions": "stale",
         "cycles": "stale",
+        "soft_dependent_potential_cycles": "stale",
     }
     assert result["diagnostics_summary"]["name_collisions"]["count"] is None
     assert state.collisions is collisions
@@ -713,5 +715,6 @@ def test_wrapper_diagnostics_exception_cannot_replace_successful_tool_result(
         "syntax_errors": "unavailable",
         "name_collisions": "unavailable",
         "cycles": "unavailable",
+        "soft_dependent_potential_cycles": "unavailable",
     }
     assert result["diagnostics_attention_required"] is False

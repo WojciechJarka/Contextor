@@ -165,7 +165,8 @@ def test_existing_constructor_compatibility() -> None:
         "shared_usage_clusters_state", "trie", "package_root",
     )
     assert tuple(field.name for field in fields(RepositoryAnalysisState)) == (
-        *previous_fields, "cycle_semantics", "cycle_semantics_state",
+        previous_fields[0], "typing_guard_evidence",
+        *previous_fields[1:], "cycle_semantics", "cycle_semantics_state",
         "cycle_semantics_invalidation_reason",
     )
     seed = RepositoryAnalysisState()

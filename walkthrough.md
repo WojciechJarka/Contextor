@@ -1,131 +1,200 @@
-# SP-T4-I2B5-I4B-T67 — fail-closed przed no-op
+# SP-T4-REMAINING-R2 — KOREKTA 7 KONTRAKTÓW
 
-## PREFLIGHT
+## PRECHECK
 
-- **DIRECT_EVIDENCE:** Contextor MCP source range pokazał koniec `tests/test_p1d3_d2b2_type_only.py` na T66 (`source_total_lines=4846`); T67 nie istniał. Engine freshness envelope w preflight wskazywał revision `1451`, `provenance=live`, `workspace_sync=verified`.
-- **DIRECT_EVIDENCE:** `FileDelta.is_empty` zwraca `True`, gdy nie ma zmian membership, importów, artefaktów ani metadanych.
-- **CODE_PATH_PROVED:** przy invalid baseline helper działa fail-closed. Gdy zmienia importy zachowanego modułu, planner rozszerza plan o `modules`/`dependency_graph`; wtedy semantic no-op warunek widzi rozszerzony plan i przepuszcza operację do executora mimo `delta.is_empty=True`.
-- **DIRECT_EVIDENCE:** HEAD przed zmianą: `7ae3c229d91303cc1736fbd296be221aefefae16`; working tree czysty, plik testowy bez wcześniejszego diffu. Interpreter: CPython 3.15.2.
+- DIRECT_EVIDENCE — Contextor MCP przed zmianą: LIVE revision 1455, provenance live, canonical state fresh, global workspace_sync unverified, resync_required=false. Syntax diagnostics 0/fresh; graph i structural cycles fresh, cycles count 16; cycle_semantics stale.
+- DIRECT_EVIDENCE — per-file MCP freshness przed zmianą: wszystkie trzy test files miały workspace_sync=verified na revision 1455. Zakresy źródła odczytano z aktualnego LIVE.
+- DIRECT_EVIDENCE — Git przed zmianą: HEAD 102cf6aceae0041755b6c1692d4ec2061a472882; status wskazywał wyłącznie M walkthrough.md. Trzy pliki testowe nie miały wcześniejszych zmian.
+- Dokładne anchory pasowały:
+  - test_cycle_semantics_canonical_state.py:168-170 — tuple pól zawierało *previous_fields, "cycle_semantics", ...
+  - test_mcp_diagnostics.py:128-143, 220-234 i 705-716 — trzy wskazane słowniki availability miały dotychczas trzy klucze.
+  - test_p1d3_package_cycle_integration.py:468-477 i 2275-2283 — dwie wskazane asercje oczekiwały cycle-source-manifest/2.
+- Interpreter: CPython 3.15.2; pytest 9.1.1.
 
-## CHANGE
+## EXACT_CHANGES
 
-- Dopisano na końcu dokładnie jeden test `test_sp_t4_i2b5_i4b_t67_invalid_baseline_noop` zgodnie z podanym ciałem.
-- Nie zmieniono kodu produkcyjnego, istniejących asercji, helperów ani monkeypatchy.
-- **DIRECT_EVIDENCE:** finalny Git diff zawiera wyłącznie dopisany test T67.
-- **NOTATKA WYKONAWCZA:** pierwszy anchor patcha był niejednoznaczny i tymczasowo umieścił test przed końcem pliku. Błąd wykryto przed uruchomieniem testów, tę kopię usunięto i dopisano T67 za unikalnym ogonem T66. Przywrócono też jedną pustą linię T63 do stanu bazowego. Finalny diff potwierdza brak zmian istniejących testów. Feed MCP odnotował pośrednie zdarzenia pliku; końcowy stan potwierdzono osobno na revision `1455`.
+- test_cycle_semantics_canonical_state.py: w asercji nazw pól dodano typing_guard_evidence po previous_fields[0], zachowując kolejność reszty previous_fields. previous_fields i dalsze asercje konstruktora pozostały bez zmian.
+- test_mcp_diagnostics.py: tylko oczekiwane słowniki w trzech wskazanych testach rozszerzono o soft_dependent_potential_cycles ze wskazanym stale/stale/unavailable.
+- test_p1d3_package_cycle_integration.py: tylko literalne wersje w test_package_closure_and_prepared_v2 oraz test_p1d3_d2a_original_worker_prepares_v2 zmieniono z /2 na /3.
+- test_c16_p0_old_evidence_semantic_version_rejected oraz test_minimal_decorator_import_effects pozostały nietknięte. Nie zmieniono produkcji, innych testów ani issues.md.
 
-## TESTS
+## TARGETED_RESULTS
 
-Uruchomiono wyłącznie wskazane testy, na CPython 3.15.2, w dwóch parach i kolejności z promptu.
+Uruchomiono na CPython 3.15.2 dokładnie te siedem node IDs z --tb=long:
 
-Pierwsza para: T67, następnie T66.
-
-```text
-2 passed in 5.90s
-```
-
-Druga para: T62, następnie T65.
-
-```text
-2 passed in 2.97s
-```
-
-| Test | Wynik |
+| Node ID | Wynik |
 |---|---|
-| T67 `invalid_baseline_noop` | PASS |
-| T66 `noop_evidence_refresh` | PASS |
-| T62 `engine_global_reclassification` | PASS |
-| T65 `invalid_baseline_fails_closed` | PASS |
+| tests/test_cycle_semantics_canonical_state.py::test_existing_constructor_compatibility | PASS |
+| tests/test_mcp_diagnostics.py::test_resync_diagnostics_summary_hides_fresh_payloads_without_mutation | FAIL |
+| tests/test_mcp_diagnostics.py::test_get_name_collisions_hides_fresh_details_during_resync | PASS |
+| tests/test_mcp_diagnostics.py::test_wrapper_diagnostics_exception_cannot_replace_successful_tool_result | PASS |
+| tests/test_p1d3_package_cycle_integration.py::test_package_closure_and_prepared_v2[fixture0] | PASS |
+| tests/test_p1d3_package_cycle_integration.py::test_package_closure_and_prepared_v2[fixture1] | PASS |
+| tests/test_p1d3_package_cycle_integration.py::test_p1d3_d2a_original_worker_prepares_v2 | PASS |
 
-Brak tracebacków. Nie uruchamiano innych testów, pełnego pytest ani FULL.
+Wynik: 6 passed, 1 failed, 2 warnings in 10.55s. Ostrzeżenia to AuthlibDeprecationWarning dla Authlib/JWT i integracji Authlib HTTPX. Nie wykonano kolejnej poprawki ani dodatkowych testów.
 
-## T67 EVIDENCE
+Pełny traceback jedynego FAIL z pytest:
 
-- **DIRECT_EVIDENCE:** T67 przechodzi z `result.delta.is_empty is True` i `result.status == "UPDATED"`.
-- **DIRECT_EVIDENCE:** po update evidence pozostaje `{}`, guarded import jest `type_only=False`, a `pkg.b` przechodzi z soft edge do hard edge.
-- **DIRECT_EVIDENCE:** nowe `modules` i `dependency_graph` mają inną tożsamość. Zachowane referencje `before_modules`/`before_graph` nadal mają `type_only=True` i soft edge.
-- **INFERENCE:** w tym świadku status `UPDATED` wynika z planu poszerzonego przez fail-closed reclassyfikację, mimo pustego surowego `FileDelta`; asercje T67 oraz ścieżka helper→planner→executor są z tym zgodne.
-- **LIMITATION:** jest to jeden syntetyczny świadek `_I1_SAFE`; nie dowodzi zachowania dla wszystkich postaci repozytoriów ani wszystkich zmian źródeł, które dają pusty `FileDelta`.
+~~~text
+____ test_resync_diagnostics_summary_hides_fresh_payloads_without_mutation ____
 
-## MCP POST-CHANGE AUDIT
+    def test_resync_diagnostics_summary_hides_fresh_payloads_without_mutation():
+        syntax_facts = {
+            "broken.py": {"status": "checked_with_errors", "errors": [{"message": "bad"}]}
+        }
+        collisions = [_collision()]
+        cycles = [["a", "b", "a"]]
+        state = SimpleNamespace(
+            resync_required=True,
+            syntax_diagnostics_state="fresh",
+            syntax_diagnostics_by_path=syntax_facts,
+            collisions_state="fresh",
+            collisions=collisions,
+            cycles_state="fresh",
+            cycles=cycles,
+        )
 
-- **DIRECT_EVIDENCE:** końcowy event `desktop_watcher`, `operation=update_file`, `status=UPDATED` dla pliku testowego, revision `1455`; continuity=`continuous`, `resync_required=false`, `resync_reason=null`; `blast_radius_state=deferred`, affected modules=0.
-- **DIRECT_EVIDENCE:** MCP odczytał pełny T67 z `canonical_state=fresh`, `workspace_sync=verified`, `provenance=live`, revision `1455`.
-- **DIRECT_EVIDENCE:** syntax diagnostics=0/fresh; graph/module/topology/artifact-consumption/cycles/collisions/lineage families fresh. Cycles=16/fresh; cycle warning view fresh, active warnings=16. `cycle_semantics=stale`.
-- Źródło zostało zsynchronizowane przez watcher; `update_file` MCP nie wywoływano. Restartu nie wykonywano.
+        summary = diagnostics_summary_for_state(state)
 
-## FINAL VERDICT
+        assert summary["availability"] == {
+            "syntax_errors": "stale",
+            "name_collisions": "stale",
+            "cycles": "stale",
+            "soft_dependent_potential_cycles": "stale",
+        }
+        assert summary["syntax_errors"] == {"count": None, "availability": "stale"}
+        assert summary["name_collisions"] == {
+            "count": None,
+            "critical": None,
+            "warning": None,
+            "info": None,
+            "availability": "stale",
+        }
+        assert summary["cycles"] == {
+            "count": None,
+            "availability": "stale",
+            "count_semantics": "DFS_BACK_EDGE_PATHS_DEDUP_ROTATION_NOT_ALL_SIMPLE_CYCLES",
+        }
+        assert summary["attention_required"] is False
+        assert state.syntax_diagnostics_by_path is syntax_facts
+        assert state.collisions is collisions
+        assert state.cycles is cycles
 
-**T67_PASS** — dodany test i pozostałe wskazane testy przeszły; końcowy source jest verified w LIVE. Zakres pozostaje ograniczony do T67 i wskazanego subsetu.
+        state.resync_required = False
+        recovered = diagnostics_summary_for_state(state)
+>       assert recovered["availability"] == {
+            "syntax_errors": "fresh",
+            "name_collisions": "fresh",
+            "cycles": "fresh",
+        }
+E       AssertionError: assert {'syntax_errors': 'fresh', 'name_collisions': 'fresh', 'cycles': 'fresh', 'soft_dependent_potential_cycles': 'unavailable'} == {'syntax_errors': 'fresh', 'name_collisions': 'fresh', 'cycles': 'fresh'}
+E
+E         Common items:
+E         {'cycles': 'fresh', 'name_collisions': 'fresh', 'syntax_errors': 'fresh'}
+E         Left contains one more item:
+E         {'soft_dependent_potential_cycles': 'unavailable'}
+E
+E         Full diff:
+E           {
+E               'syntax_errors': 'fresh',
+E               'name_collisions': 'fresh',
+E               'cycles': 'fresh',
+E         +     'soft_dependent_potential_cycles': 'unavailable',
+E           }
+
+tests\test_mcp_diagnostics.py:163: AssertionError
+~~~
+
+## CONTRACT_VERIFICATION
+
+- CODE_PATH_PROVED — MCP class implementation contextor/core/analysis/state_manager.py:86-205 declares typing_guard_evidence as a keyword-only dataclass field after modules. The updated field-name tuple matches this declaration; the targeted constructor test passes.
+- CODE_PATH_PROVED — contextor/core/diagnostics_projection.py:93-278 returns soft_dependent_potential_cycles and includes its availability in the summary availability mapping. The stale-resync branch reports stale for this family.
+- CODE_PATH_PROVED — contextor/core/diagnostics_projection.py:1-92 defines _soft_dependent_cycle_diagnostic. For resync_required=True it reports stale. After recovery it requires cycles_state=fresh and dependency_graph.hard_edges/soft_edges to be Mapping objects; absent or invalid graph data returns unavailable. This test's SimpleNamespace has no dependency_graph, so the post-resync actual value unavailable is consistent with that code path.
+- CODE_PATH_PROVED — contextor/core/cycle_semantics/generation_manifest.py:34 defines MANIFEST_VERSION as cycle-source-manifest/3. contextor/core/cycle_semantics/original_worker_preparation.py:43-255 validates the prepared manifest against MANIFEST_VERSION. Both package fixtures and the original-worker targeted test pass after the literal expectation changes.
+- DIRECT_EVIDENCE — post-change MCP reads returned revision 1458, provenance live, canonical state fresh, global workspace_sync unverified, resync_required=false, syntax diagnostics 0/fresh, graph fresh and cycles 16/fresh. cycle_semantics remains stale.
+- DIRECT_EVIDENCE — per-file MCP source reads at revision 1458 returned workspace_sync=verified for all three changed test files. MCP get_source_range returned the edited anchors exactly as requested.
+- CONTRACT_PROVED — the six passing node IDs confirm their changed assertions pass against the current test/runtime paths. This is scoped test evidence, not a general semantic certification.
+- INFERENCE — the test names test_package_closure_and_prepared_v2 and test_p1d3_d2a_original_worker_prepares_v2 still say v2 while their targeted assertions now require version 3; names were explicitly frozen by the prompt.
+- UNKNOWN — no claim is made here about broader correctness beyond the exact changed assertions and read code paths.
+
+## LIMITATIONS
+
+- One targeted test remains FAIL at its separate post-resync recovery assertion. The prompt limited the edit to adding stale to the first expected dictionary and prohibited changing the remaining recovery assertions; no second edit was made.
+- The actual recovered availability contains soft_dependent_potential_cycles=unavailable because this synthetic state has no dependency_graph, as confirmed by the current helper. The remaining exact three-key expectation does not include this value.
+- No source/test modifications were made outside the three requested test assertions. No full pytest, production FULL, restart, staging, commit or push was performed.
 
 ## FILES_CHANGED
 
-- `tests/test_p1d3_d2b2_type_only.py` — jedyny zmieniony plik testowy.
-- `walkthrough.md` — wymagany raport; bez własnego diffu.
+- tests/test_cycle_semantics_canonical_state.py
+- tests/test_mcp_diagnostics.py
+- tests/test_p1d3_package_cycle_integration.py
+- walkthrough.md — overwritten report; excluded from its own diff.
 
 ## FULL_DIFFS
 
-### `tests/test_p1d3_d2b2_type_only.py`
-
-```diff
-diff --git a/tests/test_p1d3_d2b2_type_only.py b/tests/test_p1d3_d2b2_type_only.py
-index 09eabef..74448b5 100644
---- a/tests/test_p1d3_d2b2_type_only.py
-+++ b/tests/test_p1d3_d2b2_type_only.py
-@@ -4844,3 +4844,55 @@ def test_sp_t4_i2b5_i4b_t66_noop_evidence_refresh(
-         engine.state
-     ).type_only is True
- 
-+
-+def test_sp_t4_i2b5_i4b_t67_invalid_baseline_noop(
-+    tmp_path, isolated_dirs,
-+):
-+    root = write_synthetic_repository(
-+        tmp_path / "repo", _I1_SAFE
-+    )
-+    _, engine = _i1_full_engine(root)
-+
-+    before_modules = engine.state.modules
-+    before_graph = engine.state.dependency_graph
-+
-+    assert _i1_guarded_import(
-+        engine.state
-+    ).type_only is True
-+    assert "pkg.b" in before_graph.soft_edges["pkg.a"]
-+
-+    engine.state.typing_guard_evidence = {}
-+
-+    target = root / "pkg/c.py"
-+    with target.open("a", encoding="utf-8") as stream:
-+        stream.write("\n# evidence fallback\n")
-+
-+    result = engine.update_file(str(target.resolve()))
-+
-+    assert result.delta.is_empty is True
-+    assert result.status == "UPDATED"
-+
-+    assert engine.state.typing_guard_evidence == {}
-+    assert _i1_guarded_import(
-+        engine.state
-+    ).type_only is False
-+
-+    assert "pkg.b" in (
-+        engine.state.dependency_graph
-+        .hard_edges["pkg.a"]
-+    )
-+    assert "pkg.b" not in (
-+        engine.state.dependency_graph
-+        .soft_edges["pkg.a"]
-+    )
-+
-+    assert engine.state.modules is not before_modules
-+    assert engine.state.dependency_graph is not before_graph
-+
-+    before_guarded = next(
-+        ref for ref in before_modules["pkg.a"].imports
-+        if ref.module == "pkg.b"
-+    )
-+    assert before_guarded.type_only is True
-+    assert "pkg.b" in before_graph.soft_edges["pkg.a"]
-+
-```
+~~~diff
+diff --git a/tests/test_cycle_semantics_canonical_state.py b/tests/test_cycle_semantics_canonical_state.py
+index beb0efb..30f9454 100644
+--- a/tests/test_cycle_semantics_canonical_state.py
++++ b/tests/test_cycle_semantics_canonical_state.py
+@@ -165,7 +165,8 @@ def test_existing_constructor_compatibility() -> None:
+         "shared_usage_clusters_state", "trie", "package_root",
+     )
+     assert tuple(field.name for field in fields(RepositoryAnalysisState)) == (
+-        *previous_fields, "cycle_semantics", "cycle_semantics_state",
++        previous_fields[0], "typing_guard_evidence",
++        *previous_fields[1:], "cycle_semantics", "cycle_semantics_state",
+         "cycle_semantics_invalidation_reason",
+     )
+     seed = RepositoryAnalysisState()
+diff --git a/tests/test_mcp_diagnostics.py b/tests/test_mcp_diagnostics.py
+index 1c7de24..d92f950 100644
+--- a/tests/test_mcp_diagnostics.py
++++ b/tests/test_mcp_diagnostics.py
+@@ -138,6 +138,7 @@ def test_resync_diagnostics_summary_hides_fresh_payloads_without_mutation():
+         "syntax_errors": "stale",
+         "name_collisions": "stale",
+         "cycles": "stale",
++        "soft_dependent_potential_cycles": "stale",
+     }
+     assert summary["syntax_errors"] == {"count": None, "availability": "stale"}
+     assert summary["name_collisions"] == {
+@@ -227,6 +228,7 @@ def test_get_name_collisions_hides_fresh_details_during_resync(tmp_path, monkeyp
+         "syntax_errors": "stale",
+         "name_collisions": "stale",
+         "cycles": "stale",
++        "soft_dependent_potential_cycles": "stale",
+     }
+     assert result["diagnostics_summary"]["name_collisions"]["count"] is None
+     assert state.collisions is collisions
+@@ -713,5 +715,6 @@ def test_wrapper_diagnostics_exception_cannot_replace_successful_tool_result(
+         "syntax_errors": "unavailable",
+         "name_collisions": "unavailable",
+         "cycles": "unavailable",
++        "soft_dependent_potential_cycles": "unavailable",
+     }
+     assert result["diagnostics_attention_required"] is False
+diff --git a/tests/test_p1d3_package_cycle_integration.py b/tests/test_p1d3_package_cycle_integration.py
+index e149079..4456279 100644
+--- a/tests/test_p1d3_package_cycle_integration.py
++++ b/tests/test_p1d3_package_cycle_integration.py
+@@ -470,7 +470,7 @@ def test_package_closure_and_prepared_v2(tmp_path, isolated_dirs, fixture):
+     assert prepared.status == "PREPARED_UNPUBLISHED_NON_ATOMIC"
+     assert prepared.source_modules == closure[0].evidence_source_modules
+     manifest = prepared.manifest
+-    assert manifest.version == MANIFEST_VERSION == "cycle-source-manifest/2"
++    assert manifest.version == MANIFEST_VERSION == "cycle-source-manifest/3"
+     assert manifest.source_manifest_sha256 is not None
+     component = manifest.components[0]
+     assert component.model_kind == "REGULAR_PACKAGE"
+@@ -2277,7 +2277,7 @@ def test_p1d3_d2a_original_worker_prepares_v2(tmp_path, isolated_dirs):
+         captured, graph.hard_edges, snapshot,
+     )
+     assert prepared.status == "PREPARED_UNPUBLISHED_NON_ATOMIC"
+-    assert prepared.manifest.version == "cycle-source-manifest/2"
++    assert prepared.manifest.version == "cycle-source-manifest/3"
+     component = prepared.manifest.components[0]
+     assert component.model_kind == "REGULAR_PACKAGE"
+     assert component.model_classification == "MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS"
+~~~

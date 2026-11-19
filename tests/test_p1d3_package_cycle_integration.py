@@ -470,7 +470,7 @@ def test_package_closure_and_prepared_v2(tmp_path, isolated_dirs, fixture):
     assert prepared.status == "PREPARED_UNPUBLISHED_NON_ATOMIC"
     assert prepared.source_modules == closure[0].evidence_source_modules
     manifest = prepared.manifest
-    assert manifest.version == MANIFEST_VERSION == "cycle-source-manifest/2"
+    assert manifest.version == MANIFEST_VERSION == "cycle-source-manifest/3"
     assert manifest.source_manifest_sha256 is not None
     component = manifest.components[0]
     assert component.model_kind == "REGULAR_PACKAGE"
@@ -2277,7 +2277,7 @@ def test_p1d3_d2a_original_worker_prepares_v2(tmp_path, isolated_dirs):
         captured, graph.hard_edges, snapshot,
     )
     assert prepared.status == "PREPARED_UNPUBLISHED_NON_ATOMIC"
-    assert prepared.manifest.version == "cycle-source-manifest/2"
+    assert prepared.manifest.version == "cycle-source-manifest/3"
     component = prepared.manifest.components[0]
     assert component.model_kind == "REGULAR_PACKAGE"
     assert component.model_classification == "MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS"
