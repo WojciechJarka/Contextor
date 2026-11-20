@@ -65,7 +65,7 @@ CASES = [
             "    import pkg.body\n"
         ),
         ("pkg.body", "pkg.decorate"),
-        "UNKNOWN",
+        "MODEL_PASS",
         id="class-body-before-decorator",
     ),
     pytest.param(

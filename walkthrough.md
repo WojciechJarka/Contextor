@@ -1,63 +1,79 @@
-# SP-T4-REMAINING-R4 — OLD EVIDENCE REJECTION
+# SP-T4-REMAINING-R6 — CLASS DECORATOR CONTRACT
 
 ## PRECHECK
 
-- DIRECT_EVIDENCE — Contextor MCP przed zmianą: LIVE revision 1459, provenance live, canonical state fresh, global workspace_sync unverified, resync_required=false. Syntax diagnostics 0/fresh; graph fresh; cycles 16/fresh; cycle_semantics stale.
-- DIRECT_EVIDENCE — test_c16_p0_old_evidence_semantic_version_rejected miał per-file workspace_sync=verified na revision 1459. Dokładny anchor zgadzał się z promptem.
-- DIRECT_EVIDENCE — Git przed zmianą: HEAD 1b5900d351a5c2d0263bf331d7087846d392082d. Zmieniany test nie miał wcześniejszego diffu; status zawierał wcześniejsze M walkthrough.md.
-- Interpreter docelowy: CPython 3.15.2.
+- **DIRECT_EVIDENCE — Contextor MCP przed edycją:** LIVE revision 1460, provenance=live, canonical_state=fresh, resync_required=false. Globalne workspace_sync=unverified; dla pliku testowego per-file workspace_sync=verified na revision 1460.
+- **DIRECT_EVIDENCE — Git przed edycją:** HEAD caf1ed548a21ba52b0290e5be4fbf71018831e02. Status zawierał wyłącznie wcześniejszą modyfikację walkthrough.md z poprzedniego raportu; plik testowy był czysty.
+- **DIRECT_EVIDENCE — interpreter:** repo .venv wskazuje CPython 3.15.2, executable C:\Temp\Contextor_Repo\.venv\Scripts\python.exe.
+- **DIRECT_EVIDENCE — anchor MCP i lokalny:** w CASES przypadek class-body-before-decorator miał źródło i expected_imports bez zmian oraz expected_model_outcome="UNKNOWN" w linii 68.
+- **CONTRACT_PROVED — niezależna kontrola semantyczna:** discovery R5 dla zweryfikowanego LIVE revision 1460 wykazało ograniczoną ścieżkę evaluator dla dokładnie tego fixture: klasa importuje pkg.body przed wywołaniem dekoratora; ograniczona funkcja deco importuje pkg.decorate, a potem zwraca ten sam abstrakcyjny class_fact. Oba moduły są indeksowane, a ich syntetyczne źródła to pass. MODEL_PASS jest uzasadniony dla tego zamkniętego przypadku. To nie certyfikuje dowolnych dekoratorów ani środowiska runtime.
+- Nie zmieniano produkcji. Nie uruchomiono FULL ani pełnego pytest.
 
 ## EXACT_CHANGE
 
-W tests/test_p1d3_package_cycle_integration.py, wyłącznie w test_c16_p0_old_evidence_semantic_version_rejected:
-- zmieniono asercję baseline z cycle-semantics-evidence/3 na cycle-semantics-evidence/4;
-- pozostawiono OLD jako cycle-semantics-evidence/2;
-- bezpośrednio po asercji reason dodano sprawdzenia evidence_state=EVIDENCE_MISMATCH oraz model_classification=INDETERMINATE.
+W tests/test_cycle_semantics_decorator_import_effect_baseline.py zmieniono wyłącznie expected_model_outcome parametru class-body-before-decorator z UNKNOWN na MODEL_PASS. Źródło, expected_imports, pozostałe parametry i mechanizm testu pozostały bez zmian.
 
-Nie zmieniono innych testów, fixture, produkcji ani issues.md.
+## TARGETED_RESULTS
 
-## TARGETED_RESULT
+Interpreter dla obu poleceń: CPython 3.15.2 z repo .venv.
 
-Uruchomiono wyłącznie:
-tests/test_p1d3_package_cycle_integration.py::test_c16_p0_old_evidence_semantic_version_rejected
+1. Dokładny node ID:
+   tests/test_cycle_semantics_decorator_import_effect_baseline.py::test_minimal_decorator_import_effects[class-body-before-decorator]
 
-Komenda użyła CPython 3.15.2 z --tb=long. Wynik: 1 passed in 1.88s. Brak tracebacku. Nie uruchomiono pełnego pytest ani FULL.
+   Wynik: PASS — 1 passed in 2.11s.
 
-## CONTRACT_VERIFICATION
+2. Wszystkie parametryzacje funkcji:
+   tests/test_cycle_semantics_decorator_import_effect_baseline.py::test_minimal_decorator_import_effects
 
-- CODE_PATH_PROVED — bieżący Contextor MCP odczytał contextor/core/cycle_semantics/evidence.py na revision 1460, workspace_sync=verified. EVIDENCE_SEMANTIC_VERSION w linii 32 wynosi cycle-semantics-evidence/4.
-- CODE_PATH_PROVED — assess_index_bound_scc_models w liniach 107-363 porównuje source_evidence.semantic_version z EVIDENCE_SEMANTIC_VERSION po wcześniejszych kontrolach graph fingerprint i topology. Różnica ustawia reason EVIDENCE_SEMANTIC_VERSION_MISMATCH.
-- CODE_PATH_PROVED — dla global_reason assessor tworzy SCCModelEvidenceAssessment z model_classification=INDETERMINATE, domyślnym evidence_state=EVIDENCE_MISMATCH i podanym reason.
-- DIRECT_EVIDENCE — test pozostawia OLD=/2, a PASS potwierdza końcowe asercje reason, evidence_state i model_classification dla tego syntetycznego przypadku.
-- MCP post-change audit: LIVE revision 1460, provenance live, canonical state fresh, global workspace_sync unverified, resync_required=false; syntax diagnostics 0/fresh; graph fresh; cycles 16/fresh.
-- Per-file MCP audit: tests/test_p1d3_package_cycle_integration.py ma workspace_sync=verified na revision 1460. MCP source range zwrócił dokładnie zmieniony test.
-- HEAD pozostał 1b5900d351a5c2d0263bf331d7087846d392082d. Nie wykonywano staging, commit ani push.
+   Wynik: PASS — 5 passed in 1.38s.
+
+Nie wystąpiły FAIL ani tracebacki.
+
+## CPYTHON_PARITY
+
+- **DIRECT_EVIDENCE:** test wywołuje podproces przez sys.executable -I -B i porównuje observed["imports"] z expected_imports. Interpreter bazowy potwierdzono jako CPython 3.15.2, więc podproces używa tego samego executable.
+- **DIRECT_EVIDENCE:** dla class-body-before-decorator test sprawdza kolejność ("pkg.body", "pkg.decorate"). Parametr przeszedł z tym oracle oraz z oceną modelu MODEL_PASS.
+- **DIRECT_EVIDENCE:** pięć obecnych expected_model_outcome w CASES po zmianie:
+  - decorated-function-body-deferred — MODEL_PASS;
+  - decorator-import-during-definition — MODEL_PASS;
+  - stacked-decorator-import-order — MODEL_PASS;
+  - class-body-before-decorator — MODEL_PASS;
+  - default-before-decorator-application — UNKNOWN.
+- Wszystkie pięć parametrów przeszło; dotychczasowe oczekiwanie UNKNOWN pozostało dla default-before-decorator-application.
+
+## MODEL_BOUNDARY
+
+- **CODE_PATH_PROVED:** test celuje w syntetyczny zamknięty pakiet. Ograniczony evaluator przyjmuje dla badanego przypadku named decorator z obsługiwanym jednoargumentowym body, importy z indeksowanych modułów i bezpośrednie return cls.
+- **DIRECT_EVIDENCE:** evaluator deklaruje założenie conventional builtin bindings i brak atestacji rzeczywistych __builtins__, builtins oraz import environment. MODEL_PASS nie oznacza ogólnego dowodu bezpieczeństwa wykonania.
+- **INFERENCE:** oczekiwanie MODEL_PASS jest odpowiednie dla tego przypadku, ponieważ wszystkie jego jawne efekty należą do obsługiwanego podzbioru. Nie rozszerza to kontraktu na arbitralne skutki uboczne dekoratorów.
+
+## LIMITATIONS
+
+- Test obejmuje pięć parametrów jednej funkcji; nie uruchamiano pozostałych testów pliku ani pełnego pytest.
+- **DIRECT_EVIDENCE — MCP post-change audit:** Desktop watcher opublikował event revision 1461, operation=update_file, origin=desktop_watcher, status=UPDATED dla wskazanego pliku testowego. affected_modules.total=0, blast_radius_state=deferred.
+- LIVE po zmianie: revision=1461, provenance=live, canonical_state=fresh, resync_required=false; per-file workspace_sync=verified dla testu na revision 1461. Globalne workspace_sync pozostaje unverified.
+- Diagnostyka LIVE: syntax_errors=0/fresh; graph=fresh; cycles=fresh, structural count=16. cycle_semantics family jest stale. Diagnostyka strukturalna nie jest wynikiem badanego testu ani dowodem wykonania dekoratorów.
+- Zmieniono wyłącznie test i walkthrough.md. Nie było potrzeby restartu; nie wywołano MCP update_file.
 
 ## FILES_CHANGED
 
-- tests/test_p1d3_package_cycle_integration.py
-- walkthrough.md — nadpisany raport; wyłączony z własnego diffu.
+- tests/test_cycle_semantics_decorator_import_effect_baseline.py — jedna zmiana oczekiwanego wyniku.
+- walkthrough.md — raport bieżącego zadania; raport nie jest wliczony do FULL_DIFFS.
 
 ## FULL_DIFFS
 
 ~~~diff
-diff --git a/tests/test_p1d3_package_cycle_integration.py b/tests/test_p1d3_package_cycle_integration.py
-index 4456279..5e69606 100644
---- a/tests/test_p1d3_package_cycle_integration.py
-+++ b/tests/test_p1d3_package_cycle_integration.py
-@@ -2991,7 +2991,7 @@ def test_c16_p0_old_evidence_semantic_version_rejected(
-         tmp_path / "repo", D2A_ACTIVE_CHAIN,
-     )
-     _, graph, captured, _, evidence, snapshot = _d2a_source_evidence(root)
--    assert evidence.semantic_version == "cycle-semantics-evidence/3"
-+    assert evidence.semantic_version == "cycle-semantics-evidence/4"
-     previous = replace(
-         evidence, semantic_version="cycle-semantics-evidence/2",
-     )
-@@ -3002,3 +3002,5 @@ def test_c16_p0_old_evidence_semantic_version_rejected(
-         previous,
-     )
-     assert assessment[0].reason == "EVIDENCE_SEMANTIC_VERSION_MISMATCH"
-+    assert assessment[0].evidence_state == "EVIDENCE_MISMATCH"
-+    assert assessment[0].model_classification == "INDETERMINATE"
+diff --git a/tests/test_cycle_semantics_decorator_import_effect_baseline.py b/tests/test_cycle_semantics_decorator_import_effect_baseline.py
+index a53eaf9..cfbf650 100644
+--- a/tests/test_cycle_semantics_decorator_import_effect_baseline.py
++++ b/tests/test_cycle_semantics_decorator_import_effect_baseline.py
+@@ -65,7 +65,7 @@ CASES = [
+             "    import pkg.body\n"
+         ),
+         ("pkg.body", "pkg.decorate"),
+-        "UNKNOWN",
++        "MODEL_PASS",
+         id="class-body-before-decorator",
+     ),
 ~~~
+
