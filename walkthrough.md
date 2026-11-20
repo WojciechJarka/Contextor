@@ -1,131 +1,167 @@
-# P6-D04-I2 — RESTRICTED DEFINITION-TIME DEFAULT CALLS
+# P6-D04-I3 — EXACT BOUNDARY REGRESSION TESTS
 
 ## PRECHECK
 
-- **DIRECT_EVIDENCE — Contextor MCP przed zmianą:** LIVE revision 1465, provenance=live, canonical_state=fresh, resync_required=false, parse_stale_modules={}; globalne syntax_errors=0 (fresh). Agregat workspace_sync=unverified.
-- **DIRECT_EVIDENCE — per-file przed zmianą:** contextor/core/cycle_semantics/package_model.py miało workspace_sync=verified przy rev 1465, syntax_diagnostics=checked_and_none, errors=0. Badane pliki testów również miały per-file workspace_sync=verified.
-- **DIRECT_EVIDENCE — lokalny precheck:** HEAD 4e26e0718392d8296433dcaff2044c7a8053f955; git status --short był pusty. Wszystkie cztery dokładne kotwice z promptu odpowiadały aktualnemu plikowi.
-- **DIRECT_EVIDENCE — issues.md:** odczytano cały plik. Zawiera wpisy o innych obszarach Contextora; nie ma wpisu P6-D04 ani o default calls. Plik nie został zmieniony.
-- **DIRECT_EVIDENCE — istniejące kontrakty testowe:** odczytano przez Contextor testy:
-  - tests/test_cycle_semantics_passive_functions.py: test_c23_dynamic_default_unknown, test_c23_positional_default_opaque_binding, test_c23_keyword_only_default_opaque_binding, test_c23_zero_arg_opaque_body_not_executed, test_c23_existing_restricted_function_preserved;
-  - tests/test_cycle_semantics_decorator_import_effect_baseline.py: test_minimal_decorator_import_effects;
-  - tests/test_cycle_semantics_definition_effect_order_cpython.py: test_definition_effect_order_cpython.
-- **CODE_PATH_PROVED:** validator domyślnie dopuszcza tylko literalne defaulty; _compile zapisuje wspierane funkcje restricted jako _RestrictedFunction, a istniejący krok CALL_FUNCTION wykonuje lookup w bieżącym namespace, otwiera _FunctionFrame dla body i wznawia frame modułu po zakończeniu. _RestrictedFunction przechowuje module, body i parametry, nie wartość defaultu.
-- **INFERENCE — semantyczny zakres:** w ograniczonym przypadku bezargumentowa nazwana funkcja restricted może mieć modelowane importy w body; jej wywołanie przy definicji dodaje te efekty przed związaniem f. Ponieważ f pozostaje opaque i nie jest wywoływane, modeluje się efekt wywołania, a nie przechowuje wartość defaultu. Nie jest to ogólna ewaluacja wyrażeń Python.
+- **DIRECT_EVIDENCE — Contextor MCP:** przed zmianą LIVE revision 1466, provenance=live, canonical_state=fresh, resync_required=false; globalne syntax_errors=0 (fresh). Plik tests/test_cycle_semantics_default_definition_effects.py miał per-file workspace_sync=verified, canonical_revision=1466, syntax_diagnostics=checked_and_none.
+- **DIRECT_EVIDENCE — lokalny stan:** HEAD 54ed000d6e2b163b0e3c655914f98762a5d376b8; git status --short był pusty. Odczytano dokładny koniec pliku: ostatnia asercja porządku eventów kończyła dotychczasowy test_default_definition_effects.
+- **DIRECT_EVIDENCE — issues.md:** odczytano bez modyfikacji; zawiera wpisy o innych obszarach, bez P6-D04/I3.
+- **INFERENCE — niezależna ocena przypadków:** keyword-only defaults mają być ewaluowane kolejno; powtórne g() powinno dać dwa wywołania, ale pojedynczy START_IMPORT dla już załadowanego modułu; g=h przed definicją powinno użyć aktualnego aliasu; call f() po definicji f nadal jest poza obsługą opaque funkcji; import pkg.child z from pkg import f podczas ewaluacji defaultu zachodzi przed związaniem f, więc nie może uzyskać MODEL_PASS.
 
-## EXACT_CHANGES
+## EXACT_CHANGE
 
-- Zmiana 1: dodano allow_restricted_default_calls=False do _safe_passive_function_definition.
-- Zmiana 2: safe_default dopuszcza ast.Call wyłącznie przy włączonym opt-in, bezpośredniej ast.Name z nie-dunderowym identyfikatorem oraz bez argumentów i keywords; pozostała walidacja literalnych defaultów pozostała bez zmian.
-- Zmiana 3: opt-in przekazywany jest wyłącznie w gałęzi ast.FunctionDef jako not stmt.decorator_list. AsyncFunctionDef i walidacja metod klas nadal korzystają z domyślnego False.
-- Zmiana 4: dla kolejnych args.defaults, a następnie args.kw_defaults, compiler dodaje CALL_FUNCTION przed DEFINE_OPAQUE_FUNCTION dla f. f pozostaje opaque.
-- Nie zmieniono _Step, _FunctionFrame, _RestrictedFunction, interpretera, testów ani innych plików produkcyjnych.
+- Na końcu tests/test_cycle_semantics_default_definition_effects.py dopisano dokładnie dostarczony helper _p6_boundary_model oraz pięć testów granicznych.
+- Istniejąca treść pliku pozostała bez zmian. Nie zmieniono produkcji ani innych testów.
+- issues.md pozostał bez zmian. walkthrough.md nadpisano zgodnie z poleceniem raportowym.
 
 ## TARGETED_RESULTS
 
-Wykonano dokładnie cztery wskazane polecenia:
+Uruchomiono dokładnie:
 
 ~~~text
 .venv/Scripts/python.exe -m pytest -q tests/test_cycle_semantics_default_definition_effects.py --tb=long
-5 passed in 1.24s
 ~~~
 
-~~~text
-.venv/Scripts/python.exe -m pytest -q tests/test_cycle_semantics_passive_functions.py::test_c23_dynamic_default_unknown tests/test_cycle_semantics_passive_functions.py::test_c23_positional_default_opaque_binding tests/test_cycle_semantics_passive_functions.py::test_c23_keyword_only_default_opaque_binding tests/test_cycle_semantics_passive_functions.py::test_c23_zero_arg_opaque_body_not_executed tests/test_cycle_semantics_passive_functions.py::test_c23_existing_restricted_function_preserved --tb=long
-5 passed in 1.22s
-~~~
+Wynik: 10 passed in 0.78s (exit code 0). Wykonano wszystkie pięć dotychczasowych i pięć dopisanych przypadków; tracebacków nie było. Interpreter .venv/Scripts/python.exe był bezpośrednio zweryfikowany jako Python 3.15.2 w poprzednim zadaniu na tym samym workspace/venv.
 
-~~~text
-.venv/Scripts/python.exe -m pytest -q tests/test_cycle_semantics_decorator_import_effect_baseline.py::test_minimal_decorator_import_effects --tb=long
-5 passed in 1.23s
-~~~
+## SEMANTIC_BOUNDARIES
 
-~~~text
-.venv/Scripts/python.exe -m pytest -q tests/test_cycle_semantics_definition_effect_order_cpython.py::test_definition_effect_order_cpython --tb=long
-8 passed in 1.37s
-~~~
-
-Wynik łączny: 23 przypadki PASS. Testy z test_definition_effect_order_cpython uruchamiają izolowane podprocesy CPython dla porządku efektów definicji i dekoratorów. Interpreter .venv/Scripts/python.exe był bezpośrednio zweryfikowany jako Python 3.15.2 w poprzednim zadaniu na tym samym workspace/venv; w tym zadaniu uruchomiono wyłącznie podane polecenia pytest.
-
-## MODEL_BOUNDARY
-
-- **DIRECT_EVIDENCE:** named no-arg default call przechodzi compile tylko w niedekorowanym FunctionDef. CALL_FUNCTION nie ma bindingu, więc wartość zwrócona przez restricted callee nie jest wiązana jako nazwa ani zapisywana do reprezentacji f.
-- **CODE_PATH_PROVED:** istniejący interpreter robi namespace lookup targetu; _execute_restricted_call akceptuje tylko _RestrictedFunction z tego samego modułu i zgodną liczbą argumentów. Następnie CALL_FUNCTION dopisuje event, przesuwa frame modułu i uruchamia body w _FunctionFrame. Po końcu body moduł wznawia się od następnego kroku. To pozwala zaobserwować importy g/h przed krokiem definicji opaque f.
-- **DIRECT_EVIDENCE — granice zachowane przez testy:** nieznane compute_default nadal daje UNKNOWN; defaulty stałe, keyword-only i opaque body zachowują dotychczasowe zachowanie; zwykłe body f nie jest wykonywane przy definicji; istniejące restricted function call pozostaje obsłużone. Baseline dekoratorów nadal przechodzi, w tym dynamic default w dekorowanej funkcji z oczekiwanym UNKNOWN.
-- **INFERENCE — rebinding i unsupported return:** rebinding g przed defaultem widzi w runtime bieżące g, a nie wcześniejszą definicję; jeśli nie jest _RestrictedFunction, wynik jest UNKNOWN. G z unsupported return jest reprezentowane opaque, więc jej wywołanie pozostaje UNKNOWN. Testy regresyjne potwierdziły te oczekiwane statusy.
-- **INFERENCE — kolejność:** konkatenacja args.defaults i args.kw_defaults daje positional defaults w kolejności AST, potem keyword-only defaults w kolejności AST; pominięte kw-only defaults mają wartość None i nie generują CALL_FUNCTION.
-- Rozszerzenie nie dotyczy dekorowanych funkcji, AsyncFunctionDef, metod klas, wywołań z argumentami, atrybutowych callees ani wartości defaultów dostępnych przy późniejszej introspekcji.
+- **DIRECT_EVIDENCE — keyword-only order:** test wymaga importów pkg.a, pkg.b w kolejności odpowiadającej x=g(), y=h().
+- **DIRECT_EVIDENCE — repeated call:** test wymaga dwóch eventów CALL_FUNCTION symbol=g oraz jednego START_IMPORT dla pkg.child.
+- **DIRECT_EVIDENCE — aktualny namespace:** po g = h test wymaga wyłącznie importu pkg.b, co sprawdza lookup aliasu w chwili default call.
+- **DIRECT_EVIDENCE — opaque boundary:** późniejsze f() daje UNKNOWN, mimo że wcześniejszy default g() pozwolił związać f jako DEFINE_OPAQUE_FUNCTION.
+- **DIRECT_EVIDENCE — kolejność wiązania:** gdy default g() importuje pkg.child, a child wykonuje from pkg import f, wynik nie może być MODEL_PASS. Asercja celowo wymaga tylko outcome != MODEL_PASS.
+- **CODE_PATH_PROVED — interpreter:** istniejący CALL_FUNCTION robi lookup nazwy w bieżącym module namespace, odrzuca wartość, która nie jest zgodną _RestrictedFunction, i uruchamia jej body w _FunctionFrame. Importy body są eventami modelu; po zakończeniu frame wraca do kolejnego kroku. _FunctionFrame.result_binding jest opcjonalny; wywołania defaultów nie wiążą wartości pod dodatkową nazwą.
+- **INFERENCE:** pięć nowych przypadków zawęża granicę wyłącznie dla efektów wywołania i kolejności definicji; nie testują ani nie wprowadzają reprezentacji wartości zwracanej jako defaultu.
 
 ## MCP_AUDIT
 
-- **DIRECT_EVIDENCE — LIVE po zmianie:** revision 1466, provenance=live, canonical_state=fresh, resync_required=false, parse_stale_modules={}.
-- **DIRECT_EVIDENCE — per-file:** contextor/core/cycle_semantics/package_model.py ma workspace_sync=verified przy canonical_revision=1466, provenance=live.
-- **DIRECT_EVIDENCE — składnia:** globalne syntax_errors.count=0 (fresh); produkcyjny plik ma checked_and_none, availability=fresh, errors=[], total=0.
-- **DIRECT_EVIDENCE — freshness:** graph=fresh, cycles=fresh, cycle_semantics=stale. Pozostałe rodziny module, topology, artifact_consumption, collisions i lineage są fresh. Agregat workspace_sync pozostaje unverified mimo verified dla badanego pliku.
-- **DIRECT_EVIDENCE — watcher:** event revision 1466, operation=update_file, origin=desktop_watcher, status=UPDATED dla package_model.py; continuity=continuous, resync_required=false.
+- **DIRECT_EVIDENCE — LIVE po zmianie:** revision 1467, provenance=live, canonical_state=fresh, resync_required=false, parse_stale_modules={}.
+- **DIRECT_EVIDENCE — per-file:** tests/test_cycle_semantics_default_definition_effects.py ma workspace_sync=verified przy canonical_revision=1467, provenance=live.
+- **DIRECT_EVIDENCE — składnia:** globalne syntax_errors.count=0 (fresh); plik docelowy ma checked_and_none, availability=fresh, errors=[], total=0.
+- **DIRECT_EVIDENCE — freshness:** graph=fresh i cycles=fresh; cycle_semantics=stale. Rodziny module, topology, artifact_consumption, collisions i lineage są fresh. Agregat workspace_sync=unverified, mimo verified dla pliku docelowego.
+- **DIRECT_EVIDENCE — watcher:** event revision 1467, operation=update_file, origin=desktop_watcher, status=UPDATED dla testu; continuity=continuous, resync_required=false.
 
 ## FILES_CHANGED
 
-- contextor/core/cycle_semantics/package_model.py — jedyny zmieniony plik produkcyjny.
+- tests/test_cycle_semantics_default_definition_effects.py — dopisano wyłącznie dostarczony fragment.
 - walkthrough.md — nadpisany wymagany raport; nie jest liczony jako zmieniony source/test.
-- Nie zmieniono żadnego testu, issues.md ani audyt.txt.
+- Nie zmieniono produkcji, innych testów, issues.md ani audyt.txt.
 
 ## FULL_DIFFS
 
-### contextor/core/cycle_semantics/package_model.py — pełny rzeczywisty diff
+### tests/test_cycle_semantics_default_definition_effects.py — pełny rzeczywisty diff
 
 ~~~diff
-diff --git a/contextor/core/cycle_semantics/package_model.py b/contextor/core/cycle_semantics/package_model.py
-index 5275c9b..8f8b5cc 100644
---- a/contextor/core/cycle_semantics/package_model.py
-+++ b/contextor/core/cycle_semantics/package_model.py
-@@ -149,6 +149,7 @@ def _safe_passive_function_definition(
-     annotation_semantics: str | None = None,
-     allow_builtin_property: bool = False,
-     allow_restricted_decorator: bool = False,
-+    allow_restricted_default_calls: bool = False,
- ) -> bool:
-     """A definition whose creation has no unknown evaluations.
- 
-@@ -214,6 +215,17 @@ def _safe_passive_function_definition(
-         return False
- 
-     def safe_default(value: ast.AST) -> bool:
-+        if (
-+            allow_restricted_default_calls
-+            and type(value) is ast.Call
-+            and type(value.func) is ast.Name
-+            and value.func.id.isidentifier()
-+            and not value.func.id.startswith("__")
-+            and not value.args
-+            and not value.keywords
-+        ):
-+            return True
+diff --git a/tests/test_cycle_semantics_default_definition_effects.py b/tests/test_cycle_semantics_default_definition_effects.py
+index 00e309a..a53f802 100644
+--- a/tests/test_cycle_semantics_default_definition_effects.py
++++ b/tests/test_cycle_semantics_default_definition_effects.py
+@@ -138,3 +138,107 @@ def test_default_definition_effects(
+         position < definition_position
+         for position in observed_positions
+     )
 +
-         return (
-             isinstance(value, ast.Constant)
-             and type(value.value) in (
-@@ -1038,6 +1050,7 @@ def _compile(
-                 stmt,
-                 annotation_semantics=annotation_semantics,
-                 allow_restricted_decorator=True,
-+                allow_restricted_default_calls=not stmt.decorator_list,
-             ):
-                 return None
-@@ -1148,6 +1161,15 @@ def _compile(
-             if stmt.decorator_list and not restricted_callable:
-                 return None
- 
-+            for default in (*args.defaults, *args.kw_defaults):
-+                if type(default) is ast.Call:
-+                    steps.append(
-+                        _Step(
-+                            "CALL_FUNCTION",
-+                            target=default.func.id,
-+                        )
-+                    )
 +
-             if restricted_callable:
-                 steps.append(
-                     _Step(
++def _p6_boundary_model(source, children):
++    sources = {
++        "pkg.__init__": ast.parse(source),
++        **{
++            name: ast.parse(code)
++            for name, code in children.items()
++        },
++    }
++    return evaluate_package_import_order(sources, "pkg")
++
++
++def test_p6_keyword_only_default_order():
++    result = _p6_boundary_model(
++        "def g():\n"
++        "    import pkg.a\n"
++        "def h():\n"
++        "    import pkg.b\n"
++        "def f(*, x=g(), y=h()):\n"
++        "    pass\n",
++        {"pkg.a": "pass", "pkg.b": "pass"},
++    )
++    assert result.outcome == "MODEL_PASS"
++    imports = [
++        event.target
++        for event in result.events
++        if event.operation == "START_IMPORT"
++        and event.target in {"pkg.a", "pkg.b"}
++    ]
++    assert imports == ["pkg.a", "pkg.b"]
++
++
++def test_p6_repeated_default_call():
++    result = _p6_boundary_model(
++        "def g():\n"
++        "    import pkg.child\n"
++        "def f(x=g(), y=g()):\n"
++        "    pass\n",
++        {"pkg.child": "pass"},
++    )
++    assert result.outcome == "MODEL_PASS"
++    calls = [
++        event.symbol
++        for event in result.events
++        if event.operation == "CALL_FUNCTION"
++    ]
++    assert calls == ["g", "g"]
++    imports = [
++        event.target
++        for event in result.events
++        if event.operation == "START_IMPORT"
++        and event.target == "pkg.child"
++    ]
++    assert imports == ["pkg.child"]
++
++
++def test_p6_alias_rebinding_before_default():
++    result = _p6_boundary_model(
++        "def g():\n"
++        "    import pkg.a\n"
++        "def h():\n"
++        "    import pkg.b\n"
++        "g = h\n"
++        "def f(x=g()):\n"
++        "    pass\n",
++        {"pkg.a": "pass", "pkg.b": "pass"},
++    )
++    assert result.outcome == "MODEL_PASS"
++    imports = [
++        event.target
++        for event in result.events
++        if event.operation == "START_IMPORT"
++        and event.target in {"pkg.a", "pkg.b"}
++    ]
++    assert imports == ["pkg.b"]
++
++
++def test_p6_later_opaque_call_remains_unknown():
++    result = _p6_boundary_model(
++        "def g():\n"
++        "    import pkg.child\n"
++        "def f(x=g()):\n"
++        "    pass\n"
++        "f()\n",
++        {"pkg.child": "pass"},
++    )
++    assert result.outcome == "UNKNOWN"
++    assert any(
++        event.operation == "DEFINE_OPAQUE_FUNCTION"
++        and event.symbol == "f"
++        for event in result.events
++    )
++
++
++def test_p6_import_before_function_binding():
++    result = _p6_boundary_model(
++        "def g():\n"
++        "    import pkg.child\n"
++        "def f(x=g()):\n"
++        "    pass\n",
++        {"pkg.child": "from pkg import f"},
++    )
++    assert result.outcome != "MODEL_PASS"
 ~~~
