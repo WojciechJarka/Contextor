@@ -67,7 +67,7 @@ class FakeStateManager:
 
 def _candidate():
     return SimpleNamespace(
-        modules={}, reexport_facts_by_module={},
+        modules={}, typing_guard_evidence={}, reexport_facts_by_module={},
         artifacts={},
         layer_information={},
         module_parse_freshness={},
