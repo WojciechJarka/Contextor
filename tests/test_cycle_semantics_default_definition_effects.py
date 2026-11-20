@@ -250,3 +250,164 @@ def test_p6_import_before_function_binding():
         and event.symbol == "f"
         for event in result.events
     )
+
+
+@pytest.mark.parametrize(
+    "source,children,expected_imports,expected_calls",
+    [
+        pytest.param(
+            (
+                "def deco(fn):\n"
+                "    import pkg.decorate\n"
+                "    return fn\n"
+                "def g():\n"
+                "    import pkg.default\n"
+                "@deco\n"
+                "def f(x=g()):\n"
+                "    pass\n"
+            ),
+            {"pkg.decorate": "pass", "pkg.default": "pass"},
+            ("pkg.default", "pkg.decorate"),
+            ("g", "deco"),
+            id="single-decorator-default",
+        ),
+        pytest.param(
+            (
+                "def upper(fn):\n"
+                "    import pkg.upper\n"
+                "    return fn\n"
+                "def lower(fn):\n"
+                "    import pkg.lower\n"
+                "    return fn\n"
+                "def g():\n"
+                "    import pkg.default\n"
+                "@upper\n"
+                "@lower\n"
+                "def f(x=g()):\n"
+                "    pass\n"
+            ),
+            {
+                "pkg.upper": "pass",
+                "pkg.lower": "pass",
+                "pkg.default": "pass",
+            },
+            ("pkg.default", "pkg.lower", "pkg.upper"),
+            ("g", "lower", "upper"),
+            id="stacked-decorators-default",
+        ),
+    ],
+)
+def test_p6_decorated_default_effect_order(
+    source,
+    children,
+    expected_imports,
+    expected_calls,
+):
+    result = _p6_boundary_model(source, children)
+
+    assert result.outcome == "MODEL_PASS"
+
+    imports = tuple(
+        event.target
+        for event in result.events
+        if event.operation == "START_IMPORT"
+        and event.target in children
+    )
+    assert imports == expected_imports
+
+    calls = tuple(
+        event.symbol
+        for event in result.events
+        if event.operation == "CALL_FUNCTION"
+    )
+    assert calls == expected_calls
+
+    definitions = [
+        event
+        for event in result.events
+        if event.operation == "DEFINE_OPAQUE_FUNCTION"
+        and event.symbol == "f"
+    ]
+    assert len(definitions) == 1
+
+
+def test_p6_missing_decorator_precedes_default():
+    result = _p6_boundary_model(
+        "def g():\n"
+        "    import pkg.default\n"
+        "@missing\n"
+        "def f(x=g()):\n"
+        "    pass\n",
+        {"pkg.default": "pass"},
+    )
+
+    assert result.outcome == "UNKNOWN"
+    assert not any(
+        event.operation == "START_IMPORT"
+        and event.target == "pkg.default"
+        for event in result.events
+    )
+
+
+def test_p6_noncallable_decorator_after_default():
+    result = _p6_boundary_model(
+        "deco = None\n"
+        "def g():\n"
+        "    import pkg.default\n"
+        "@deco\n"
+        "def f(x=g()):\n"
+        "    pass\n",
+        {"pkg.default": "pass"},
+    )
+
+    assert result.outcome == "UNKNOWN"
+    assert any(
+        event.operation == "START_IMPORT"
+        and event.target == "pkg.default"
+        for event in result.events
+    )
+    assert not any(
+        event.operation == "CALL_FUNCTION"
+        and event.symbol == "deco"
+        for event in result.events
+    )
+
+
+def test_p6_unmodeled_decorator_rebinding_unknown():
+    result = _p6_boundary_model(
+        "def deco(fn):\n"
+        "    import pkg.original\n"
+        "    return fn\n"
+        "def g():\n"
+        "    import pkg.child\n"
+        "@deco\n"
+        "def f(x=g()):\n"
+        "    pass\n",
+        {
+            "pkg.child": "import pkg\npkg.deco = None\n",
+            "pkg.original": "pass",
+        },
+    )
+
+    assert result.outcome == "UNKNOWN"
+
+
+def test_p6_decorated_opaque_later_call_unknown():
+    result = _p6_boundary_model(
+        "def deco(fn):\n"
+        "    return fn\n"
+        "def g():\n"
+        "    import pkg.default\n"
+        "@deco\n"
+        "def f(x=g()):\n"
+        "    pass\n"
+        "f()\n",
+        {"pkg.default": "pass"},
+    )
+
+    assert result.outcome == "UNKNOWN"
+    assert any(
+        event.operation == "DEFINE_OPAQUE_FUNCTION"
+        and event.symbol == "f"
+        for event in result.events
+    )
