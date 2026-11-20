@@ -241,4 +241,12 @@ def test_p6_import_before_function_binding():
         "    pass\n",
         {"pkg.child": "from pkg import f"},
     )
-    assert result.outcome != "MODEL_PASS"
+    assert result.outcome == "EARLY_BINDING_HAZARD"
+    assert result.target_module == "pkg"
+    assert result.symbol == "f"
+    assert any(
+        event.operation == "EARLY_BINDING_HAZARD"
+        and event.target == "pkg"
+        and event.symbol == "f"
+        for event in result.events
+    )
