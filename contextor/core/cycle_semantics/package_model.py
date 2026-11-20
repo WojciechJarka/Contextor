@@ -149,6 +149,7 @@ def _safe_passive_function_definition(
     annotation_semantics: str | None = None,
     allow_builtin_property: bool = False,
     allow_restricted_decorator: bool = False,
+    allow_restricted_default_calls: bool = False,
 ) -> bool:
     """A definition whose creation has no unknown evaluations.
 
@@ -214,6 +215,17 @@ def _safe_passive_function_definition(
         return False
 
     def safe_default(value: ast.AST) -> bool:
+        if (
+            allow_restricted_default_calls
+            and type(value) is ast.Call
+            and type(value.func) is ast.Name
+            and value.func.id.isidentifier()
+            and not value.func.id.startswith("__")
+            and not value.args
+            and not value.keywords
+        ):
+            return True
+
         return (
             isinstance(value, ast.Constant)
             and type(value.value) in (
@@ -1038,6 +1050,7 @@ def _compile(
                 stmt,
                 annotation_semantics=annotation_semantics,
                 allow_restricted_decorator=True,
+                allow_restricted_default_calls=not stmt.decorator_list,
             ):
                 return None
 
@@ -1147,6 +1160,15 @@ def _compile(
 
             if stmt.decorator_list and not restricted_callable:
                 return None
+
+            for default in (*args.defaults, *args.kw_defaults):
+                if type(default) is ast.Call:
+                    steps.append(
+                        _Step(
+                            "CALL_FUNCTION",
+                            target=default.func.id,
+                        )
+                    )
 
             if restricted_callable:
                 steps.append(
