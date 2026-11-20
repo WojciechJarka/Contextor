@@ -411,3 +411,35 @@ def test_p6_decorated_opaque_later_call_unknown():
         and event.symbol == "f"
         for event in result.events
     )
+
+
+def test_p6_decorated_default_early_binding_hazard():
+    result = _p6_boundary_model(
+        "def deco(fn):\n"
+        "    return fn\n"
+        "def g():\n"
+        "    import pkg.child\n"
+        "@deco\n"
+        "def f(x=g()):\n"
+        "    pass\n",
+        {"pkg.child": "from pkg import f"},
+    )
+
+    assert result.outcome == "EARLY_BINDING_HAZARD"
+    assert result.target_module == "pkg"
+    assert result.symbol == "f"
+
+
+def test_p6_decorated_opaque_child_collision_unknown():
+    result = _p6_boundary_model(
+        "def deco(fn):\n"
+        "    return fn\n"
+        "def g():\n"
+        "    return\n"
+        "@deco\n"
+        "def child(x=g()):\n"
+        "    pass\n",
+        {"pkg.child": "pass"},
+    )
+
+    assert result.outcome == "UNKNOWN"

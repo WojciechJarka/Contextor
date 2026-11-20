@@ -107,6 +107,10 @@ def _safe_class_namespace_value(value: object) -> bool:
     return False
 
 
+def _opaque_function_value(module: str, name: str) -> str:
+    return "\x00OPAQUE_FUNCTION:" + module + ":" + name
+
+
 @dataclass(frozen=True)
 class PackageImportAssessment:
     entry_module: str
@@ -154,7 +158,7 @@ def _safe_passive_function_definition(
     """A definition whose creation has no unknown evaluations.
 
     Its body may be opaque because function bodies are deferred.
-    Only literal default expressions are supported.
+    Only literal defaults and opt-in restricted calls are supported.
     """
     if (
         not statement.name.isidentifier()
@@ -1050,7 +1054,7 @@ def _compile(
                 stmt,
                 annotation_semantics=annotation_semantics,
                 allow_restricted_decorator=True,
-                allow_restricted_default_calls=not stmt.decorator_list,
+                allow_restricted_default_calls=True,
             ):
                 return None
 
@@ -1159,7 +1163,38 @@ def _compile(
                     restricted_callable = False
 
             if stmt.decorator_list and not restricted_callable:
-                return None
+                if not (
+                    args.defaults
+                    or any(
+                        value is not None
+                        for value in args.kw_defaults
+                    )
+                ):
+                    return None
+
+                if (
+                    type(stmt.lineno) is not int
+                    or stmt.lineno < 1
+                    or type(stmt.col_offset) is not int
+                    or stmt.col_offset < 0
+                ):
+                    return None
+
+                decorator_definition_id = (
+                    f"{logical}:{stmt.lineno}:{stmt.col_offset}"
+                )
+
+                steps.append(
+                    _Step(
+                        "SNAPSHOT_FUNCTION_DECORATORS",
+                        binding=stmt.name,
+                        definition_id=decorator_definition_id,
+                        decorator_names=tuple(
+                            item.id
+                            for item in stmt.decorator_list
+                        ),
+                    )
+                )
 
             for default in (*args.defaults, *args.kw_defaults):
                 if type(default) is ast.Call:
@@ -1197,6 +1232,14 @@ def _compile(
                             decorator.id
                             for decorator in stmt.decorator_list
                         ) if len(stmt.decorator_list) > 1 else (),
+                    )
+                )
+            elif stmt.decorator_list:
+                steps.append(
+                    _Step(
+                        "DEFINE_DECORATED_OPAQUE_FUNCTION",
+                        binding=stmt.name,
+                        definition_id=decorator_definition_id,
                     )
                 )
             else:
@@ -1661,6 +1704,7 @@ def evaluate_package_import_order(
                 "DEFINE_DECORATED_FUNCTION",
                 "DEFINE_STACKED_FUNCTION",
                 "DEFINE_OPAQUE_FUNCTION",
+                "DEFINE_DECORATED_OPAQUE_FUNCTION",
                 "DEFINE_PASSIVE_CLASS",
                 "DEFINE_DECORATED_PASSIVE_CLASS",
                 "DEFINE_CONDITIONAL_FROZEN_DATACLASS",
@@ -1692,8 +1736,8 @@ def evaluate_package_import_order(
     definition_state = _new_definition_state()
     prepared_class_bases = definition_state.prepared_class_bases
     class_facts_by_identity = definition_state.class_facts_by_identity
-    class_decorator_snapshots = (
-        definition_state.class_decorator_snapshots
+    definition_decorator_snapshots = (
+        definition_state.definition_decorator_snapshots
     )
 
     bootstrap = "\x00ENTRY"
@@ -1767,6 +1811,7 @@ def evaluate_package_import_order(
                         "DEFINE_DECORATED_FUNCTION",
                         "DEFINE_STACKED_FUNCTION",
                         "DEFINE_OPAQUE_FUNCTION",
+                        "DEFINE_DECORATED_OPAQUE_FUNCTION",
                         "DEFINE_PASSIVE_CLASS",
                         "DEFINE_DECORATED_PASSIVE_CLASS",
                         "DEFINE_CONDITIONAL_FROZEN_DATACLASS",
@@ -2188,6 +2233,78 @@ def evaluate_package_import_order(
                     )
                 )
 
+        elif step.op == "DEFINE_DECORATED_OPAQUE_FUNCTION":
+            if not step.binding or not step.definition_id:
+                return result("UNKNOWN", module, step.binding)
+
+            decorator_pairs = (
+                definition_decorator_snapshots.pop(
+                    step.definition_id,
+                    None,
+                )
+            )
+
+            if not decorator_pairs:
+                return result("UNKNOWN", module, step.binding)
+
+            application_order = tuple(
+                reversed(decorator_pairs)
+            )
+            first_name, first_object = application_order[0]
+
+            if (
+                not isinstance(first_object, _RestrictedFunction)
+                or len(first_object.parameters) != 1
+                or first_object.defining_module not in logical_sources
+                or first_object.defining_module not in programs
+            ):
+                return result("UNKNOWN", module, first_name)
+
+            opaque_function = _opaque_function_value(
+                module,
+                step.binding,
+            )
+            local_bindings: dict[str, object | None] = {}
+
+            body = _execute_restricted_object_call(
+                first_object,
+                opaque_function,
+                module=first_object.defining_module,
+                local_bindings=local_bindings,
+            )
+
+            if body is None:
+                return result("UNKNOWN", module, first_name)
+
+            events.append(
+                PackageModelEvent(
+                    module,
+                    "DEFINE_OPAQUE_FUNCTION",
+                    symbol=step.binding,
+                )
+            )
+            events.append(
+                PackageModelEvent(
+                    module,
+                    "CALL_FUNCTION",
+                    symbol=first_name,
+                )
+            )
+
+            frames[-1] = _advance_frame(frames[-1])
+            frames.append(
+                _FunctionFrame(
+                    module=first_object.defining_module,
+                    index=0,
+                    steps=body,
+                    local_bindings=local_bindings,
+                    decorator_final_binding=step.binding,
+                    remaining_decorators=application_order[1:],
+                    binding_module=module,
+                )
+            )
+            continue
+
         elif step.op == "DEFINE_STACKED_FUNCTION":
             if (
                 not step.binding
@@ -2379,10 +2496,7 @@ def evaluate_package_import_order(
 
         elif step.op == "DEFINE_OPAQUE_FUNCTION":
             namespaces[module][step.binding] = (
-                "\x00OPAQUE_FUNCTION:"
-                + module
-                + ":"
-                + step.binding
+                _opaque_function_value(module, step.binding)
             )
 
             events.append(
@@ -2488,7 +2602,10 @@ def evaluate_package_import_order(
                 )
             )
 
-        elif step.op == "SNAPSHOT_CLASS_DECORATORS":
+        elif step.op in {
+            "SNAPSHOT_CLASS_DECORATORS",
+            "SNAPSHOT_FUNCTION_DECORATORS",
+        }:
             if (
                 not step.definition_id
                 or not step.binding
@@ -2508,7 +2625,7 @@ def evaluate_package_import_order(
                     step.binding,
                 )
 
-            class_decorator_snapshots[
+            definition_decorator_snapshots[
                 step.definition_id
             ] = tuple(
                 zip(
@@ -2662,7 +2779,7 @@ def evaluate_package_import_order(
             )
             class_facts_by_identity[identity] = class_fact
             if step.op == "DEFINE_DECORATED_PASSIVE_CLASS":
-                decorator_pairs = class_decorator_snapshots.pop(
+                decorator_pairs = definition_decorator_snapshots.pop(
                     identity,
                     None,
                 )

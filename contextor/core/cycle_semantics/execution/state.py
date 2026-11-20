@@ -100,7 +100,7 @@ class _DefinitionState:
         str, tuple[tuple[_ClassFact, ...], _ClassFact]
     ]
     class_facts_by_identity: dict[str, _ClassFact]
-    class_decorator_snapshots: dict[
+    definition_decorator_snapshots: dict[
         str,
         tuple[tuple[str, object], ...],
     ]
@@ -113,5 +113,5 @@ def _new_definition_state() -> _DefinitionState:
             fact.identity: fact
             for fact in _BUILTIN_CLASS_FACTS.values()
         },
-        class_decorator_snapshots={},
+        definition_decorator_snapshots={},
     )

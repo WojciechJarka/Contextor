@@ -52,7 +52,7 @@ CASES = [
     ),
     pytest.param(
         "def identity(fn):\n    return fn\n@identity\ndef f(x=1):\n    import pkg.child\n",
-        None, (), "UNKNOWN", (),
+        None, (), "MODEL_PASS", ("identity",),
         id="decorated-unsupported-body",
     ),
     pytest.param(
