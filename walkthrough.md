@@ -1,197 +1,69 @@
-# P6-D04-I1-R1 — EXACT REGRESSION TEST IMPLEMENTATION
+# P6-D04-I1-R2 — EXACT PACKAGE FIXTURE CORRECTION
 
 ## PRECHECK
 
-- **DIRECT_EVIDENCE — Contextor MCP przed zmianą:** LIVE revision `1463`, `provenance=live`, `canonical_state=fresh`, `resync_required=false`, `parse_stale_modules={}`; globalne `syntax_errors=0` (`fresh`). Agregat `workspace_sync=unverified` nie potwierdza synchronizacji wszystkich plików.
-- **DIRECT_EVIDENCE — repozytorium przed zmianą:** HEAD `8bb5d7f60ced527d99e6531702573b0f32039234`; docelowy test nie istniał. `git status --short` pokazywał już `M audyt.txt` i `M walkthrough.md`; `audyt.txt` jest zmianą zastaną, poza zakresem tego zadania.
-- **CODE_PATH_PROVED — niezależny kontrakt semantyczny:** w odczytanym przy rev `1463` symbolu `contextor/core/cycle_semantics/package_model.py::_safe_passive_function_definition` (zakres linii 145–242, plik `workspace_sync=verified`) dozwolone są literalne defaulty; wywołanie w wyrażeniu defaultu nie przechodzi `safe_default`, więc kompilacja zachowuje się konserwatywnie i wynik modelu to `UNKNOWN`. CPython wykonuje wyrażenia defaultów podczas wykonywania instrukcji `def`, przed związaniem nazwy funkcji; wywołanie `g()` może więc w tej chwili wykonać importy z ciała `g`. Oczekiwanie `MODEL_PASS` w pierwszych trzech parametrach opisuje zamierzoną obsługę efektu, której obecna ścieżka modelu nie dopuszcza. Nie zmieniono produkcyjnego zachowania.
-- **INFERENCE:** trzy oczekiwane FAIL są regresyjnym zapisem brakującej obsługi efektu definicji. Dwa oczekiwane PASS utrzymują oczekiwany `UNKNOWN` dla fixture z rebindingiem przed definicją i fixture z jawnym `return`; ponieważ evaluator odrzuca dynamiczne wyrażenie defaultu wcześniej, sam PASS nie dowodzi, że rozróżnił te dwie przyczyny.
+- **DIRECT_EVIDENCE — Contextor MCP przed zmianą:** LIVE revision 1464, provenance=live, canonical_state=fresh, resync_required=false, parse_stale_modules={}; globalne syntax_errors=0 (fresh). Agregat workspace_sync=unverified nie potwierdza synchronizacji wszystkich plików.
+- **DIRECT_EVIDENCE — lokalny precheck:** HEAD f622f1e645987cbc179efacf16a4c7e98928cc9b; git status --short był pusty. Dokładny anchor był w tests/test_cycle_semantics_default_definition_effects.py:89–95. Interpreter .venv/Scripts/python.exe --version zgłosił Python 3.15.2.
+- **DIRECT_EVIDENCE — źródła Contextor:** contextor/core/cycle_semantics/package_layout.py::build_package_layout, linie 54–124, oraz contextor/core/cycle_semantics/package_model.py::evaluate_package_import_order i _safe_passive_function_definition miały workspace_sync=verified przy rev 1464.
 
 ## EXACT_CHANGE
 
-- Dodano dokładnie jeden plik testowy: `tests/test_cycle_semantics_default_definition_effects.py`.
-- Treść przypadków, parametrów i asercji jest zgodna z treścią dostarczoną w zadaniu. Nie zmieniono kodu produkcyjnego, innych testów, `issues.md` ani `audyt.txt`.
-- Nadpisano `walkthrough.md` zgodnie z poleceniem raportowym.
+- Zmieniono wyłącznie wskazany klucz mapy wejściowej w teście: "pkg" → "pkg.__init__".
+- CASES, parametry, asercje i kod produkcyjny pozostały bez zmian. Pełny rzeczywisty diff znajduje się w FULL_DIFFS.
+- walkthrough.md nadpisano zgodnie z wymaganym raportem.
 
 ## TARGETED_RESULTS
 
-Uruchomiono wyłącznie wymagane polecenie:
+Uruchomiono na CPython 3.15.2 wyłącznie wymagane polecenie:
 
-```text
+~~~text
 .venv/Scripts/python.exe -m pytest -q tests/test_cycle_semantics_default_definition_effects.py --tb=long
-```
+~~~
 
-Wynik: `FFF.. [100%]`; `3 failed, 2 passed in 2.05s` (exit code `1`). Nie uruchomiono innych testów.
+Wynik: FFF.. [100%]; 3 failed, 2 passed in 0.94s (exit code 1). Wszystkie trzy FAIL kończą się w tests/test_cycle_semantics_default_definition_effects.py:102 na assert result.outcome == expected_outcome; evaluator zwrócił UNKNOWN, parametr oczekiwał MODEL_PASS.
 
-## EXPECTED_FAILURES
+- FAIL: single-default-import, sequential-default-imports, rebind-after-default.
+- PASS: rebind-before-default, unsupported-return.
+- Nie uruchomiono innych testów.
 
-- **DIRECT_EVIDENCE — oczekiwane FAIL:**
-  - `test_default_definition_effects[single-default-import]`
-  - `test_default_definition_effects[sequential-default-imports]`
-  - `test_default_definition_effects[rebind-after-default]`
-- Każdy zatrzymał się na `tests/test_cycle_semantics_default_definition_effects.py:102`, przy `assert result.outcome == expected_outcome`: wynik evaluatora to `UNKNOWN`, a oczekiwany wynik parametru to `MODEL_PASS`. W tych trzech przypadkach asercje kolejności eventów nie zostały osiągnięte, bo wcześniej nie powstał wynik `MODEL_PASS`.
-- **DIRECT_EVIDENCE — oczekiwane PASS:** `test_default_definition_effects[rebind-before-default]` i `test_default_definition_effects[unsupported-return]`; oba oczekują `UNKNOWN` i kończą się przed asercjami eventów. **CODE_PATH_PROVED:** wynik wynika z odmowy obsługi call expression jako defaultu; test nie dowodzi osobnej klasyfikacji późniejszego rebindingu ani wartości zwracanej.
-- **Werdykt względem kontraktu uruchomienia:** zaobserwowano dokładnie podział FAIL/PASS wskazany w promptcie. Nie poprawiano testu ani tracebacków.
+## PACKAGE_LAYOUT_EVIDENCE
+
+- **DIRECT_EVIDENCE — package_layout.py::build_package_layout, linie 85–124:** funkcja normalizuje identyfikator kończący się .__init__ do logicznej nazwy pakietu. Dla węzła wylicza is_init, is_file i has_children. Gdy istnieje plik pkg oraz indeksowane dzieci, ale brak pkg.__init__, warunek (is_file and has_children and not is_init) nadaje AMBIGUOUS_LAYOUT. Zatem dosłowny stary układ pkg + pkg.child nie jest w tym kodzie klasyfikowany jako samodzielny MODULE_FILE; jest niejednoznaczny.
+- **CODE_PATH_PROVED — po korekcie:** klucze pkg.__init__ i pkg.child dają dla logicznego pkg is_init=True, is_file=False, has_children=True, czyli REGULAR_PACKAGE; pkg.child jest MODULE_FILE. evaluate_package_import_order (linie 1460–1510) odrzuca w bramce layoutu tylko węzły spoza REGULAR_PACKAGE i MODULE_FILE. Walidacja łańcucha rodziców (linie 1560–1625) wymaga, aby każdy prefiks dziecka był pakietem. Skorygowany układ spełnia tę bramkę.
+- **DIRECT_EVIDENCE — przyczyna pozostałych UNKNOWN:** _safe_passive_function_definition (package_model.py, linie 145–242) dopuszcza default wyłącznie gdy safe_default widzi ast.Constant o obsługiwanym typie. Wyrażenie g() jest ast.Call i zostaje odrzucone. W _compile (linie 1030–1095) odrzucenie definicji FunctionDef zwraca None; evaluate_package_import_order (linie 1560–1625) mapuje program is None na UNKNOWN.
+- **WERYFIKACJA WYNIKU:** po zmianie fixture testy bezpośrednio pokazały UNKNOWN zamiast MODEL_PASS we wszystkich trzech wymaganych przypadkach. Ponieważ skorygowany layout spełnia warunki bramki, te FAIL nie wynikają już z nieprawidłowego layoutu, tylko z konserwatywnej odmowy dynamicznego defaultu. Nie doszło do asercji eventów w tych trzech testach, bo test kończy się wcześniej na asercji outcome.
+- **INFERENCE — ograniczenie dwóch PASS:** rebind-before-default i unsupported-return także przechodzą przez ogólną odmowę dynamicznego defaultu. Sam PASS nie dowodzi, że evaluator osobno rozróżnia rebinding przed definicją od wartości zwracanej; ta zmiana testu tego nie sprawdza.
 
 ## MCP_AUDIT
 
-- **DIRECT_EVIDENCE — stan po zmianie:** Contextor LIVE revision `1464`, `provenance=live`, `canonical_state=fresh`; `resync_required=false`; `parse_stale_modules={}`.
-- **DIRECT_EVIDENCE — synchronizacja badanego pliku:** `get_symbol_implementation` rozpoznał `test_default_definition_effects` w `tests/test_cycle_semantics_default_definition_effects.py` (linie 79–140), `workspace_sync=verified`, `canonical_revision=1464`. Per-file sync oznacza zgodność fingerprintu pliku na dysku z canonical T0. Agregat projektowy nadal ma `workspace_sync=unverified`.
-- **DIRECT_EVIDENCE — składnia:** dla badanego pliku `syntax_diagnostics.status=checked_and_none`, `availability=fresh`, `errors=[]`; globalne `syntax_errors.count=0`, `availability=fresh`.
-- **DIRECT_EVIDENCE — resync/event stream:** `get_live_events(after_revision=1464, limit=1)` zwrócił `events=[]`, `continuity=continuous`, `resync_required=false`. Odczyt od rev `1463` zwrócił `confirmation_required` z powodu projekcji o szacowanym rozmiarze `19.23 KiB`; nie uzyskano w ten sposób bezpośredniego payloadu eventu przejścia `1463→1464`. Rewizja `1464` i zweryfikowany per-file sync potwierdzają jednak, że nowy plik znajduje się w aktualnym canonical state.
-- **DIRECT_EVIDENCE — pozostałe freshness:** rodzina `cycle_semantics` była oznaczona jako `stale`; pozostałe wymienione rodziny (`module`, `graph`, `topology`, `artifact_consumption`, `cycles`, `collisions`, `lineage`) były `fresh`. To metadane stanu LIVE, nie wynik testu.
-- **UNKNOWN:** nie ustalano, czy agregat `workspace_sync=unverified` wynika z dowolnego konkretnego pliku; audyt potwierdza wyłącznie wymagany per-file stan dla nowego testu.
+- **DIRECT_EVIDENCE — po zmianie:** Contextor LIVE revision 1465, provenance=live, canonical_state=fresh, resync_required=false, parse_stale_modules={}. Agregat workspace_sync=unverified; rodzina cycle_semantics=stale.
+- **DIRECT_EVIDENCE — badany plik:** per-file workspace_sync=verified dla tests/test_cycle_semantics_default_definition_effects.py, canonical_revision=1465, provenance=live.
+- **DIRECT_EVIDENCE — składnia:** globalne syntax_errors.count=0 (fresh); file diagnostics: checked_and_none, fresh, errors=[], total=0.
+- **DIRECT_EVIDENCE — watcher:** get_live_events(after_revision=1464) zwrócił event revision 1465, operation=update_file, origin=desktop_watcher, status=UPDATED, ścieżka testu; continuity=continuous, resync_required=false.
+- **UNKNOWN:** przyczyna agregatowego workspace_sync=unverified nie była badana; plik docelowy ma osobne, zweryfikowane workspace_sync=verified.
 
 ## FILES_CHANGED
 
-- `tests/test_cycle_semantics_default_definition_effects.py` — nowy plik, cała treść pokazana w `FULL_DIFFS`.
-- `walkthrough.md` — nadpisany raport wymagany zadaniem; jako sam raport nie jest liczony jako zmieniony plik source/test.
-- `audyt.txt` — zmiana była obecna już przed zadaniem i nie została przez to zadanie zmodyfikowana.
-- Nie zmieniono żadnego pliku produkcyjnego, innego testu ani `issues.md`.
+- tests/test_cycle_semantics_default_definition_effects.py — zmieniono wyłącznie klucz "pkg" na "pkg.__init__".
+- walkthrough.md — nadpisany raport wymagany zadaniem; jako raport nie jest liczony jako zmieniony source/test.
+- Nie zmieniono kodu produkcyjnego, innych testów, issues.md ani audyt.txt.
 
 ## FULL_DIFFS
 
-### `tests/test_cycle_semantics_default_definition_effects.py` — pełna dodana treść
+### tests/test_cycle_semantics_default_definition_effects.py — pełny rzeczywisty diff
 
-```python
-import ast
-
-import pytest
-
-from contextor.core.cycle_semantics.package_model import (
-    evaluate_package_import_order,
-)
-
-
-CASES = [
-    pytest.param(
-        (
-            "def g():\n"
-            "    import pkg.child\n"
-            "def f(x=g()):\n"
-            "    pass\n"
-        ),
-        {"pkg.child": "pass"},
-        "MODEL_PASS",
-        ("pkg.child",),
-        id="single-default-import",
-    ),
-    pytest.param(
-        (
-            "def g():\n"
-            "    import pkg.a\n"
-            "def h():\n"
-            "    import pkg.b\n"
-            "def f(x=g(), y=h()):\n"
-            "    pass\n"
-        ),
-        {"pkg.a": "pass", "pkg.b": "pass"},
-        "MODEL_PASS",
-        ("pkg.a", "pkg.b"),
-        id="sequential-default-imports",
-    ),
-    pytest.param(
-        (
-            "def g():\n"
-            "    import pkg.child\n"
-            "def f(x=g()):\n"
-            "    pass\n"
-            "g = None\n"
-        ),
-        {"pkg.child": "pass"},
-        "MODEL_PASS",
-        ("pkg.child",),
-        id="rebind-after-default",
-    ),
-    pytest.param(
-        (
-            "def g():\n"
-            "    import pkg.child\n"
-            "g = None\n"
-            "def f(x=g()):\n"
-            "    pass\n"
-        ),
-        {"pkg.child": "pass"},
-        "UNKNOWN",
-        (),
-        id="rebind-before-default",
-    ),
-    pytest.param(
-        (
-            "def g():\n"
-            "    import pkg.child\n"
-            "    return 10\n"
-            "def f(x=g()):\n"
-            "    pass\n"
-        ),
-        {"pkg.child": "pass"},
-        "UNKNOWN",
-        (),
-        id="unsupported-return",
-    ),
-]
-
-
-@pytest.mark.parametrize(
-    "source,children,expected_outcome,expected_imports",
-    CASES,
-)
-def test_default_definition_effects(
-    source,
-    children,
-    expected_outcome,
-    expected_imports,
-):
-    sources = {
-        "pkg": ast.parse(source),
-        **{
-            name: ast.parse(child_source)
-            for name, child_source in children.items()
-        },
-    }
-
-    result = evaluate_package_import_order(
-        sources,
-        "pkg",
-    )
-
-    assert result.outcome == expected_outcome
-
-    if expected_outcome == "UNKNOWN":
-        return
-
-    events = list(result.events)
-
-    definition_positions = [
-        index
-        for index, event in enumerate(events)
-        if (
-            event.operation == "DEFINE_OPAQUE_FUNCTION"
-            and event.symbol == "f"
-        )
-    ]
-
-    assert len(definition_positions) == 1
-    definition_position = definition_positions[0]
-
-    observed_positions = []
-
-    for target in expected_imports:
-        positions = [
-            index
-            for index, event in enumerate(events)
-            if (
-                event.operation == "START_IMPORT"
-                and event.target == target
-            )
-        ]
-
-        assert len(positions) == 1
-        observed_positions.append(positions[0])
-
-    assert observed_positions == sorted(observed_positions)
-    assert all(
-        position < definition_position
-        for position in observed_positions
-    )
-```
+~~~diff
+diff --git a/tests/test_cycle_semantics_default_definition_effects.py b/tests/test_cycle_semantics_default_definition_effects.py
+index 1966af0..00e309a 100644
+--- a/tests/test_cycle_semantics_default_definition_effects.py
++++ b/tests/test_cycle_semantics_default_definition_effects.py
+@@ -87,7 +87,7 @@ def test_default_definition_effects(
+     expected_imports,
+ ):
+     sources = {
+-        "pkg": ast.parse(source),
++        "pkg.__init__": ast.parse(source),
+         **{
+             name: ast.parse(child_source)
+             for name, child_source in children.items()
+~~~

@@ -87,7 +87,7 @@ def test_default_definition_effects(
     expected_imports,
 ):
     sources = {
-        "pkg": ast.parse(source),
+        "pkg.__init__": ast.parse(source),
         **{
             name: ast.parse(child_source)
             for name, child_source in children.items()
