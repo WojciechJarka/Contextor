@@ -2042,13 +2042,26 @@ def evaluate_package_import_order(
                         and not step.function_local
                         and not step.class_local
                     ):
+                        known_builtin = (
+                            _known_builtin_callable(step.symbol)
+                            if (
+                                _assume_frozen_dataclass_decoration
+                                and step.op == "FROM"
+                                and target == "builtins"
+                            )
+                            else None
+                        )
                         namespaces[module][step.binding] = (
-                            "\x00ASSUMED_EXTERNAL:"
-                            + target
-                            + (
-                                ":" + step.symbol
-                                if step.op == "FROM"
-                                else ""
+                            known_builtin
+                            if known_builtin is not None
+                            else (
+                                "\x00ASSUMED_EXTERNAL:"
+                                + target
+                                + (
+                                    ":" + step.symbol
+                                    if step.op == "FROM"
+                                    else ""
+                                )
                             )
                         )
                     frames[-1] = _advance_frame(frames[-1])
