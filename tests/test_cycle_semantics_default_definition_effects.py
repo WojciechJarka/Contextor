@@ -273,16 +273,16 @@ def test_p6_import_before_function_binding():
         ),
         pytest.param(
             (
-                "def upper(fn):\n"
+                "def upper_decorator(fn):\n"
                 "    import pkg.upper\n"
                 "    return fn\n"
-                "def lower(fn):\n"
+                "def lower_decorator(fn):\n"
                 "    import pkg.lower\n"
                 "    return fn\n"
                 "def g():\n"
                 "    import pkg.default\n"
-                "@upper\n"
-                "@lower\n"
+                "@upper_decorator\n"
+                "@lower_decorator\n"
                 "def f(x=g()):\n"
                 "    pass\n"
             ),
@@ -292,7 +292,7 @@ def test_p6_import_before_function_binding():
                 "pkg.default": "pass",
             },
             ("pkg.default", "pkg.lower", "pkg.upper"),
-            ("g", "lower", "upper"),
+            ("g", "lower_decorator", "upper_decorator"),
             id="stacked-decorators-default",
         ),
     ],
@@ -443,3 +443,159 @@ def test_p6_decorated_opaque_child_collision_unknown():
     )
 
     assert result.outcome == "UNKNOWN"
+
+
+def test_p6_stacked_decorator_child_name_collision_unknown():
+    result = _p6_boundary_model(
+        "def upper(fn):\n"
+        "    import pkg.upper\n"
+        "    return fn\n"
+        "def lower(fn):\n"
+        "    import pkg.lower\n"
+        "    return fn\n"
+        "def g():\n"
+        "    import pkg.default\n"
+        "@upper\n"
+        "@lower\n"
+        "def f(x=g()):\n"
+        "    pass\n",
+        {
+            "pkg.upper": "pass",
+            "pkg.lower": "pass",
+            "pkg.default": "pass",
+        },
+    )
+
+    assert result.outcome == "UNKNOWN"
+    assert result.target_module == "pkg"
+    assert result.symbol is None
+    assert result.events == ()
+
+
+def test_p6_decorator_import_before_final_binding():
+    result = _p6_boundary_model(
+        "def deco(fn):\n"
+        "    import pkg.child\n"
+        "    return fn\n"
+        "def g():\n"
+        "    return\n"
+        "@deco\n"
+        "def f(x=g()):\n"
+        "    pass\n",
+        {"pkg.child": "from pkg import f"},
+    )
+
+    assert result.outcome == "EARLY_BINDING_HAZARD"
+    assert result.target_module == "pkg"
+    assert result.symbol == "f"
+    assert tuple(
+        event.symbol
+        for event in result.events
+        if event.operation == "CALL_FUNCTION"
+    ) == ("g", "deco")
+
+
+def test_p6_decorator_same_name_as_defined_function():
+    result = _p6_boundary_model(
+        "def f(fn):\n"
+        "    return fn\n"
+        "def g():\n"
+        "    import pkg.default\n"
+        "@f\n"
+        "def f(x=g()):\n"
+        "    pass\n",
+        {"pkg.default": "pass"},
+    )
+
+    assert result.outcome == "MODEL_PASS"
+    assert tuple(
+        event.symbol
+        for event in result.events
+        if event.operation == "CALL_FUNCTION"
+    ) == ("g", "f")
+    assert sum(
+        event.operation == "DEFINE_OPAQUE_FUNCTION"
+        and event.symbol == "f"
+        for event in result.events
+    ) == 1
+
+
+def test_p6_keyword_only_defaults_before_decorator():
+    result = _p6_boundary_model(
+        "def deco(fn):\n"
+        "    import pkg.decorate\n"
+        "    return fn\n"
+        "def g():\n"
+        "    import pkg.a\n"
+        "def h():\n"
+        "    import pkg.b\n"
+        "@deco\n"
+        "def f(x=1, *, y=g(), z=h()):\n"
+        "    pass\n",
+        {
+            "pkg.a": "pass",
+            "pkg.b": "pass",
+            "pkg.decorate": "pass",
+        },
+    )
+
+    assert result.outcome == "MODEL_PASS"
+    assert tuple(
+        event.target
+        for event in result.events
+        if event.operation == "START_IMPORT"
+        and event.target in {
+            "pkg.a", "pkg.b", "pkg.decorate"
+        }
+    ) == ("pkg.a", "pkg.b", "pkg.decorate")
+    assert tuple(
+        event.symbol
+        for event in result.events
+        if event.operation == "CALL_FUNCTION"
+    ) == ("g", "h", "deco")
+
+
+def test_p6_cross_module_decorator_with_default():
+    sources = {
+        "pkg.__init__": ast.parse("pass"),
+        "pkg.decorators": ast.parse(
+            "def deco(fn):\n"
+            "    import pkg.decorate\n"
+            "    return fn\n"
+        ),
+        "pkg.app": ast.parse(
+            "from pkg.decorators import deco\n"
+            "def g():\n"
+            "    import pkg.default\n"
+            "@deco\n"
+            "def f(x=g()):\n"
+            "    pass\n"
+        ),
+        "pkg.default": ast.parse("pass"),
+        "pkg.decorate": ast.parse("pass"),
+    }
+
+    result = evaluate_package_import_order(
+        sources, "pkg.app"
+    )
+
+    assert result.outcome == "MODEL_PASS"
+    assert tuple(
+        event.target
+        for event in result.events
+        if event.operation == "START_IMPORT"
+        and event.target in {
+            "pkg.default", "pkg.decorate"
+        }
+    ) == ("pkg.default", "pkg.decorate")
+    assert tuple(
+        event.symbol
+        for event in result.events
+        if event.operation == "CALL_FUNCTION"
+    ) == ("g", "deco")
+    assert sum(
+        event.operation == "DEFINE_OPAQUE_FUNCTION"
+        and event.symbol == "f"
+        and event.module == "pkg.app"
+        for event in result.events
+    ) == 1
