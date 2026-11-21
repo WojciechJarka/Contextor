@@ -53,11 +53,11 @@ Priorytet	Etap	Cel
 powrócmy do weryfikacji - i ewentualnej korekty problemów - w kolejnych hipotezach na temat contextora - 
 pamiętaj, że nie musza być one nadal aktualne (całkowicie lub częsciowo):
 
-6Wyrażenia wartości domyślnych funkcjiZachowawcze ograniczenieD04: wywołanie g() w wartości domyślnej wykonuje się przy definicji. Model akceptuje wybrane literały, lecz nie rozróżnia szerzej wyrażeń bezpiecznych od tych z efektami. Trzeba zachować kolejność i moment ewaluacji.
 
 
 
-7Dekoracja dataclass(frozen=True)Założenie warunkoweD06, D07, D09 i D11: warunkowa akceptacja oparta na założeniu działania dekoratora. Należy oddzielić rzeczywiste operacje dataclasses od samego kształtu AST i nie promować warunkowego sukcesu do produkcyjnego PASS.
+
+
 
 
 
@@ -102,6 +102,8 @@ pamiętaj, że nie musza być one nadal aktualne (całkowicie lub częsciowo):
 18Pozostałe kontrole optional/legacy i adopcji kodu LIVEResztkowe luki weryfikacji, nie potwierdzone defektyOddzielne API optional/legacy nie zasilają sprawdzonej projekcji ostrzeżeń, ale dynamiczni konsumenci poza nią nie zostali zinwentaryzowani globalnie. Po restarcie LIVE brak bezpośredniego fingerprintu klasy w RAM, choć nowy PID i czas startu mocno wskazują na adopcję aktualnego kodu.
 
 19 czy nadal istnieją problemy z lukami w łańcuchach publikacji?
+
+największym zagrożeniem dla Contextora nie jest obecnie zbyt mały zakres interpretowanych konstrukcji, lecz możliwość otrzymania MODEL_PASS na podstawie niepełnego modelu skutków wykonania
 
 ****************************************************************************************************************************************************************************************
 
