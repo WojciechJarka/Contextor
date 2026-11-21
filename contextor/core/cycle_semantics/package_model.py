@@ -1006,17 +1006,21 @@ def _compile(
                         )
 
                     if (
-                        type(body_statement) is ast.FunctionDef
+                        conditional_dataclass
+                        and type(body_statement)
+                        is ast.FunctionDef
                         and len(body_statement.decorator_list) == 1
                         and type(body_statement.decorator_list[0])
                         is ast.Name
-                        and body_statement.decorator_list[0].id
-                        == "property"
                     ):
+                        decorator = body_statement.decorator_list[0]
                         steps.append(
                             _Step(
-                                "CHECK_BUILTIN_PROPERTY",
-                                target="property",
+                                "APPLY_KNOWN_CLASS_DECORATOR",
+                                target=decorator.id,
+                                binding=body_statement.name,
+                                source_line=decorator.lineno,
+                                source_column=decorator.col_offset,
                             )
                         )
 
