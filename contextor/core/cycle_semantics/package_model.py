@@ -2560,10 +2560,15 @@ def evaluate_package_import_order(
                     step.target,
                 )
 
-        elif step.op == "CHECK_BUILTIN_PROPERTY":
+        elif step.op == "APPLY_KNOWN_CLASS_DECORATOR":
+            callable_fact = _resolve_known_builtin_callable(
+                step.target,
+                namespaces[module],
+            )
             if (
-                step.target != "property"
-                or "property" in namespaces[module]
+                not step.binding
+                or callable_fact is None
+                or callable_fact.effect != "PASSIVE_PROPERTY"
             ):
                 return result(
                     "UNKNOWN",

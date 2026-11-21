@@ -1,74 +1,65 @@
-# P9-I1-R4 — CLASS DECORATOR STEP, ONE EXACT REPLACEMENT
+# P9-I1-R5 — APPLY_KNOWN_CLASS_DECORATOR HANDLER
 
 ## PREFLIGHT
 
-- DIRECT_EVIDENCE: Contextor MCP jako pierwsze źródło: LIVE revision 1497, `canonical_state=fresh`, globalny `workspace_sync=unverified`, `syntax_errors=0` (fresh), `resync_required=false`. Per-file `workspace_sync=verified` dla `package_model.py::_compile`.
-- DIRECT_EVIDENCE: HEAD `1b4d2b4ba0ea9bc4a6154157709cb60f4593f8bb`; początkowy `git status --short` pusty. Naprawa R3 jest już w bieżącym HEAD, dlatego nie stanowi lokalnego diffu względem HEAD. `ast.parse(package_model.py)` przed zmianą wypisał `AST_OK`.
-- CODE_PATH_PROVED: wcześniejsze P9-I1 pozostają: importy `_known_builtin_callable`/`_resolve_known_builtin_callable`, `allow_known_class_decorator`, `class_decorator_names` i `protected_names`. Dokładny stary blok `CHECK_BUILTIN_PROPERTY` występował raz w pętli `for body_statement in stmt.body` gałęzi `ast.ClassDef`; osobny handler wykonawczy pozostał.
+- DIRECT_EVIDENCE: Contextor MCP był pierwszym źródłem. LIVE revision 1498, `canonical_state=fresh`, globalny `workspace_sync=unverified`, `syntax_errors=0` (fresh), `resync_required=false`; per-file `workspace_sync=verified` dla `package_model.py::evaluate_package_import_order`.
+- DIRECT_EVIDENCE: HEAD `ace022b87457f7a2b4a12329efbdf8a9df5a175e`; początkowy `git status --short` i diff `package_model.py` były puste.
+- CODE_PATH_PROVED: `_compile` emitował `APPLY_KNOWN_CLASS_DECORATOR` (`package_model.py:1019`), `_resolve_known_builtin_callable` był importowany (`:71`), a stary handler `CHECK_BUILTIN_PROPERTY` występował dokładnie raz (`:2563`). MCP potwierdził dokładną kotwicę sąsiednich handlerów.
 
 ## EXACT_REPLACEMENT
 
-- Zastąpiono wyłącznie jeden stary blok emisji `CHECK_BUILTIN_PROPERTY` blokiem emisji `APPLY_KNOWN_CLASS_DECORATOR` w tym samym miejscu. Nowy `_Step` ma `target=decorator.id`, `binding=body_statement.name`, źródłowe `lineno` i `col_offset`.
-- Poprzedzający warunek `AnnAssign`, następujący `continue`, obsługa importów i `DEFINE_CONDITIONAL_FROZEN_DATACLASS` pozostały. Nie zmieniono handlerów, `calls.py` ani testów.
+- Zastąpiono wyłącznie blok handlera `CHECK_BUILTIN_PROPERTY` blokiem `APPLY_KNOWN_CLASS_DECORATOR`. Handler pobiera `_resolve_known_builtin_callable(step.target, namespaces[module])` i odmawia `UNKNOWN`, gdy nie ma `binding`, faktu callable albo efektu `PASSIVE_PROPERTY`.
+- Nie zmieniono `_compile`, `calls.py`, `FROM`, `ALIAS`, testów ani sąsiedniego `DEFINE_CONDITIONAL_FROZEN_DATACLASS`. Nie dodano eventów, symulacji gettera ani deskryptora.
 
 ## AST_VALIDATION
 
-- DIRECT_EVIDENCE: CPython 3.15.2 `ast.parse(package_model.py)` wypisał `AST_OK` (exit 0). Literalne sprawdzenie gałęzi `_compile`: jedna `elif isinstance(stmt, ast.ClassDef)`, jedna `elif isinstance(stmt, ast.AnnAssign)`, jedna `elif isinstance(stmt, ast.FunctionDef)`; nowy krok występuje raz.
-- Nie uruchomiono pytest. Nowy krok nie ma jeszcze handlera wykonawczego; status semantyczny pozostaje częściowy.
+- DIRECT_EVIDENCE: `.venv/Scripts/python.exe` (CPython 3.15.2) wykonało `ast.parse(package_model.py)` i wypisało `AST_OK`, exit 0.
+- Nie uruchomiono pytest ani FULL.
 
 ## DIFF_VALIDATION
 
-- DIRECT_EVIDENCE: `git diff --check` exit 0. Aktualny diff `package_model.py` ma dokładnie jeden hunk `@@ -1006,17 +1006,21 @@ def _compile(`, 9 dodanych i 5 usuniętych linii; żadnej dodatkowej kopii fragmentu. Stary `CHECK_BUILTIN_PROPERTY` występuje jeszcze raz, wyłącznie w nietkniętym handlerze runtime.
-- Pełny diff względem HEAD znajduje się w `FULL_DIFFS`. Nie może obejmować R3 jako lokalnej zmiany, bo R3 jest już zatwierdzone w aktualnym HEAD.
+- DIRECT_EVIDENCE: `git diff --check` exit 0. Aktualny diff ma jeden hunk w `evaluate_package_import_order` przy linii 2560. W `package_model.py` brak `CHECK_BUILTIN_PROPERTY`; `APPLY_KNOWN_CLASS_DECORATOR` występuje raz jako `_Step` (`:1019`) i dokładnie raz jako handler (`:2563`). Początkowy status był czysty, więc diff poniżej obejmuje jedyną zmianę aktualnego zadania.
 
 ## MCP_POST_AUDIT
 
-- DIRECT_EVIDENCE: LIVE revision 1498, `canonical_state=fresh`, `syntax_errors=0` (fresh), `resync_required=false`. Per-file `workspace_sync=verified` dla `package_model.py::_compile`; globalny `workspace_sync=unverified`.
-- Zmiana zwykłego kodu repo nie stanowi dowodu adopcji przez proces runtime serwera MCP. Nie wykonano restartu ani ręcznego resync.
+- DIRECT_EVIDENCE: LIVE revision 1499, `canonical_state=fresh`, `syntax_errors=0` (fresh), `resync_required=false`. Per-file `workspace_sync=verified` dla `package_model.py::evaluate_package_import_order`. Globalny `workspace_sync=unverified`.
+- Per-file sync potwierdza zgodność canonical z plikiem, nie adopcję nowego kodu przez działający proces backendu MCP. Nie restartowano.
 
 ## REMAINING_IMPLEMENTATION
 
-- CODE_PATH_PROVED: istniejący handler `CHECK_BUILTIN_PROPERTY` pozostał, a handler `APPLY_KNOWN_CLASS_DECORATOR` jeszcze nie istnieje. Nie wykonano pozostałych kroków P9-I1 dotyczących `FROM`, `ALIAS` i testów. **P9-I1 PARTIAL — NOT FINAL PASS.**
+- CODE_PATH_PROVED: handler jest obecny, lecz P9-I1 nadal nie ma zakończonych zmian `FROM` i `ALIAS` oraz nowych kontraktów testowych. Status: **P9-I1 PARTIAL — NOT FINAL PASS**.
 
 ## FILES_CHANGED
 
-- `contextor/core/cycle_semantics/package_model.py` — jedyna zmiana source.
+- `contextor/core/cycle_semantics/package_model.py` — jedyny zmieniony plik source.
 - `walkthrough.md` — raport, wyłączony z diffu source/tests.
 
 ## FULL_DIFFS
 
-Cały aktualny diff `package_model.py` względem bieżącego HEAD:
+Pełny aktualny diff source/tests względem HEAD (testy bez zmian):
 
 ```diff
 diff --git a/contextor/core/cycle_semantics/package_model.py b/contextor/core/cycle_semantics/package_model.py
-index b0bf6a2..2f92a87 100644
+index 2f92a87..b60810a 100644
 --- a/contextor/core/cycle_semantics/package_model.py
 +++ b/contextor/core/cycle_semantics/package_model.py
-@@ -1006,17 +1006,21 @@ def _compile(
-                         )
+@@ -2560,10 +2560,15 @@ def evaluate_package_import_order(
+                     step.target,
+                 )
  
-                     if (
--                        type(body_statement) is ast.FunctionDef
-+                        conditional_dataclass
-+                        and type(body_statement)
-+                        is ast.FunctionDef
-                         and len(body_statement.decorator_list) == 1
-                         and type(body_statement.decorator_list[0])
-                         is ast.Name
--                        and body_statement.decorator_list[0].id
--                        == "property"
-                     ):
-+                        decorator = body_statement.decorator_list[0]
-                         steps.append(
-                             _Step(
--                                "CHECK_BUILTIN_PROPERTY",
--                                target="property",
-+                                "APPLY_KNOWN_CLASS_DECORATOR",
-+                                target=decorator.id,
-+                                binding=body_statement.name,
-+                                source_line=decorator.lineno,
-+                                source_column=decorator.col_offset,
-                             )
-                         )
- 
+-        elif step.op == "CHECK_BUILTIN_PROPERTY":
++        elif step.op == "APPLY_KNOWN_CLASS_DECORATOR":
++            callable_fact = _resolve_known_builtin_callable(
++                step.target,
++                namespaces[module],
++            )
+             if (
+-                step.target != "property"
+-                or "property" in namespaces[module]
++                not step.binding
++                or callable_fact is None
++                or callable_fact.effect != "PASSIVE_PROPERTY"
+             ):
+                 return result(
+                     "UNKNOWN",
 ```
