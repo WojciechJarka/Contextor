@@ -32,6 +32,16 @@ Development history (newest first). Entries retain their original technical clai
   classifications.
 - Expanded CPython 3.15.2 comparison and regression
   coverage for accepted and rejected class definitions.
+  
+### Improved Dataclass Field Semantics
+
+- Corrected default-value detection for `dataclasses.field()`, distinguishing fields without defaults from fields with explicit default values.
+- Fixed incorrect conditional acceptance of required fields appearing after fields with default values.
+- Extended support for `field()` calls using `hash` and `compare` options, including combinations of supported arguments.
+- Added support for imported aliases of `dataclasses.field`, with runtime binding checks to reject shadowed or unverified callables.
+- Preserved conservative `UNKNOWN` outcomes for unsupported arguments, expressions, and ambiguous bindings.
+- Maintained separation between conditional modeling assumptions and production `MODEL_PASS` classifications.
+- Expanded regression and CPython 3.15.2 compatibility coverage for field initialization order, binding identity, and conditional import behavior.
 
 ### 2026-11-14 — Restricted Python Execution Model and Semantic Architecture
 
