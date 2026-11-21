@@ -17,6 +17,22 @@ Development history (newest first). Entries retain their original technical clai
 - Maintained conservative `UNKNOWN` outcomes for unsupported operations, ambiguous bindings, and package namespace collisions.
 - Expanded regression coverage and CPython compatibility checks to validate execution ordering, decorator behavior, and semantic safety boundaries.
 
+### Hardened Conditional Frozen Dataclass Validation
+
+- Improved conditional validation of frozen dataclass
+  definitions by detecting collisions between annotated
+  fields and methods or properties in the same class.
+- Added conservative rejection of repeated field
+  annotations to prevent incorrect assumptions about
+  field defaults and initialization order.
+- Preserved valid definitions with distinct field names
+  and unrelated properties.
+- Maintained strict separation between conditional
+  modeling assumptions and production MODEL_PASS
+  classifications.
+- Expanded CPython 3.15.2 comparison and regression
+  coverage for accepted and rejected class definitions.
+
 ### 2026-11-14 — Restricted Python Execution Model and Semantic Architecture
 
 #### Added

@@ -1025,11 +1025,8 @@ def test_r11_requires_exact_field_factory_binding(
 @pytest.mark.parametrize(
     "default_expression",
     [
-        "field()",
         "field(default=1)",
-        "field(hash=True)",
         "field(hash=0)",
-        "field(hash=False, compare=True)",
         "other(hash=False)",
         "field(hash=False) or None",
     ],
@@ -3011,3 +3008,168 @@ def test_p7_distinct_defaulted_dataclass_fields_admitted():
         item.class_name
         for item in result.assumed_dataclass_decorations
     ) == ("C",)
+
+
+def _p8_field_result(class_body, *, import_line=None, prelude=""):
+    if import_line is None:
+        import_line = "from dataclasses import dataclass, field\n"
+    sources = {
+        "pkg.__init__": ast.parse(
+            import_line
+            + prelude
+            + "@dataclass(frozen=True)\n"
+            + "class C:\n"
+            + class_body
+            + "import pkg.child\n"
+        ),
+        "pkg.child": ast.parse("pass"),
+    }
+    return evaluate_package_import_order(
+        sources,
+        "pkg",
+        annotation_semantics="DEFERRED",
+        _compile_on_first_import=True,
+        _assume_passive_external_imports=True,
+        _assume_frozen_dataclass_decoration=True,
+    )
+
+
+@pytest.mark.parametrize(
+    "class_body,import_line",
+    [
+        pytest.param(
+            "    a: int = field(hash=False)\n    b: int\n",
+            None,
+            id="hash-false-before-required",
+        ),
+        pytest.param(
+            "    a: int = field(compare=False)\n    b: int\n",
+            None,
+            id="compare-false-before-required",
+        ),
+        pytest.param(
+            "    a: int = field()\n    b: int\n",
+            None,
+            id="empty-field-before-required",
+        ),
+        pytest.param(
+            "    a: int = field(hash=False, compare=False)\n"
+            "    b: int\n",
+            None,
+            id="hash-and-compare",
+        ),
+        pytest.param(
+            "    a: int = field(hash=True)\n    b: int\n",
+            None,
+            id="hash-true",
+        ),
+        pytest.param(
+            "    a: int = field(hash=None)\n    b: int\n",
+            None,
+            id="hash-none",
+        ),
+        pytest.param(
+            "    a: int = make_field(compare=False)\n"
+            "    b: int\n",
+            "from dataclasses import dataclass, field as make_field\n",
+            id="import-alias",
+        ),
+        pytest.param(
+            "    a: int = field(hash=False)\n    b: int = 1\n",
+            None,
+            id="before-literal-default",
+        ),
+    ],
+)
+def test_p8_defaultless_field_conditional_pass(class_body, import_line):
+    result = _p8_field_result(class_body, import_line=import_line)
+
+    assert result.outcome == "MODEL_PASS"
+    assert tuple(
+        item.class_name
+        for item in result.assumed_dataclass_decorations
+    ) == ("C",)
+    events = list(result.events)
+    class_positions = [
+        index
+        for index, event in enumerate(events)
+        if event.operation == "DEFINE_PASSIVE_CLASS"
+        and event.symbol == "C"
+    ]
+    child_positions = [
+        index
+        for index, event in enumerate(events)
+        if event.operation == "START_IMPORT"
+        and event.target == "pkg.child"
+    ]
+    assert len(class_positions) == len(child_positions) == 1
+    assert class_positions[0] < child_positions[0]
+
+
+@pytest.mark.parametrize(
+    "class_body,prelude",
+    [
+        pytest.param(
+            "    a: int = 1\n    b: int = field(hash=False)\n",
+            "",
+            id="literal-before-hash-false",
+        ),
+        pytest.param(
+            "    a: int = 1\n    b: int = field(compare=False)\n",
+            "",
+            id="literal-before-compare-false",
+        ),
+        pytest.param(
+            "    a: int = 1\n    b: int = field()\n",
+            "",
+            id="literal-before-empty-field",
+        ),
+        pytest.param(
+            "    a: int = field(hash=False)\n    b: int\n",
+            "field = None\n",
+            id="rebound-to-none",
+        ),
+        pytest.param(
+            "    a: int = make_field(compare=False)\n"
+            "    b: int\n",
+            "def make_field(*, compare):\n    pass\n",
+            id="unproven-function",
+        ),
+        pytest.param(
+            "    a: int = field(default=1)\n    b: int\n",
+            "",
+            id="explicit-default",
+        ),
+        pytest.param(
+            "    a: int = field(default_factory=list)\n"
+            "    b: int\n",
+            "",
+            id="default-factory",
+        ),
+        pytest.param(
+            "    a: int = field(init=False)\n    b: int\n",
+            "",
+            id="init-false",
+        ),
+        pytest.param(
+            "    a: int = field(hash=0)\n    b: int\n",
+            "",
+            id="invalid-hash-type",
+        ),
+        pytest.param(
+            "    a: int = field(compare=0)\n    b: int\n",
+            "",
+            id="invalid-compare-type",
+        ),
+    ],
+)
+def test_p8_field_boundary_unknown(class_body, prelude):
+    result = _p8_field_result(class_body, prelude=prelude)
+
+    assert result.outcome == "UNKNOWN"
+    assert result.assumed_dataclass_decorations == ()
+    assert not any(
+        event.operation == "START_IMPORT"
+        and event.target == "pkg.child"
+        for event in result.events
+    )

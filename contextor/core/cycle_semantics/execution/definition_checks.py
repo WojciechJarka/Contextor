@@ -24,20 +24,39 @@ def _exact_frozen_dataclass_decorator(
     )
 
 
-def _exact_restricted_dataclass_hash_field_call(
+def _restricted_defaultless_dataclass_field_call(
     node: ast.AST,
-) -> bool:
-    return (
-        type(node) is ast.Call
-        and type(node.func) is ast.Name
-        and node.func.id == "field"
-        and not node.args
-        and len(node.keywords) == 1
-        and node.keywords[0].arg == "hash"
-        and type(node.keywords[0].value) is ast.Constant
-        and type(node.keywords[0].value.value) is bool
-        and node.keywords[0].value.value is False
-    )
+) -> str | None:
+    if (
+        type(node) is not ast.Call
+        or type(node.func) is not ast.Name
+        or not node.func.id.isidentifier()
+        or node.func.id.startswith("__")
+        or node.args
+    ):
+        return None
+
+    seen: set[str] = set()
+
+    for keyword in node.keywords:
+        if (
+            keyword.arg not in {"hash", "compare"}
+            or keyword.arg in seen
+            or type(keyword.value) is not ast.Constant
+        ):
+            return None
+
+        value = keyword.value.value
+
+        if keyword.arg == "hash":
+            if type(value) not in {bool, type(None)}:
+                return None
+        elif type(value) is not bool:
+            return None
+
+        seen.add(keyword.arg)
+
+    return node.func.id
 
 
 def _restricted_dataclass_field_annotation(

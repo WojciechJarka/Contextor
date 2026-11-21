@@ -32,7 +32,7 @@ from .execution.expressions import (
 )
 from .execution.definition_checks import (
     _exact_frozen_dataclass_decorator,
-    _exact_restricted_dataclass_hash_field_call,
+    _restricted_defaultless_dataclass_field_call,
     _restricted_dataclass_field_annotation,
 )
 from .execution.class_facts import (
@@ -365,14 +365,17 @@ def _safe_passive_class_definition(
 
         seen_default_field = False
 
-        uses_field_call = any(
-            isinstance(item, ast.AnnAssign)
-            and item.value is not None
-            and _exact_restricted_dataclass_hash_field_call(
-                item.value
-            )
-            for item in statement.body
-        )
+        field_factory_names: set[str] = set()
+
+        for item in statement.body:
+            if isinstance(item, ast.AnnAssign):
+                field_name = (
+                    _restricted_defaultless_dataclass_field_call(
+                        item.value
+                    )
+                )
+                if field_name is not None:
+                    field_factory_names.add(field_name)
 
         uses_property = any(
             type(item) is ast.FunctionDef
@@ -382,10 +385,7 @@ def _safe_passive_class_definition(
             for item in statement.body
         )
 
-        protected_names = set()
-
-        if uses_field_call:
-            protected_names.add("field")
+        protected_names = set(field_factory_names)
 
         if uses_property:
             protected_names.add("property")
@@ -421,34 +421,35 @@ def _safe_passive_class_definition(
                     return False
 
                 default_value = body_statement.value
-
-                if default_value is None:
-                    if seen_default_field:
-                        return False
-                else:
-                    literal_default = (
-                        type(default_value) is ast.Constant
-                        and type(default_value.value) in {
-                            type(None),
-                            bool,
-                            int,
-                            float,
-                            complex,
-                            str,
-                            bytes,
-                        }
+                literal_default = (
+                    type(default_value) is ast.Constant
+                    and type(default_value.value) in {
+                        type(None),
+                        bool,
+                        int,
+                        float,
+                        complex,
+                        str,
+                        bytes,
+                    }
+                )
+                field_call_name = (
+                    _restricted_defaultless_dataclass_field_call(
+                        default_value
                     )
+                )
 
-                    if (
-                        not literal_default
-                        and not
-                        _exact_restricted_dataclass_hash_field_call(
-                            default_value
-                        )
-                    ):
-                        return False
+                if (
+                    default_value is not None
+                    and not literal_default
+                    and field_call_name is None
+                ):
+                    return False
 
+                if literal_default:
                     seen_default_field = True
+                elif seen_default_field:
+                    return False
 
             if isinstance(
                 body_statement,
@@ -478,9 +479,9 @@ def _safe_passive_class_definition(
                 and body_statement.simple == 1
                 and body_statement.target.id.isidentifier()
                 and not body_statement.target.id.startswith("__")
-                and _exact_restricted_dataclass_hash_field_call(
+                and _restricted_defaultless_dataclass_field_call(
                     body_statement.value
-                )
+                ) is not None
             ):
                 continue
 
@@ -979,13 +980,16 @@ def _compile(
                         isinstance(body_statement, ast.AnnAssign)
                         and body_statement.value is not None
                     ):
-                        if _exact_restricted_dataclass_hash_field_call(
-                            body_statement.value
-                        ):
+                        field_name = (
+                            _restricted_defaultless_dataclass_field_call(
+                                body_statement.value
+                            )
+                        )
+                        if field_name is not None:
                             steps.append(
                                 _Step(
                                     "CHECK_DATACLASS_FIELD_FACTORY",
-                                    target="field",
+                                    target=field_name,
                                 )
                             )
 
@@ -2538,8 +2542,8 @@ def evaluate_package_import_order(
 
         elif step.op == "CHECK_DATACLASS_FIELD_FACTORY":
             if (
-                step.target != "field"
-                or namespaces[module].get("field")
+                not step.target
+                or namespaces[module].get(step.target)
                 != "\x00ASSUMED_EXTERNAL:dataclasses:field"
             ):
                 return result(

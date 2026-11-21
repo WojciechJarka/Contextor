@@ -1006,3 +1006,44 @@ def test_p7_public_conditional_repeated_field_annotation_unknown():
     model = result.conditional_assessment.model_assessment
     assert model is not None
     assert model.assumed_dataclass_decorations == ()
+
+
+@pytest.mark.parametrize(
+    "class_body,expected_outcome",
+    [
+        pytest.param(
+            "    a: int = field(hash=False)\n"
+            "    b: int\n",
+            "CONDITIONAL_MODEL_PASS",
+            id="defaultless-field",
+        ),
+        pytest.param(
+            "    a: int = 1\n"
+            "    b: int = field(hash=False)\n",
+            "UNKNOWN",
+            id="invalid-order",
+        ),
+    ],
+)
+def test_p8_public_defaultless_field_order(class_body, expected_outcome):
+    result = _dataclass_result(
+        "from dataclasses import dataclass, field\n"
+        "@dataclass(frozen=True)\n"
+        "class C:\n"
+        + class_body
+        + "import pkg.ns.b\n",
+        decorate=True,
+        child="pass\n",
+    )
+
+    assert result.outcome == expected_outcome
+    assert result.conditional_assessment is not None
+    model = result.conditional_assessment.model_assessment
+    assert model is not None
+    if expected_outcome == "CONDITIONAL_MODEL_PASS":
+        assert tuple(
+            item.class_name
+            for item in model.assumed_dataclass_decorations
+        ) == ("C",)
+    else:
+        assert model.assumed_dataclass_decorations == ()
