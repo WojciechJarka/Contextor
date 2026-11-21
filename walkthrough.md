@@ -1,249 +1,176 @@
-# P6-D05-I2-R2 — Final semantic boundaries
+# P7-I1 — Dataclass class-namespace binding guard
 
 ## PRECHECK
 
-**DIRECT_EVIDENCE — Contextor MCP:** przed zmianą LIVE revision 1475, provenance=live, canonical_state=fresh, global workspace_sync=unverified, syntax_errors=0 (fresh), resync_required=false, parse_stale_modules={}; cycle_semantics=stale. Per-file workspace_sync dla tests/test_cycle_semantics_default_definition_effects.py wynosił verified przy revision 1475.
+DIRECT_EVIDENCE: Contextor MCP przed zmianą: LIVE revision 1476, canonical_state=fresh, global workspace_sync=unverified, syntax_errors=0 (fresh), resync_required=false. Per-file workspace_sync=verified dla package_model.py, test_cycle_semantics_package_model.py i test_cycle_semantics_namespace_bound_model.py. _safe_passive_class_definition miał kotwicę if conditional_dataclass bezpośrednio przed seen_default_field = False (package_model.py:335–336). Odczytano helpery _r8_frozen_dataclass_result i _r8_assert_rejected oraz końce obu plików testowych.
 
-**DIRECT_EVIDENCE — kotwica i repozytorium:** Contextor odczytał test_p6_stacked_decorator_child_name_collision_unknown (linie 448–472), stanowiący dokładną kotwicę EOF. HEAD: 5f2f4375912a4921ee5df9265d8b19b47ef15498. Przed zmianą status zawierał już modyfikacje pliku testowego i walkthrough.md z poprzedniego zadania. issues.md odczytano zgodnie z poleceniem i pozostawiono bez zmian.
+HEAD przed zmianą: bc5e3856f0b59c9ac9340e94eeaf9e2dfb683e8b. Git status przed zmianą: M CHANGELOG.md, M walkthrough.md. To zastane zmiany; CHANGELOG.md nie został dotknięty.
 
-## EXACT_CHANGE
+## EXACT_CHANGES
 
-Do końca tests/test_cycle_semantics_default_definition_effects.py dopisano dokładnie cztery testy podane w zleceniu:
+W package_model.py dodano dokładnie wskazany warunek: przecięcie prostych nazw AnnAssign z nazwami FunctionDef/AsyncFunctionDef w warunkowej klasie dataclass zwraca False przed dalszą analizą pól. Nie zmieniono innych warunków ani handlerów runtime.
 
-- test_p6_decorator_import_before_final_binding
-- test_p6_decorator_same_name_as_defined_function
-- test_p6_keyword_only_defaults_before_decorator
-- test_p6_cross_module_decorator_with_default
-
-Nie zmieniono istniejącego kodu testowego ani żadnego pliku produkcyjnego. Nie zmieniono oczekiwań.
+Na końcu test_cycle_semantics_package_model.py dopisano dwa negatywne warianty kolizji oraz pozytywny wariant niepowiązanej property. Na końcu test_cycle_semantics_namespace_bound_model.py dopisano publiczny kontrakt UNKNOWN. Podczas kontroli diffu wykryto, że ostatni test był początkowo umieszczony przy wcześniejszej identycznej kotwicy; przeniesiono ten sam blok na rzeczywisty EOF bez zmiany treści.
 
 ## TARGETED_RESULTS
 
-Interpreter: CPython 3.15.2. Uruchomiono wyłącznie:
+Interpreter: CPython 3.15.2. Pierwsze dokładnie wskazane polecenie: 109 passed, 152 deselected. Po przeniesieniu testu na EOF wykonano je ponownie, aby sprawdzić końcową kolejność: 109 passed, 152 deselected w 3.07 s.
 
-    .venv/Scripts/python.exe -m pytest -q tests/test_cycle_semantics_default_definition_effects.py --tb=long
+    .venv/Scripts/python.exe -m pytest -q tests/test_cycle_semantics_package_model.py tests/test_cycle_semantics_namespace_bound_model.py -k "r8 or r10 or r11 or frozen_dataclass or p7" --tb=long
 
-Wynik rzeczywisty: **23 passed in 1.02s**, exit code 0. Prompt przewidywał 22 PASS; liczba rzeczywistych zaliczeń różni się o jeden. Nie wystąpił FAIL, więc nie ma tracebacku FAIL. Nie uruchamiano dodatkowego pytest.
+Drugie dokładnie wskazane polecenie: 3 passed, 105 deselected w 1.59 s.
 
-## SEMANTIC_BOUNDARIES
+    .venv/Scripts/python.exe -m pytest -q tests/test_cycle_semantics_external_import_authority.py tests/test_cycle_semantics_passive_classes.py -k "dataclass or conditional_external" --tb=long
 
-**DIRECT_EVIDENCE z target run:** wszystkie cztery dopisane przypadki przeszły wraz z asercjami:
+Brak FAIL; nie ma tracebacku. Nie uruchamiano pełnego pytest ani FULL.
 
-- import z dekoratora przed końcowym związaniem f daje EARLY_BINDING_HAZARD, target pkg, symbol f; zdarzenia CALL_FUNCTION to g, deco;
-- dekorator nazwany tak samo jak wiązana funkcja f daje MODEL_PASS, wywołania g, f i dokładnie jedno DEFINE_OPAQUE_FUNCTION dla f;
-- kw-only defaults wykonują importy pkg.a, pkg.b przed importem pkg.decorate, z wywołaniami g, h, deco;
-- dekorator z pkg.decorators zastosowany do f w pkg.app daje MODEL_PASS; importy pkg.default, pkg.decorate; wywołania g, deco; f jest wiązane w pkg.app.
+## FIELD_NAMESPACE_INVARIANT
 
-**INFERENCE:** target run potwierdza evaluatorowe asercje dla tych czterech źródeł. Nie wykonano osobnych runtime probes CPythona dla tych czterech fixture’ów.
+CODE_PATH_PROVED: warunek dotyczy wyłącznie conditional_dataclass i porównuje wszystkie proste nazwy pól z nazwami wiązanymi przez definicje funkcji w tym samym class body. Kolizja x/property x oraz token/metoda token kończy walidację przed ASSUMED_FROZEN_DATACLASS_DECORATION i DEFINE_PASSIVE_CLASS. Niezwiązana property label pozostaje poza przecięciem i test potwierdza wewnętrzny MODEL_PASS z jednym rekordem założonej dekoracji C.
+
+DIRECT_EVIDENCE z P7-R1: CPython 3.15.2 dla obu kolizji z późniejszym wymaganym polem zgłasza TypeError: non-default argument 'y' follows default argument 'x' (w wariancie metody analogicznie), przed związaniem C i importem dziecka. Guard konserwatywnie zwraca UNKNOWN także dla innych kolizji tych nazw; nie twierdzi, że każda taka klasa jest błędna w CPython.
+
+## CONDITIONAL_AUTHORITY_BOUNDARY
+
+MODEL_PASS w pozytywnym teście jest wewnętrznym wynikiem z jawnymi założeniami o imporcie dataclasses i dekoracji frozen; nie jest produkcyjnym dowodem runtime. Nowy test publiczny potwierdza UNKNOWN oraz pustą listę assumed_dataclass_decorations dla kolizji. Nie zmieniono mapowania CONDITIONAL_MODEL_PASS, polityk warunkowych, receipt ani warning suppression.
 
 ## MCP_AUDIT
 
-Po zmianie LIVE revision 1476, provenance=live, canonical_state=fresh. Per-file workspace_sync dla tests/test_cycle_semantics_default_definition_effects.py wynosi verified przy revision 1476. Odpowiedź symbolu test_p6_cross_module_decorator_with_default wykazała syntax_errors=0 (fresh); resync_required=false, parse_stale_modules={}. Global workspace_sync pozostaje unverified; cycle_semantics=stale.
+Desktop watcher opublikował kolejno: revision 1477 dla package_model.py, 1478 dla test_cycle_semantics_package_model.py, 1479 dla test_cycle_semantics_namespace_bound_model.py oraz 1480 po przeniesieniu testu na EOF. Wszystkie eventy: origin=desktop_watcher, operation=update_file, status=UPDATED; ciągłość zachowana, resync_required=false.
 
-get_live_events po revision 1475 potwierdził ciągłość i zdarzenie revision 1476: update_file, origin=desktop_watcher, status=UPDATED, ścieżka wskazuje zmieniony plik testowy. resync_required=false.
+Końcowy Contextor LIVE revision 1480, canonical_state=fresh, syntax_errors=0 (fresh), resync_required=false. Per-file workspace_sync=verified przy revision 1480 dla wszystkich trzech zmienionych plików. Global workspace_sync=unverified, cycle_semantics=stale.
 
-issues.md nie został zmieniony. Nie wykonano FULL, dodatkowych testów, restartu, staging, commit ani push.
+Bez restartu, staging, commit i push.
 
 ## FILES_CHANGED
 
-- tests/test_cycle_semantics_default_definition_effects.py — dopisano cztery testy w tym zadaniu; plik zawiera także wcześniejsze, istniejące zmiany R1.
-- walkthrough.md — wymagany raport.
+- contextor/core/cycle_semantics/package_model.py
+- tests/test_cycle_semantics_package_model.py
+- tests/test_cycle_semantics_namespace_bound_model.py
+- walkthrough.md — wyłącznie raport
+
+Zastany CHANGELOG.md pozostawiono bez zmian.
 
 ## FULL_DIFFS
 
-Pełny rzeczywisty diff aktualnego pliku testowego względem HEAD. Fragment dotyczący stacked-decorators-default i testu kolizji istniał w worktree przed R2; cztery końcowe testy są zmianą R2.
+Pełny rzeczywisty diff trzech zmienionych plików względem HEAD:
 
-    diff --git a/tests/test_cycle_semantics_default_definition_effects.py b/tests/test_cycle_semantics_default_definition_effects.py
-    index aa604ad..e79dff6 100644
-    --- a/tests/test_cycle_semantics_default_definition_effects.py
-    +++ b/tests/test_cycle_semantics_default_definition_effects.py
-    @@ -273,16 +273,16 @@ def test_p6_import_before_function_binding():
-             ),
-             pytest.param(
-                 (
-    -                "def upper(fn):\n"
-    +                "def upper_decorator(fn):\n"
-                     "    import pkg.upper\n"
-                     "    return fn\n"
-    -                "def lower(fn):\n"
-    +                "def lower_decorator(fn):\n"
-                     "    import pkg.lower\n"
-                     "    return fn\n"
-                     "def g():\n"
-                     "    import pkg.default\n"
-    -                "@upper\n"
-    -                "@lower\n"
-    +                "@upper_decorator\n"
-    +                "@lower_decorator\n"
-                     "def f(x=g()):\n"
-                     "    pass\n"
-                 ),
-    @@ -292,7 +292,7 @@ def test_p6_import_before_function_binding():
-                     "pkg.default": "pass",
-                 },
-                 ("pkg.default", "pkg.lower", "pkg.upper"),
-    -            ("g", "lower", "upper"),
-    +            ("g", "lower_decorator", "upper_decorator"),
-                 id="stacked-decorators-default",
-             ),
-         ],
-    @@ -443,3 +443,159 @@ def test_p6_decorated_opaque_child_collision_unknown():
-         )
+    diff --git a/contextor/core/cycle_semantics/package_model.py b/contextor/core/cycle_semantics/package_model.py
+    index 88f8bc9..ea520f5 100644
+    --- a/contextor/core/cycle_semantics/package_model.py
+    +++ b/contextor/core/cycle_semantics/package_model.py
+    @@ -334,6 +334,28 @@ def _safe_passive_class_definition(
+             return False
      
-         assert result.outcome == "UNKNOWN"
+         if conditional_dataclass:
+    +        annotated_names = frozenset(
+    +            item.target.id
+    +            for item in statement.body
+    +            if (
+    +                isinstance(item, ast.AnnAssign)
+    +                and isinstance(item.target, ast.Name)
+    +                and item.simple == 1
+    +            )
+    +        )
+    +        function_binding_names = frozenset(
+    +            item.name
+    +            for item in statement.body
+    +            if isinstance(
+    +                item,
+    +                (ast.FunctionDef, ast.AsyncFunctionDef),
+    +            )
+    +        )
+    +        if not annotated_names.isdisjoint(
+    +            function_binding_names
+    +        ):
+    +            return False
+    +
+             seen_default_field = False
+     
+             uses_field_call = any(
+    diff --git a/tests/test_cycle_semantics_namespace_bound_model.py b/tests/test_cycle_semantics_namespace_bound_model.py
+    index a8b5de5..805202e 100644
+    --- a/tests/test_cycle_semantics_namespace_bound_model.py
+    +++ b/tests/test_cycle_semantics_namespace_bound_model.py
+    @@ -968,3 +968,23 @@ def test_p8_unreachable_module_bad_hash_still_rejected():
+         assert result.reason == "SOURCE_FINGERPRINT_MISMATCH"
+         assert result.source_evidence_sha256 is None
+         assert result.conditional_assessment is None
     +
     +
-    +def test_p6_stacked_decorator_child_name_collision_unknown():
-    +    result = _p6_boundary_model(
-    +        "def upper(fn):\n"
-    +        "    import pkg.upper\n"
-    +        "    return fn\n"
-    +        "def lower(fn):\n"
-    +        "    import pkg.lower\n"
-    +        "    return fn\n"
-    +        "def g():\n"
-    +        "    import pkg.default\n"
-    +        "@upper\n"
-    +        "@lower\n"
-    +        "def f(x=g()):\n"
-    +        "    pass\n",
-    +        {
-    +            "pkg.upper": "pass",
-    +            "pkg.lower": "pass",
-    +            "pkg.default": "pass",
-    +        },
+    +def test_p7_public_conditional_field_collision_unknown():
+    +    result = _dataclass_result(
+    +        "from dataclasses import dataclass\n"
+    +        "@dataclass(frozen=True)\n"
+    +        "class C:\n"
+    +        "    x: int\n"
+    +        "    @property\n"
+    +        "    def x(self):\n"
+    +        "        return 1\n"
+    +        "    y: int\n",
+    +        decorate=True,
     +    )
     +
     +    assert result.outcome == "UNKNOWN"
-    +    assert result.target_module == "pkg"
-    +    assert result.symbol is None
-    +    assert result.events == ()
+    +    assert result.conditional_assessment is not None
+    +    model = result.conditional_assessment.model_assessment
+    +    assert model is not None
+    +    assert model.assumed_dataclass_decorations == ()
+    diff --git a/tests/test_cycle_semantics_package_model.py b/tests/test_cycle_semantics_package_model.py
+    index 72a01da..358a539 100644
+    --- a/tests/test_cycle_semantics_package_model.py
+    +++ b/tests/test_cycle_semantics_package_model.py
+    @@ -2919,3 +2919,53 @@ def test_p11_strict_mode_remains_whole_module_unknown():
+             and event.symbol == "value"
+             for event in opt_in.events
+         )
     +
     +
-    +def test_p6_decorator_import_before_final_binding():
-    +    result = _p6_boundary_model(
-    +        "def deco(fn):\n"
-    +        "    import pkg.child\n"
-    +        "    return fn\n"
-    +        "def g():\n"
-    +        "    return\n"
-    +        "@deco\n"
-    +        "def f(x=g()):\n"
-    +        "    pass\n",
-    +        {"pkg.child": "from pkg import f"},
-    +    )
-    +
-    +    assert result.outcome == "EARLY_BINDING_HAZARD"
-    +    assert result.target_module == "pkg"
-    +    assert result.symbol == "f"
-    +    assert tuple(
-    +        event.symbol
-    +        for event in result.events
-    +        if event.operation == "CALL_FUNCTION"
-    +    ) == ("g", "deco")
-    +
-    +
-    +def test_p6_decorator_same_name_as_defined_function():
-    +    result = _p6_boundary_model(
-    +        "def f(fn):\n"
-    +        "    return fn\n"
-    +        "def g():\n"
-    +        "    import pkg.default\n"
-    +        "@f\n"
-    +        "def f(x=g()):\n"
-    +        "    pass\n",
-    +        {"pkg.default": "pass"},
-    +    )
-    +
-    +    assert result.outcome == "MODEL_PASS"
-    +    assert tuple(
-    +        event.symbol
-    +        for event in result.events
-    +        if event.operation == "CALL_FUNCTION"
-    +    ) == ("g", "f")
-    +    assert sum(
-    +        event.operation == "DEFINE_OPAQUE_FUNCTION"
-    +        and event.symbol == "f"
-    +        for event in result.events
-    +    ) == 1
-    +
-    +
-    +def test_p6_keyword_only_defaults_before_decorator():
-    +    result = _p6_boundary_model(
-    +        "def deco(fn):\n"
-    +        "    import pkg.decorate\n"
-    +        "    return fn\n"
-    +        "def g():\n"
-    +        "    import pkg.a\n"
-    +        "def h():\n"
-    +        "    import pkg.b\n"
-    +        "@deco\n"
-    +        "def f(x=1, *, y=g(), z=h()):\n"
-    +        "    pass\n",
-    +        {
-    +            "pkg.a": "pass",
-    +            "pkg.b": "pass",
-    +            "pkg.decorate": "pass",
-    +        },
-    +    )
-    +
-    +    assert result.outcome == "MODEL_PASS"
-    +    assert tuple(
-    +        event.target
-    +        for event in result.events
-    +        if event.operation == "START_IMPORT"
-    +        and event.target in {
-    +            "pkg.a", "pkg.b", "pkg.decorate"
-    +        }
-    +    ) == ("pkg.a", "pkg.b", "pkg.decorate")
-    +    assert tuple(
-    +        event.symbol
-    +        for event in result.events
-    +        if event.operation == "CALL_FUNCTION"
-    +    ) == ("g", "h", "deco")
-    +
-    +
-    +def test_p6_cross_module_decorator_with_default():
-    +    sources = {
-    +        "pkg.__init__": ast.parse("pass"),
-    +        "pkg.decorators": ast.parse(
-    +            "def deco(fn):\n"
-    +            "    import pkg.decorate\n"
-    +            "    return fn\n"
+    +@pytest.mark.parametrize(
+    +    "class_body",
+    +    [
+    +        pytest.param(
+    +            "    x: int\n"
+    +            "    @property\n"
+    +            "    def x(self):\n"
+    +            "        return 1\n"
+    +            "    y: int\n",
+    +            id="property-binding",
     +        ),
-    +        "pkg.app": ast.parse(
-    +            "from pkg.decorators import deco\n"
-    +            "def g():\n"
-    +            "    import pkg.default\n"
-    +            "@deco\n"
-    +            "def f(x=g()):\n"
-    +            "    pass\n"
+    +        pytest.param(
+    +            "    token: int\n"
+    +            "    def token(self):\n"
+    +            "        pass\n"
+    +            "    required: int\n",
+    +            id="function-binding",
     +        ),
-    +        "pkg.default": ast.parse("pass"),
-    +        "pkg.decorate": ast.parse("pass"),
-    +    }
+    +    ],
+    +)
+    +def test_p7_dataclass_field_function_binding_unknown(
+    +    class_body,
+    +):
+    +    result = _r8_frozen_dataclass_result(
+    +        "@dataclass(frozen=True)\n"
+    +        "class C:\n"
+    +        + class_body
+    +    )
     +
-    +    result = evaluate_package_import_order(
-    +        sources, "pkg.app"
+    +    _r8_assert_rejected(result, class_name="C")
+    +
+    +
+    +def test_p7_dataclass_unrelated_property_remains_admitted():
+    +    result = _r8_frozen_dataclass_result(
+    +        "@dataclass(frozen=True)\n"
+    +        "class C:\n"
+    +        "    x: int\n"
+    +        "    y: int\n"
+    +        "    @property\n"
+    +        "    def label(self):\n"
+    +        "        return 1\n"
     +    )
     +
     +    assert result.outcome == "MODEL_PASS"
     +    assert tuple(
-    +        event.target
-    +        for event in result.events
-    +        if event.operation == "START_IMPORT"
-    +        and event.target in {
-    +            "pkg.default", "pkg.decorate"
-    +        }
-    +    ) == ("pkg.default", "pkg.decorate")
-    +    assert tuple(
-    +        event.symbol
-    +        for event in result.events
-    +        if event.operation == "CALL_FUNCTION"
-    +    ) == ("g", "deco")
-    +    assert sum(
-    +        event.operation == "DEFINE_OPAQUE_FUNCTION"
-    +        and event.symbol == "f"
-    +        and event.module == "pkg.app"
-    +        for event in result.events
-    +    ) == 1
+    +        item.class_name
+    +        for item in result.assumed_dataclass_decorations
+    +    ) == ("C",)

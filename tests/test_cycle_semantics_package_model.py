@@ -2919,3 +2919,53 @@ def test_p11_strict_mode_remains_whole_module_unknown():
         and event.symbol == "value"
         for event in opt_in.events
     )
+
+
+@pytest.mark.parametrize(
+    "class_body",
+    [
+        pytest.param(
+            "    x: int\n"
+            "    @property\n"
+            "    def x(self):\n"
+            "        return 1\n"
+            "    y: int\n",
+            id="property-binding",
+        ),
+        pytest.param(
+            "    token: int\n"
+            "    def token(self):\n"
+            "        pass\n"
+            "    required: int\n",
+            id="function-binding",
+        ),
+    ],
+)
+def test_p7_dataclass_field_function_binding_unknown(
+    class_body,
+):
+    result = _r8_frozen_dataclass_result(
+        "@dataclass(frozen=True)\n"
+        "class C:\n"
+        + class_body
+    )
+
+    _r8_assert_rejected(result, class_name="C")
+
+
+def test_p7_dataclass_unrelated_property_remains_admitted():
+    result = _r8_frozen_dataclass_result(
+        "@dataclass(frozen=True)\n"
+        "class C:\n"
+        "    x: int\n"
+        "    y: int\n"
+        "    @property\n"
+        "    def label(self):\n"
+        "        return 1\n"
+    )
+
+    assert result.outcome == "MODEL_PASS"
+    assert tuple(
+        item.class_name
+        for item in result.assumed_dataclass_decorations
+    ) == ("C",)

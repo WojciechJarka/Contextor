@@ -334,6 +334,28 @@ def _safe_passive_class_definition(
         return False
 
     if conditional_dataclass:
+        annotated_names = frozenset(
+            item.target.id
+            for item in statement.body
+            if (
+                isinstance(item, ast.AnnAssign)
+                and isinstance(item.target, ast.Name)
+                and item.simple == 1
+            )
+        )
+        function_binding_names = frozenset(
+            item.name
+            for item in statement.body
+            if isinstance(
+                item,
+                (ast.FunctionDef, ast.AsyncFunctionDef),
+            )
+        )
+        if not annotated_names.isdisjoint(
+            function_binding_names
+        ):
+            return False
+
         seen_default_field = False
 
         uses_field_call = any(

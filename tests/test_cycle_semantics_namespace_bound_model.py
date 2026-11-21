@@ -968,3 +968,23 @@ def test_p8_unreachable_module_bad_hash_still_rejected():
     assert result.reason == "SOURCE_FINGERPRINT_MISMATCH"
     assert result.source_evidence_sha256 is None
     assert result.conditional_assessment is None
+
+
+def test_p7_public_conditional_field_collision_unknown():
+    result = _dataclass_result(
+        "from dataclasses import dataclass\n"
+        "@dataclass(frozen=True)\n"
+        "class C:\n"
+        "    x: int\n"
+        "    @property\n"
+        "    def x(self):\n"
+        "        return 1\n"
+        "    y: int\n",
+        decorate=True,
+    )
+
+    assert result.outcome == "UNKNOWN"
+    assert result.conditional_assessment is not None
+    model = result.conditional_assessment.model_assessment
+    assert model is not None
+    assert model.assumed_dataclass_decorations == ()

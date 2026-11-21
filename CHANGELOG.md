@@ -1,20 +1,39 @@
-## 2026-11-14 — Restricted Python Execution Model and Semantic Architecture
+# Contextor — Changelog
 
-### Added
+Development history (newest first). Entries retain their original technical claims, validation results and stated limitations.
+
+---
+
+## November 2026
+
+### 2026-11-21 — Enhanced Function Definition and Decorator Semantics
+
+- Implemented definition-time evaluation of restricted default-argument expressions, preserving execution order and import side effects.
+- Extended support to positional and keyword-only defaults, including repeated function calls and name rebinding.
+- Added decorator snapshots to preserve callable identity before default-expression evaluation.
+- Implemented correct application order for single and stacked decorators, including cross-module function decorators.
+- Preserved deferred function-body execution and delayed name binding until decorator application completes.
+- Improved detection of early-binding hazards during imports triggered by default expressions and decorators.
+- Maintained conservative `UNKNOWN` outcomes for unsupported operations, ambiguous bindings, and package namespace collisions.
+- Expanded regression coverage and CPython compatibility checks to validate execution ordering, decorator behavior, and semantic safety boundaries.
+
+### 2026-11-14 — Restricted Python Execution Model and Semantic Architecture
+
+#### Added
 - Extended the restricted Python execution model with function frames, per-call local environments, positional argument binding, explicit and implicit return-value propagation, and function-object identity tracking.
 - Added semantic support for named and stacked function and class decorators, including imported decorators from indexed modules.
 - Implemented decorator object snapshots, bottom-to-top application, intermediate return-value propagation, and deferred final symbol binding.
 - Extended passive class modeling with class identity preservation, inheritance, MRO validation, and restricted decorator execution.
 - Added CPython 3.15.2 comparison tests and negative regression cases for unsupported or uncertain execution paths.
 
-### Changed
+#### Changed
 - Modularized the package execution engine by extracting compiled steps, expression and definition checks, execution state, import resolution, lifecycle operations, restricted calls, and class facts into dedicated modules.
 - Preserved `package_model.py` as the central compiler and execution orchestrator.
 - Improved cross-module execution semantics by evaluating supported decorators in their defining modules while preserving result ownership in the applying module.
 - Updated historical regression contracts to reflect newly supported semantic behavior without weakening `UNKNOWN` boundaries.
 - Corrected outdated SCC02 source assertions to recognize the intentionally method-scoped repository-generator import in the GUI.
 
-### Validation
+#### Validation
 - Completed the final decorator regression suite with **348 passing tests**.
 - Verified the corrected SCC02 source contracts and existing lazy-import regression: **3 passing tests**.
 - Confirmed successful post-change Contextor MCP audits, verified target-file synchronization, and zero syntax errors.
@@ -23,25 +42,25 @@
 
 **Note:** Semantic cycle diagnostics remain stale in the current LIVE state. Final runtime cycle classification is a separate validation step.
 
-## 2026-11-10 Patch - Improved Cycle Semantics Diagnostics and External Import Safety
+### 2026-11-10 — Improved Cycle Semantics Diagnostics and External Import Safety
 
-Enhanced diagnostic precision: Added UNMODELED_STATEMENT events identifying the exact AST statement type and source location where conditional import-order analysis stops. Previously modeled events remain preserved, and unsupported constructs continue to produce UNKNOWN.
+- Enhanced diagnostic precision: Added UNMODELED_STATEMENT events identifying the exact AST statement type and source location where conditional import-order analysis stops. Previously modeled events remain preserved, and unsupported constructs continue to produce UNKNOWN.
 
-Strengthened external import safety validation: Added regression coverage demonstrating that external imports can modify Python built-ins and cause runtime failures despite a conditional MODEL_PASS.
+- Strengthened external import safety validation: Added regression coverage demonstrating that external imports can modify Python built-ins and cause runtime failures despite a conditional MODEL_PASS.
 
-Preserved strict evidence boundaries: Confirmed that hypothetical external-import and frozen-dataclass assumptions cannot be promoted to unconditional MODEL_PASS or used to suppress cycle warnings.
+- Preserved strict evidence boundaries: Confirmed that hypothetical external-import and frozen-dataclass assumptions cannot be promoted to unconditional MODEL_PASS or used to suppress cycle warnings.
 
-Validated conditional namespace analysis: Verified existing namespace-package and frozen-dataclass modeling against real Contextor source files without executing production imports.
+- Validated conditional namespace analysis: Verified existing namespace-package and frozen-dataclass modeling against real Contextor source files without executing production imports.
 
-Removed hardcoded Python version dependencies: Updated regression tests to derive the target Python version from the interpreter running in Contextor's active backend virtual environment.
+- Removed hardcoded Python version dependencies: Updated regression tests to derive the target Python version from the interpreter running in Contextor's active backend virtual environment.
 
-Expanded regression coverage: Added positive and negative tests for diagnostic provenance, execution-order preservation, external side effects, and conditional-model authority.
+- Expanded regression coverage: Added positive and negative tests for diagnostic provenance, execution-order preservation, external side effects, and conditional-model authority.
 
-Maintained structural integrity: Preserved the canonical dependency graph, all 16 existing structural cycle paths, and conservative warning behavior.
+- Maintained structural integrity: Preserved the canonical dependency graph, all 16 existing structural cycle paths, and conservative warning behavior.
 
-Validation: Targeted test suites passed, MCP post-change audits confirmed source synchronization, and no regressions were observed in the verified paths.
+- Validation: Targeted test suites passed, MCP post-change audits confirmed source synchronization, and no regressions were observed in the verified paths.
 
-### Improved Class Body Execution and Import Cycle Regression Coverage
+#### Improved Class Body Execution and Import Cycle Regression Coverage
 
 **Added**
 - Expanded regression coverage for Python class body execution order, class name binding, and circular import hazards.
@@ -60,73 +79,73 @@ Validation: Targeted test suites passed, MCP post-change audits confirmed source
 
 **Scope:** Test-only changes. No production code modifications or changes to cycle classification behavior.
 
-## 2026-11--09 Patch - Semantic Cycle Diagnostics & External Import Safety
+### 2026-11-09 — Semantic Cycle Diagnostics & External Import Safety
 
-Added — Semantic Cycle Diagnostics Layer
+#### Added — Semantic Cycle Diagnostics Layer
 
-Introduced a semantic analysis layer for Python circular imports, extending structural dependency detection with import-order evaluation, initialization-state tracking, and early-binding hazard identification.
+- Introduced a semantic analysis layer for Python circular imports, extending structural dependency detection with import-order evaluation, initialization-state tracking, and early-binding hazard identification.
 
-Added strongly connected component (SCC) analysis and deterministic cycle classification, distinguishing structural cycles from semantically evaluated execution scenarios.
+- Added strongly connected component (SCC) analysis and deterministic cycle classification, distinguishing structural cycles from semantically evaluated execution scenarios.
 
-Implemented restricted Python execution models to analyze module initialization, import ordering, symbol availability, and partially initialized modules without executing analyzed application code.
+- Implemented restricted Python execution models to analyze module initialization, import ordering, symbol availability, and partially initialized modules without executing analyzed application code.
 
-Added support for regular packages, selected namespace-package (PEP 420) scenarios, relative imports, package re-exports, deferred execution contexts, and other Python import mechanisms within explicitly defined modeling boundaries.
+- Added support for regular packages, selected namespace-package (PEP 420) scenarios, relative imports, package re-exports, deferred execution contexts, and other Python import mechanisms within explicitly defined modeling boundaries.
 
-Introduced source-bound evidence verification, AST consistency checks, reproducible model assessments, and generation-aware publication contracts.
+- Introduced source-bound evidence verification, AST consistency checks, reproducible model assessments, and generation-aware publication contracts.
 
-Integrated semantic cycle evidence with canonical LIVE state, MCP diagnostics, Desktop presentation, and authenticated warning projections.
+- Integrated semantic cycle evidence with canonical LIVE state, MCP diagnostics, Desktop presentation, and authenticated warning projections.
 
-Established evidence-based warning eligibility: structurally detected cycles remain available in the dependency graph, while suppression requires verified semantic evidence rather than assumptions.
+- Established evidence-based warning eligibility: structurally detected cycles remain available in the dependency graph, while suppression requires verified semantic evidence rather than assumptions.
 
-Added regression coverage for distinct import and cycle mechanisms, including positive, negative, and ambiguous cases.
+- Added regression coverage for distinct import and cycle mechanisms, including positive, negative, and ambiguous cases.
 
-Added — Potential Cycle Detection
+#### Added — Potential Cycle Detection
 
-Introduced SOFT_DEPENDENT_POTENTIAL_CYCLE diagnostics for strongly connected components formed by the union of hard and soft import dependencies.
+- Introduced SOFT_DEPENDENT_POTENTIAL_CYCLE diagnostics for strongly connected components formed by the union of hard and soft import dependencies.
 
-Added deterministic reporting of potential cycle members and uncertain internal edges.
+- Added deterministic reporting of potential cycle members and uncertain internal edges.
 
-Kept potential cycles separate from confirmed structural cycles and semantically validated model results.
+- Kept potential cycles separate from confirmed structural cycles and semantically validated model results.
 
-Exposed potential-cycle diagnostics through canonical LIVE and Desktop, including revision-bound verification and explicit evidence scopes.
+- Exposed potential-cycle diagnostics through canonical LIVE and Desktop, including revision-bound verification and explicit evidence scopes.
 
-Prevented positive potential-cycle diagnostics from being hidden behind successful structural validation or misleading repository-health messages.
+- Prevented positive potential-cycle diagnostics from being hidden behind successful structural validation or misleading repository-health messages.
 
-Fixed — External Import Side Effects (R1–R2, F1–F1M)
+#### Fixed — External Import Side Effects (R1–R2, F1–F1M)
 
-Removed unjustified assumptions that external imports are passive or that successful import execution can be inferred from source syntax alone.
+- Removed unjustified assumptions that external imports are passive or that successful import execution can be inferred from source syntax alone.
 
-Ensured unresolved external imports reached during ordinary model execution produce UNKNOWN rather than unsupported MODEL_PASS results.
+- Ensured unresolved external imports reached during ordinary model execution produce UNKNOWN rather than unsupported MODEL_PASS results.
 
-Corrected typing.TYPE_CHECKING and from typing import TYPE_CHECKING handling: syntactic recognition no longer establishes the imported value as False.
+- Corrected typing.TYPE_CHECKING and from typing import TYPE_CHECKING handling: syntactic recognition no longer establishes the imported value as False.
 
-Preserved import provenance and execution ordering while stopping at unsupported conditional evaluations.
+- Preserved import provenance and execution ordering while stopping at unsupported conditional evaluations.
 
-Restricted external-import assumptions to explicitly conditional assessments, keeping CONDITIONAL_MODEL_PASS separate from authoritative MODEL_PASS.
+- Restricted external-import assumptions to explicitly conditional assessments, keeping CONDITIONAL_MODEL_PASS separate from authoritative MODEL_PASS.
 
-Verified that conditional assessments cannot qualify for ordinary cycle acceptance, generation receipts, or warning suppression through the audited publication paths.
+- Verified that conditional assessments cannot qualify for ordinary cycle acceptance, generation receipts, or warning suppression through the audited publication paths.
 
-Added independent CPython regression witnesses demonstrating external import side effects, including mutation of builtins.property, manipulation of sys.modules, and exceptions during module initialization.
+- Added independent CPython regression witnesses demonstrating external import side effects, including mutation of builtins.property, manipulation of sys.modules, and exceptions during module initialization.
 
-Corrected Desktop success and recovery messages to distinguish verified static diagnostics from actual Python runtime safety.
+- Corrected Desktop success and recovery messages to distinguish verified static diagnostics from actual Python runtime safety.
 
-Added an opt-in runtime attestation mechanism for verifying that the Desktop process has loaded the corrected cycle-model implementation.
+- Added an opt-in runtime attestation mechanism for verifying that the Desktop process has loaded the corrected cycle-model implementation.
 
-Successfully verified F1H adoption in the running Desktop interpreter using matching loaded/source code fingerprints and both TYPE_CHECKING regression scenarios.
+- Successfully verified F1H adoption in the running Desktop interpreter using matching loaded/source code fingerprints and both TYPE_CHECKING regression scenarios.
 
-Validation and Safety Boundaries
+#### Validation and Safety Boundaries
 
-Preserved the canonical hard/soft dependency graph and structural cycle inventory throughout the external-import corrections.
+- Preserved the canonical hard/soft dependency graph and structural cycle inventory throughout the external-import corrections.
 
-Verified that potential cycles are reported independently without being promoted to confirmed execution hazards or successful semantic assessments.
+- Verified that potential cycles are reported independently without being promoted to confirmed execution hazards or successful semantic assessments.
 
-Maintained fail-closed behavior where source evidence, import effects, execution conditions, or canonical authority cannot be established.
+- Maintained fail-closed behavior where source evidence, import effects, execution conditions, or canonical authority cannot be established.
 
-Kept actual CPython execution safety outside the claims of the restricted static model.
+- Kept actual CPython execution safety outside the claims of the restricted static model.
 
-Current status: The external-import side-effects correction is completed and runtime adoption verified. The semantic cycle diagnostics infrastructure is operational, while full semantic classification and evidence-based suppression remain dependent on fresh, authenticated model assessments.
+- Current status: The external-import side-effects correction is completed and runtime adoption verified. The semantic cycle diagnostics infrastructure is operational, while full semantic classification and evidence-based suppression remain dependent on fresh, authenticated model assessments.
 
-### Fixed — Name Provenance, Shadowing & Builtin Environment Authority (P2)
+#### Fixed — Name Provenance, Shadowing & Builtin Environment Authority (P2)
 
 - Audited name binding, alias propagation, import ordering, and shadowing behavior across the restricted Python cycle models.
 - Verified existing safeguards for `ValueError`, `property`, `field`, `dataclass`, `ast`, builtin annotation names, and supported class-local bindings.
@@ -142,12 +161,15 @@ Current status: The external-import side-effects correction is completed and run
 
 **Status:** Completed and runtime adoption verified. The model remains explicitly limited to supported static semantics and does not certify arbitrary Python runtime environments or object identities.
 
+---
 
-## 2026-10-26 Patch — Canonical Analysis Parity, Cycle Semantics and LIVE Publication Integration
+## October 2026
+
+### 2026-10-26 — Canonical Analysis Parity, Cycle Semantics and LIVE Publication Integration
 
 Consolidated the October 10–26 development work covering canonical FULL/LIVE consistency, incremental analysis correctness, Python cycle-semantics evidence, source-bound publication, MCP diagnostics and bounded profiling.
 
-### Canonical FULL, LIVE and incremental analysis consistency
+#### Canonical FULL, LIVE and incremental analysis consistency
 
 - Strengthened canonical parity between fresh FULL analysis and incremental LIVE updates, including dependency graphs, artifact consumption, module usage, persistent identities, collision facts, lineage, cached analytics and architectural layer reports.
 
@@ -177,7 +199,7 @@ Consolidated the October 10–26 development work covering canonical FULL/LIVE c
 
 - Separated the full-analysis lease implementation from its coordination interface while preserving cross-process single-writer admission, cancellation and ownership semantics.
 
-### Python cycle-semantics foundation
+#### Python cycle-semantics foundation
 
 - Introduced a dedicated `contextor.core.cycle_semantics` analysis package, separating structural cycle detection from source-attributed import diagnostics, initialization-order modeling and canonical publication authority.
 
@@ -203,7 +225,7 @@ Consolidated the October 10–26 development work covering canonical FULL/LIVE c
 
 - Introduced the model classifications `MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS`, `MODEL_INTERNAL_EARLY_BINDING_HAZARD` and `INDETERMINATE`, with explicit entry-coverage and evidence requirements. A model PASS is not a certificate of Python runtime import safety.
 
-### Original worker source evidence and manifest preparation — P1D2A–G
+#### Original worker source evidence and manifest preparation — P1D2A–G
 
 - Added opt-in capture of original indexer-worker source bytes, preserving historical indexing behavior when source capture is not requested.
 
@@ -223,7 +245,7 @@ Consolidated the October 10–26 development work covering canonical FULL/LIVE c
 
 - Kept prepared manifests ephemeral and unpublished by default, using `PREPARED_ONLY_NOT_CANONICALLY_PUBLISHED` authority until an explicit canonical publication operation succeeds.
 
-### Canonical manifest co-publication and LIVE verification — P1D2H–L
+#### Canonical manifest co-publication and LIVE verification — P1D2H–L
 
 - Extended `save_engine_state` with an optional prepared-manifest handoff to the existing canonical snapshot store, without changing historical calls that omit the argument.
 
@@ -251,7 +273,7 @@ Consolidated the October 10–26 development work covering canonical FULL/LIVE c
 
 - Preserved ordinary FULL canonical snapshot publication independently of cycle receipt publication. Without the explicit cycle opt-in, the canonical generation remains receipt-free.
 
-### MCP diagnostics, analysis status and bounded profiling
+#### MCP diagnostics, analysis status and bounded profiling
 
 - Extended cycle-diagnostic retrieval with read-only, bounded projections over existing canonical and historical evidence, including explicit freshness, source-coverage and publication-binding limitations.
 
@@ -269,7 +291,7 @@ Consolidated the October 10–26 development work covering canonical FULL/LIVE c
 
 - Updated MCP documentation and architectural guidance to describe the expanded cycle evidence, analysis-status behavior and profiling contracts.
 
-### Verification, acceptance and remaining limitations
+#### Verification, acceptance and remaining limitations
 
 - Expanded isolated regression coverage for canonical FULL/incremental parity, file-domain reconciliation, failed-commit rollback, package resolution, collision consistency, source evidence, cycle semantics, canonical publication and LIVE IPC.
 
@@ -289,7 +311,7 @@ Consolidated the October 10–26 development work covering canonical FULL/LIVE c
 
 - P1D2 is accepted as an isolated opt-in integration milestone, not as general semantic safety certification. No active-repository FULL analysis or active LIVE service restart was performed as part of the final acceptance stage.
 
-## 2026-10-09 Patch - L37/L38 and A3C recovery hardening
+### 2026-10-09 — L37/L38 and A3C Recovery Hardening
 
 Completed the L37/L38 durable-verified canonical publication and persistence-first publication/recovery work. A3C now finalizes recovery certificates on the owner thread, bounds certificate expiry and fences mutations until recovery admission is certified. The watcher performs trusted rebaseline and defers updates during recovery; GUI recovery incidents retain generation-aware handling.
 
@@ -297,7 +319,7 @@ Corrected the T7 recovery reprompt and T9 Tk timer lifecycle. Native Windows wat
 
 Parallel second-Desktop startup remains unverified because MCP backend ownership and TCP port 8765 are shared.
 
-## 2026-10-07 Patch - Desktop MCP backend restart control
+### 2026-10-07 — Desktop MCP Backend Restart Control
 
 Added a `Restart Backend` control to the Contextor Desktop header next to `MCP Logs`, allowing the persistent MCP backend to be restarted directly from the GUI without restarting Desktop or using the command line.
 
@@ -307,7 +329,7 @@ The existing backend ownership, lease, transport, authentication, autostart, and
 
 Runtime certification confirmed a real backend replacement from PID 14668 to PID 12240 with a new backend instance identity while preserving the same `http://127.0.0.1:8765/mcp` endpoint and leaving the active LIVE watcher attached. Targeted GUI, backend-control, and progress-widget regressions passed: 15 tests passed.
 
-##  2026-10-05 Patch - multi-repository LIVE runtime support
+### 2026-10-05 — Multi-Repository LIVE Runtime Support
 
 Added runtime phase telemetry for split-lineage snapshot loading and used it to isolate cold-start cost to lineage chunk loading and deep persisted-lineage revalidation.
 
@@ -315,9 +337,11 @@ Introduced a non-authoritative schema-2 per-chunk lineage validation cache keyed
 
 Runtime-certified the warm lineage fast path on Spiral Prophet: normalize_lineage_facts_state dropped from 6.594 s to effectively 0 ms, stable warm load_snapshot fell from 11.313 s cold to ~4.1 s, and all 1,065 lineage chunks retained trust across canonical revision churn, reducing pre-endpoint startup time by about 63%.
 
+---
 
+## September 2026
 
-##  2026-09-25 Patch — Persistent State, Analysis Performance and Shared MCP Runtime
+### 2026-09-25 — Persistent State, Analysis Performance and Shared MCP Runtime
 
 - Reworked canonical LIVE persistence into schema 1.3 with a compact core snapshot, immutable per-source lineage chunks and a revision manifest. Unchanged lineage chunks are now reused across revisions while metadata remains the sole atomic authority pointer, preserving crash safety and backward loading of older snapshot formats.
 
@@ -360,7 +384,7 @@ survives sudden power loss or an operating system crash.
 
 - Expanded targeted regression coverage for persistence, copy-on-write state cloning, reusable indexing workers, backend lifecycle/authentication and narrow canonical diagnostic queries while continuing to avoid unnecessary full-suite execution during individual refactor stages.
 
-17.09.2026 patch
+### 2026-09-17 — Runtime Provenance, Indexing and Desktop Lifecycle
 
 - Corrected canonical LIVE provenance so query tools now report `provenance=live` when data is served from the active CanonicalLiveServer rather than incorrectly labelling fresh LIVE state as snapshot-backed; runtime certification confirmed fresh canonical/family state and complete anchors.
 
@@ -388,46 +412,47 @@ survives sudden power loss or an operating system crash.
 
 - Isolated the large Python-process accumulation from the Desktop lifecycle. Repeated `contextor.mcp_server` trees were observed under the Codex app-server and disappeared completely when Codex was closed; the exact trigger for repeated Codex-hosted MCP tree creation remains a separate follow-up.
 
-2026-09-14 Patch
-Added canonical universal lineage as a first-class repository-analysis family, covering symbol ownership, semantic anchors, call/data-flow relationships, exposed surfaces and callable interface descriptors without relying on query-time source rescans.
-Added deterministic full-analysis lineage materialization from extracted source facts and finalized persistent module/artifact identities, with explicit fresh, deferred and resource-limited family states.
-Added canonical lineage semantic-version tracking, source manifests and source-fingerprint validation so lineage freshness and compatibility are independently auditable.
-Added persistent lineage owner/source query indexes to canonical repository state, including completeness validation for semantic anchor bindings and fail-closed handling of incomplete materialization.
-Extended incremental analysis so universal lineage participates in canonical state refresh rather than existing as a one-off reporting artifact, preserving the long-term LIVE model for repository-wide architectural signals.
-Added callable-interface extraction and materialization needed to represent Python call semantics beyond simple direct AST name matching, while preserving stable persistent symbol identities.
-Added canonical intra-module symbol-call context support and completed the get_symbol_call_context tool path on top of materialized repository facts rather than ad-hoc query-time analysis.
-Added the public get_symbol_lineage MCP query path, including canonical backend, query service, response planning, indexed/preview representation handling and progressive disclosure for large lineage payloads.
-Completed public registration, documentation and runtime dogfood for get_symbol_lineage; exact-symbol lookup, indexed large-output handling and canonical LIVE-backed retrieval were verified end to end.
-Kept lineage and other MCP query tools read-only with respect to canonical state: query execution does not materialize missing analysis families or mutate repository state.
-Added broader phase-level runtime tracing for full analysis and incremental LIVE updates, making indexing, canonical materialization, persistence, publication, cloning and updater execution independently measurable.
-Identified full-analysis performance regressions after universal-lineage integration and isolated their major contributors instead of treating total wall time as a single opaque metric.
-Identified large canonical-state serialization and cloning costs, including the lineage-heavy state footprint, while keeping optimization of those paths separate from correctness fixes.
-Identified a canonical-writer starvation case where a long-running LIVE mutation could hold the repository execution lease while a queued full analysis waited behind later mutation work.
-Added canonical-writer admission ordering across processes using a short-lived per-repository admission turnstile in front of the existing execution lease.
-Preserved the existing single-writer execution lock and mutation queue while enforcing priority ordering such that an already-running mutation completes, a waiting full analysis runs next, and subsequently queued LIVE mutations resume afterward.
-Added explicit canonical writer kinds for full_analysis, live_mutation and Desktop startup_publish, with shared timeout/cancellation semantics and no parallel scheduler or duplicate ownership model.
-Hardened canonical-writer admission cleanup so process-local locks are released even when native lock teardown fails, without weakening OS-lock authority.
-Added durable runtime-trace coverage for canonical-writer admission acquisition/release and full-analysis lease/body/end events, including writer owner and writer kind.
-Added spawned-process regressions proving cross-process A -> FULL -> B ordering, timeout recovery, cancellation while waiting and post-failure lock reuse.
-Diagnosed the long Desktop cold start as synchronous LIVE bootstrap work executing on the Tk main thread rather than as a slow Tk/UI construction problem.
-Moved heavy Desktop LIVE startup off the Tk thread while preserving the existing LIVE attach, generation/revision validation, startup reconciliation, watcher, event-feed and retry semantics.
-Moved startup cache pruning and stale-exclusion filesystem checks out of the pre-paint path, allowing the main window to render before background maintenance begins.
-Added non-blocking public LIVE startup with per-repository in-flight deduplication, while retaining the former deterministic startup implementation as an internal blocking path for background execution and focused testing.
-Added close-time guards so daemon startup work cannot attach new LIVE components after Desktop shutdown begins, without making window close wait for long-running startup threads.
-Hardened repository-identity UI updates so background LIVE initialization marshals Tk variable changes back onto the GUI thread.
-Added dedicated regressions proving that public LIVE startup returns before a blocked connection completes, duplicate starts collapse to one worker, shutdown prevents new background startup and post-paint cache cleanup does not block the caller.
-Preserved watcher startup reconciliation and Desktop integration semantics while adapting deterministic tests to exercise the internal blocking startup path directly.
-Closed the race introduced by immediate GUI availability where background startup could otherwise publish an older cached canonical state while a user-triggered full analysis was already running.
-Wrapped only the Desktop startup cache-publish operation in the existing canonical-writer coordinator using non-blocking startup_publish admission.
-When another canonical writer is active, Desktop startup now skips stale cache publication immediately but still starts the watcher and LIVE event feed, allowing the authoritative analysis or mutation to complete normally.
-Added integration regressions proving that a busy canonical writer suppresses startup cache publication without delaying watcher startup, while a free writer still permits the existing cached-state publication path.
-Runtime-certified canonical-writer ordering and asynchronous Desktop startup together: Desktop now becomes usable immediately while LIVE initialization continues in the background, and a repository analysis started immediately after restart no longer collides with LIVE bootstrap.
-Reduced observed Desktop first-paint latency from the previous tens-of-seconds main-thread stall to effectively immediate rendering while leaving heavy LIVE readiness work asynchronous.
-Revalidated durable authority-event replay after the startup changes: the final sidecar reached its durable high-water mark with an equal LIVE handoff cursor, no pending replay range and no delivery conflicts.
-Verified a clean runtime trace after log cleanup and restart; the previously observed malformed JSONL record did not reproduce and was not converted into a permissive recovery workaround without evidence of a program-generated corruption bug.
-Completed runtime certification of the combined W1/W1a canonical-writer changes and G1/G1C/G1D Desktop startup changes with full analysis, LIVE authorization and background startup active concurrently.
+### 2026-09-14 — Universal Lineage, Writer Coordination and Desktop Startup
 
-## [Canonical Runtime Authority and LIVE lifecycle hardening] - 2026-09-09
+- Added canonical universal lineage as a first-class repository-analysis family, covering symbol ownership, semantic anchors, call/data-flow relationships, exposed surfaces and callable interface descriptors without relying on query-time source rescans.
+- Added deterministic full-analysis lineage materialization from extracted source facts and finalized persistent module/artifact identities, with explicit fresh, deferred and resource-limited family states.
+- Added canonical lineage semantic-version tracking, source manifests and source-fingerprint validation so lineage freshness and compatibility are independently auditable.
+- Added persistent lineage owner/source query indexes to canonical repository state, including completeness validation for semantic anchor bindings and fail-closed handling of incomplete materialization.
+- Extended incremental analysis so universal lineage participates in canonical state refresh rather than existing as a one-off reporting artifact, preserving the long-term LIVE model for repository-wide architectural signals.
+- Added callable-interface extraction and materialization needed to represent Python call semantics beyond simple direct AST name matching, while preserving stable persistent symbol identities.
+- Added canonical intra-module symbol-call context support and completed the get_symbol_call_context tool path on top of materialized repository facts rather than ad-hoc query-time analysis.
+- Added the public get_symbol_lineage MCP query path, including canonical backend, query service, response planning, indexed/preview representation handling and progressive disclosure for large lineage payloads.
+- Completed public registration, documentation and runtime dogfood for get_symbol_lineage; exact-symbol lookup, indexed large-output handling and canonical LIVE-backed retrieval were verified end to end.
+- Kept lineage and other MCP query tools read-only with respect to canonical state: query execution does not materialize missing analysis families or mutate repository state.
+- Added broader phase-level runtime tracing for full analysis and incremental LIVE updates, making indexing, canonical materialization, persistence, publication, cloning and updater execution independently measurable.
+- Identified full-analysis performance regressions after universal-lineage integration and isolated their major contributors instead of treating total wall time as a single opaque metric.
+- Identified large canonical-state serialization and cloning costs, including the lineage-heavy state footprint, while keeping optimization of those paths separate from correctness fixes.
+- Identified a canonical-writer starvation case where a long-running LIVE mutation could hold the repository execution lease while a queued full analysis waited behind later mutation work.
+- Added canonical-writer admission ordering across processes using a short-lived per-repository admission turnstile in front of the existing execution lease.
+- Preserved the existing single-writer execution lock and mutation queue while enforcing priority ordering such that an already-running mutation completes, a waiting full analysis runs next, and subsequently queued LIVE mutations resume afterward.
+- Added explicit canonical writer kinds for full_analysis, live_mutation and Desktop startup_publish, with shared timeout/cancellation semantics and no parallel scheduler or duplicate ownership model.
+- Hardened canonical-writer admission cleanup so process-local locks are released even when native lock teardown fails, without weakening OS-lock authority.
+- Added durable runtime-trace coverage for canonical-writer admission acquisition/release and full-analysis lease/body/end events, including writer owner and writer kind.
+- Added spawned-process regressions proving cross-process A -> FULL -> B ordering, timeout recovery, cancellation while waiting and post-failure lock reuse.
+- Diagnosed the long Desktop cold start as synchronous LIVE bootstrap work executing on the Tk main thread rather than as a slow Tk/UI construction problem.
+- Moved heavy Desktop LIVE startup off the Tk thread while preserving the existing LIVE attach, generation/revision validation, startup reconciliation, watcher, event-feed and retry semantics.
+- Moved startup cache pruning and stale-exclusion filesystem checks out of the pre-paint path, allowing the main window to render before background maintenance begins.
+- Added non-blocking public LIVE startup with per-repository in-flight deduplication, while retaining the former deterministic startup implementation as an internal blocking path for background execution and focused testing.
+- Added close-time guards so daemon startup work cannot attach new LIVE components after Desktop shutdown begins, without making window close wait for long-running startup threads.
+- Hardened repository-identity UI updates so background LIVE initialization marshals Tk variable changes back onto the GUI thread.
+- Added dedicated regressions proving that public LIVE startup returns before a blocked connection completes, duplicate starts collapse to one worker, shutdown prevents new background startup and post-paint cache cleanup does not block the caller.
+- Preserved watcher startup reconciliation and Desktop integration semantics while adapting deterministic tests to exercise the internal blocking startup path directly.
+- Closed the race introduced by immediate GUI availability where background startup could otherwise publish an older cached canonical state while a user-triggered full analysis was already running.
+- Wrapped only the Desktop startup cache-publish operation in the existing canonical-writer coordinator using non-blocking startup_publish admission.
+- When another canonical writer is active, Desktop startup now skips stale cache publication immediately but still starts the watcher and LIVE event feed, allowing the authoritative analysis or mutation to complete normally.
+- Added integration regressions proving that a busy canonical writer suppresses startup cache publication without delaying watcher startup, while a free writer still permits the existing cached-state publication path.
+- Runtime-certified canonical-writer ordering and asynchronous Desktop startup together: Desktop now becomes usable immediately while LIVE initialization continues in the background, and a repository analysis started immediately after restart no longer collides with LIVE bootstrap.
+- Reduced observed Desktop first-paint latency from the previous tens-of-seconds main-thread stall to effectively immediate rendering while leaving heavy LIVE readiness work asynchronous.
+- Revalidated durable authority-event replay after the startup changes: the final sidecar reached its durable high-water mark with an equal LIVE handoff cursor, no pending replay range and no delivery conflicts.
+- Verified a clean runtime trace after log cleanup and restart; the previously observed malformed JSONL record did not reproduce and was not converted into a permissive recovery workaround without evidence of a program-generated corruption bug.
+- Completed runtime certification of the combined W1/W1a canonical-writer changes and G1/G1C/G1D Desktop startup changes with full analysis, LIVE authorization and background startup active concurrently.
+
+### 2026-09-09 — Canonical Runtime Authority and LIVE Lifecycle Hardening
 
 - Added a canonical runtime-domain model that mechanically separates production and test resources, including repository cache, LIVE locks, IPC endpoints and runtime logs, with fail-closed overlap validation.
 - Added durable runtime authority leasing with generation fencing, stale-owner recovery, exact process identity, cross-process locking and protection against PID reuse or ambiguous takeover.
@@ -443,7 +468,7 @@ Completed runtime certification of the combined W1/W1a canonical-writer changes 
 - Removed brittle wall-clock assumptions from dead-child startup verification while preserving deterministic checks that premature child exit is detected through the correct runtime branch rather than normal startup timeout.
 - Completed runtime-authority and Desktop lifecycle certification with the full automated suite passing: 1852 tests, zero failures, zero skips and no project-generated warnings; only the external FastMCP/Authlib deprecation warning remains.
 
-## [Lossless module-level blast radius] - 2026-09-07
+### 2026-09-07 — Lossless Module-Level Blast Radius
 
 - Added `get_module_blast_radius`, providing the complete canonical blast radius of a module in one MCP call without per-artifact N+1 queries.
 - Added lossless indexed representation with persistent module/artifact identities, deterministic shared consumer/reachability sets and automatic representation selection.
@@ -454,7 +479,7 @@ Completed runtime certification of the combined W1/W1a canonical-writer changes 
 - Added separate readable-output and complete-context safety policies so normal complete module context is not rejected merely for exceeding the generic 15 KiB warning threshold.
 - Real MCP certification on `contextor.core.reporting_engine.graph_analytics` confirmed complete lossless output, zero truncation and no required per-artifact follow-up calls.
 
-## [Canonical class-scope artifact correction] - 2026-09-07
+### 2026-09-07 — Canonical Class-Scope Artifact Correction
 
 - Corrected canonical symbol extraction so only true module-scope `Assign` and `AnnAssign` bindings are classified as `global` artifacts.
 - Class-body assignments, annotated fields and dataclass fields are no longer flattened into unqualified module globals.
@@ -465,7 +490,7 @@ Completed runtime certification of the combined W1/W1a canonical-writer changes 
 - Obsolete false artifact identities were retired from the active persistent registry and retained only in recovery history as designed.
 - Canonical artifact projection, `get_artifacts_for_module` and `get_module_blast_radius` were runtime-certified against the same corrected 39-artifact set.
 
-## [Semantic invalidation of cached symbol facts] - 2026-09-07
+### 2026-09-07 — Semantic Invalidation of Cached Symbol Facts
 
 - Fixed a cache-freshness defect where a successful new full-analysis job could reuse structurally valid but semantically stale `SymbolFacts` after analyzer behavior changed.
 - Raised `SYMBOL_FACTS_SCHEMA_VERSION` from 1 to 2 and defined it explicitly as a semantic contract version, not only a serialized-shape version.
@@ -474,16 +499,16 @@ Completed runtime certification of the combined W1/W1a canonical-writer changes 
 - Kept other cached fact families independent and unchanged; no repository-wide cache purge, registry reset or migration is required.
 - Real MCP full-analysis certification confirmed schema-1 facts were no longer reused, corrected schema-2 facts were published to LIVE canonical state, and the rebuilt artifact catalog matched fresh extraction.
 
-## [MCP query latency hardening and canonical registry reuse] - 2026-09-06
+### 2026-09-06 — MCP Query Latency Hardening and Canonical Registry Reuse
 
-* Removed redundant persistent-registry reads from several public MCP query paths by reusing the already-loaded registry owned by a fresh canonical LIVE engine, while preserving snapshot/recovery fallbacks, persistent identity semantics, fail-closed behavior, and public response contracts.
-* Reduced real MCP median latency for `get_artifacts_for_module` from **1324 ms to 241 ms** and for `get_artifact_blast_radius` from **5989 ms to 319 ms**, with exact response parity.
-* Reduced `get_symbol_call_context` from **1366 ms to 183 ms** while preserving canonical materialized `symbol_calls`, BFS depth/direction semantics, evidence ordering, representation negotiation, and zero query-time source/AST reconstruction.
-* Reduced `lookup_index_entries` from **1689 ms to 192 ms** and `get_file_edit_context(mode="minimal")` from **5667 ms to 502 ms** by eliminating unnecessary repository discovery and write-style registry transactions on read-only paths.
-* Optimized `extract_indexed_report_context` to reuse the LIVE registry catalog projection, retaining exact indexed-report semantics and reducing its current real MCP median from **199 ms to 181 ms**.
-* Profiled `search_source` end-to-end and established that its dominant cost is semantic source-span construction rather than disk I/O. Added resolver-local ephemeral line indexes for comments, strings, and statements, reducing real MCP median latency from **14546 ms to 13014 ms** with byte-identical output and unchanged source-read behavior.
-* Added focused regression coverage for fresh-LIVE registry reuse, fallback/recovery behavior, resolver span precedence, column-sensitive resolution, multiline spans, identity representation, and exact semantic/output parity.
-* Preserved Desktop LIVE ownership throughout the refactors: no MCP `update_file` path was used, canonical revisions remained fresh after edits, and LIVE restart was not required; MCP runtime reloads were performed only where modified server modules required them.
+- Removed redundant persistent-registry reads from several public MCP query paths by reusing the already-loaded registry owned by a fresh canonical LIVE engine, while preserving snapshot/recovery fallbacks, persistent identity semantics, fail-closed behavior, and public response contracts.
+- Reduced real MCP median latency for `get_artifacts_for_module` from **1324 ms to 241 ms** and for `get_artifact_blast_radius` from **5989 ms to 319 ms**, with exact response parity.
+- Reduced `get_symbol_call_context` from **1366 ms to 183 ms** while preserving canonical materialized `symbol_calls`, BFS depth/direction semantics, evidence ordering, representation negotiation, and zero query-time source/AST reconstruction.
+- Reduced `lookup_index_entries` from **1689 ms to 192 ms** and `get_file_edit_context(mode="minimal")` from **5667 ms to 502 ms** by eliminating unnecessary repository discovery and write-style registry transactions on read-only paths.
+- Optimized `extract_indexed_report_context` to reuse the LIVE registry catalog projection, retaining exact indexed-report semantics and reducing its current real MCP median from **199 ms to 181 ms**.
+- Profiled `search_source` end-to-end and established that its dominant cost is semantic source-span construction rather than disk I/O. Added resolver-local ephemeral line indexes for comments, strings, and statements, reducing real MCP median latency from **14546 ms to 13014 ms** with byte-identical output and unchanged source-read behavior.
+- Added focused regression coverage for fresh-LIVE registry reuse, fallback/recovery behavior, resolver span precedence, column-sensitive resolution, multiline spans, identity representation, and exact semantic/output parity.
+- Preserved Desktop LIVE ownership throughout the refactors: no MCP `update_file` path was used, canonical revisions remained fresh after edits, and LIVE restart was not required; MCP runtime reloads were performed only where modified server modules required them.
 - Optimized the remaining slow MCP query paths without weakening semantics: `get_layer_isolation` dropped from 1236 ms to 142 ms, `lookup_artifact_by_symbol` from 739 ms to 195 ms, and `get_source_range` from 333 ms to 81 ms in real MCP certification. The changes reuse fresh canonical/LIVE state or avoid redundant repository-wide path projection while preserving fallbacks, ordering, identity resolution, scope validation and output parity.
 - Completed canonical syntax diagnostics as a persistent source-scoped LIVE fact family. Full analysis now materializes explicit `checked_and_none` or `checked_with_errors` facts for canonical Python paths, including syntax-invalid files that cannot yet have a module identity; legacy or incomplete states remain explicitly `not_materialized`/`deferred` instead of fabricating zero errors.
 - Added atomic incremental/LIVE maintenance of syntax diagnostics. Desktop watcher updates now preserve fresh syntax facts across valid edits, syntax failures, recovery, file additions and deletion in the same persisted canonical revision, while structural module facts remain correctly last-known-good during parse failures.
@@ -491,55 +516,57 @@ Completed runtime certification of the combined W1/W1a canonical-writer changes 
 - Updated the `get_file_edit_context` public documentation and focused contracts for materialized success, syntax errors, unavailable/deferred states, bounding and stale-structural/current-syntax coexistence.
 - Runtime-certified the final syntax-diagnostics flow end-to-end: full analysis materialization, persistent hydration, natural Desktop LIVE `UPDATED → SYNTAX_ERROR → RECOVERED → DELETED` lifecycle, atomic revision publication, and fresh syntax diagnostics in both `get_file_edit_context` and `get_source_range`.
 
-## Patch — Canonical LIVE completeness and final single-file performance] - 2026-09-03
+### 2026-09-03 — Canonical LIVE Completeness and Single-File Performance
 
-* Completed canonical `ModuleUsageFacts` lifecycle coverage across full analysis, persistence, hydration and incremental/LIVE updates, including materialized intra-module symbol calls and reference evidence without query-time source reconstruction.
-* Closed the remaining canonical false-fresh gaps for derived analytics. Dependency Matrix and Shared Usage Clusters now participate in candidate-state copy-on-write, freshness transitions, incremental recomputation, persistence and LIVE publication with independent failure isolation.
-* Reused one shared artifact-data projection for Dependency Matrix and Shared Usage Clusters during the same incremental update, eliminating duplicate projection work without changing either analysis domain or report semantics.
-* Hardened stale and parse-failure handling so last-known-good module facts remain explicitly distinguishable from current source truth and cannot be reused as fresh canonical data.
-* Optimized single-file test-context construction by reusing authoritative current ASTs already present in canonical repository state. Test candidates with current ASTs no longer reread and reparse their source files; stale, missing or non-authoritative candidates retain the existing parse fallback.
-* Preserved exact test discovery, assertion detection, symbol coverage, ordering, deduplication and fallback semantics while eliminating 109 redundant `parse_source` calls in the representative single-file benchmark.
-* Reduced measured TestContextBuilder median runtime from approximately `2.15 s` to `1.34 s` on the representative repository, with exact output parity across all measured runs.
-* Verified natural desktop LIVE publication for the affected production and test changes with continuous revisions and no resynchronization requirement.
-* Closed the current full-repository, layer and single-file performance optimization branch after exhausting the known meaningful duplicate-work candidates without reducing analytical coverage or correctness.
-### Layer and single-file reporting performance
+- Completed canonical `ModuleUsageFacts` lifecycle coverage across full analysis, persistence, hydration and incremental/LIVE updates, including materialized intra-module symbol calls and reference evidence without query-time source reconstruction.
+- Closed the remaining canonical false-fresh gaps for derived analytics. Dependency Matrix and Shared Usage Clusters now participate in candidate-state copy-on-write, freshness transitions, incremental recomputation, persistence and LIVE publication with independent failure isolation.
+- Reused one shared artifact-data projection for Dependency Matrix and Shared Usage Clusters during the same incremental update, eliminating duplicate projection work without changing either analysis domain or report semantics.
+- Hardened stale and parse-failure handling so last-known-good module facts remain explicitly distinguishable from current source truth and cannot be reused as fresh canonical data.
+- Optimized single-file test-context construction by reusing authoritative current ASTs already present in canonical repository state. Test candidates with current ASTs no longer reread and reparse their source files; stale, missing or non-authoritative candidates retain the existing parse fallback.
+- Preserved exact test discovery, assertion detection, symbol coverage, ordering, deduplication and fallback semantics while eliminating 109 redundant `parse_source` calls in the representative single-file benchmark.
+- Reduced measured TestContextBuilder median runtime from approximately `2.15 s` to `1.34 s` on the representative repository, with exact output parity across all measured runs.
+- Verified natural desktop LIVE publication for the affected production and test changes with continuous revisions and no resynchronization requirement.
+- Closed the current full-repository, layer and single-file performance optimization branch after exhausting the known meaningful duplicate-work candidates without reducing analytical coverage or correctness.
+#### Layer and single-file reporting performance
 
-* Reworked layer analysis to consume validated authoritative canonical state directly instead of constructing and materializing a full incremental engine when layer reporting does not require update semantics.
-* Preserved the existing LIVE-first/snapshot-validated repository-state selection, repository identity checks, collision freshness rules and fail-closed fallbacks while removing unnecessary repository-wide materialization from layer reports.
-* Reduced large-layer analysis from full-engine-scale latency to a few seconds on the Contextor repository without reducing report content or architectural analysis.
-* Added a fail-closed state-only fast path for single-file analysis when the target is already tracked, byte-current and backed by healthy canonical state.
-* Healthy unchanged single-file analysis now reuses canonical modules, dependency graph, artifacts and existing report fallbacks directly, avoiding incremental-engine construction, repository-wide module-usage materialization and a redundant `update_file` call.
-* Changed, new, deleted, stale or resync-required files continue through the existing full incremental-engine path, preserving refresh planning, recovery, persistence and LIVE publication semantics.
-* Unified downstream single-file reporting around the selected canonical analysis state so deep context, artifact projection and graph analytics use the same report pipeline regardless of whether the state came from the lightweight or full-engine path.
-* Preserved source-backed reference discovery when persisted canonical state intentionally lacks materialized module-usage facts; output parity was verified against the previous fully materialized path.
-* Reduced healthy unchanged single-file analysis to roughly 0.5 seconds in warm measurements while retaining the existing report and MCP contracts.
+- Reworked layer analysis to consume validated authoritative canonical state directly instead of constructing and materializing a full incremental engine when layer reporting does not require update semantics.
+- Preserved the existing LIVE-first/snapshot-validated repository-state selection, repository identity checks, collision freshness rules and fail-closed fallbacks while removing unnecessary repository-wide materialization from layer reports.
+- Reduced large-layer analysis from full-engine-scale latency to a few seconds on the Contextor repository without reducing report content or architectural analysis.
+- Added a fail-closed state-only fast path for single-file analysis when the target is already tracked, byte-current and backed by healthy canonical state.
+- Healthy unchanged single-file analysis now reuses canonical modules, dependency graph, artifacts and existing report fallbacks directly, avoiding incremental-engine construction, repository-wide module-usage materialization and a redundant `update_file` call.
+- Changed, new, deleted, stale or resync-required files continue through the existing full incremental-engine path, preserving refresh planning, recovery, persistence and LIVE publication semantics.
+- Unified downstream single-file reporting around the selected canonical analysis state so deep context, artifact projection and graph analytics use the same report pipeline regardless of whether the state came from the lightweight or full-engine path.
+- Preserved source-backed reference discovery when persisted canonical state intentionally lacks materialized module-usage facts; output parity was verified against the previous fully materialized path.
+- Reduced healthy unchanged single-file analysis to roughly 0.5 seconds in warm measurements while retaining the existing report and MCP contracts.
 
+---
 
-## Patch — Full Repository Analysis Performance] - 2026-08-31
+## August 2026
 
-### Full repository analysis performance
+### 2026-08-31 — Full Repository Analysis Performance
 
-* Reworked the full `analyze_project` execution path to eliminate repeated repository-wide work while preserving the complete analysis, reporting, cache, LIVE, persistence and fallback contracts.
-* Fused collision analysis into the existing indexed AST/fact pipeline. Warm current-schema analyses now reuse cached collision facts instead of traversing every module AST again, while incomplete or invalid coverage still falls back to the authoritative repository-wide collision extractor.
-* Fused test-context facts into the index worker/cache path. Test imports, referenced names and assertion presence are extracted from the already-live AST and reused by `TestContextIndex`, removing the previous second parse/visitor pass over test files.
-* Reused the already-computed global shared-usage Jaccard clusters for canonical state publication. The handoff is accepted only with exact current-run provenance, domain and structural validation; invalid or incomplete handoffs retain the canonical recomputation fallback.
-* Replaced repeated `TestContextIndex.find_test_files()` full scans with run-scoped reverse indexes for filename and dotted import-prefix lookup, preserving exact previous matching, deduplication and deterministic ordering semantics.
-* Reused automatic test-directory discovery directly from the current `RepositoryIndex` result domain instead of rescanning indexed module paths during artifact reporting. Explicit caller-supplied `test_dirs`, including custom directories, remain authoritative and unchanged.
-* Preserved serial and ProcessPool parity, current cache fingerprint/source validation, schema migration behavior, exclusions, test discovery rules, canonical/LIVE freshness, report contents, MCP/API contracts and persistent identities throughout the optimization series.
-* Final warm-path attribution confirmed that current-schema indexed files perform zero source parses, zero symbol/reference/collision/test-fact extraction and zero cache rewrites. Remaining `index_repository` cost is dominated by required cache freshness validation, ProcessPool transport/coordination and construction of current-run repository representations rather than duplicated analysis work.
-* Controlled post-optimization full-repository benchmarking reached a warm median of approximately **5.9 s** on the current Contextor repository workload. No further repository-wide optimization target with at least approximately 100 ms of demonstrated safely removable duplicate work remained, so the full-analysis performance series was closed rather than adding marginal complexity.
+#### Full repository analysis performance
 
+- Reworked the full `analyze_project` execution path to eliminate repeated repository-wide work while preserving the complete analysis, reporting, cache, LIVE, persistence and fallback contracts.
+- Fused collision analysis into the existing indexed AST/fact pipeline. Warm current-schema analyses now reuse cached collision facts instead of traversing every module AST again, while incomplete or invalid coverage still falls back to the authoritative repository-wide collision extractor.
+- Fused test-context facts into the index worker/cache path. Test imports, referenced names and assertion presence are extracted from the already-live AST and reused by `TestContextIndex`, removing the previous second parse/visitor pass over test files.
+- Reused the already-computed global shared-usage Jaccard clusters for canonical state publication. The handoff is accepted only with exact current-run provenance, domain and structural validation; invalid or incomplete handoffs retain the canonical recomputation fallback.
+- Replaced repeated `TestContextIndex.find_test_files()` full scans with run-scoped reverse indexes for filename and dotted import-prefix lookup, preserving exact previous matching, deduplication and deterministic ordering semantics.
+- Reused automatic test-directory discovery directly from the current `RepositoryIndex` result domain instead of rescanning indexed module paths during artifact reporting. Explicit caller-supplied `test_dirs`, including custom directories, remain authoritative and unchanged.
+- Preserved serial and ProcessPool parity, current cache fingerprint/source validation, schema migration behavior, exclusions, test discovery rules, canonical/LIVE freshness, report contents, MCP/API contracts and persistent identities throughout the optimization series.
+- Final warm-path attribution confirmed that current-schema indexed files perform zero source parses, zero symbol/reference/collision/test-fact extraction and zero cache rewrites. Remaining `index_repository` cost is dominated by required cache freshness validation, ProcessPool transport/coordination and construction of current-run repository representations rather than duplicated analysis work.
+- Controlled post-optimization full-repository benchmarking reached a warm median of approximately **5.9 s** on the current Contextor repository workload. No further repository-wide optimization target with at least approximately 100 ms of demonstrated safely removable duplicate work remained, so the full-analysis performance series was closed rather than adding marginal complexity.
 
-## Patch — MCP Ergonomics and Round-Trip Runtime Hardening] - 2026-08-26
+### 2026-08-26 — MCP Ergonomics and Round-Trip Runtime Hardening
 
-### Public MCP ergonomics
+#### Public MCP ergonomics
 
 - Completed an end-to-end ergonomics review of the full public MCP surface. All 24 public tools, their centralized documentation entries and runtime discovery descriptions were audited for parameter consistency, bounded output behavior, identity handling and LLM-oriented usage.
 - Standardized common query ergonomics without breaking existing public contracts. Added or retained compatibility aliases where useful, preserved explicit ambiguity handling and removed unnecessary multi-call workflows where canonical state already contained enough information to answer safely.
 - Hardened shared active-identity resolution across artifact-oriented tools. Persistent module and artifact registries remain identity stores only; canonical LIVE state remains authoritative for current architectural ownership and source location.
 - Kept public FastMCP discovery descriptions centralized in `contextor/mcp/docs/index.json`. Registered tool descriptions remain index-backed, bounded in size and separate from implementation functions.
 
-### Compact evidence without information-free responses
+#### Compact evidence without information-free responses
 
 - Reworked compact responses so non-empty collections no longer collapse to counts with no supporting evidence.
 - `compact=True` remains the default, but affected collections now return up to three representative evidence items together with the full `total` and an explicit `truncated` flag.
@@ -547,7 +574,7 @@ Completed runtime certification of the combined W1/W1a canonical-writer changes 
 - Preserved existing non-compact behavior and caller-provided item/evidence limits.
 - Kept mutating `update_file` free from unsafe replay-style expansion semantics; complete evidence must be requested on the original call when required.
 
-### Single-shot large-output handling
+#### Single-shot large-output handling
 
 - Added deterministic semantic auto-bounding for MCP responses that can safely return a useful prefix instead of forcing an identical second request solely to approve a large payload.
 - Added a shared `largest_fitting_prefix` helper using serialized UTF-8 size and the existing 15 KiB (`15360` byte) warning threshold.
@@ -558,7 +585,7 @@ Completed runtime certification of the combined W1/W1a canonical-writer changes 
 - Existing representation rules remain unchanged: material indexed savings are required for automatic switching, and oversized named call-context payloads still use the established forced-indexed contract.
 - `get_source_range` intentionally remains lossless. Oversized exact ranges still require explicit large-output approval rather than semantic truncation.
 
-### Canonical projection single-call quickstart
+#### Canonical projection single-call quickstart
 
 - Removed the mandatory `describe_canonical_state` prerequisite for basic canonical projection queries.
 - When both `schema_version` and `language_version` are omitted, `query_canonical_projection` now uses the stable `1.0/1.0` contract automatically.
@@ -567,7 +594,7 @@ Completed runtime certification of the combined W1/W1a canonical-writer changes 
 - Basic requests can now directly specify `root`, `filters` and `select` for `modules`, `artifacts` or `dependencies`; empty filters match all records and an empty selection requests all selectable fields.
 - `describe_canonical_state` remains available for complete versioned schemas, field/operator discovery, v1.1 capabilities, ordering, null semantics, limits and validation repair.
 
-### Single-shot symbol implementation lookup
+#### Single-shot symbol implementation lookup
 
 - Extended `get_symbol_implementation` so a globally unique plain symbol can be resolved without first calling `search_artifacts` or supplying a file path.
 - Plain leaves without explicit file scope now use the shared active artifact resolver. A unique exact leaf resolves to its canonical artifact identity and canonical LIVE module ownership before entering the existing source/AST implementation pipeline.
@@ -578,7 +605,7 @@ Completed runtime certification of the combined W1/W1a canonical-writer changes 
 - Canonical LIVE state remains the source of identity, ownership and source location; implementation text continues to be read from the current file on disk.
 - The existing 5120-byte automatic implementation-fetch threshold is unchanged.
 
-### Concurrent analysis-status disambiguation
+#### Concurrent analysis-status disambiguation
 
 - Hardened `get_analysis_status(job_id=None)` for durable stores containing multiple queued or running jobs.
 - When more than one active durable job exists, the tool now returns `status="ambiguous_job"` instead of silently selecting one.
@@ -589,7 +616,7 @@ Completed runtime certification of the combined W1/W1a canonical-writer changes 
 - Existing stale-owner interruption, job deduplication, public job shaping and large skipped-file output bounding remain unchanged.
 - The ambiguity branch is strictly read-only and does not rewrite or normalize durable job files.
 
-### Runtime certification
+#### Runtime certification
 
 - Restarted the MCP server and independently certified the new behavior against the running FastMCP runtime rather than relying only on source-level tests.
 - Verified fresh client-visible schemas and registered descriptions for canonical projection, symbol implementation and analysis-status tools.
@@ -603,7 +630,7 @@ Completed runtime certification of the combined W1/W1a canonical-writer changes 
 - Verified concurrent analysis ambiguity on isolated durable jobs, including the five-item bound, deterministic ordering, explicit-job override and preservation of legacy latest-job semantics.
 - Confirmed the ambiguous analysis-status path is byte-for-byte read-only using SHA-256 checks of durable job files before and after the runtime call.
 
-### Verification status
+#### Verification status
 
 - Public MCP ergonomics review: 24/24 tools complete.
 - Public MCP documentation and discovery parity: complete.
@@ -614,13 +641,13 @@ Completed runtime certification of the combined W1/W1a canonical-writer changes 
 - Runtime round-trip ergonomics certification: 5/5 passing.
 - Open code, contract and runtime findings: none.
 
-### Canonical single-file reference projection
+#### Canonical single-file reference projection
 Replaced single-file repository-wide reference rescans with canonical in-memory reference projection backed by `artifact_consumption` and per-module `reference_evidence`, while preserving exact legacy reference, consumer, ambiguity, and detail semantics.
 
-### Legacy reference-evidence hydration
+#### Legacy reference-evidence hydration
 Added fail-closed one-time materialization of legacy reference evidence during normal repository hydration, allowing existing snapshots to upgrade through the authoritative usage extraction path so subsequent hydrations and single-file queries avoid repository-wide source and AST rescans.
 
-### Desktop LIVE startup hardening
+#### Desktop LIVE startup hardening
 Hardened Desktop LIVE startup against transient service initialization delays with bounded non-blocking GUI retries, duplicate-watcher prevention, and shutdown-safe retry cancellation, without changing canonical LIVE runtime behavior or MCP connection timeout semantics.
 
 Added per-tool canonical freshness envelopes across LLM-facing MCP queries, exposing canonical revision, LIVE/snapshot provenance, workspace synchronization state, family-level freshness and explicit advisory warnings without requiring a separate get_analysis_status call.
@@ -636,10 +663,9 @@ Persisted startup materialization so expensive legacy/canonical backfill is paid
 Added end-to-end regressions for daemon restart epochs, same-session cache reuse, cross-session journal reuse, full-analysis same-daemon publication, explicit generation mismatch, publication rejection/failure handling, journal-ahead revision separation and slow/dead/hung LIVE startup paths.
 Completed post-restart runtime certification with all audited MCP tools resolving from the same verified LIVE canonical publication, canonical/event revision separation intact, Desktop watcher active and no runtime freshness warnings.
 
+### 2026-08-21 — 1.2.0-beta — LIVE Hardening, MCP Modularization & Token Efficiency
 
-## [1.2.0-beta Patch — LIVE Hardening, MCP Modularization & Token Efficiency] - 2026-08-21
-
-### Canonical LIVE truth and recovery semantics
+#### Canonical LIVE truth and recovery semantics
 
 - Hardened canonical LIVE state against syntax-invalid source updates. Modules with parse failures now retain last-known-good structural facts only as explicitly stale data instead of being exposed as current truth.
 - Added persistent per-module parse freshness tracking and authoritative current-truth helpers shared by LIVE updates and MCP query paths.
@@ -650,7 +676,7 @@ Completed post-restart runtime certification with all audited MCP tools resolvin
 - Strengthened owner identity validation with repository identity, root path, PID, endpoint, owner token and authentication identity checks.
 - Preserved journal and revision continuity across transient reconnects and desktop/MCP restarts.
 
-### LIVE incremental correctness and restart reconciliation
+#### LIVE incremental correctness and restart reconciliation
 
 - Fixed incremental ADD handling when persisted file fingerprints were ahead of canonical state. An unchanged fingerprint can no longer suppress materialization of a module missing from canonical RAM.
 - `UNCHANGED` is now valid only when the current file fingerprint matches and the module already exists in authoritative canonical state.
@@ -663,7 +689,7 @@ Completed post-restart runtime certification with all audited MCP tools resolvin
 - Added pre-dispatch revalidation of startup candidates to prevent stale reconciliation queues from producing unnecessary `update_file` journal events.
 - Verified offline ADD, MODIFY and DELETE recovery, canonical cleanup/materialization and zero-change restart idempotence.
 
-### MCP discovery and documentation token reduction
+#### MCP discovery and documentation token reduction
 
 - Moved public MCP documentation out of Python tool docstrings into `contextor/mcp/docs`.
 - Added a compact documentation index with per-tool short descriptions and one JSON document per public MCP tool.
@@ -673,7 +699,7 @@ Completed post-restart runtime certification with all audited MCP tools resolvin
 - Reduced the serialized FastMCP discovery catalog from 36,961 bytes to 15,517 bytes, a 58.02% reduction, while preserving public tool schemas and behavior.
 - Removed public documentation docstrings from tool implementations to keep discovery payloads independent from full operational documentation.
 
-### MCP server modularization
+#### MCP server modularization
 
 - Split the former monolithic `contextor/mcp_server.py` into one implementation module per public MCP tool under `contextor/mcp/tools`.
 - All 21 public MCP tools now have dedicated implementation owners; `mcp_server.py` contains zero public tool implementation bodies.
@@ -690,7 +716,7 @@ Completed post-restart runtime certification with all audited MCP tools resolvin
 - Kept single-consumer helpers local to their tool owners instead of creating unnecessary shared abstractions.
 - Migrated tests and monkeypatches to actual implementation owners and removed obsolete test dependencies on private `mcp_server` symbols.
 
-### MCP analysis execution and Windows multiprocessing
+#### MCP analysis execution and Windows multiprocessing
 
 - Removed the obsolete MCP-specific `CONTEXTOR_DISABLE_PROCESS_POOL=1` override that forced full repository analysis into sequential artifact processing.
 - Restored the same internal ProcessPool execution policy used by desktop analysis while retaining an explicitly inherited sequential fallback when requested by the environment.
@@ -700,7 +726,7 @@ Completed post-restart runtime certification with all audited MCP tools resolvin
 - Eliminated the previously observed MCP-specific ~2x full-analysis slowdown caused by forced sequential artifact analysis.
 - Controlled desktop/MCP measurements now show equivalent global-pipeline execution, with only bounded MCP process/bootstrap overhead.
 
-### Canonical MCP query ownership and SSOT cleanup
+#### Canonical MCP query ownership and SSOT cleanup
 
 - Completed migration of current architecture, module-context, file-edit, artifact-search and symbol-implementation queries to canonical `RepositoryAnalysisState` ownership.
 - Preserved fail-closed parse freshness, exact canonical artifact domains, zero-consumer artifacts, ambiguity handling, freshness/provenance and bounded response semantics through the MCP split.
@@ -708,7 +734,7 @@ Completed post-restart runtime certification with all audited MCP tools resolvin
 - `get_layer_isolation` remains intentionally report-backed pending its separate canonical R4/R5 cleanup.
 - Preserved complete AST-scoped symbol implementation retrieval with signatures, source resolution, ambiguity refusal and static context after modularization.
 
-### Validation and regression coverage
+#### Validation and regression coverage
 
 - Added structural regression coverage for all MCP split stages, including tool ownership, registration parity, dependency direction, shared-helper uniqueness and absence of monolithic tool bodies.
 - Added Windows spawn regressions proving multiprocessing children do not bootstrap FastMCP or MCP registration.
@@ -717,7 +743,7 @@ Completed post-restart runtime certification with all audited MCP tools resolvin
 - Verified incremental materialization of newly created MCP modules through desktop LIVE without using Full Analysis as a repair mechanism.
 - Full-suite checkpoints during the refactor identified only expected test/fixture drift from deliberate ownership and contract changes; affected tests were migrated without restoring legacy compatibility paths.
 
-### Performance characterization
+#### Performance characterization
 
 - Controlled OLD-vs-CURRENT Full Analysis benchmarking found no performance regression from the MCP/LIVE refactors.
 - Current code processed a larger repository snapshot faster than the older comparison revision under identical execution conditions.
@@ -726,9 +752,9 @@ Completed post-restart runtime certification with all audited MCP tools resolvin
 - Large historical Full Analysis timing variance was classified as environmental/runtime variance rather than a deterministic code regression.
 - Remaining Full Analysis cost is now treated as a scalability concern for larger repositories rather than a regression introduced by the current refactor.
 
-Patch — MCP Pre-Edit Ergonomics & GUI Operation Timing] - 2026-08-19
+### 2026-08-19 — MCP Pre-Edit Ergonomics & GUI Operation Timing
 
-### Lightweight pre-edit context for coding agents
+#### Lightweight pre-edit context for coding agents
 
 - Extended `get_file_edit_context` with an opt-in `mode="minimal"` designed as a low-overhead pre-edit guard for coding agents.
 - Preserved the existing `get_file_edit_context` contract as the default behavior; existing positional and named callers remain backward-compatible.
@@ -758,7 +784,7 @@ Patch — MCP Pre-Edit Ergonomics & GUI Operation Timing] - 2026-08-19
 - Minimal mode performs no source-code reads, repository analysis, report generation, graph recomputation or LIVE mutation.
 - Removed proposed heuristic `local / guarded / deep` scope classification rather than exposing uncalibrated safety judgments to coding agents.
 
-### Canonical LIVE risk integration
+#### Canonical LIVE risk integration
 
 - Fixed `get_file_edit_context(mode="minimal")` reading per-module risk from the wrong LIVE state field.
 - `risk_score` now uses the canonical:
@@ -774,7 +800,7 @@ Patch — MCP Pre-Edit Ergonomics & GUI Operation Timing] - 2026-08-19
   - `contextor.ui.gui`,
   - `contextor.core.api.facade`.
 
-### GUI analysis duration reporting
+#### GUI analysis duration reporting
 
 - Added end-to-end operation timing for the three primary GUI analysis actions:
   - repository analysis,
@@ -789,7 +815,7 @@ Patch — MCP Pre-Edit Ergonomics & GUI Operation Timing] - 2026-08-19
 - Existing consumers of `run_with_progress` that do not provide an operation name preserve the previous success-message contract exactly.
 - Failure, cancellation, progress and ETA semantics remain unchanged.
 
-LLM-friendly MCP target resolution
+#### LLM-Friendly MCP Target Resolution
 
 - Hardened `get_module_context` for natural LLM input by adding a backward-compatible `module` alias alongside the existing `module_name` parameter.
 - Module inputs are now compared through canonical identity rather than raw text, allowing equivalent forms such as dotted module names and persistent module IDs to resolve safely to the same target.
@@ -810,7 +836,7 @@ LLM-friendly MCP target resolution
 - No implicit semantic switching was introduced: module tools and artifact tools continue to perform their own responsibilities while providing useful routing diagnostics for mismatched target types.
 - Full MCP regression coverage for these routing changes passed: `56/56`.
 
-### Canonical LIVE layer provenance
+#### Canonical LIVE layer provenance
 
 - Fixed `get_file_edit_context(mode="minimal")` returning `layer: "unknown"` despite fresh cached LIVE analytics.
 - Minimal pre-edit context now reads module layers exclusively from:
@@ -822,7 +848,7 @@ LLM-friendly MCP target resolution
   - `contextor.core.api.facade` → `contract`
   - `contextor.ui.exclude_check` → `ui`
 
-### Persistent LIVE revision restoration
+#### Persistent LIVE revision restoration
 
 - Fixed `get_file_edit_context(mode="minimal")` returning `live_revision: null` after MCP hydration from persisted LIVE state.
 - Canonical revision remains lifecycle metadata rather than becoming part of `RepositoryAnalysisState`.
@@ -840,7 +866,7 @@ LLM-friendly MCP target resolution
   - `get_file_edit_context(..., mode="minimal")` revision: `374`
   - persisted hydration correctly restored revision `373` without incrementing it.
 
-### Verification
+#### Verification
 
 - Running MCP verification confirmed correct target routing for dotted module names, module IDs, artifacts and symbols.
 - Canonical conflict detection was verified for equivalent and genuinely different target representations.
@@ -850,7 +876,7 @@ LLM-friendly MCP target resolution
   - `live_revision`,
   from their respective LIVE state sources.
 
-### MCP artifact ranking and dependency semantics
+#### MCP artifact ranking and dependency semantics
 
 - Improved module-to-artifact diagnostics in `get_artifact_blast_radius` with deterministic public-first candidate ranking.
 - Artifact candidates now prioritize:
@@ -869,7 +895,7 @@ LLM-friendly MCP target resolution
 - Updated MCP tool descriptions so agents receive these definitions directly instead of having to infer the meaning of the metrics.
 - Targeted MCP regression verification passed: `9/9`.
 
-### Pre-Edit Layer Guard
+#### Pre-Edit Layer Guard
 
 - Extended `get_file_edit_context(..., mode="minimal")` with a lightweight `layer_guard` so coding agents can see layer-rule context before editing without invoking the full `get_layer_isolation` workflow.
 - `layer_guard` is built entirely from canonical in-memory state and existing validator rules; it performs no source reads, report reads, repository analysis, graph recomputation or LIVE mutation.
@@ -890,7 +916,7 @@ LLM-friendly MCP target resolution
 - LIVE verification confirmed correct behavior for both restricted and unrestricted layers, including canonical `layer`, `risk_score`, `live_revision` and layer-rule state.
 - Targeted MCP regression verification passed: `14/14`.
 
-### Cross-Layer Artifact Blast Radius
+#### Cross-Layer Artifact Blast Radius
 
 - Extended `get_artifact_blast_radius` with an architectural projection for direct symbol consumers.
 - Added canonical classification of consumers into:
@@ -907,7 +933,7 @@ LLM-friendly MCP target resolution
 - MCP tool descriptions were updated to expose the exact semantics directly to coding agents.
 - LIVE verification confirmed correct same-layer, cross-layer and test-impact classification for real Contextor artifacts.
 
-### Symbol-Seeded Downstream Module Reachability
+#### Symbol-Seeded Downstream Module Reachability
 
 - Extended `get_artifact_blast_radius` with conservative downstream module reachability seeded by confirmed direct symbol consumers.
 - Reused the canonical `calculate_affected_set` implementation over the LIVE hard + soft dependency graph; no duplicate traversal algorithm was introduced.
@@ -930,7 +956,7 @@ LLM-friendly MCP target resolution
 - LIVE verification confirmed real downstream expansion for facade and incremental-analysis symbols, including production/test separation and zero-result behavior for locally unused symbols.
 - Targeted MCP regression verification passed: `16/16`.
 
-### Canonical LIVE Topology Metrics & Lifecycle Hardening
+#### Canonical LIVE Topology Metrics & Lifecycle Hardening
 
 - Hardened `get_module_context` so advanced graph metrics now prefer canonical LIVE `topology_analytics` whenever the LIVE engine is available.
 - `pagerank`, `betweenness`, HITS hub/authority scores, bridge score and module risk are now sourced from their dedicated canonical LIVE maps instead of saved graph-analysis snapshots.
@@ -968,7 +994,7 @@ Preserved the previous canonical artifact-consumption container without in-place
 Added lifecycle proofs for late-provider ambiguity, consumer-added-after-providers ambiguity, unchanged-source no-reread behavior and unaffected-slice preservation.
 Verified that both full reporting and RAM/LIVE dependency-matrix paths use the same authoritative exact channel mapper, preserving parity between canonical repository analysis and incremental materialization.
 
-### Regression and contract verification
+#### Regression and contract verification
 
 - Added deterministic GUI progress-widget regression coverage for named-operation durations and legacy success-message compatibility.
 - Added MCP regression coverage for:
@@ -988,7 +1014,111 @@ Verified that both full reporting and RAM/LIVE dependency-matrix paths use the s
   `4 passed`.
 - Direct verification against the running MCP server confirmed the new minimal pre-edit paths, canonical target resolution, artifact guidance and LIVE risk wiring.
 
-## [1.2.0-beta Patch — Incremental module-level blast radius in LIVE] - 2026-08-17
+### 2026-08-18 — 1.2.0-beta — LIVE Analytics & Incremental Engine Refactor
+
+#### Persistent LIVE topology and cached analytics
+
+- Added persistent canonical LIVE topology analytics, including PageRank,
+  betweenness, HITS hub/authority scores, bridge scores, hotspots,
+  module risk and inspection targets.
+- Added persistent cached architectural analytics for module layers,
+  visibility, export degree and layer violations.
+- Added explicit freshness tracking for topology and cached analytics with
+  `fresh`, `stale` and `deferred` states preserved across LIVE snapshots
+  and MCP restarts.
+- Added RAM-only reconstruction of missing legacy analytics from canonical
+  dependency, module, artifact and artifact-consumption state without
+  unnecessary source reads.
+- Added stale-state guards so non-empty stale analytics are never silently
+  reconstructed or promoted to fresh after restart.
+- Extended LIVE module-context responses with canonical topology and cached
+  analytics while preserving existing fan-in and fan-out information.
+- Refined RefreshPlanner invalidation so statically complete
+  `runtime_unresolved` updates may remain fresh.
+- Added true no-op handling for implementation-body-only changes when no
+  modeled imports, definitions or usage facts change.
+- Reduced call-retarget refresh scope to the canonical usage,
+  artifact-consumption and cached-analytics families actually affected.
+- Reduced unnecessary persistent identity-registry synchronization for
+  updates that do not add or remove symbol identities.
+
+#### Incremental artifact consumption and refresh execution
+
+- Maintained canonical incremental `ModuleUsageFacts` and reverse
+  artifact-consumption state across LIVE ADD, MODIFY and DELETE updates.
+- Preserved typed usage channels for API imports, direct calls,
+  qualified references, runtime calls, callback calls, event bindings
+  and inheritance.
+- Added RefreshPlan-driven incremental execution with explicit
+  `REPARSE`, `RECOMPUTE`, `PATCH`, `GRAPH` and commit boundaries.
+- Preserved fail-closed execution for unsupported refresh tokens and exact
+  plan-versus-execution tracing.
+- Preserved Copy-on-Write isolation so failed recomputation, analytics or
+  registry operations do not publish partially updated canonical state.
+- Preserved correct re-export resolution ordering by ensuring recomputation
+  observes candidate module state before resolving new re-export targets.
+- Kept persistent identity-registry transactions outside candidate-state
+  computation so persistent commit remains owned by the incremental engine.
+- Preserved semantic separation between refresh completeness and static
+  certainty, allowing `complete + runtime_unresolved` states without
+  incorrectly marking canonical static data stale.
+
+#### Incremental engine decomposition
+
+- Refactored the incremental analysis engine from a monolithic implementation
+  into cohesive incremental-analysis components while preserving its public
+  behavior and compatibility.
+- Extracted pure reverse blast-radius and local degree calculations into
+  `analysis/incremental/graph_ops.py`.
+- Extracted LIVE bootstrap and canonical-state materialization into
+  `analysis/incremental/materialization.py`.
+- Extracted source preparation, syntax validation, import and symbol
+  extraction, and semantic `FileDelta` / `UsageDelta` calculation into
+  `analysis/incremental/preparation.py`.
+- Reduced duplicate source handling in the preparation path and reused the
+  prepared source data across downstream incremental analysis.
+- Extracted RefreshPlan candidate-state execution into
+  `analysis/incremental/plan_executor.py`, including recomputation,
+  patch-family dispatch, graph recomputations and execution tracing.
+- Kept lock ownership, update lifecycle, registry transaction handling,
+  canonical-state publication and file-state acknowledgement in the
+  incremental engine orchestration boundary.
+- Reduced `incremental_engine.py` from approximately 802 to 374 lines before
+  final subsystem consolidation, removing more than half of the original
+  monolithic implementation.
+- Preserved existing incremental engine import contracts throughout the
+  refactor while preparing the implementation for final consolidation under
+  the dedicated `analysis.incremental` subsystem.
+
+#### Regression and contract alignment
+
+- Updated historical Stage 2 tests to the current LIVE artifact-consumption
+  freshness contract.
+- Updated module-context tests to validate required fan-in and fan-out
+  behavior without rejecting the newer topology and cached-analytics fields.
+- Updated failure-injection tests to target the extracted RefreshPlan
+  execution boundary while preserving Copy-on-Write rollback guarantees.
+- Updated registry failure fixtures so they exercise updates that genuinely
+  require persistent identity synchronization.
+- Updated reverse-blast-radius fixtures so they exercise modeled dependency
+  changes instead of implementation-body-only no-ops.
+- Verified the Stage 3 critical regression ratchet with 139 passing tests.
+- Consolidated the incremental analysis subsystem under
+  `analysis/incremental`, moving the canonical engine implementation to
+  `analysis/incremental/engine.py`.
+- Replaced the former top-level `analysis/incremental_engine.py`
+  implementation with a lightweight backward-compatible facade, preserving
+  all existing engine, result and degree-delta import paths.
+- Added package-level incremental-engine exports while preserving reference
+  identity between legacy, canonical and package-level imports.
+- Completed the incremental-engine decomposition with clear boundaries for
+  orchestration, source preparation, RefreshPlan execution, state
+  materialization and pure graph operations.
+- Reduced the historical `incremental_engine.py` from approximately 802 lines
+  to an 18-line compatibility facade, with the canonical orchestrator now
+  isolated in `analysis/incremental/engine.py`.
+
+### 2026-08-17 — 1.2.0-beta — Incremental Module-Level Blast Radius in LIVE
 
 - Added incremental module-level reverse blast radius propagation to the
   canonical LIVE engine (`IncrementalAnalysisEngine`). Updates now calculate the
@@ -1025,8 +1155,10 @@ Verified that both full reporting and RAM/LIVE dependency-matrix paths use the s
   `affected_modules` payloads.
 - Note: Local/global graph metrics, artifact-level consumption refresh, test-impact
   propagation, and artifact-level blast radius remain deferred in this stage.
-  
-  - Hardened canonical LIVE runtime ownership so GUI and MCP clients can safely share one service without stealing or falsely claiming ownership.
+
+#### LIVE Runtime Ownership and Lifecycle Hardening
+
+- Hardened canonical LIVE runtime ownership so GUI and MCP clients can safely share one service without stealing or falsely claiming ownership.
 - Added durable per-process `owner_token` identities alongside service and owner PIDs. PID values are now used only for process/liveness tracking, while ownership requires an explicit token match.
 - Added serialized per-repository LIVE startup and post-spawn process verification to prevent concurrent GUI/MCP startups from leaving competing or orphaned runtime processes.
 - Added Windows-safe owner monitoring using a retained process handle, preventing PID reuse from keeping orphaned LIVE runtimes alive after their owner exits.
@@ -1037,7 +1169,7 @@ Verified that both full reporting and RAM/LIVE dependency-matrix paths use the s
 - Verified the lifecycle end-to-end on Windows: GUI-created LIVE remained shared with MCP, disappeared cleanly when the GUI closed, removed its endpoint, and restarted with a new service PID, owner PID, port, authentication key and owner token.
 - Updated the GUI launcher regression to target the canonical `run_contextor.bat` launcher and its repository-local `.venv`.
 
- — Incremental LIVE graph metrics
+#### Incremental LIVE Graph Metrics
 
 - Synchronized canonical `RepositoryAnalysisState.metrics` directly from the current in-memory dependency graph after incremental ADD, MODIFY and DELETE operations, without a full repository source rescan.
 - Preserved `state.metrics` as a macro-only graph summary containing `nodes`, hard/soft/total edge counts, hard-edge density and maximum in/out degree; no per-module metric records are stored there.
@@ -1048,7 +1180,7 @@ Verified that both full reporting and RAM/LIVE dependency-matrix paths use the s
 - Confirmed at every checkpoint that canonical `state.metrics` exactly matched an independently recomputed `compute_graph_metrics(...)` oracle.
 - Verified full cleanup and reversibility: after deleting probe modules, LIVE graph metrics returned exactly to the original baseline state.
 
-— Dependency-driven LIVE semantic refresh
+#### Dependency-Driven LIVE Semantic Refresh
 
 - Reworked incremental repository updates around a deterministic `RefreshPlanner` and explicit `REPARSE → RECOMPUTE → PATCH → GRAPH → COMMIT` execution model.
 - LIVE updates now parse changed source only once, reuse cached canonical facts for unchanged modules, and avoid repository-wide source rescans during normal ADD, MODIFY and DELETE operations.
@@ -1072,111 +1204,7 @@ Verified that both full reporting and RAM/LIVE dependency-matrix paths use the s
 - Preserved compact MCP/LIVE payloads while making topology metrics available through existing context and report projections.
 - Verified topology analytics parity against fresh production computation across import changes, module ADD/DELETE, restart, snapshot recovery and body-only updates.
 
-## [1.2.0-beta Patch — LIVE Analytics & Incremental Engine Refactor] - 2026-08-18
-
-### Persistent LIVE topology and cached analytics
-
-- Added persistent canonical LIVE topology analytics, including PageRank,
-  betweenness, HITS hub/authority scores, bridge scores, hotspots,
-  module risk and inspection targets.
-- Added persistent cached architectural analytics for module layers,
-  visibility, export degree and layer violations.
-- Added explicit freshness tracking for topology and cached analytics with
-  `fresh`, `stale` and `deferred` states preserved across LIVE snapshots
-  and MCP restarts.
-- Added RAM-only reconstruction of missing legacy analytics from canonical
-  dependency, module, artifact and artifact-consumption state without
-  unnecessary source reads.
-- Added stale-state guards so non-empty stale analytics are never silently
-  reconstructed or promoted to fresh after restart.
-- Extended LIVE module-context responses with canonical topology and cached
-  analytics while preserving existing fan-in and fan-out information.
-- Refined RefreshPlanner invalidation so statically complete
-  `runtime_unresolved` updates may remain fresh.
-- Added true no-op handling for implementation-body-only changes when no
-  modeled imports, definitions or usage facts change.
-- Reduced call-retarget refresh scope to the canonical usage,
-  artifact-consumption and cached-analytics families actually affected.
-- Reduced unnecessary persistent identity-registry synchronization for
-  updates that do not add or remove symbol identities.
-
-### Incremental artifact consumption and refresh execution
-
-- Maintained canonical incremental `ModuleUsageFacts` and reverse
-  artifact-consumption state across LIVE ADD, MODIFY and DELETE updates.
-- Preserved typed usage channels for API imports, direct calls,
-  qualified references, runtime calls, callback calls, event bindings
-  and inheritance.
-- Added RefreshPlan-driven incremental execution with explicit
-  `REPARSE`, `RECOMPUTE`, `PATCH`, `GRAPH` and commit boundaries.
-- Preserved fail-closed execution for unsupported refresh tokens and exact
-  plan-versus-execution tracing.
-- Preserved Copy-on-Write isolation so failed recomputation, analytics or
-  registry operations do not publish partially updated canonical state.
-- Preserved correct re-export resolution ordering by ensuring recomputation
-  observes candidate module state before resolving new re-export targets.
-- Kept persistent identity-registry transactions outside candidate-state
-  computation so persistent commit remains owned by the incremental engine.
-- Preserved semantic separation between refresh completeness and static
-  certainty, allowing `complete + runtime_unresolved` states without
-  incorrectly marking canonical static data stale.
-
-### Incremental engine decomposition
-
-- Refactored the incremental analysis engine from a monolithic implementation
-  into cohesive incremental-analysis components while preserving its public
-  behavior and compatibility.
-- Extracted pure reverse blast-radius and local degree calculations into
-  `analysis/incremental/graph_ops.py`.
-- Extracted LIVE bootstrap and canonical-state materialization into
-  `analysis/incremental/materialization.py`.
-- Extracted source preparation, syntax validation, import and symbol
-  extraction, and semantic `FileDelta` / `UsageDelta` calculation into
-  `analysis/incremental/preparation.py`.
-- Reduced duplicate source handling in the preparation path and reused the
-  prepared source data across downstream incremental analysis.
-- Extracted RefreshPlan candidate-state execution into
-  `analysis/incremental/plan_executor.py`, including recomputation,
-  patch-family dispatch, graph recomputations and execution tracing.
-- Kept lock ownership, update lifecycle, registry transaction handling,
-  canonical-state publication and file-state acknowledgement in the
-  incremental engine orchestration boundary.
-- Reduced `incremental_engine.py` from approximately 802 to 374 lines before
-  final subsystem consolidation, removing more than half of the original
-  monolithic implementation.
-- Preserved existing incremental engine import contracts throughout the
-  refactor while preparing the implementation for final consolidation under
-  the dedicated `analysis.incremental` subsystem.
-
-### Regression and contract alignment
-
-- Updated historical Stage 2 tests to the current LIVE artifact-consumption
-  freshness contract.
-- Updated module-context tests to validate required fan-in and fan-out
-  behavior without rejecting the newer topology and cached-analytics fields.
-- Updated failure-injection tests to target the extracted RefreshPlan
-  execution boundary while preserving Copy-on-Write rollback guarantees.
-- Updated registry failure fixtures so they exercise updates that genuinely
-  require persistent identity synchronization.
-- Updated reverse-blast-radius fixtures so they exercise modeled dependency
-  changes instead of implementation-body-only no-ops.
-- Verified the Stage 3 critical regression ratchet with 139 passing tests.
-- Consolidated the incremental analysis subsystem under
-  `analysis/incremental`, moving the canonical engine implementation to
-  `analysis/incremental/engine.py`.
-- Replaced the former top-level `analysis/incremental_engine.py`
-  implementation with a lightweight backward-compatible facade, preserving
-  all existing engine, result and degree-delta import paths.
-- Added package-level incremental-engine exports while preserving reference
-  identity between legacy, canonical and package-level imports.
-- Completed the incremental-engine decomposition with clear boundaries for
-  orchestration, source preparation, RefreshPlan execution, state
-  materialization and pure graph operations.
-- Reduced the historical `incremental_engine.py` from approximately 802 lines
-  to an 18-line compatibility facade, with the canonical orchestrator now
-  isolated in `analysis/incremental/engine.py`.
-
-## [1.2.0-beta Patch — Scoped analysis guards] - 2026-08-15
+### 2026-08-15 — 1.2.0-beta — Scoped Analysis Guards
 
 - Removed the deprecated expression-based ``query_canonical_state`` and
   ``query_canonical_state_bounded`` MCP endpoints together with their private
@@ -1235,7 +1263,7 @@ Verified that both full reporting and RAM/LIVE dependency-matrix paths use the s
   warning across later polling and server restarts; failed publication no
   longer disappears behind a generic successful-analysis message.
 
-## [1.2.0-beta Patch — Central repository identities] - 2026-08-14
+### 2026-08-14 — 1.2.0-beta — Central Repository Identities
 
 - Moved creation and lookup of persistent identity dictionaries to Contextor's
   central `.contextor/repositories/` directory. Analyzed repositories are no
@@ -1252,9 +1280,9 @@ Verified that both full reporting and RAM/LIVE dependency-matrix paths use the s
 - Full, layer and single-file analysis now initialize the same central identity;
   scoped analysis success refreshes the permanent Repo ID shown by the GUI.
 
-## [1.2.0-beta Patch — Parts II–IV] - 2026-08-13
+### 2026-08-13 — 1.2.0-beta — Parts II–IV
 
-### Part II — Reliable reporting and persistent identities
+#### Part II — Reliable reporting and persistent identities
 
 - Repaired global, layer and single-file report consistency, including real
   module/symbol identities, correct Markdown context, Git headers and
@@ -1267,7 +1295,7 @@ Verified that both full reporting and RAM/LIVE dependency-matrix paths use the s
 - Preserved per-repository identity isolation, generation-based IDs, recovery
   dictionaries and reusable slot bookkeeping across incremental updates.
 
-### Part III — LIVE model and LLM-oriented MCP tools
+#### Part III — LIVE model and LLM-oriented MCP tools
 
 - Added one authenticated localhost Canonical LIVE owner in RAM, shared by the
   desktop watcher and MCP through revisioned IPC. Atomic disk snapshots are now
@@ -1312,7 +1340,7 @@ Verified that both full reporting and RAM/LIVE dependency-matrix paths use the s
   labelled saved or deferred metrics, including newly created modules before a
   full report refresh.
 
-### Part IV — Refactor guidance and final MCP completeness
+#### Part IV — Refactor guidance and final MCP completeness
 
 - Used Contextor's own hotspot and blast-radius data to split the reporting
   orchestrator into dedicated `artifact_pipeline` and `layer_pipeline` modules.
@@ -1333,11 +1361,36 @@ Verified that both full reporting and RAM/LIVE dependency-matrix paths use the s
 
 ---
 
-## [1.2.0-beta] - 2026-08-06
+### 2026-08-07 — Patch — Session 2
 
-### Added
+#### Fixed & Improved
 
-#### Model Context Protocol (MCP)
+- **Pipeline Artifact Bug Fix**: Fixed a critical bug in `pipeline.py` where a typo (`symbols` instead of `artifacts`) incorrectly marked all artifacts as orphaned, causing massive ID generation bloat (e.g., `A.../2`, `A.../3`).
+- **Layer Slicer Index Passing**: Fixed `analyze_layer` (`layer_slicer.py`) crashing with `index_dict must be provided to build_module_index` by correctly spanning the registry transaction in `facade.py` to include artifact report compaction.
+- **Flattened Local Registry**: Removed redundant `repositories/<repo_name>` subdirectories from `PersistentIdentityRegistry`. The registry now stores its files directly in the root `.contextor/` folder.
+- **Indexed Structural Reports**: Updated `generate_structure_report` and `layer_slicer.py` to correctly map all string-based `hard_edges` and `soft_edges` to their compact registry IDs, drastically reducing report size and unifying the ID schema across all reports.
+- **Test Artifact Cleanup**: Fixed `tests/test_reporting_single_file.py` to use Pytest's `tmp_path` fixture instead of a hardcoded `"dummy_path"`, and removed the leaked `dummy_path` folder from the project root.
+- **End-to-End Validation**: Performed a full E2E test via the Model Context Protocol (MCP) server on the refactored architecture. All MCP query endpoints (`analyze_project`, `analyze_layer`, `get_project_architecture`, `get_project_index`, `get_module_context`) successfully passed and correctly interface with the centralized `.contextor/` registry.
+
+### 2026-08-07 — Patch — Refactored & Improved
+
+#### Refactored & Improved
+
+- **Single File Analysis Builders (Zombie Modules Cleanup)**: Refactored the oversized `single_file_analysis.py` module and its associated `context_builders.py`. Extracted the logic into a new structured pipeline with dedicated layer builders (`layer0_builders.py`, `layer1_builders.py`, `layer2_builders.py`, `layer3_builders.py`) managed by a new `registry.py` under `contextor/core/single_file/builders/`. The old "zombie" monolithic files were safely archived to the `legacy/` directory.
+- **Reporting Engine Pipeline Extraction**: Refactored the massively overgrown `io_manager.py` (which previously handled both I/O and pipeline orchestration). Extracted the high-level analysis flow, dependency resolution, and layer slicing logic into a dedicated `pipeline.py` module, strictly enforcing the Single Responsibility Principle and reducing `io_manager.py` complexity by over 400 lines.
+- **Persistent Identity Registry**: Completely refactored the core identity management of the system. Removed all local integer-based ID generation (`IndexDictionary`) from individual reports. All modules and artifacts are now tracked by a central `PersistentIdentityRegistry` located in `.contextor/repositories/<repo_id>`. IDs are now globally stable string identifiers (format `{gen}/{slot}`, e.g., `"17/4"`).
+- **Atomic Operations & Locking**: The registry enforces strict atomicity using system-level file locks (`.lock`) and atomic renames (`fsync` + `rename`) to guarantee identity consistency even during parallel runs or abrupt crashes.
+- **Reporting Engine Updates**: Removed the deprecated `_save_index_dictionary_with_dedup` from the engine (`io_manager.py`, `pipeline.py`, `facade.py`). Reports no longer output or rely on `*_index_dictionary.json` files in the output directory. They now operate strictly by querying the active `PersistentIdentityRegistry` context.
+- **MCP Server Modernization**: Updated the FastMCP server (`mcp_server.py`) to directly query the `PersistentIdentityRegistry` instead of loading the removed index dictionary files from disk.
+- **New MCP Tool (`get_project_index`)**: Added a new MCP tool `get_project_index(repo_path: str)` to expose the active mapping of internal registry IDs to their actual module and artifact paths, allowing external LLM agents to accurately translate compact identifiers found in reports.
+- **GUI Parser String ID Support**: Updated `gui_parser.py` (specifically `parse_and_filter_json` and `rewrite_index_to_text`) to correctly parse and process the new string-based generation/slot IDs, removing legacy integer coercion bugs.
+- **Test Suite Updates**: Removed obsolete index-saving assertions and passed the mock `PersistentIdentityRegistry` instances into unit tests for `artifact_usage_report`, `generators`, and `reporting_single_file`.
+
+### 2026-08-06 — 1.2.0-beta
+
+#### Added
+
+##### Model Context Protocol (MCP)
 
 - Introduced a native FastMCP server, transforming Contextor into an LLM-oriented query engine.
 - Added `MCP_installer.bat` for automated MCP environment setup.
@@ -1346,7 +1399,7 @@ Verified that both full reporting and RAM/LIVE dependency-matrix paths use the s
 - Added architectural boundary validation in `get_layer_isolation`.
 - Added secure sandbox execution for `query_json_data`.
 
-#### Graph Analytics
+##### Graph Analytics
 
 - Added `graph_analytics.json` report.
 - Added fan-in, fan-out and export-degree metrics.
@@ -1356,7 +1409,7 @@ Verified that both full reporting and RAM/LIVE dependency-matrix paths use the s
 - Added Jaccard complete-linkage clustering.
 - Added dependency type breakdown statistics.
 
-#### Reporting
+##### Reporting
 
 - Added strict separation between global, layer and single-file reports.
 - Added dedicated layer index dictionaries.
@@ -1367,9 +1420,9 @@ Verified that both full reporting and RAM/LIVE dependency-matrix paths use the s
 
 ---
 
-### Changed
+#### Changed
 
-#### Reporting Engine
+##### Reporting Engine
 
 - Replaced raw JSON reading with synthesized MCP query endpoints.
 - Replaced GUI parser string search with indexed lookup.
@@ -1377,14 +1430,14 @@ Verified that both full reporting and RAM/LIVE dependency-matrix paths use the s
 - Optimized report routing and index dictionary management.
 - Optimized LLM context generation using compact indexed structures.
 
-#### Architecture
+##### Architecture
 
 - Split `engine.py` into `generators.py` and `io_manager.py`.
 - Split `generators.py` into dedicated generator modules.
 - Retained backward-compatible facades after refactoring.
 - Eliminated oversized architectural hotspots.
 
-#### Performance
+##### Performance
 
 - Removed generation of `artifacts.json` and `artifacts_usage.json`.
 - Standardized on compact indexed artifact reports.
@@ -1393,9 +1446,9 @@ Verified that both full reporting and RAM/LIVE dependency-matrix paths use the s
 
 ---
 
-### Fixed
+#### Fixed
 
-#### MCP
+##### MCP
 
 - Fixed Windows multiprocessing initialization (`freeze_support()`).
 - Fixed stdout corruption breaking JSON-RPC communication.
@@ -1406,7 +1459,7 @@ Verified that both full reporting and RAM/LIVE dependency-matrix paths use the s
 - Fixed Windows Codex MCP analysis hangs by isolating Git from the JSON-RPC stdin stream, using non-interactive Git subprocesses and native HEAD/ref resolution; verified all 17 MCP tools end to end.
 - Added identity-verified MCP process cleanup for normal shutdown and orphan recovery on the next server start.
 
-#### Reporting
+##### Reporting
 
 - Fixed missing layer index dictionaries.
 - Fixed global index overwrite detection.
@@ -1415,13 +1468,13 @@ Verified that both full reporting and RAM/LIVE dependency-matrix paths use the s
 
 ---
 
-### Security
+#### Security
 
 - Replaced unrestricted `eval()` in `query_json_data` with a sandboxed execution environment.
 
 ---
 
-### Developer Experience
+#### Developer Experience
 
 - Improved MCP support for LLM workflows.
 - Added architectural context pills for AI-assisted refactoring.
@@ -1429,47 +1482,21 @@ Verified that both full reporting and RAM/LIVE dependency-matrix paths use the s
 
 ---
 
-### Validation
+#### Validation
 
 - Verified all MCP tools in a full end-to-end test.
 - Cross-validated generated reports against the analyzed source code.
 - Confirmed correct isolation of global, layer and single-file report scopes.
 - Verified zero cross-scope index overwrites.
-### Known limitations
+#### Known limitations
 
 - The graph cache in `core/graph/incremental.py` remains in-memory only,
   so it never hits in a single CLI run.
 - Comments and docstrings mix English and Polish.
 
-## [Patch] - 2026-08-05
+### 2026-08-06 — Patch — Additional MCP and Reporting Improvements
 
-### Added & Improved
-
-- **Global & Layered Reporting Separation**: Global reports are now robust and logically separated into distinct layers (e.g., `contextor` vs `tests`). Each layer receives its own specific metrics, structure, artifacts, and summary without mixing contexts.
-- **Comprehensive Metrics**: Added complete global metrics (e.g., `density_hard`, `edges_hard`) and detailed per-layer `per_module` metrics (`in/out degree`, `internal_in/out`) to accurately evaluate hotspots and isolated code.
-- **Hotspots, Technical Debt & Action Items**: Outbound hotspots and structural bottlenecks are now directly linked with actionable items (e.g., `WARNING: Refactor '...' (out_degree=X, type=OUTBOUND_HOTSPOT)`). Technical debt is synthesized in a normalized `debt_summary`.
-- **Zero-Collision Validations**: Namespace collisions and dependency cycles are properly monitored. Stable analysis explicitly validates and reports `total_collisions: 0` and `cycle_count: 0`, guaranteeing analysis fidelity.
-- **Tests Layer Observability**: `tests` is now treated as an independent architectural boundary with its own structural filtered metrics and hotspots, enabling analysis of test impact on the production architecture without noise.
-- **Robust Strict String-Based GUI Parser**: Replaced the deep-search algorithm with a highly performant, short-circuiting strict string parser to definitively prevent false-positive matches of modules vs symbols.
-- **Automated Output Routing & Timestamps**: All generated reports are now safely tagged with a `datestamp` to track history. High-risk layer reports are safely isolated into `[repo]_high_risk_layers_[datestamp]` subfolders.
-- **Test Suite Enhancements**: Expanded the test suite coverage to accurately test the updated parsing mechanisms and architectural isolation logic.
-
-- **Git & Diff Engine Integration**: Contextor now deeply integrates with Git context. Added a dedicated 
-epo_state module and diff_engine to automatically identify previously generated reports, compute deltas across runs (hotspots, cycles, layers, and debt score), and accurately evaluate technical regression or improvements across the repository.
-- **Granular Git Impact Reports**: Single-file reports now feature a dedicated git section containing recent commits, authors, and truncated file patches, allowing the LLM to understand immediate local file changes alongside architectural implications.
-
-- **Model Context Protocol (MCP) Server**: Introduced a native FastMCP server allowing LLMs (like Claude) to directly invoke Contextor. The server exposes tools for global analysis (analyze_project), layered analysis (analyze_layer), single-file insights (analyze_single_file), artifact filtering (filter_artifacts), and reading raw JSON reports.
-- **MCP Environment Installer**: Added MCP_installer.bat to safely handle environment detection and installation of MCP dependencies alongside Contextor.
-
-- **Engine Refactoring**: Split the oversized `contextor.core.reporting_engine.engine` module (SRP violation) into `generators.py` (business logic) and `io_manager.py` (I/O operations). This decoupling significantly improves maintainability and testability. Updated `facade.py` imports and completely refactored the test suite to include robust integration tests. The old engine module has been safely backed up to `legacy/engine.py`.
-- **I/O Optimization & Bloatware Removal**: Completely eliminated the generation and disk-writing of massive `artifacts.json` (70 MB) and `artifacts_usage.json` (140+ MB) reports. Contextor now generates and relies exclusively on a highly optimized, index-based `artifacts_compact.json`, reducing disk I/O latency and saving hundreds of megabytes per run.
-- **Strict Indexed Extraction Engine**: Rewrote the core search/filtering engine in `gui_parser.py`. Replaced the slow, raw string-matching algorithm (based on `json.dumps` serialization) with a blazing-fast index-based traversal, resolving definitions and consumers against the compact modules array.
-- **LLM Token Efficiency Maximization**: The output "single LLM context" subsets generated by the GUI parser now natively retain the `compact` integer-indexed format. This drastically minimizes the input token cost while supplying LLMs with a perfect structural "blast-radius" map.
-- **Cluster & Detail Saturation Limiting**: Introduced strict safeguards (`MAX_CLUSTERS = 30` and `MAX_USAGE_DETAILS = 15`) in `artifact_usage_report.py` to truncate long-tail extraction candidates and AST detail bloat, preventing infinite context scaling on massive codebases.
-
-## [Patch] - 2026-08-06
-
-### Added
+#### Added
 
 - **Graph Analytics Report** (`graph_analytics.py`): A new dedicated report generated alongside existing reports for all three reporting levels — full repository, per-layer, and single-file. Addresses the following gaps missing from previous reports:
   - `fan_in` (consumer count), `fan_out` (provider count), `export_degree` (number of artifacts exported by a module)
@@ -1491,18 +1518,18 @@ epo_state module and diff_engine to automatically identify previously generated 
   - Added automatic path resolution (`_find_latest_report`) so LLMs no longer need to know the exact timestamped filenames of reports.
   - LLMs now receive perfectly sized, synthesized insights (including reverse-mapped string dependencies) instead of massive arrays of integer indices.
 
-### Fixed
+#### Fixed
 
 - **MCP Server on Windows** (`mcp_server.py`): Added `multiprocessing.freeze_support()` call in the `__main__` block. Without it, `ProcessPoolExecutor` inside `ContextorFacade.analyze_project()` caused a `RuntimeError` during subprocess bootstrapping on Windows, making every MCP `analyze_*` tool call fail silently.
 - **MCP Stream Corruption**: Forced all internal Contextor progress logs to be routed to `sys.stderr`, preventing stdout pollution from breaking the JSON-RPC communication stream used by MCP.
 - **MCP Tool `analyze_single_file`**: Fixed an argument ordering bug where `repo_root` and `file_path` were swapped when calling the facade.
 - **MCP Tool `get_layer_isolation`**: Fixed a bug where passing a full path (e.g., `contextor/core`) would fail to match the layer index; it now normalizes the input automatically.
 
-### Architecture Refactoring
+#### Architecture Refactoring
 - **Generators Hotspot Elimination**: Split the massive `contextor.core.reporting_engine.generators` module (674 lines) into four domain-specific components: `summary_generator.py`, `structure_generator.py`, `collisions_generator.py`, and `layer_slicer.py`. The original `generators.py` was retained as a backward-compatible re-exporting facade. This refactoring completely eliminated the module from the top 5 global architectural hotspots (score dropped from 0.84 to unlisted), drastically reducing project technical debt.
 - **MCP Context Pill**: Added a new Level-3 MCP tool `get_file_edit_context`. It provides LLMs with a specialized, single-shot context pill prior to editing a file, combining module metrics, API signature blast radius, and dependency trees into one response.
 
-### Bug Fixes & UI Enhancements
+#### Bug Fixes & UI Enhancements
 - **Layer Report Index Dictionary Omission**: Fixed a bug where isolated layer reports failed to save their own `index_dictionary.json` file. `layer_slicer.py` now correctly surfaces the layer-specific index, and `io_manager.py` saves it with the correct layer prefix (e.g., `Contextor_Repo_core_index_dictionary_[datestamp].json`).
 - **Global Index Overwrite Prevention**: Fixed an aggressive wildcard glob in `_save_index_dictionary_with_dedup` that was incorrectly flagging layer-specific index dictionaries as "outdated" versions of the global repository index and renaming them. The pattern matcher now strictly verifies segment length.
 - **Smart Rewrite Fallback**: Upgraded the GUI "Rewrite Index -> Txt" tool to reliably locate the global repository index. It now searches for an exact datestamp match (even if outdated), explicitly ignores layer-specific or single-file dictionaries (by preferring the shortest filename), and surfaces a robust UI `MessageBox` fallback confirmation if it needs to use the latest available global index.
@@ -1510,37 +1537,38 @@ epo_state module and diff_engine to automatically identify previously generated 
 - **MCP `get_project_architecture` — wrong `module_count` field**: Fixed a wrong key lookup (`metrics.global_module_count` → `metrics.nodes`). The tool was returning `module_count: 0` on every call despite the summary report containing the correct value.
 - **MCP `get_file_edit_context` — `risk_score` always zero**: Fixed by replacing the non-existent `hotspot_score` key lookup (which lives in `summary.json`, not in `graph_analytics.json`) with a computed proxy based on `(betweenness + hub_score) / 2`, sourced correctly from `graph_analytics.json`.
 
-### Production Test — 2026-08-06
+#### Production Test — 2026-08-06
 Full end-to-end production test covering all 10 MCP tools and all three report types (full project, layer, single-file). All tools passed. Report data cross-validated against actual source code — data found to accurately reflect the real state of the codebase. Index dictionary separation between global, layer, and single-file scopes confirmed working with no cross-scope overwrites.
 
-### MCP Refinements & Security Updates
+#### MCP Refinements & Security Updates
 - **Secure Sandbox for `query_json_data`**: Replaced the unrestricted `eval()` call with a strictly sandboxed execution environment (whitelisted built-ins only) to prevent arbitrary code execution vulnerabilities.
 - **Accurate `risk_score` for Edit Context**: Fixed `get_file_edit_context` to correctly extract the true `hotspot_score` from `summary.json`, using the centrality metrics from `graph_analytics.json` only as a secondary fallback.
 - **Test Coverage Context**: Enhanced `get_file_edit_context` to expose `tests_covering` by identifying modules from the `tests.*` layer that depend on the target module, giving LLMs immediate visibility into available test coverage.
 - **Layer Boundary Violations**: Upgraded `get_layer_isolation` to detect and report architectural boundary violations (e.g., when a lower-tier layer like `ui` directly imports a higher-tier layer like `runtime`), enforcing strict layer hierarchy (`tests > ui/cli > contract > engine > runtime > adapter`).
 - **Regression Analysis Tool (`get_report_diff`)**: Added a new MCP tool to expose the `report_diff` functionality. It computes the delta between the last two analysis runs, surfacing newly introduced hotspots, resolved debt, and cycle changes directly to the LLM.
 
-## [Patch] - 2026-08-07
+### 2026-08-05 — Patch — Added & Improved
 
-### Refactored & Improved
+#### Added & Improved
 
-- **Single File Analysis Builders (Zombie Modules Cleanup)**: Refactored the oversized `single_file_analysis.py` module and its associated `context_builders.py`. Extracted the logic into a new structured pipeline with dedicated layer builders (`layer0_builders.py`, `layer1_builders.py`, `layer2_builders.py`, `layer3_builders.py`) managed by a new `registry.py` under `contextor/core/single_file/builders/`. The old "zombie" monolithic files were safely archived to the `legacy/` directory.
-- **Reporting Engine Pipeline Extraction**: Refactored the massively overgrown `io_manager.py` (which previously handled both I/O and pipeline orchestration). Extracted the high-level analysis flow, dependency resolution, and layer slicing logic into a dedicated `pipeline.py` module, strictly enforcing the Single Responsibility Principle and reducing `io_manager.py` complexity by over 400 lines.
-- **Persistent Identity Registry**: Completely refactored the core identity management of the system. Removed all local integer-based ID generation (`IndexDictionary`) from individual reports. All modules and artifacts are now tracked by a central `PersistentIdentityRegistry` located in `.contextor/repositories/<repo_id>`. IDs are now globally stable string identifiers (format `{gen}/{slot}`, e.g., `"17/4"`).
-- **Atomic Operations & Locking**: The registry enforces strict atomicity using system-level file locks (`.lock`) and atomic renames (`fsync` + `rename`) to guarantee identity consistency even during parallel runs or abrupt crashes.
-- **Reporting Engine Updates**: Removed the deprecated `_save_index_dictionary_with_dedup` from the engine (`io_manager.py`, `pipeline.py`, `facade.py`). Reports no longer output or rely on `*_index_dictionary.json` files in the output directory. They now operate strictly by querying the active `PersistentIdentityRegistry` context.
-- **MCP Server Modernization**: Updated the FastMCP server (`mcp_server.py`) to directly query the `PersistentIdentityRegistry` instead of loading the removed index dictionary files from disk. 
-- **New MCP Tool (`get_project_index`)**: Added a new MCP tool `get_project_index(repo_path: str)` to expose the active mapping of internal registry IDs to their actual module and artifact paths, allowing external LLM agents to accurately translate compact identifiers found in reports.
-- **GUI Parser String ID Support**: Updated `gui_parser.py` (specifically `parse_and_filter_json` and `rewrite_index_to_text`) to correctly parse and process the new string-based generation/slot IDs, removing legacy integer coercion bugs.
-- **Test Suite Updates**: Removed obsolete index-saving assertions and passed the mock `PersistentIdentityRegistry` instances into unit tests for `artifact_usage_report`, `generators`, and `reporting_single_file`.
+- **Global & Layered Reporting Separation**: Global reports are now robust and logically separated into distinct layers (e.g., `contextor` vs `tests`). Each layer receives its own specific metrics, structure, artifacts, and summary without mixing contexts.
+- **Comprehensive Metrics**: Added complete global metrics (e.g., `density_hard`, `edges_hard`) and detailed per-layer `per_module` metrics (`in/out degree`, `internal_in/out`) to accurately evaluate hotspots and isolated code.
+- **Hotspots, Technical Debt & Action Items**: Outbound hotspots and structural bottlenecks are now directly linked with actionable items (e.g., `WARNING: Refactor '...' (out_degree=X, type=OUTBOUND_HOTSPOT)`). Technical debt is synthesized in a normalized `debt_summary`.
+- **Zero-Collision Validations**: Namespace collisions and dependency cycles are properly monitored. Stable analysis explicitly validates and reports `total_collisions: 0` and `cycle_count: 0`, guaranteeing analysis fidelity.
+- **Tests Layer Observability**: `tests` is now treated as an independent architectural boundary with its own structural filtered metrics and hotspots, enabling analysis of test impact on the production architecture without noise.
+- **Robust Strict String-Based GUI Parser**: Replaced the deep-search algorithm with a highly performant, short-circuiting strict string parser to definitively prevent false-positive matches of modules vs symbols.
+- **Automated Output Routing & Timestamps**: All generated reports are now safely tagged with a `datestamp` to track history. High-risk layer reports are safely isolated into `[repo]_high_risk_layers_[datestamp]` subfolders.
+- **Test Suite Enhancements**: Expanded the test suite coverage to accurately test the updated parsing mechanisms and architectural isolation logic.
 
-## [Patch] - 2026-08-07 (Session 2)
+- **Git & Diff Engine Integration**: Contextor now deeply integrates with Git context. Added a dedicated
+epo_state module and diff_engine to automatically identify previously generated reports, compute deltas across runs (hotspots, cycles, layers, and debt score), and accurately evaluate technical regression or improvements across the repository.
+- **Granular Git Impact Reports**: Single-file reports now feature a dedicated git section containing recent commits, authors, and truncated file patches, allowing the LLM to understand immediate local file changes alongside architectural implications.
 
-### Fixed & Improved
+- **Model Context Protocol (MCP) Server**: Introduced a native FastMCP server allowing LLMs (like Claude) to directly invoke Contextor. The server exposes tools for global analysis (analyze_project), layered analysis (analyze_layer), single-file insights (analyze_single_file), artifact filtering (filter_artifacts), and reading raw JSON reports.
+- **MCP Environment Installer**: Added MCP_installer.bat to safely handle environment detection and installation of MCP dependencies alongside Contextor.
 
-- **Pipeline Artifact Bug Fix**: Fixed a critical bug in `pipeline.py` where a typo (`symbols` instead of `artifacts`) incorrectly marked all artifacts as orphaned, causing massive ID generation bloat (e.g., `A.../2`, `A.../3`).
-- **Layer Slicer Index Passing**: Fixed `analyze_layer` (`layer_slicer.py`) crashing with `index_dict must be provided to build_module_index` by correctly spanning the registry transaction in `facade.py` to include artifact report compaction.
-- **Flattened Local Registry**: Removed redundant `repositories/<repo_name>` subdirectories from `PersistentIdentityRegistry`. The registry now stores its files directly in the root `.contextor/` folder.
-- **Indexed Structural Reports**: Updated `generate_structure_report` and `layer_slicer.py` to correctly map all string-based `hard_edges` and `soft_edges` to their compact registry IDs, drastically reducing report size and unifying the ID schema across all reports.
-- **Test Artifact Cleanup**: Fixed `tests/test_reporting_single_file.py` to use Pytest's `tmp_path` fixture instead of a hardcoded `"dummy_path"`, and removed the leaked `dummy_path` folder from the project root.
-- **End-to-End Validation**: Performed a full E2E test via the Model Context Protocol (MCP) server on the refactored architecture. All MCP query endpoints (`analyze_project`, `analyze_layer`, `get_project_architecture`, `get_project_index`, `get_module_context`) successfully passed and correctly interface with the centralized `.contextor/` registry.
+- **Engine Refactoring**: Split the oversized `contextor.core.reporting_engine.engine` module (SRP violation) into `generators.py` (business logic) and `io_manager.py` (I/O operations). This decoupling significantly improves maintainability and testability. Updated `facade.py` imports and completely refactored the test suite to include robust integration tests. The old engine module has been safely backed up to `legacy/engine.py`.
+- **I/O Optimization & Bloatware Removal**: Completely eliminated the generation and disk-writing of massive `artifacts.json` (70 MB) and `artifacts_usage.json` (140+ MB) reports. Contextor now generates and relies exclusively on a highly optimized, index-based `artifacts_compact.json`, reducing disk I/O latency and saving hundreds of megabytes per run.
+- **Strict Indexed Extraction Engine**: Rewrote the core search/filtering engine in `gui_parser.py`. Replaced the slow, raw string-matching algorithm (based on `json.dumps` serialization) with a blazing-fast index-based traversal, resolving definitions and consumers against the compact modules array.
+- **LLM Token Efficiency Maximization**: The output "single LLM context" subsets generated by the GUI parser now natively retain the `compact` integer-indexed format. This drastically minimizes the input token cost while supplying LLMs with a perfect structural "blast-radius" map.
+- **Cluster & Detail Saturation Limiting**: Introduced strict safeguards (`MAX_CLUSTERS = 30` and `MAX_USAGE_DETAILS = 15`) in `artifact_usage_report.py` to truncate long-tail extraction candidates and AST detail bloat, preventing infinite context scaling on massive codebases.
