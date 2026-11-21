@@ -61,11 +61,11 @@ pamiętaj, że nie musza być one nadal aktualne (całkowicie lub częsciowo):
 
 
 
-8Semantyka dataclasses.fieldWybór specyficzny dla projektuSpecjalnie rozpoznawane field(hash=False), ale field(compare=False) z D08 pozostaje UNKNOWN mimo udanego wykonania w fixture. Trzeba badać wywołanie, wiązanie field, argumenty oraz skutki dekoracji.
 
 
 
-9Mechanizm dekoratora @propertyWybór specyficzny dla projektuD09/D10: rozpoznawanie @property po nazwie, przy częściowej kontroli przesłonięcia. Potrzebny jest niezależny kontrakt wiązania dekoratora i jego wykonania, także przy zmianach środowiska.
+
+
 
 
 

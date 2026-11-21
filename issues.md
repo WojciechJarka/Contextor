@@ -89,3 +89,6 @@ właściciela w sprawdzonych przypadkach. Wymaga
 późniejszej weryfikacji zakresu modelowania,
 tożsamości obiektów i kontraktu kompletności wyników.
 Nie zatwierdzono jeszcze implementacji.
+
+### P10 — nierozstrzygnięte UNKNOWN dla STRINGIFIED
+W macierzy P10-R1-CONT przypadki L/M zakończyły się w modelu UNKNOWN na pkg.child bez zdarzeń wykonania, mimo pomyślnego importu przez CPython 3.15.2. Przyczyna wymaga identyfikacji w ścieżce kompilacji lub wykonania. Nie wykazano FALSE_PASS ani nie zatwierdzono implementacji.
