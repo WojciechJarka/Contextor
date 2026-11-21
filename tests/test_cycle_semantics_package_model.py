@@ -3173,3 +3173,196 @@ def test_p8_field_boundary_unknown(class_body, prelude):
         and event.target == "pkg.child"
         for event in result.events
     )
+
+
+_P9_I1_CASES = (
+    ("A", "", "", "@property", "", "", True, True),
+    (
+        "B",
+        "from builtins import property as prop\n",
+        "", "@prop", "", "", True, True,
+    ),
+    (
+        "C",
+        "from builtins import property as prop\n"
+        "alias = prop\n",
+        "", "@alias", "", "", True, True,
+    ),
+    (
+        "D", "alias = property\n",
+        "", "@alias", "", "", True, True,
+    ),
+    (
+        "E", "alias = property\nproperty = None\n",
+        "", "@alias", "", "", True, True,
+    ),
+    (
+        "F", "", "", "@property", "",
+        "property = None\n", True, True,
+    ),
+    (
+        "G", "property = None\n",
+        "", "@property", "", "", False, False,
+    ),
+    (
+        "H",
+        "from builtins import property as prop\n"
+        "prop = None\n",
+        "", "@prop", "", "", False, False,
+    ),
+    (
+        "I",
+        "def property(fn):\n    return fn\n",
+        "", "@property", "", "", False, True,
+    ),
+    (
+        "J",
+        "def ta_nazwa(fn):\n    return fn\n",
+        "", "@ta_nazwa", "", "", False, True,
+    ),
+    (
+        "K", "",
+        "    property: object = None\n",
+        "@property", "", "", False, False,
+    ),
+    (
+        "L", "",
+        "    def property(fn):\n        return fn\n",
+        "@property", "", "", False, True,
+    ),
+    (
+        "M", "",
+        "    from builtins import property as property\n",
+        "@property", "", "", False, True,
+    ),
+    (
+        "N", "", "", "@property.setter",
+        "", "", False, None,
+    ),
+    (
+        "O", "", "", "@property()",
+        "", "", False, None,
+    ),
+)
+
+
+@pytest.mark.parametrize(
+    (
+        "case_id,before_class,class_before,"
+        "decorator,class_after,after_class,"
+        "model_pass,python_success"
+    ),
+    _P9_I1_CASES,
+    ids=[case[0] for case in _P9_I1_CASES],
+)
+def test_p9_i1_known_builtin_decorator_identity(
+    tmp_path,
+    case_id,
+    before_class,
+    class_before,
+    decorator,
+    class_after,
+    after_class,
+    model_pass,
+    python_success,
+):
+    source = (
+        "from dataclasses import dataclass\n"
+        + before_class
+        + "@dataclass(frozen=True)\n"
+        + "class C:\n"
+        + "    x: int\n"
+        + "    y: int\n"
+        + class_before
+        + f"    {decorator}\n"
+        + "    def value(self):\n"
+        + "        return 1\n"
+        + class_after
+        + after_class
+        + "import pkg.child\n"
+    )
+    sources = {
+        "pkg.__init__": source,
+        "pkg.child": "pass\n",
+    }
+    trees = {
+        name: ast.parse(code)
+        for name, code in sources.items()
+    }
+
+    model = evaluate_package_import_order(
+        trees,
+        "pkg",
+        annotation_semantics="DEFERRED",
+        _compile_on_first_import=True,
+        _assume_passive_external_imports=True,
+        _assume_frozen_dataclass_decoration=True,
+    )
+
+    assert model.outcome == (
+        "MODEL_PASS" if model_pass else "UNKNOWN"
+    )
+    assert model.evidence_scope == (
+        "CONDITIONAL_EXTERNAL_AND_FROZEN_DATACLASS_"
+        "ASSUMPTIONS_NOT_RUNTIME_PROOF"
+    )
+    assert (
+        model.builtin_environment_precondition
+        == STANDARD_BUILTINS_PRECONDITION
+    )
+
+    decorations = [
+        item
+        for item in model.assumed_dataclass_decorations
+        if item.class_name == "C"
+    ]
+    assert len(decorations) == int(model_pass)
+
+    events = list(model.events)
+    class_positions = [
+        index
+        for index, event in enumerate(events)
+        if (
+            event.operation == "DEFINE_PASSIVE_CLASS"
+            and event.symbol == "C"
+        )
+    ]
+    child_positions = [
+        index
+        for index, event in enumerate(events)
+        if (
+            event.operation == "START_IMPORT"
+            and event.target == "pkg.child"
+        )
+    ]
+
+    if model_pass:
+        assert len(class_positions) == 1
+        assert len(child_positions) == 1
+        assert class_positions[0] < child_positions[0]
+        assert model.reached_unmodeled_import is None
+    else:
+        assert class_positions == []
+        assert child_positions == []
+
+    if case_id in {"B", "C", "H"}:
+        assert any(
+            item.target == "builtins"
+            and item.symbol == "property"
+            for item in model.assumed_external_imports
+        )
+
+    if model_pass:
+        ordinary = evaluate_package_import_order(
+            trees,
+            "pkg",
+            annotation_semantics="DEFERRED",
+            _compile_on_first_import=True,
+        )
+        assert ordinary.outcome == "UNKNOWN"
+
+    if python_success is not None:
+        assert (
+            _actual(tmp_path, sources, "pkg")
+            is python_success
+        )
