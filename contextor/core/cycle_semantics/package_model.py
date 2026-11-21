@@ -3064,20 +3064,23 @@ def evaluate_package_import_order(
             )
 
         elif step.op == "ALIAS":
-            if (
-                not step.target
-                or not step.binding
-                or step.target not in namespaces[module]
-            ):
+            if not step.target or not step.binding:
+                return result("UNKNOWN", module, step.target)
+
+            if step.target in namespaces[module]:
+                value = namespaces[module][step.target]
+            elif _assume_frozen_dataclass_decoration:
+                value = _known_builtin_callable(step.target)
+                if value is None:
+                    return result(
+                        "UNKNOWN", module, step.target,
+                    )
+            else:
                 return result(
-                    "UNKNOWN",
-                    module,
-                    step.target,
+                    "UNKNOWN", module, step.target,
                 )
 
-            namespaces[module][step.binding] = (
-                namespaces[module][step.target]
-            )
+            namespaces[module][step.binding] = value
 
             events.append(
                 PackageModelEvent(
