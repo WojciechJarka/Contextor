@@ -1,208 +1,189 @@
-# P9-I1-R9 — TRWAŁE KONTRAKTY A–O
+# P9-I1-R10 — SOURCE-BOUND PUBLIC CONTRACT
 
 ## PREFLIGHT
 
-- DIRECT_EVIDENCE: Contextor MCP jako pierwsze źródło: LIVE revision 1501, `canonical_state=fresh`, `syntax_errors=0`, `resync_required=false`. Per-file `workspace_sync=verified` dla `tests/test_cycle_semantics_package_model.py::_actual`; globalny `workspace_sync=unverified`.
-- HEAD: `728711a2de8f830c0e789260d839260db186702a`. Przed edycją status obejmował wyłącznie zastany raport `walkthrough.md`; test i source były czyste.
-- MCP i literalny odczyt potwierdziły importy `evaluate_package_import_order`, `STANDARD_BUILTINS_PRECONDITION`, `pytest`, helper `_actual(tmp_path, source, entry)` oraz dokładną kotwicę EOF. Helper uruchamia import próbki w osobnym procesie `sys.executable -I -B`.
-- CONTRACT_PROVED: poprzedni audyt R8 porównał A–M z CPython 3.15.2, w tym pozytywne i negatywne kontrprzykłady. N/O pozostają tylko kontraktem konserwatywnego UNKNOWN.
+- DIRECT_EVIDENCE: Contextor MCP jako pierwsze źródło: LIVE revision 1502, `canonical_state=fresh`, `syntax_errors=0`, `resync_required=false`; per-file `workspace_sync=verified` dla `tests/test_cycle_semantics_namespace_bound_model.py::_dataclass_result`. Globalny `workspace_sync=unverified`.
+- HEAD `43479a05f20bac69499b987e884f18cd334db9ad`; status wejściowy czysty. MCP i odczyt pliku potwierdziły `_dataclass_result`, `_external_case`, `pytest`, `frozen_dataclass_t01–t04` oraz kotwicę EOF.
+- CODE_PATH_PROVED: `_dataclass_result` uruchamia source-bound publiczny evaluator z `target_python_version=(3,15)`, flagami `decorate` i `external`; `_external_case` buduje snapshot źródła oraz fingerprint.
 
 ## EXACT_TEST_ADDITION
 
-- Dopisano dosłownie `_P9_I1_CASES` oraz jeden test parametryczny `test_p9_i1_known_builtin_decorator_identity` na końcu pliku. Istniejące funkcje i asercje pozostały bez zmian.
-- Diff obejmuje 193 dodane linie w jednym pliku testowym. Produkcji nie zmieniano.
+- Dopisano dosłownie `_P9_I1_SOURCE_BOUND_CASES` i jeden test parametryczny `test_p9_i1_source_bound_decorator_identity` na końcu wskazanego pliku.
+- Diff: 164 dodane linie; brak edycji istniejących testów, helperów i kodu produkcyjnego.
 
-## MATRIX_A_O
+## PUBLIC_OUTCOME_MATRIX
 
-- A–F: wymagany warunkowy `MODEL_PASS`, jedna założona dekoracja C, `DEFINE_PASSIVE_CLASS(C)` przed `START_IMPORT(pkg.child)`; zwykły evaluator zwraca `UNKNOWN`.
-- G–O: wymagany `UNKNOWN`, bez założonej dekoracji C, bez `DEFINE_PASSIVE_CLASS(C)` i bez dojścia do `pkg.child`.
-- B/C/H: dodatkowo potwierdzenie założonego external `FROM builtins import property`.
-- Każdy wariant sprawdza `evidence_scope=CONDITIONAL_EXTERNAL_AND_FROZEN_DATACLASS_ASSUMPTIONS_NOT_RUNTIME_PROOF` i `builtin_environment_precondition=STANDARD_BUILTINS_PRECONDITION`.
+| Przypadki | Oczekiwany publiczny wynik | Wewnętrzny wynik | Dekoracja C i import `pkg.ns.b` |
+|---|---|---|---|
+| A, B, C, E | `CONDITIONAL_MODEL_PASS` | `MODEL_PASS` pod założeniami | jedna dekoracja, klasa przed importem |
+| G, H, I, M, N, O | `UNKNOWN` | `UNKNOWN` | brak dekoracji i importu |
 
-## CPYTHON_315_PARITY
+- B/C/H potwierdzają rekord założonego `FROM builtins import property`. C/E potwierdzają event `ALIAS`. Każdy wariant sprawdza, że ścieżka bez flag warunkowych zwraca `UNKNOWN`.
 
-- DIRECT_EVIDENCE: `_actual` uruchamia A–M w izolowanych podprocesach CPython 3.15.2. A–F oraz I/J/L/M importują się poprawnie; G/H/K kończą się niepowodzeniem importu. To zgadza się z niezależnymi wynikami discovery R8.
-- N/O mają `python_success=None`; test nie wykonuje dla nich próby importu CPythona. Ich runtime parity: NOT_PROVED. Modelowy `UNKNOWN` w I/J/L/M jest konserwatywną odmową, nie błędem CPythona.
+## CONDITIONAL_AUTHORITY
+
+- CONTRACT_PROVED: test wymaga `authority=SOURCE_BOUND_CALLER_SUPPLIED_INVENTORY_NOT_RUNTIME_OR_LIVE_PROOF`, wewnętrznego `evidence_scope=CONDITIONAL_EXTERNAL_AND_FROZEN_DATACLASS_ASSUMPTIONS_NOT_RUNTIME_PROOF` i `builtin_environment_precondition=CONVENTIONAL_BUILTINS_ASSUMED_NOT_RUNTIME_ATTESTED`.
+- W A/B/C/E test wymaga niepustego `source_evidence_sha256`; ten fingerprint nie jest dowodem stanu runtime ani LIVE. Publiczny wynik nie jest bezwarunkowym `MODEL_PASS`.
+
+## IMPORT_ORDER_CONTRACT
+
+- A/B/C/E wymagają dokładnie jednego `DEFINE_PASSIVE_CLASS(C)` przed dokładnie jednym `START_IMPORT(pkg.ns.b)`. G/H/I/M/N/O nie mogą osiągnąć żadnego z tych eventów.
+- `pkg.ns.b` zawiera `from pkg.ns.a import C`, więc kolejność wiązania klasy przed importem dziecka jest częścią sprawdzanego kontraktu.
 
 ## TARGETED_RESULTS
 
-- `ast.parse(tests/test_cycle_semantics_package_model.py)`: `AST_OK`, exit 0.
+- `ast.parse(tests/test_cycle_semantics_namespace_bound_model.py)`: `AST_OK`, exit 0.
 - `git diff --check`: exit 0.
-- `-k "test_p9_i1_known_builtin_decorator_identity"`: **15 passed, 228 deselected**.
-- `-k "r10 or r11 or p7 or p8 or p9_i1"`: **85 passed, 158 deselected**.
-- Oba zestawy uruchomiono przez `.venv/Scripts/python.exe` (CPython 3.15.2). Bez FAIL; bez pełnego pytest i FULL.
+- `-k "p9_i1_source_bound_decorator_identity"`: **10 passed, 54 deselected**.
+- `-k "frozen_dataclass or p9_i1"`: **31 passed, 33 deselected**.
+- Testy uruchomiono przez `.venv/Scripts/python.exe` (CPython 3.15.2). Bez FAIL; bez pełnego pytest i FULL.
 
 ## MCP_POST_AUDIT
 
-- DIRECT_EVIDENCE: `desktop_watcher` opublikował `UPDATED` dla pliku testowego w LIVE revision 1502; `continuity=continuous`, `resync_required=false`.
-- LIVE revision 1502, `canonical_state=fresh`, `syntax_errors=0` (fresh), per-file `workspace_sync=verified` dla nowego testu. Globalny `workspace_sync=unverified`.
-- Status P9-I1: **VALIDATION IN PROGRESS**.
+- DIRECT_EVIDENCE: `desktop_watcher` opublikował `UPDATED` dla pliku testowego w LIVE revision 1503; `continuity=continuous`, `resync_required=false`.
+- LIVE revision 1503, `canonical_state=fresh`, `syntax_errors=0` (fresh), per-file `workspace_sync=verified` dla nowego testu. Globalny `workspace_sync=unverified`.
+- Status: **P9-I1 VALIDATION IN PROGRESS**.
+
+## ISSUES_MD_CHECK
+
+- `issues.md` istnieje; odczyt nie wykazał wpisów P9. Pliku nie zmieniano.
 
 ## FILES_CHANGED
 
-- `tests/test_cycle_semantics_package_model.py` — jedyny zmieniony plik source/tests.
-- `walkthrough.md` — nadpisany raport; nie jest liczony jako plik source/tests.
+- `tests/test_cycle_semantics_namespace_bound_model.py` — jedyny zmieniony plik source/tests.
+- `walkthrough.md` — nadpisany raport, poza diffem source/tests.
 
 ## FULL_DIFFS
 
-Pełny aktualny diff pliku testowego względem HEAD:
+Pełny aktualny diff source/tests względem HEAD:
 
 ```diff
-diff --git a/tests/test_cycle_semantics_package_model.py b/tests/test_cycle_semantics_package_model.py
-index 1f92467..2278282 100644
---- a/tests/test_cycle_semantics_package_model.py
-+++ b/tests/test_cycle_semantics_package_model.py
-@@ -3173,3 +3173,196 @@ def test_p8_field_boundary_unknown(class_body, prelude):
-         and event.target == "pkg.child"
-         for event in result.events
-     )
+diff --git a/tests/test_cycle_semantics_namespace_bound_model.py b/tests/test_cycle_semantics_namespace_bound_model.py
+index d209f5a..7a0b750 100644
+--- a/tests/test_cycle_semantics_namespace_bound_model.py
++++ b/tests/test_cycle_semantics_namespace_bound_model.py
+@@ -1047,3 +1047,167 @@ def test_p8_public_defaultless_field_order(class_body, expected_outcome):
+         ) == ("C",)
+     else:
+         assert model.assumed_dataclass_decorations == ()
 +
 +
-+_P9_I1_CASES = (
-+    ("A", "", "", "@property", "", "", True, True),
++_P9_I1_SOURCE_BOUND_CASES = (
++    ("A", "", "", "@property", True),
 +    (
 +        "B",
 +        "from builtins import property as prop\n",
-+        "", "@prop", "", "", True, True,
++        "", "@prop", True,
 +    ),
 +    (
 +        "C",
 +        "from builtins import property as prop\n"
 +        "alias = prop\n",
-+        "", "@alias", "", "", True, True,
++        "", "@alias", True,
 +    ),
 +    (
-+        "D", "alias = property\n",
-+        "", "@alias", "", "", True, True,
++        "E",
++        "alias = property\nproperty = None\n",
++        "", "@alias", True,
 +    ),
 +    (
-+        "E", "alias = property\nproperty = None\n",
-+        "", "@alias", "", "", True, True,
-+    ),
-+    (
-+        "F", "", "", "@property", "",
-+        "property = None\n", True, True,
-+    ),
-+    (
-+        "G", "property = None\n",
-+        "", "@property", "", "", False, False,
++        "G",
++        "property = None\n",
++        "", "@property", False,
 +    ),
 +    (
 +        "H",
 +        "from builtins import property as prop\n"
 +        "prop = None\n",
-+        "", "@prop", "", "", False, False,
++        "", "@prop", False,
 +    ),
 +    (
 +        "I",
 +        "def property(fn):\n    return fn\n",
-+        "", "@property", "", "", False, True,
++        "", "@property", False,
 +    ),
 +    (
-+        "J",
-+        "def ta_nazwa(fn):\n    return fn\n",
-+        "", "@ta_nazwa", "", "", False, True,
-+    ),
-+    (
-+        "K", "",
-+        "    property: object = None\n",
-+        "@property", "", "", False, False,
-+    ),
-+    (
-+        "L", "",
-+        "    def property(fn):\n        return fn\n",
-+        "@property", "", "", False, True,
-+    ),
-+    (
-+        "M", "",
++        "M",
++        "",
 +        "    from builtins import property as property\n",
-+        "@property", "", "", False, True,
++        "@property", False,
 +    ),
-+    (
-+        "N", "", "", "@property.setter",
-+        "", "", False, None,
-+    ),
-+    (
-+        "O", "", "", "@property()",
-+        "", "", False, None,
-+    ),
++    ("N", "", "", "@property.setter", False),
++    ("O", "", "", "@property()", False),
 +)
 +
 +
 +@pytest.mark.parametrize(
-+    (
-+        "case_id,before_class,class_before,"
-+        "decorator,class_after,after_class,"
-+        "model_pass,python_success"
-+    ),
-+    _P9_I1_CASES,
-+    ids=[case[0] for case in _P9_I1_CASES],
++    "case_id,prelude,class_prelude,decorator,accepted",
++    _P9_I1_SOURCE_BOUND_CASES,
++    ids=[
++        case[0]
++        for case in _P9_I1_SOURCE_BOUND_CASES
++    ],
 +)
-+def test_p9_i1_known_builtin_decorator_identity(
-+    tmp_path,
++def test_p9_i1_source_bound_decorator_identity(
 +    case_id,
-+    before_class,
-+    class_before,
++    prelude,
++    class_prelude,
 +    decorator,
-+    class_after,
-+    after_class,
-+    model_pass,
-+    python_success,
++    accepted,
 +):
 +    source = (
 +        "from dataclasses import dataclass\n"
-+        + before_class
++        + prelude
 +        + "@dataclass(frozen=True)\n"
 +        + "class C:\n"
 +        + "    x: int\n"
 +        + "    y: int\n"
-+        + class_before
++        + class_prelude
 +        + f"    {decorator}\n"
 +        + "    def value(self):\n"
 +        + "        return 1\n"
-+        + class_after
-+        + after_class
-+        + "import pkg.child\n"
++        + "import pkg.ns.b\n"
 +    )
-+    sources = {
-+        "pkg.__init__": source,
-+        "pkg.child": "pass\n",
-+    }
-+    trees = {
-+        name: ast.parse(code)
-+        for name, code in sources.items()
-+    }
++    child = "from pkg.ns.a import C\n"
 +
-+    model = evaluate_package_import_order(
-+        trees,
-+        "pkg",
-+        annotation_semantics="DEFERRED",
-+        _compile_on_first_import=True,
-+        _assume_passive_external_imports=True,
-+        _assume_frozen_dataclass_decoration=True,
++    result = _dataclass_result(
++        source,
++        decorate=True,
++        external=True,
++        child=child,
 +    )
 +
++    assert result.outcome == (
++        "CONDITIONAL_MODEL_PASS"
++        if accepted else "UNKNOWN"
++    )
++    assert result.authority == (
++        "SOURCE_BOUND_CALLER_SUPPLIED_INVENTORY_"
++        "NOT_RUNTIME_OR_LIVE_PROOF"
++    )
++    assert result.conditional_assessment is not None
++
++    model = (
++        result.conditional_assessment.model_assessment
++    )
++    assert model is not None
 +    assert model.outcome == (
-+        "MODEL_PASS" if model_pass else "UNKNOWN"
++        "MODEL_PASS" if accepted else "UNKNOWN"
 +    )
 +    assert model.evidence_scope == (
 +        "CONDITIONAL_EXTERNAL_AND_FROZEN_DATACLASS_"
 +        "ASSUMPTIONS_NOT_RUNTIME_PROOF"
 +    )
-+    assert (
-+        model.builtin_environment_precondition
-+        == STANDARD_BUILTINS_PRECONDITION
++    assert model.builtin_environment_precondition == (
++        "CONVENTIONAL_BUILTINS_ASSUMED_NOT_RUNTIME_ATTESTED"
 +    )
 +
-+    decorations = [
++    decorated_classes = [
 +        item
 +        for item in model.assumed_dataclass_decorations
 +        if item.class_name == "C"
 +    ]
-+    assert len(decorations) == int(model_pass)
++    assert len(decorated_classes) == int(accepted)
 +
 +    events = list(model.events)
-+    class_positions = [
++    defined = [
 +        index
 +        for index, event in enumerate(events)
 +        if (
@@ -210,23 +191,23 @@ index 1f92467..2278282 100644
 +            and event.symbol == "C"
 +        )
 +    ]
-+    child_positions = [
++    started_child = [
 +        index
 +        for index, event in enumerate(events)
 +        if (
 +            event.operation == "START_IMPORT"
-+            and event.target == "pkg.child"
++            and event.target == "pkg.ns.b"
 +        )
 +    ]
 +
-+    if model_pass:
-+        assert len(class_positions) == 1
-+        assert len(child_positions) == 1
-+        assert class_positions[0] < child_positions[0]
-+        assert model.reached_unmodeled_import is None
++    if accepted:
++        assert len(defined) == 1
++        assert len(started_child) == 1
++        assert defined[0] < started_child[0]
++        assert result.source_evidence_sha256 is not None
 +    else:
-+        assert class_positions == []
-+        assert child_positions == []
++        assert defined == []
++        assert started_child == []
 +
 +    if case_id in {"B", "C", "H"}:
 +        assert any(
@@ -235,18 +216,18 @@ index 1f92467..2278282 100644
 +            for item in model.assumed_external_imports
 +        )
 +
-+    if model_pass:
-+        ordinary = evaluate_package_import_order(
-+            trees,
-+            "pkg",
-+            annotation_semantics="DEFERRED",
-+            _compile_on_first_import=True,
++    if case_id in {"C", "E"}:
++        assert any(
++            event.operation == "ALIAS"
++            and event.symbol == "alias"
++            for event in events
 +        )
-+        assert ordinary.outcome == "UNKNOWN"
 +
-+    if python_success is not None:
-+        assert (
-+            _actual(tmp_path, sources, "pkg")
-+            is python_success
-+        )
++    ordinary = _dataclass_result(
++        source,
++        decorate=False,
++        external=False,
++        child=child,
++    )
++    assert ordinary.outcome == "UNKNOWN"
 ```

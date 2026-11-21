@@ -1047,3 +1047,167 @@ def test_p8_public_defaultless_field_order(class_body, expected_outcome):
         ) == ("C",)
     else:
         assert model.assumed_dataclass_decorations == ()
+
+
+_P9_I1_SOURCE_BOUND_CASES = (
+    ("A", "", "", "@property", True),
+    (
+        "B",
+        "from builtins import property as prop\n",
+        "", "@prop", True,
+    ),
+    (
+        "C",
+        "from builtins import property as prop\n"
+        "alias = prop\n",
+        "", "@alias", True,
+    ),
+    (
+        "E",
+        "alias = property\nproperty = None\n",
+        "", "@alias", True,
+    ),
+    (
+        "G",
+        "property = None\n",
+        "", "@property", False,
+    ),
+    (
+        "H",
+        "from builtins import property as prop\n"
+        "prop = None\n",
+        "", "@prop", False,
+    ),
+    (
+        "I",
+        "def property(fn):\n    return fn\n",
+        "", "@property", False,
+    ),
+    (
+        "M",
+        "",
+        "    from builtins import property as property\n",
+        "@property", False,
+    ),
+    ("N", "", "", "@property.setter", False),
+    ("O", "", "", "@property()", False),
+)
+
+
+@pytest.mark.parametrize(
+    "case_id,prelude,class_prelude,decorator,accepted",
+    _P9_I1_SOURCE_BOUND_CASES,
+    ids=[
+        case[0]
+        for case in _P9_I1_SOURCE_BOUND_CASES
+    ],
+)
+def test_p9_i1_source_bound_decorator_identity(
+    case_id,
+    prelude,
+    class_prelude,
+    decorator,
+    accepted,
+):
+    source = (
+        "from dataclasses import dataclass\n"
+        + prelude
+        + "@dataclass(frozen=True)\n"
+        + "class C:\n"
+        + "    x: int\n"
+        + "    y: int\n"
+        + class_prelude
+        + f"    {decorator}\n"
+        + "    def value(self):\n"
+        + "        return 1\n"
+        + "import pkg.ns.b\n"
+    )
+    child = "from pkg.ns.a import C\n"
+
+    result = _dataclass_result(
+        source,
+        decorate=True,
+        external=True,
+        child=child,
+    )
+
+    assert result.outcome == (
+        "CONDITIONAL_MODEL_PASS"
+        if accepted else "UNKNOWN"
+    )
+    assert result.authority == (
+        "SOURCE_BOUND_CALLER_SUPPLIED_INVENTORY_"
+        "NOT_RUNTIME_OR_LIVE_PROOF"
+    )
+    assert result.conditional_assessment is not None
+
+    model = (
+        result.conditional_assessment.model_assessment
+    )
+    assert model is not None
+    assert model.outcome == (
+        "MODEL_PASS" if accepted else "UNKNOWN"
+    )
+    assert model.evidence_scope == (
+        "CONDITIONAL_EXTERNAL_AND_FROZEN_DATACLASS_"
+        "ASSUMPTIONS_NOT_RUNTIME_PROOF"
+    )
+    assert model.builtin_environment_precondition == (
+        "CONVENTIONAL_BUILTINS_ASSUMED_NOT_RUNTIME_ATTESTED"
+    )
+
+    decorated_classes = [
+        item
+        for item in model.assumed_dataclass_decorations
+        if item.class_name == "C"
+    ]
+    assert len(decorated_classes) == int(accepted)
+
+    events = list(model.events)
+    defined = [
+        index
+        for index, event in enumerate(events)
+        if (
+            event.operation == "DEFINE_PASSIVE_CLASS"
+            and event.symbol == "C"
+        )
+    ]
+    started_child = [
+        index
+        for index, event in enumerate(events)
+        if (
+            event.operation == "START_IMPORT"
+            and event.target == "pkg.ns.b"
+        )
+    ]
+
+    if accepted:
+        assert len(defined) == 1
+        assert len(started_child) == 1
+        assert defined[0] < started_child[0]
+        assert result.source_evidence_sha256 is not None
+    else:
+        assert defined == []
+        assert started_child == []
+
+    if case_id in {"B", "C", "H"}:
+        assert any(
+            item.target == "builtins"
+            and item.symbol == "property"
+            for item in model.assumed_external_imports
+        )
+
+    if case_id in {"C", "E"}:
+        assert any(
+            event.operation == "ALIAS"
+            and event.symbol == "alias"
+            for event in events
+        )
+
+    ordinary = _dataclass_result(
+        source,
+        decorate=False,
+        external=False,
+        child=child,
+    )
+    assert ordinary.outcome == "UNKNOWN"
