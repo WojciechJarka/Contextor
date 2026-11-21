@@ -2969,3 +2969,45 @@ def test_p7_dataclass_unrelated_property_remains_admitted():
         item.class_name
         for item in result.assumed_dataclass_decorations
     ) == ("C",)
+
+
+@pytest.mark.parametrize(
+    "class_body",
+    [
+        pytest.param(
+            "    x: int\n"
+            "    y: int\n"
+            "    x: int = 1\n",
+            id="repeated-with-final-default",
+        ),
+        pytest.param(
+            "    x: int\n"
+            "    y: int\n"
+            "    x: int\n",
+            id="repeated-without-default",
+        ),
+    ],
+)
+def test_p7_repeated_dataclass_field_annotation_unknown(class_body):
+    result = _r8_frozen_dataclass_result(
+        "@dataclass(frozen=True)\n"
+        "class C:\n"
+        + class_body
+    )
+
+    _r8_assert_rejected(result, class_name="C")
+
+
+def test_p7_distinct_defaulted_dataclass_fields_admitted():
+    result = _r8_frozen_dataclass_result(
+        "@dataclass(frozen=True)\n"
+        "class C:\n"
+        "    x: int = 1\n"
+        "    y: int = 2\n"
+    )
+
+    assert result.outcome == "MODEL_PASS"
+    assert tuple(
+        item.class_name
+        for item in result.assumed_dataclass_decorations
+    ) == ("C",)

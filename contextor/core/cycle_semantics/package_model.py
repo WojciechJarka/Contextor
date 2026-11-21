@@ -334,7 +334,7 @@ def _safe_passive_class_definition(
         return False
 
     if conditional_dataclass:
-        annotated_names = frozenset(
+        annotated_field_names = tuple(
             item.target.id
             for item in statement.body
             if (
@@ -343,6 +343,13 @@ def _safe_passive_class_definition(
                 and item.simple == 1
             )
         )
+        annotated_names = frozenset(
+            annotated_field_names
+        )
+        if len(annotated_field_names) != len(
+            annotated_names
+        ):
+            return False
         function_binding_names = frozenset(
             item.name
             for item in statement.body

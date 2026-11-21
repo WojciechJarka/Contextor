@@ -988,3 +988,21 @@ def test_p7_public_conditional_field_collision_unknown():
     model = result.conditional_assessment.model_assessment
     assert model is not None
     assert model.assumed_dataclass_decorations == ()
+
+
+def test_p7_public_conditional_repeated_field_annotation_unknown():
+    result = _dataclass_result(
+        "from dataclasses import dataclass\n"
+        "@dataclass(frozen=True)\n"
+        "class C:\n"
+        "    x: int\n"
+        "    y: int\n"
+        "    x: int = 1\n",
+        decorate=True,
+    )
+
+    assert result.outcome == "UNKNOWN"
+    assert result.conditional_assessment is not None
+    model = result.conditional_assessment.model_assessment
+    assert model is not None
+    assert model.assumed_dataclass_decorations == ()
