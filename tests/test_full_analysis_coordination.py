@@ -42,6 +42,139 @@ from contextor.mcp import analysis_jobs
 from contextor.mcp import runtime as mcp_runtime
 
 
+def test_desktop_history_success_visible_via_mcp(tmp_path):
+    from types import SimpleNamespace
+    from contextor.core.analysis.full_analysis_history import (
+        run_desktop_full_with_history,
+    )
+    from contextor.mcp.tools.get_analysis_status import (
+        get_analysis_status,
+    )
+
+    def analysis(_path, **_kwargs):
+        return [], SimpleNamespace(
+            summary_data={"skipped_files": []},
+            live_publish_status="success",
+            live_publish_revision=123,
+        )
+
+    outcome = run_desktop_full_with_history(
+        tmp_path,
+        runner=run_full_analysis_exclusive,
+        analysis_fn=analysis,
+    )
+    assert outcome[1].live_publish_revision == 123
+
+    status = json.loads(get_analysis_status(str(tmp_path)))
+    assert status["source"] == "desktop"
+    assert status["status"] == "completed"
+    assert status["operation"] == "project"
+    assert status["live_publish_status"] == "success"
+    assert status["live_publish_revision"] == 123
+
+    exact = json.loads(get_analysis_status(
+        str(tmp_path), job_id=status["job_id"]
+    ))
+    assert exact["job_id"] == status["job_id"]
+
+
+def test_desktop_history_release_failure_not_completed(
+    tmp_path, monkeypatch,
+):
+    from contextor.core.analysis import (
+        full_analysis_coordinator as coordinator,
+    )
+    from contextor.core.analysis.full_analysis_history import (
+        run_desktop_full_with_history,
+    )
+    from contextor.mcp.tools.get_analysis_status import (
+        get_analysis_status,
+    )
+
+    original_release = coordinator.release_full_analysis
+
+    def failing_release(lease):
+        original_release(lease)
+        raise OSError("controlled unlock failure")
+
+    monkeypatch.setattr(
+        coordinator, "release_full_analysis",
+        failing_release,
+    )
+
+    def analysis(_path, **_kwargs):
+        return [], SimpleNamespace(
+            live_publish_status="success",
+            live_publish_revision=123,
+        )
+
+    with pytest.raises(
+        OSError, match="controlled unlock failure",
+    ):
+        run_desktop_full_with_history(
+            tmp_path,
+            runner=run_full_analysis_exclusive,
+            analysis_fn=analysis,
+        )
+
+    status = json.loads(get_analysis_status(str(tmp_path)))
+    assert status["source"] == "desktop"
+    assert status["status"] == "failed"
+    assert "controlled unlock failure" in status["error"]
+    assert status["live_publish_status"] is None
+    assert status["live_publish_revision"] is None
+
+
+def test_desktop_history_write_failure_preserves_result(
+    tmp_path, monkeypatch,
+):
+    from contextor.core.analysis import full_analysis_history
+
+    def failing_write(*_args, **_kwargs):
+        raise OSError("history unavailable")
+
+    monkeypatch.setattr(
+        full_analysis_history,
+        "_write_desktop_full_record",
+        failing_write,
+    )
+
+    def runner(_path, *, owner):
+        assert owner == "desktop_analysis"
+        return "analysis-result"
+
+    assert full_analysis_history.run_desktop_full_with_history(
+        tmp_path,
+        runner=runner,
+    ) == "analysis-result"
+
+
+def test_desktop_history_does_not_mask_original_error(
+    tmp_path, monkeypatch,
+):
+    from contextor.core.analysis import full_analysis_history
+
+    def failing_write(*_args, **_kwargs):
+        raise OSError("history unavailable")
+
+    monkeypatch.setattr(
+        full_analysis_history,
+        "_write_desktop_full_record",
+        failing_write,
+    )
+
+    def runner(_path, *, owner):
+        raise ValueError("original analysis error")
+
+    with pytest.raises(
+        ValueError, match="original analysis error",
+    ):
+        full_analysis_history.run_desktop_full_with_history(
+            tmp_path,
+            runner=runner,
+        )
+
+
 def test_acyclic_lease_import_contract():
     from contextor.core.api import facade
     from contextor.core.analysis import full_analysis_lease as lease

@@ -43,6 +43,17 @@ Development history (newest first). Entries retain their original technical clai
 - Maintained separation between conditional modeling assumptions and production `MODEL_PASS` classifications.
 - Expanded regression and CPython 3.15.2 compatibility coverage for field initialization order, binding identity, and conditional import behavior.
 
+### Improved Class Decorator Identity Resolution
+
+- Replaced hardcoded `@property` name matching with identity-based resolution of known built-in decorators.
+- Introduced an immutable representation of known built-in callables, with a registry of supported decorator effects.
+- Added support for decorator aliases imported from `builtins` or assigned through local module bindings, preserving object identity across subsequent name rebindings.
+- Strengthened conservative handling of shadowed bindings, unknown decorators, and class-local name collisions.
+- Preserved Python's definition-time ordering, ensuring class creation precedes subsequent imports without executing property getters.
+- Maintained strict separation between conditional model results and production-level evidence, preventing conditional assumptions from being promoted to unconditional `MODEL_PASS` or warning suppression.
+- Added 25 regression cases covering decorator identity, aliases, shadowing, import ordering, CPython 3.15.2 parity, and public source-bound assessment.
+- **Validation:** 415 targeted tests passed on CPython 3.15.2, with no confirmed false-positive model passes in the tested scenarios.
+
 ### 2026-11-14 — Restricted Python Execution Model and Semantic Architecture
 
 #### Added

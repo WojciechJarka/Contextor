@@ -7021,3 +7021,63 @@ def test_get_artifacts_for_module_representation_and_progressive_disclosure(
     )
     assert blast_res["consumers"]["total"] == 20
     assert len(blast_res["consumers"]["items"]) == 20
+
+
+def test_desktop_history_source_and_active_mcp_priority(
+    tmp_path, monkeypatch,
+):
+    from contextor.mcp.tools.get_analysis_status import (
+        get_analysis_status,
+    )
+
+    job_id = "a" * 32
+    analysis_jobs._write_analysis_job(
+        tmp_path,
+        {
+            "job_id": job_id,
+            "operation": "project",
+            "repo_path": str(tmp_path),
+            "target": None,
+            "status": "running",
+            "owner_pid": os.getpid(),
+        },
+    )
+    monkeypatch.setattr(
+        analysis_jobs,
+        "_is_current_process_analysis_task_active",
+        lambda _job_id: True,
+    )
+
+    from contextor.core.analysis.full_analysis_history import (
+        run_desktop_full_with_history,
+    )
+
+    def runner(_path, *, owner):
+        return [], SimpleNamespace(
+            live_publish_status="success",
+            live_publish_revision=123,
+        )
+
+    run_desktop_full_with_history(
+        tmp_path, runner=runner,
+    )
+
+    latest = json.loads(get_analysis_status(str(tmp_path)))
+    assert latest["job_id"] == job_id
+    assert latest["source"] == "mcp"
+    assert latest["status"] == "running"
+
+    desktop_ids = [
+        path.stem
+        for path in (
+            tmp_path / ".contextor" / "analysis_jobs"
+        ).glob("*.json")
+        if path.stem != job_id
+    ]
+    assert len(desktop_ids) == 1
+
+    exact = json.loads(get_analysis_status(
+        str(tmp_path), job_id=desktop_ids[0]
+    ))
+    assert exact["source"] == "desktop"
+    assert exact["status"] == "completed"

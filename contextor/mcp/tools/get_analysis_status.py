@@ -55,7 +55,11 @@ def get_analysis_status(
                 indent=2,
             )
 
-        job = analysis_jobs._latest_analysis_job(root)
+        job = (
+            active_jobs[0]
+            if len(active_jobs) == 1
+            else analysis_jobs._latest_analysis_job(root)
+        )
 
     else:
         job = analysis_jobs._read_analysis_job(root, job_id)

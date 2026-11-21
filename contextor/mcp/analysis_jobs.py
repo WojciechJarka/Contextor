@@ -204,6 +204,7 @@ def _public_job(
             "live_publish_expected_state_id", "live_publish_expected_revision",
         )
     }
+    visible["source"] = job.get("source", "mcp")
     if "skipped_python_files" in job:
         skipped_files = list(job["skipped_python_files"])
         selected, total, truncated = bounded_items(skipped_files, max_skipped_files)

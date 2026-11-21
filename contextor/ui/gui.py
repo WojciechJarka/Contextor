@@ -28,6 +28,9 @@ from contextor.core.analysis.full_analysis_coordinator import (
     release_full_analysis,
     run_full_analysis_exclusive,
 )
+from contextor.core.analysis.full_analysis_history import (
+    run_desktop_full_with_history,
+)
 from contextor.core.analysis.process_pool_lifecycle import (
     terminate_active_process_pools,
 )
@@ -1540,9 +1543,9 @@ class ContextorGUI:
             except Exception:
                 pre_seq = 0
 
-            errors, analysis_result = run_full_analysis_exclusive(
+            errors, analysis_result = run_desktop_full_with_history(
                 path,
-                owner="desktop_analysis",
+                runner=run_full_analysis_exclusive,
                 log=log,
                 progress_callback=progress_callback,
                 is_cancelled=lambda: getattr(self.progress_bar, "is_cancelled", False),
