@@ -12,6 +12,43 @@ class _RestrictedFunction:
     parameters: tuple[str, ...] = ()
 
 
+@dataclass(frozen=True)
+class _KnownBuiltinCallable:
+    canonical_identity: str
+    effect: str
+
+
+_KNOWN_BUILTIN_CALLABLES = {
+    "property": _KnownBuiltinCallable(
+        "builtins.property", "PASSIVE_PROPERTY",
+    ),
+}
+
+
+def _known_builtin_callable(
+    name: str | None,
+) -> _KnownBuiltinCallable | None:
+    return _KNOWN_BUILTIN_CALLABLES.get(name)
+
+
+def _resolve_known_builtin_callable(
+    name: str | None,
+    namespace: dict[str, object | None],
+) -> _KnownBuiltinCallable | None:
+    if name is None:
+        return None
+    value = (
+        namespace[name]
+        if name in namespace
+        else _known_builtin_callable(name)
+    )
+    return (
+        value
+        if type(value) is _KnownBuiltinCallable
+        else None
+    )
+
+
 @dataclass(frozen=True, eq=False)
 class _DecoratorSnapshot:
     names: tuple[str, ...]

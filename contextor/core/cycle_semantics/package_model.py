@@ -66,7 +66,9 @@ from .execution.calls import (
     _RestrictedFunction,
     _execute_restricted_call,
     _execute_restricted_object_call,
+    _known_builtin_callable,
     _new_restricted_function,
+    _resolve_known_builtin_callable,
     _snapshot_named_decorators,
 )
 
@@ -151,7 +153,7 @@ def _safe_passive_function_definition(
     *,
     allow_dunder: bool = False,
     annotation_semantics: str | None = None,
-    allow_builtin_property: bool = False,
+    allow_known_class_decorator: bool = False,
     allow_restricted_decorator: bool = False,
     allow_restricted_default_calls: bool = False,
 ) -> bool:
@@ -169,13 +171,13 @@ def _safe_passive_function_definition(
         or (
             bool(statement.decorator_list)
             and not (
-                allow_builtin_property
+                allow_known_class_decorator
                 and type(statement) is ast.FunctionDef
                 and len(statement.decorator_list) == 1
                 and type(statement.decorator_list[0])
                 is ast.Name
-                and statement.decorator_list[0].id
-                == "property"
+                and statement.decorator_list[0].id.isidentifier()
+                and not statement.decorator_list[0].id.startswith("__")
             )
             and not (
                 allow_restricted_decorator
@@ -377,18 +379,20 @@ def _safe_passive_class_definition(
                 if field_name is not None:
                     field_factory_names.add(field_name)
 
-        uses_property = any(
-            type(item) is ast.FunctionDef
-            and len(item.decorator_list) == 1
-            and type(item.decorator_list[0]) is ast.Name
-            and item.decorator_list[0].id == "property"
+        class_decorator_names = {
+            item.decorator_list[0].id
             for item in statement.body
+            if (
+                type(item) is ast.FunctionDef
+                and len(item.decorator_list) == 1
+                and type(item.decorator_list[0]) is ast.Name
+            )
+        }
+
+        protected_names = (
+            set(field_factory_names)
+            | class_decorator_names
         )
-
-        protected_names = set(field_factory_names)
-
-        if uses_property:
-            protected_names.add("property")
 
         if any(
             (
@@ -523,7 +527,7 @@ def _safe_passive_class_definition(
                 body_statement,
                 allow_dunder=True,
                 annotation_semantics=annotation_semantics,
-                allow_builtin_property=conditional_dataclass,
+                allow_known_class_decorator=conditional_dataclass,
             )
         ):
             continue
@@ -977,6 +981,94 @@ def _compile(
                     (ast.Import, ast.ImportFrom),
                 ):
                     if (
+                        conditional_dataclass
+                        and type(body_statement)
+                        is ast.FunctionDef
+                        and len(body_statement.decorator_list) == 1
+                        and type(
+                            body_statement.decorator_list[0]
+                        ) is ast.Name
+                    ):
+                        decorator = (
+                            body_statement.decorator_list[0]
+                        )
+                        steps.append(
+                            _Step(
+                                "APPLY_KNOWN_CLASS_DECORATOR",
+                                target=decorator.id,
+                                binding=body_statement.name,
+                                source_line=decorator.lineno,
+                                source_column=decorator.col_offset,
+                            )
+                        )
+
+                    continue
+
+                fragment = ast.Module(
+                    body=[body_statement],
+                    type_ignores=[],
+                )
+                compiled = _compile(
+                    fragment,
+                    logical,
+                    package,
+                    _depth=_depth + 1,
+                    assume_frozen_dataclass=assume_frozen_dataclass,
+                )
+                if (
+                    compiled is None
+                    or any(
+                        item.op not in {
+                            "IMPORT",
+                            "FROM",
+                            "PREPARE_FROM_MEMBER",
+                        }
+                        for item in compiled
+                    )
+                ):
+                    return None
+
+                steps.extend(
+                    replace(item, class_local=True)
+                    for item in compiled
+                )
+
+            if conditional_dataclass:
+                steps.append(
+                    _Step(
+                        "DEFINE_CONDITIONAL_FROZEN_DATACLASS",
+                        binding=stmt.name,
+                        source_line=stmt.decorator_list[0].lineno,
+                        source_column=stmt.decorator_list[0].col_offset,
+                        annotation_builtin_names=tuple(sorted({
+                            node.id
+                            for field in stmt.body
+                            if isinstance(field, ast.AnnAssign)
+                            for node in ast.walk(field.annotation)
+                            if isinstance(node, ast.Name)
+                        })),
+                    )
+                )
+            else:
+                steps.append(
+                    _Step(
+                        (
+                            "DEFINE_DECORATED_PASSIVE_CLASS"
+                            if ordinary_named_decorators
+                            else "DEFINE_PASSIVE_CLASS"
+                        ),
+                        binding=stmt.name,
+                        source_line=stmt.lineno,
+                        source_column=stmt.col_offset,
+                        definition_id=(
+                            f"{logical}:{stmt.lineno}:{stmt.col_offset}"
+                        ),
+                        defines_init_subclass=has_init_subclass,
+                        passive_metaclass_body=passive_metaclass_body,
+                    )
+                )
+
+        elif isinstance(stmt, ast.FunctionDef):
                         isinstance(body_statement, ast.AnnAssign)
                         and body_statement.value is not None
                     ):
