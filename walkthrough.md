@@ -1,265 +1,153 @@
-# P10-R4-A2-I1 — semantyczny dispatch i konstrukcja unii
+# P10-R4-A2-I2 — tożsamość instancji definicji klasy
 
 ## PREFLIGHT
 
-- DIRECT_EVIDENCE: Contextor MCP `get_project_architecture(repo_path="C:\\Temp\\Contextor_Repo", fields=[])` przed zmianą: canonical LIVE revision 1521, `canonical_state=fresh`, `resync_required=false`; per-file `get_module_context` dla `execution.annotation_effects` pokazał `workspace_sync=verified`. `get_symbol_lineage(A9503/1, mode="preview")` rozwiązał `_eval`, revision 1521, `metadata_consistent=true`.
-- HEAD przed zmianą: `6aa63381abbe5386a0c52afdf54828bcef3e2853`. `git status --short`: przed zmianą tylko `M walkthrough.md`; nie było lokalnej zmiany w pliku produkcyjnym. Anchory: `annotation_effects.py:12-45` klas symbolicznych, `:112` `_type_operand`, `:124` `_eval`, `:246` konstrukcja `_TypeUnion((left, right))`. SOURCE_DRIFT nie wystąpił.
-- CONTRACT_PROVED: CPython 3.15.2 `C:\Python315\python.exe` potwierdził `None | None` jako TypeError oraz normalizację `int | int`, `list[int] | list[int]`, `list[int | str] | list[str | int]`, `list[[]] | list[[]]`. Nie czytano ani nie zmieniano `issues.md`.
+- DIRECT_EVIDENCE: Contextor MCP `get_project_architecture(repo_path="C:\\Temp\\Contextor_Repo", fields=[])` przed edycją: LIVE revision **1524**, `canonical_state=fresh`. `get_module_context` dla `package_model.py`, `execution/annotation_effects.py`, `execution/steps.py`: każdy `workspace_sync=verified`, revision 1524. `cycle_semantics=stale` jako odrębna rodzina; nie przesądza o obecnym zachowaniu ścieżki.
+- `get_symbol_lineage(mode="preview")` rozwiązał `_compile` i `evaluate_package_import_order` w `package_model.py` przy revision 1524. `get_file_edit_context(mode="minimal")`: właściciel `package_model.py`, 49 bezpośrednich i 396 tranzytywnych modułów konsumenckich; wynik jest statycznym blast radius, nie dowodem wykonania.
+- Literalne anchory przed zmianą: `package_model.py:918-932` kontrola współrzędnych tylko w gałęzi zwykłej klasy, `:1057-1108` kroki definicji, `:2612-2675` wykonanie warunkowej dataclass. `execution/steps.py:definition_id` już zawiera pole `str | None`. `rg -F 'PASSIVE_CLASS:' . -g '*.py' -g '!issues.md'`: dwa użycia w Pythonie, konstrukcja w `package_model.py` i rozpoznanie prefiksu w `execution/annotation_effects.py`. Nie czytano ani nie zmieniano `issues.md`.
+- `git status --short` przed edycją pusty; nie było lokalnego diffa source/tests. Anchory zgodne z aktualnym źródłem. Nie wykonywano restartu, FULL, staging, commit ani push.
 
-## ZAKRES ZMIANY
+## REPRODUKCJA PRZED ZMIANĄ
 
-- CODE_PATH_PROVED: `execution/annotation_effects.py` — wspólna symboliczna reprezentacja slotu `_BuiltinUnionOr` wyłącznie dla `_Type`, `_Class`, `_Alias`, `_TypeUnion`; `_Scalar`, `_Module`, `_Seq` nie dziedziczą po niej. `_unionable` odróżnia dopuszczalny operand `None` od dostępności slotu. `_proven_key` tworzy klucz dla bezpiecznie rozpoznanych wartości, wykluczając `_Module`. `_construct_union` rozwija zagnieżdżone unie, normalizuje `None` do `builtins.NoneType`, zachowuje pierwsze wystąpienie i usuwa duplikaty. `_eval` wywołuje tę funkcję tylko dla BitOr. Pozostałe gałęzie nie zostały zmienione.
-- Nowy `tests/test_cycle_semantics_annotation_union_i1.py` porównuje izolowany import CPython 3.15.2 z `_eval` i warunkowym `evaluate_package_import_order`. Model uruchamiany jest na AST, bez wykonywania analizowanego pakietu. `evidence_scope=CONDITIONAL_EXTERNAL_AND_FROZEN_DATACLASS_ASSUMPTIONS_NOT_RUNTIME_PROOF`; nie jest to dowód runtime safety bez założeń. Testy sprawdzają deterministyczność oraz brak mutacji AST.
+- Izolowany CPython **3.15.2** z rzeczywistym `dataclasses.dataclass(frozen=True)` dla `T; Old = T; T; C.x: Old | T`: `Old is T` = **False**, `repr(Field.type) = pkg.T | pkg.T`, `typing.get_args` zawiera **2** człony, pierwszy jest `Old`, drugi nim nie jest.
+- CODE_PATH_PROVED: dotychczasowy `evaluate_package_import_order` dla tego źródła zwracał `MODEL_PASS`, trzy założone dekoracje i eventy obydwu definicji T. Stary sentinel obu wiązań miał tę samą wartość `\x00PASSIVE_CLASS:pkg:T`; `_eval(Old | T)` zwracał tylko `_Class(identity='\x00PASSIVE_CLASS:pkg:T')`. To osiągalna kolizja tożsamości symbolicznej mimo odrębnych klas CPython.
 
-## CPYTHON / MODEL
+## IMPLEMENTACJA I REPRODUKCJA PO ZMIANIE
 
-Każdy wiersz dodatni: CPython `Field.type` jak poniżej, import OK; `_eval` zwraca oczekiwaną strukturę, model `MODEL_PASS` z jedną `ASSUMED_FROZEN_DATACLASS_DECORATION`. Każdy przypadek używa osobnego podprocesu CPython 3.15.2 oraz osobnego tymczasowego `pkg`.
+- Zmiana ograniczona do `package_model.py`: istniejąca kontrola `lineno` i `col_offset` została przeniesiona po `_safe_passive_class_definition`, przed rozgałęzienie warunkowe. Jeden `definition_id=f"{logical}:{stmt.lineno}:{stmt.col_offset}"` jest przekazywany do wszystkich trzech kroków definicji klasy. `DEFINE_CONDITIONAL_FROZEN_DATACLASS` wymaga niepustego ID przed publikacją dekoracji i zapisuje `\x00PASSIVE_CLASS:` + `step.definition_id`. Prefiks, anchory eventów dekoratora i klasy, kolejność eventów, założenia i evidence_scope pozostają takie jak przed zmianą. Nie zmieniono operatorów, `_proven_key`, `_BUILTINS`, `_GENERIC`, `annotation_effects.py` ani `steps.py`.
+- Po zmianie kroki dwóch definicji T mają `definition_id='pkg:3:0'` i `'pkg:7:0'`. Ich `source_line` pozostaje linią dekoratora, odpowiednio 2 i 6. `_eval(Old | T)` zwraca `_TypeUnion` z `_Class('\x00PASSIVE_CLASS:pkg:3:0')` i `_Class('\x00PASSIVE_CLASS:pkg:7:0')` w tej kolejności. Pełny model pozostaje `MODEL_PASS` z trzema założonymi dekoracjami. To potwierdza usunięcie kolizji wartości symbolicznej; sam `MODEL_PASS` nie służył za dowód tożsamości.
 
-| Adnotacja | CPython `repr(Field.type)` | Kluczowy wynik symboliczny |
+## MACIERZ CPYTHON / MODEL A–G
+
+Każda próba CPython odbywa się w osobnym podprocesie `.venv\\Scripts\\python.exe` (zweryfikowany CPython 3.15.2) z odrębnym tymczasowym `pkg`, a model czyta wyłącznie AST. Warunkowy `evidence_scope=CONDITIONAL_EXTERNAL_AND_FROZEN_DATACLASS_ASSUMPTIONS_NOT_RUNTIME_PROOF` we wszystkich osiągniętych przypadkach; wyniki modelu są warunkowe, nie atestują runtime builtins ani importów.
+
+| Przypadek | CPython | Model i tożsamość symboliczna |
 |---|---|---|
-| `int | int` | `<class 'int'>` | jeden `_Type(builtins.int)` |
-| `list[int] | list[int]` | `list[int]` | jeden `_Alias` |
-| `int | None` | `int | None` | `_TypeUnion(int, NoneType)` |
-| `None | int` | `None | int` | `_TypeUnion(NoneType, int)` |
-| `int | None | None` | `int | None` | dwa człony |
-| `int | str | int` | `int | str` | dwa człony |
-| `(int | str) | (str | None)` | `int | str | None` | trzy człony, pierwsza kolejność |
-| `list[int] | list[str]` | `list[int] | list[str]` | dwie różne `_Alias` |
-| `list[[]] | int` | `list[[]] | int` | `_Alias`, `_Type` |
-| `list[[]] | list[[]]` | `list[[]]` | jedna `_Alias` |
-| `list[int | str] | list[str | int]` | `list[int | str]` | jeden `_Alias`, równość zagnieżdżonej unii niezależna od kolejności |
+| A. Dwa T, alias Old, `Old | T` | `Old is T=False`, 2 człony, pierwszy Old | `MODEL_PASS`; dwa ID `pkg:3:0`, `pkg:7:0`; `_TypeUnion` z 2 `_Class` |
+| B. `Old | Old` po ponownej definicji T | wynik jest pojedynczą klasą Old, `get_args=()` | `MODEL_PASS`; `_eval` zwraca pojedynczą `_Class` pierwszej definicji |
+| C. T i U w jednym module | `Old is T=True`, `Old | U` ma 2 człony | `MODEL_PASS`; różne ID według pozycji definicji, 2 człony |
+| D. T w `pkg.a` i `pkg.b` | `Old is T=False`, 2 człony | `MODEL_PASS`; różne ID `pkg.a:3:0`, `pkg.b:3:0`, 2 człony |
+| E. Alias pierwszej T, późniejsze `T=1` | `Old is T=False`, `Old | Old` jedna klasa | `MODEL_PASS`; wiązanie Old zachowuje pierwsze ID |
+| F. Przesunięcie definicji o linię | CPython nadal 2 odrębne obiekty i 2 człony | `MODEL_PASS`; obydwa ID przesunięte o linię |
+| G. Zwykłe klasy | zwykłe definicje nadal tworzą odrębne obiekty Pythona | `_compile` nadal daje `pkg:1:0`, `pkg:2:0` w `DEFINE_PASSIVE_CLASS` |
 
-- Kontrprzykłady `None | None`, `(None | None) | int`, `None | (None | None)`: izolowany CPython kończy import z `TypeError unsupported operand type(s) for |: 'NoneType' and 'NoneType'`; `_eval=None`, model `UNKNOWN`, brak `ASSUMED_FROZEN_DATACLASS_DECORATION`.
-- Test `_proven_key` potwierdza identyczny klucz dla unii z odwróconą kolejnością, a `_construct_union` jest idempotentne dla powtórzonego członu. Test porządku wykonania: CPython przy `L[int] | R[int]` drukuje `LEFT`, `RIGHT`, następnie `FIELD int | str`; model `UNKNOWN` bez wykonania metod. Ścieżka `_eval` odwiedza `n.left` przed `n.right` (`annotation_effects.py`, gałąź `ast.BinOp`).
-- Dynamiczne granice: własne `__class_getitem__` powoduje wyłącznie efekt `USER_GETITEM` w izolowanym CPython; niestandardowe `Meta.__or__` powoduje `USER_OR`; przesłonięte modułowo `list` i zewnętrzne `from builtins import list as Alias` są `UNKNOWN` w modelu bez założonej dekoracji. `NOT_REACHED`: niestandardowa metaklasa może być odrzucona już przy definicji `T`; taki test nie dowodzi samej gałęzi BitOr.
+- `test_cycle_semantics_conditional_class_identity_i2.py` sprawdza AST bez mutacji, deterministyczność pełnego modelu, dokładne `definition_id` z kroków, liczbę i wartości członów `_eval`, CPython `is` i `typing.get_args`. Dla G test dotyczy zachowania ID w kompilatorze; nie używa podprocesu CPython, ponieważ ID jest wyłącznie faktem modelu.
 
 ## TESTY
 
-- `C:\Python315\python.exe -m pytest ...` nie uruchomił testów: interpreter nie ma zainstalowanego pytest (`No module named pytest`). Bez instalacji użyto repozytoryjnego `.venv\Scripts\python.exe`, zweryfikowanego jako CPython **3.15.2**, pytest 9.1.1.
-- `.venv\Scripts\python.exe -m pytest -q tests/test_cycle_semantics_annotation_union_i1.py tests/test_cycle_semantics_annotation_effects_i3.py tests/test_cycle_semantics_package_model.py -k 'union or annotation_effects or r8 or r10 or frozen_dataclass'`: **97 passed, 189 deselected**.
-- `.venv\Scripts\python.exe -m pytest -q tests/test_cycle_semantics_annotation_effects_i3.py tests/test_cycle_semantics_annotation_union_i1.py`: **45 passed**. Po doprecyzowaniu asercji rzeczywistego `Field.type`: `.venv\Scripts\python.exe -m pytest -q tests/test_cycle_semantics_annotation_union_i1.py`: **20 passed**.
-- Nie uruchamiano pełnego pytest ani FULL. `git diff --check` bez błędów; ostrzeżenie Git o planowanej konwersji LF/CRLF nie jest błędem składni.
+- `.venv\\Scripts\\python.exe -m pytest -q tests/test_cycle_semantics_conditional_class_identity_i2.py`: **5 passed**.
+- `.venv\\Scripts\\python.exe -m pytest -q tests/test_cycle_semantics_conditional_class_identity_i2.py tests/test_cycle_semantics_annotation_union_i1.py tests/test_cycle_semantics_annotation_effects_i3.py tests/test_cycle_semantics_passive_classes.py tests/test_cycle_semantics_class_decorator_staging.py tests/test_cycle_semantics_class_decorator_import_admission.py tests/test_cycle_semantics_class_decorator_identity_counterexamples.py tests/test_cycle_semantics_class_decorator_execution.py tests/test_cycle_semantics_class_decorator_baseline.py`: **207 passed**.
+- `.venv\\Scripts\\python.exe -m pytest -q tests/test_cycle_semantics_package_model.py -k 'r8 or r10 or frozen_dataclass'`: **52 passed, 189 deselected**. Bez pełnego pytest i FULL.
 
 ## POST-CHANGE LIVE
 
-- DIRECT_EVIDENCE: `get_live_events(after_revision=1521)` zwrócił ciągłe eventy `desktop_watcher UPDATED`: revision 1522 dla `annotation_effects.py`, revision 1523 i 1524 dla nowego testu. Brak `resync_required`.
-- `get_module_context` przy revision **1524**: oba zmienione moduły `canonical_state=fresh`, `workspace_sync=verified`. `get_file_edit_context(mode="minimal")`: dla obu plików `syntax_diagnostics.status=checked_and_none`, `availability=fresh`, `errors=[]`. `cycle_semantics` jako osobna rodzina pozostaje `stale`; nie jest dowodem o wykonaniu tych testów.
+- `get_live_events(after_revision=1524)`: ciągły dziennik, `resync_required=false`, `desktop_watcher UPDATED` revision **1525** dla `package_model.py`, revisions **1526–1527** dla nowego testu.
+- `get_project_architecture(fields=[])`: LIVE **1527**, `canonical_state=fresh`. `get_module_context`: `package_model.py`, `execution/annotation_effects.py`, `execution/steps.py` i nowy test — `workspace_sync=verified`, revision 1527. `get_file_edit_context(mode="minimal")`: oba zmienione pliki mają `syntax_diagnostics=checked_and_none`, `availability=fresh`, `errors=[]`.
 
-## GRANICE I WERDYKT
+## POBOCZNA OBSERWACJA / GRANICE
 
-- Klasy symboliczne są faktami modelu, nie obiektami analizowanego procesu. Warunkowy `MODEL_PASS` zakłada konwencjonalne builtins i pasywne importy/dekorację. Nie udowodniono stanu `__builtins__` docelowego procesu, hooków importu ani zachowania poza rozpoznawanym fragmentem Pythona.
-- Dla zbadanych próbek nie wykryto nowego FALSE_PASS ani błędnej normalizacji. **PASS w zakresie literalnej zmiany i ukierunkowanych prób**; nie stanowi certyfikacji dowolnego kodu Pythona.
+- CODE_PATH_PROVED: w istniejącej ścieżce `DEFINE_CONDITIONAL_FROZEN_DATACLASS` `package_model.py` ma dwa kolejno identyczne wywołania `_consume(value, module, namespaces)` przed publikacją (`:2652–2658` po zmianie). To zastany duplikat, niezwiązany z identyfikatorem; nie zmieniano go w tym zadaniu. Nie wykazano na tej podstawie FALSE_PASS ani efektu ubocznego.
+- `definition_id` jest identyfikatorem lokalizacji źródłowej przyjętym przez istniejący model. Dowód obejmuje odrębne definicje AST z odrębnymi lokalizacjami oraz jawne założenia warunkowe; nie certyfikuje dowolnej dynamicznej ewaluacji Pythona.
+- Werdykt: **PASS dla określonego kontraktu A–G**. Nie znaleziono SOURCE_DRIFT, nowego FALSE_PASS ani sprzeczności z CPython w zbadanych próbach.
 
 ## FILES_CHANGED
 
-- `contextor/core/cycle_semantics/execution/annotation_effects.py`
-- `tests/test_cycle_semantics_annotation_union_i1.py`
+- `contextor/core/cycle_semantics/package_model.py`
+- `tests/test_cycle_semantics_conditional_class_identity_i2.py`
 
 ## FULL_DIFFS
 
-Pełne rzeczywiste diffy dwóch zmienionych plików source/tests znajdują się poniżej. `walkthrough.md` jest wyłącznie raportem i nie jest liczony jako zmiana source/tests.
+Poniżej pełne rzeczywiste diffy dwóch zmienionych plików source/tests. `walkthrough.md` jako raport nie jest liczony jako plik source/test.
 
 ```diff
-diff --git a/contextor/core/cycle_semantics/execution/annotation_effects.py b/contextor/core/cycle_semantics/execution/annotation_effects.py
-index 9a7cfa9..eabe4d2 100644
---- a/contextor/core/cycle_semantics/execution/annotation_effects.py
-+++ b/contextor/core/cycle_semantics/execution/annotation_effects.py
-@@ -8,19 +8,25 @@ from typing import Mapping
- from .class_facts import _ClassFact, _BUILTIN_TYPE_ID
- 
- 
-+class _BuiltinUnionOr:
-+    """Proven CPython built-in union number slot."""
-+
-+    __slots__ = ()
-+
-+
- @dataclass(frozen=True)
- class _Scalar:
-     value: object
- 
- 
- @dataclass(frozen=True)
--class _Type:
-+class _Type(_BuiltinUnionOr):
-     identity: str
-     generic: bool
- 
- 
- @dataclass(frozen=True)
--class _Class:
-+class _Class(_BuiltinUnionOr):
-     identity: str
- 
- 
-@@ -36,13 +42,13 @@ class _Seq:
- 
- 
- @dataclass(frozen=True)
--class _Alias:
-+class _Alias(_BuiltinUnionOr):
-     origin: _Type
-     args: tuple[object, ...]
- 
- 
- @dataclass(frozen=True)
--class _TypeUnion:
-+class _TypeUnion(_BuiltinUnionOr):
-     args: tuple[object, ...]
- 
- 
-@@ -109,18 +115,123 @@ def _value(
-     return None
- 
- 
--def _type_operand(v: object) -> bool:
-+def _unionable(value: object) -> bool:
-     return (
--        isinstance(
--            v, (_Type, _Class, _Alias, _TypeUnion)
--        )
-+        isinstance(value, _BuiltinUnionOr)
-         or (
--            isinstance(v, _Scalar)
--            and v.value is None
-+            type(value) is _Scalar
-+            and value.value is None
-         )
-     )
- 
- 
-+def _proven_key(value: object) -> object | None:
-+    if type(value) is _Scalar:
-+        return ("scalar", value.value)
-+
-+    if type(value) is _Type:
-+        return ("type", value.identity)
-+
-+    if type(value) is _Class:
-+        return ("class", value.identity)
-+
-+    if type(value) is _Seq:
-+        keys = tuple(
-+            _proven_key(item)
-+            for item in value.items
-+        )
-+        if any(key is None for key in keys):
-+            return None
-+        return ("sequence", value.kind, keys)
-+
-+    if type(value) is _Alias:
-+        origin = _proven_key(value.origin)
-+        arguments = tuple(
-+            _proven_key(arg)
-+            for arg in value.args
-+        )
-+        if (
-+            origin is None
-+            or any(arg is None for arg in arguments)
-+        ):
-+            return None
-+        return ("alias", origin, arguments)
-+
-+    if type(value) is _TypeUnion:
-+        keys = tuple(
-+            _proven_key(arg)
-+            for arg in value.args
-+        )
-+        if any(key is None for key in keys):
-+            return None
-+        return ("union", frozenset(keys))
-+
-+    return None
-+
-+
-+def _construct_union(
-+    left: object,
-+    right: object,
-+) -> object | None:
-+    if not (
-+        _unionable(left)
-+        and _unionable(right)
-+    ):
-+        return None
-+
-+    # Dostępny musi być rzeczywisty,
-+    # zamodelowany slot operatora po
-+    # co najmniej jednej stronie.
-+    if not (
-+        isinstance(left, _BuiltinUnionOr)
-+        or isinstance(right, _BuiltinUnionOr)
-+    ):
-+        return None
-+
-+    members: list[object] = []
-+    seen: set[object] = set()
-+
-+    def insert(value: object) -> bool:
-+        if type(value) is _TypeUnion:
-+            candidates = value.args
-+        else:
-+            candidates = (value,)
-+
-+        for candidate in candidates:
-+            # Reguła CPython unionbuilder:
-+            # None jako element unii jest
-+            # normalizowane do typu NoneType.
-+            if (
-+                type(candidate) is _Scalar
-+                and candidate.value is None
-+            ):
-+                candidate = _Type(
-+                    "builtins.NoneType",
-+                    False,
-+                )
-+
-+            key = _proven_key(candidate)
-+            if key is None:
-+                return False
-+
-+            if key not in seen:
-+                seen.add(key)
-+                members.append(candidate)
-+
-+        return True
-+
-+    if not insert(left):
-+        return None
-+
-+    if not insert(right):
-+        return None
-+
-+    if len(members) == 1:
-+        return members[0]
-+
-+    return _TypeUnion(tuple(members))
-+
-+
- def _eval(
-     expr: ast.expr,
-     class_ns: Mapping[str, object],
-@@ -238,12 +349,8 @@ def _eval(
-             if left is None or right is None:
+diff --git a/contextor/core/cycle_semantics/package_model.py b/contextor/core/cycle_semantics/package_model.py
+index 7b64146..6aa45d6 100644
+--- a/contextor/core/cycle_semantics/package_model.py
++++ b/contextor/core/cycle_semantics/package_model.py
+@@ -894,6 +894,18 @@ def _compile(
+             ):
                  return None
  
--            if (
--                type(n.op) is ast.BitOr
--                and _type_operand(left)
--                and _type_operand(right)
--            ):
--                return _TypeUnion((left, right))
-+            if type(n.op) is ast.BitOr:
-+                return _construct_union(left, right)
++            if (
++                type(stmt.lineno) is not int
++                or stmt.lineno < 1
++                or type(stmt.col_offset) is not int
++                or stmt.col_offset < 0
++            ):
++                return None
++
++            definition_id = (
++                f"{logical}:{stmt.lineno}:{stmt.col_offset}"
++            )
++
+             ordinary_named_decorators = (
+                 bool(stmt.decorator_list)
+                 and not conditional_dataclass
+@@ -916,17 +928,6 @@ def _compile(
+                     return None
  
-             if (
-                 isinstance(left, _Scalar)
-diff --git a/tests/test_cycle_semantics_annotation_union_i1.py b/tests/test_cycle_semantics_annotation_union_i1.py
+             if not conditional_dataclass:
+-                if (
+-                    type(stmt.lineno) is not int
+-                    or stmt.lineno < 1
+-                    or type(stmt.col_offset) is not int
+-                    or stmt.col_offset < 0
+-                ):
+-                    return None
+-
+-                definition_id = (
+-                    f"{logical}:{stmt.lineno}:{stmt.col_offset}"
+-                )
+                 if ordinary_named_decorators:
+                     steps.append(
+                         _Step(
+@@ -1059,6 +1060,7 @@ def _compile(
+                     _Step(
+                         "DEFINE_CONDITIONAL_FROZEN_DATACLASS",
+                         binding=stmt.name,
++                        definition_id=definition_id,
+                         source_line=stmt.decorator_list[0].lineno,
+                         source_column=stmt.decorator_list[0].col_offset,
+                         annotation_fields=tuple(
+@@ -1102,9 +1104,7 @@ def _compile(
+                         binding=stmt.name,
+                         source_line=stmt.lineno,
+                         source_column=stmt.col_offset,
+-                        definition_id=(
+-                            f"{logical}:{stmt.lineno}:{stmt.col_offset}"
+-                        ),
++                        definition_id=definition_id,
+                         defines_init_subclass=has_init_subclass,
+                         passive_metaclass_body=passive_metaclass_body,
+                     )
+@@ -2655,6 +2655,9 @@ def evaluate_package_import_order(
+                 if not _consume(value, module, namespaces):
+                     return result("UNKNOWN", module, name)
+ 
++            if not step.definition_id:
++                return result("UNKNOWN", module, step.binding)
++
+             assumed_dataclass_decorations.append(
+                 AssumedFrozenDataclassDecoration(
+                     module=module,
+@@ -2666,9 +2669,7 @@ def evaluate_package_import_order(
+             )
+             namespaces[module][step.binding] = (
+                 "\x00PASSIVE_CLASS:"
+-                + module
+-                + ":"
+-                + step.binding
++                + step.definition_id
+             )
+             events.append(
+                 PackageModelEvent(
+diff --git a/tests/test_cycle_semantics_conditional_class_identity_i2.py b/tests/test_cycle_semantics_conditional_class_identity_i2.py
 new file mode 100644
-index 0000000..c6d5a98
+index 0000000..54ab964
 --- /dev/null
-+++ b/tests/test_cycle_semantics_annotation_union_i1.py
-@@ -0,0 +1,213 @@
-+"""CPython 3.15 union operator and restricted annotation model parity."""
++++ b/tests/test_cycle_semantics_conditional_class_identity_i2.py
+@@ -0,0 +1,192 @@
++"""Definition identity of conditional frozen dataclasses on CPython 3.15."""
 +
 +import ast
 +import os
@@ -269,56 +157,72 @@ index 0000000..c6d5a98
 +import pytest
 +
 +from contextor.core.cycle_semantics.execution.annotation_effects import (
-+    _Alias,
-+    _BuiltinUnionOr,
 +    _Class,
-+    _Module,
-+    _Scalar,
-+    _Seq,
-+    _Type,
 +    _TypeUnion,
-+    _construct_union,
 +    _eval,
-+    _proven_key,
 +)
 +from contextor.core.cycle_semantics.package_model import (
++    _compile,
 +    evaluate_package_import_order,
 +)
 +
 +
 +pytestmark = pytest.mark.skipif(
 +    sys.version_info[:2] != (3, 15),
-+    reason="CPython 3.15 annotation consumption contract",
++    reason="CPython 3.15 deferred frozen dataclass contract",
 +)
 +
 +
-+def _source(annotation, prelude=""):
-+    return (
-+        prelude
-+        + "from dataclasses import dataclass\n"
-+        + "@dataclass(frozen=True)\n"
-+        + "class C:\n"
-+        + f"    x: {annotation}\n"
++DECORATOR = "from dataclasses import dataclass\n"
++T = "@dataclass(frozen=True)\nclass T:\n    x: int\n"
++C = "@dataclass(frozen=True)\nclass C:\n    x: Old | T\n"
++
++
++def _compile_steps(source, logical="pkg"):
++    tree = ast.parse(source)
++    before = ast.dump(tree)
++    steps = _compile(
++        tree, logical, True,
++        annotation_semantics="DEFERRED",
++        assume_frozen_dataclass=True,
++    )
++    assert steps is not None
++    assert ast.dump(tree) == before
++    return steps
++
++
++def _definitions(source, name="T", logical="pkg"):
++    return [
++        step for step in _compile_steps(source, logical)
++        if step.op == "DEFINE_CONDITIONAL_FROZEN_DATACLASS"
++        and step.binding == name
++    ]
++
++
++def _symbolic(expression, bindings):
++    namespace = {
++        name: "\x00PASSIVE_CLASS:" + identity
++        for name, identity in bindings.items()
++    }
++    return _eval(
++        ast.parse(expression, mode="eval").body,
++        {}, namespace, {"pkg": namespace},
 +    )
 +
 +
-+def _model(source):
-+    tree = ast.parse(source)
-+    before = ast.dump(tree)
++def _model(sources):
++    trees = {name: ast.parse(source) for name, source in sources.items()}
++    before = {name: ast.dump(tree) for name, tree in trees.items()}
 +    options = dict(
 +        annotation_semantics="DEFERRED",
 +        _compile_on_first_import=True,
 +        _assume_passive_external_imports=True,
 +        _assume_frozen_dataclass_decoration=True,
 +    )
-+    first = evaluate_package_import_order(
-+        {"pkg.__init__": tree}, "pkg", **options,
-+    )
-+    second = evaluate_package_import_order(
-+        {"pkg.__init__": tree}, "pkg", **options,
-+    )
++    first = evaluate_package_import_order(trees, "pkg", **options)
++    second = evaluate_package_import_order(trees, "pkg", **options)
 +    assert first == second
-+    assert ast.dump(tree) == before
++    assert before == {name: ast.dump(tree) for name, tree in trees.items()}
 +    assert first.evidence_scope == (
 +        "CONDITIONAL_EXTERNAL_AND_FROZEN_DATACLASS_"
 +        "ASSUMPTIONS_NOT_RUNTIME_PROOF"
@@ -326,150 +230,113 @@ index 0000000..c6d5a98
 +    return first
 +
 +
-+def _runtime(tmp_path, source):
++def _cpython(tmp_path, sources):
 +    package = tmp_path / "pkg"
 +    package.mkdir(parents=True)
-+    (package / "__init__.py").write_text(source, encoding="utf-8")
++    for logical, source in sources.items():
++        name = "__init__.py" if logical == "pkg.__init__" else logical.removeprefix("pkg.") + ".py"
++        (package / name).write_text(source, encoding="utf-8")
 +    env = os.environ.copy()
 +    env["PYTHONPATH"] = str(tmp_path)
 +    env["PYTHONDONTWRITEBYTECODE"] = "1"
 +    code = (
-+        "try:\n"
-+        " import pkg\n"
-+        " print('FIELD', repr(pkg.C.__dataclass_fields__['x'].type))\n"
-+        " print('RESULT OK')\n"
-+        "except BaseException as error:\n"
-+        " print('RESULT', type(error).__name__, str(error))\n"
++        "import pkg, typing\n"
++        "print('SAME', pkg.Old is pkg.T)\n"
++        "value = pkg.C.__dataclass_fields__['x'].type\n"
++        "print('ARGS', len(typing.get_args(value)))\n"
++        "print('MEMBERS', tuple(arg is pkg.Old for arg in typing.get_args(value)))\n"
++        "print('FIELD', repr(value))\n"
 +    )
 +    process = subprocess.run(
 +        [sys.executable, "-u", "-c", code],
-+        cwd=tmp_path,
-+        env=env,
-+        capture_output=True,
-+        text=True,
-+        timeout=15,
-+        check=False,
++        cwd=tmp_path, env=env,
++        capture_output=True, text=True,
++        timeout=15, check=False,
 +    )
 +    assert process.returncode == 0, process.stderr
 +    return process.stdout.splitlines()
 +
 +
-+@pytest.mark.parametrize("annotation", [
-+    "None | None",
-+    "(None | None) | int",
-+    "None | (None | None)",
-+])
-+def test_none_without_union_slot_stays_unknown(
-+    tmp_path, annotation,
-+):
-+    assert _eval(ast.parse(annotation, mode="eval").body, {}, {}, {}) is None
-+    result = _model(_source(annotation))
-+    assert result.outcome == "UNKNOWN"
-+    assert result.assumed_dataclass_decorations == ()
-+    assert all(
-+        event.operation != "ASSUMED_FROZEN_DATACLASS_DECORATION"
-+        for event in result.events
++def test_redefinition_alias_and_union_have_two_identities(tmp_path):
++    source = DECORATOR + T + "Old = T\n" + T + C
++    definitions = _definitions(source)
++    assert len(definitions) == 2
++    first, second = (step.definition_id for step in definitions)
++    assert (first, second) == ("pkg:3:0", "pkg:7:0")
++    assert all(step.source_line == int(step.definition_id.split(":")[1]) - 1 for step in definitions)
++    value = _symbolic("Old | T", {"Old": first, "T": second})
++    assert isinstance(value, _TypeUnion)
++    assert value.args == (
++        _Class("\x00PASSIVE_CLASS:" + first),
++        _Class("\x00PASSIVE_CLASS:" + second),
 +    )
-+    assert _runtime(tmp_path, _source(annotation))[-1].startswith(
-+        "RESULT TypeError unsupported operand type(s) for |:"
-+    )
-+
-+
-+@pytest.mark.parametrize("annotation,expected,field_type", [
-+    ("int | int", _Type("builtins.int", False), "<class 'int'>"),
-+    ("list[int] | list[int]", _Alias(_Type("builtins.list", True), (_Type("builtins.int", False),)), "list[int]"),
-+    ("int | None", _TypeUnion((_Type("builtins.int", False), _Type("builtins.NoneType", False))), "int | None"),
-+    ("None | int", _TypeUnion((_Type("builtins.NoneType", False), _Type("builtins.int", False))), "None | int"),
-+    ("int | None | None", _TypeUnion((_Type("builtins.int", False), _Type("builtins.NoneType", False))), "int | None"),
-+    ("int | str | int", _TypeUnion((_Type("builtins.int", False), _Type("builtins.str", False))), "int | str"),
-+    ("(int | str) | (str | None)", _TypeUnion((_Type("builtins.int", False), _Type("builtins.str", False), _Type("builtins.NoneType", False))), "int | str | None"),
-+    ("list[int] | list[str]", _TypeUnion((_Alias(_Type("builtins.list", True), (_Type("builtins.int", False),)), _Alias(_Type("builtins.list", True), (_Type("builtins.str", False),)))), "list[int] | list[str]"),
-+    ("list[[]] | int", _TypeUnion((_Alias(_Type("builtins.list", True), (_Seq("list", ()),)), _Type("builtins.int", False))), "list[[]] | int"),
-+    ("list[[]] | list[[]]", _Alias(_Type("builtins.list", True), (_Seq("list", ()),)), "list[[]]"),
-+    ("list[int | str] | list[str | int]", _Alias(_Type("builtins.list", True), (_TypeUnion((_Type("builtins.int", False), _Type("builtins.str", False))),)), "list[int | str]"),
-+])
-+def test_union_normalization_matches_cpython(
-+    tmp_path, annotation, expected, field_type,
-+):
-+    expression = ast.parse(annotation, mode="eval").body
-+    before = ast.dump(expression)
-+    assert _eval(expression, {}, {}, {}) == expected
-+    assert _eval(expression, {}, {}, {}) == expected
-+    assert ast.dump(expression) == before
-+    result = _model(_source(annotation))
++    result = _model({"pkg.__init__": source})
 +    assert result.outcome == "MODEL_PASS"
-+    assert len(result.assumed_dataclass_decorations) == 1
-+    runtime = _runtime(tmp_path, _source(annotation))
-+    assert runtime[-1] == "RESULT OK"
-+    assert runtime[0] == f"FIELD {field_type}"
++    assert len(result.assumed_dataclass_decorations) == 3
++    assert _cpython(tmp_path, {"pkg.__init__": source})[:3] == [
++        "SAME False", "ARGS 2", "MEMBERS (True, False)",
++    ]
 +
 +
-+def test_union_keys_and_dispatch_boundary():
-+    integer = _Type("builtins.int", False)
-+    string = _Type("builtins.str", False)
-+    left = _construct_union(integer, string)
-+    right = _construct_union(string, integer)
-+    assert isinstance(left, _TypeUnion)
-+    assert isinstance(right, _TypeUnion)
-+    assert left.args == (integer, string)
-+    assert right.args == (string, integer)
-+    assert _proven_key(left) == _proven_key(right)
-+    assert _construct_union(left, integer) == left
-+    assert _construct_union(_Scalar(None), _Scalar(None)) is None
-+    assert _proven_key(_Module("external")) is None
-+    assert not isinstance(_Scalar(None), _BuiltinUnionOr)
-+    assert not isinstance(_Seq("list", ()), _BuiltinUnionOr)
-+    assert not isinstance(_Module("pkg"), _BuiltinUnionOr)
-+    assert isinstance(_Class("pkg.T"), _BuiltinUnionOr)
-+
-+
-+@pytest.mark.parametrize("prelude,annotation,effect", [
-+    (
-+        "class T:\n"
-+        "    def __class_getitem__(cls, item):\n"
-+        "        print('USER_GETITEM', flush=True)\n"
-+        "        raise SystemExit('getitem-effect')\n",
-+        "T[int]", "USER_GETITEM",
-+    ),
-+    (
-+        "class Meta(type):\n"
-+        "    def __or__(cls, other):\n"
-+        "        print('USER_OR', flush=True)\n"
-+        "        raise SystemExit('or-effect')\n"
-+        "class T(metaclass=Meta): pass\n",
-+        "T | int", "USER_OR",
-+    ),
-+    ("list = 1\n", "list[int]", None),
-+    ("from builtins import list as Alias\n", "Alias[int]", None),
-+])
-+def test_dynamic_boundaries_do_not_gain_pass(
-+    tmp_path, prelude, annotation, effect,
-+):
-+    source = _source(annotation, prelude)
-+    result = _model(source)
-+    assert result.outcome == "UNKNOWN"
-+    assert result.assumed_dataclass_decorations == ()
-+    runtime = _runtime(tmp_path, source)
-+    if effect:
-+        assert effect in runtime
-+
-+
-+def test_operand_evaluation_order_remains_left_to_right(tmp_path):
-+    prelude = (
-+        "class L:\n"
-+        "    def __class_getitem__(cls, item):\n"
-+        "        print('LEFT', flush=True)\n"
-+        "        return int\n"
-+        "class R:\n"
-+        "    def __class_getitem__(cls, item):\n"
-+        "        print('RIGHT', flush=True)\n"
-+        "        return str\n"
++def test_same_alias_deduplicates_and_rebinding_preserves_old(tmp_path):
++    source = DECORATOR + T + "Old = T\n" + T + "T = 1\n" + C.replace("Old | T", "Old | Old")
++    first, second = (step.definition_id for step in _definitions(source))
++    assert first != second
++    assert _symbolic("Old | Old", {"Old": first}) == _Class(
++        "\x00PASSIVE_CLASS:" + first
 +    )
-+    source = _source("L[int] | R[int]", prelude)
-+    result = _model(source)
-+    assert result.outcome == "UNKNOWN"
-+    assert result.assumed_dataclass_decorations == ()
-+    assert _runtime(tmp_path, source) == [
-+        "LEFT", "RIGHT", "FIELD int | str", "RESULT OK",
++    assert _model({"pkg.__init__": source}).outcome == "MODEL_PASS"
++    runtime = _cpython(tmp_path, {"pkg.__init__": source})
++    assert runtime[:3] == ["SAME False", "ARGS 0", "MEMBERS ()"]
++
++
++def test_two_names_and_two_modules_keep_distinct_identity(tmp_path):
++    local = DECORATOR + T + "Old = T\n" + T.replace("class T:", "class U:") + C.replace("Old | T", "Old | U")
++    t_id = _definitions(local)[0].definition_id
++    u_id = _definitions(local, "U")[0].definition_id
++    assert t_id != u_id
++    value = _symbolic("Old | U", {"Old": t_id, "U": u_id})
++    assert isinstance(value, _TypeUnion) and len(value.args) == 2
++    assert _model({"pkg.__init__": local}).outcome == "MODEL_PASS"
++    assert _cpython(tmp_path / "local", {"pkg.__init__": local})[:3] == [
++        "SAME True", "ARGS 2", "MEMBERS (True, False)",
++    ]
++
++    sources = {
++        "pkg.__init__": DECORATOR + "from .a import T as Old\nfrom .b import T\n" + C,
++        "pkg.a": DECORATOR + T,
++        "pkg.b": DECORATOR + T,
++    }
++    a_id = _definitions(sources["pkg.a"], logical="pkg.a")[0].definition_id
++    b_id = _definitions(sources["pkg.b"], logical="pkg.b")[0].definition_id
++    assert a_id != b_id
++    assert isinstance(_symbolic("Old | T", {"Old": a_id, "T": b_id}), _TypeUnion)
++    assert _model(sources).outcome == "MODEL_PASS"
++    assert _cpython(tmp_path, sources)[:3] == [
++        "SAME False", "ARGS 2", "MEMBERS (True, False)",
++    ]
++
++
++def test_shifted_definition_changes_id_not_runtime_semantics(tmp_path):
++    source = DECORATOR + T + "Old = T\n" + T + C
++    shifted = DECORATOR + "\n" + T + "Old = T\n" + T + C
++    original = [step.definition_id for step in _definitions(source)]
++    moved = [step.definition_id for step in _definitions(shifted)]
++    assert original != moved
++    assert [int(value.split(":")[1]) for value in moved] == [
++        int(value.split(":")[1]) + 1 for value in original
++    ]
++    assert _model({"pkg.__init__": shifted}).outcome == "MODEL_PASS"
++    assert _cpython(tmp_path, {"pkg.__init__": shifted})[:3] == [
++        "SAME False", "ARGS 2", "MEMBERS (True, False)",
++    ]
++
++
++def test_ordinary_class_definition_id_unchanged():
++    source = "class T: pass\nclass T: pass\n"
++    steps = _compile_steps(source)
++    defined = [step for step in steps if step.op == "DEFINE_PASSIVE_CLASS"]
++    assert [step.definition_id for step in defined] == [
++        "pkg:1:0", "pkg:2:0",
 +    ]
 ```

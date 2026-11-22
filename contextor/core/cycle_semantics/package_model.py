@@ -894,6 +894,18 @@ def _compile(
             ):
                 return None
 
+            if (
+                type(stmt.lineno) is not int
+                or stmt.lineno < 1
+                or type(stmt.col_offset) is not int
+                or stmt.col_offset < 0
+            ):
+                return None
+
+            definition_id = (
+                f"{logical}:{stmt.lineno}:{stmt.col_offset}"
+            )
+
             ordinary_named_decorators = (
                 bool(stmt.decorator_list)
                 and not conditional_dataclass
@@ -916,17 +928,6 @@ def _compile(
                     return None
 
             if not conditional_dataclass:
-                if (
-                    type(stmt.lineno) is not int
-                    or stmt.lineno < 1
-                    or type(stmt.col_offset) is not int
-                    or stmt.col_offset < 0
-                ):
-                    return None
-
-                definition_id = (
-                    f"{logical}:{stmt.lineno}:{stmt.col_offset}"
-                )
                 if ordinary_named_decorators:
                     steps.append(
                         _Step(
@@ -1059,6 +1060,7 @@ def _compile(
                     _Step(
                         "DEFINE_CONDITIONAL_FROZEN_DATACLASS",
                         binding=stmt.name,
+                        definition_id=definition_id,
                         source_line=stmt.decorator_list[0].lineno,
                         source_column=stmt.decorator_list[0].col_offset,
                         annotation_fields=tuple(
@@ -1102,9 +1104,7 @@ def _compile(
                         binding=stmt.name,
                         source_line=stmt.lineno,
                         source_column=stmt.col_offset,
-                        definition_id=(
-                            f"{logical}:{stmt.lineno}:{stmt.col_offset}"
-                        ),
+                        definition_id=definition_id,
                         defines_init_subclass=has_init_subclass,
                         passive_metaclass_body=passive_metaclass_body,
                     )
@@ -2655,6 +2655,9 @@ def evaluate_package_import_order(
                 if not _consume(value, module, namespaces):
                     return result("UNKNOWN", module, name)
 
+            if not step.definition_id:
+                return result("UNKNOWN", module, step.binding)
+
             assumed_dataclass_decorations.append(
                 AssumedFrozenDataclassDecoration(
                     module=module,
@@ -2666,9 +2669,7 @@ def evaluate_package_import_order(
             )
             namespaces[module][step.binding] = (
                 "\x00PASSIVE_CLASS:"
-                + module
-                + ":"
-                + step.binding
+                + step.definition_id
             )
             events.append(
                 PackageModelEvent(
