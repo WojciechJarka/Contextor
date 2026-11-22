@@ -33,7 +33,11 @@ from .execution.expressions import (
 from .execution.definition_checks import (
     _exact_frozen_dataclass_decorator,
     _restricted_defaultless_dataclass_field_call,
-    _restricted_dataclass_field_annotation,
+)
+from .execution.annotation_effects import (
+    _Scalar,
+    _eval,
+    _consume,
 )
 from .execution.class_facts import (
     _ClassFact,
@@ -419,11 +423,6 @@ def _safe_passive_class_definition(
                 return False
 
             if isinstance(body_statement, ast.AnnAssign):
-                if not _restricted_dataclass_field_annotation(
-                    body_statement.annotation
-                ):
-                    return False
-
                 default_value = body_statement.value
                 literal_default = (
                     type(default_value) is ast.Constant
@@ -1062,13 +1061,34 @@ def _compile(
                         binding=stmt.name,
                         source_line=stmt.decorator_list[0].lineno,
                         source_column=stmt.decorator_list[0].col_offset,
-                        annotation_builtin_names=tuple(sorted({
-                            node.id
-                            for field in stmt.body
-                            if isinstance(field, ast.AnnAssign)
-                            for node in ast.walk(field.annotation)
-                            if isinstance(node, ast.Name)
-                        })),
+                        annotation_fields=tuple(
+                            (item.target.id, item.annotation)
+                            for item in stmt.body
+                            if isinstance(item, ast.AnnAssign)
+                        ),
+                        annotation_class_bindings=(
+                            tuple(
+                                (
+                                    item.target.id,
+                                    item.value
+                                    if type(item.value) is ast.Constant
+                                    else None,
+                                )
+                                for item in stmt.body
+                                if (
+                                    isinstance(item, ast.AnnAssign)
+                                    and item.value is not None
+                                )
+                            )
+                            + tuple(
+                                (item.name, None)
+                                for item in stmt.body
+                                if isinstance(
+                                    item,
+                                    (ast.FunctionDef, ast.AsyncFunctionDef),
+                                )
+                            )
+                        ),
                     )
                 )
             else:
@@ -2593,43 +2613,47 @@ def evaluate_package_import_order(
             if (
                 namespaces[module].get("dataclass")
                 != "\x00ASSUMED_EXTERNAL:dataclasses:dataclass"
-                or any(
-                    (
-                        namespaces[module].get(name)
-                        != "\x00ASSUMED_EXTERNAL:ast"
-                        if name == "ast"
-                        else (
-                            name in namespaces[module]
-                            if name in {
-                                "str",
-                                "int",
-                                "bool",
-                                "float",
-                                "bytes",
-                                "dict",
-                                "list",
-                                "set",
-                                "tuple",
-                            }
-                            else not (
-                                isinstance(
-                                    namespaces[module].get(name),
-                                    _ClassFact,
-                                )
-                                or (
-                                    type(namespaces[module].get(name))
-                                    is str
-                                    and namespaces[module][name].startswith(
-                                        "\x00PASSIVE_CLASS:"
-                                    )
-                                )
-                            )
-                        )
-                    )
-                    for name in step.annotation_builtin_names
-                )
             ):
                 return result("UNKNOWN", module, step.binding)
+
+            class_bindings = {
+                "__module__": _Scalar(module),
+                "__qualname__": _Scalar(step.binding),
+                "__annotations__": None,
+                "__annotate__": None,
+                "__classdict__": None,
+                "__classcell__": None,
+                "__doc__": None,
+            }
+
+            for name, expression in step.annotation_class_bindings:
+                class_bindings[name] = (
+                    _Scalar(expression.value)
+                    if type(expression) is ast.Constant
+                    else None
+                )
+
+            evaluated = []
+
+            for name, expression in step.annotation_fields:
+                value = _eval(
+                    expression,
+                    class_bindings,
+                    namespaces[module],
+                    namespaces,
+                )
+
+                if value is None:
+                    return result("UNKNOWN", module, name)
+
+                evaluated.append((name, value))
+
+            for name, value in evaluated:
+                if not _consume(value, module, namespaces):
+                    return result("UNKNOWN", module, name)
+
+                if not _consume(value, module, namespaces):
+                    return result("UNKNOWN", module, name)
 
             assumed_dataclass_decorations.append(
                 AssumedFrozenDataclassDecoration(

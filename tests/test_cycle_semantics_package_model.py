@@ -308,9 +308,7 @@ def test_r8_constant_field_defaults(literal):
         "value: bool = 1 + 2",
         "value: bool = (1, 2)",
         "value: bool = {}",
-        "value: str | int",
         "value: str | UnknownName",
-        "value: str | None | None",
         "value: str + None",
         "value: str | None = factory()",
         "first: bool = False\n    later: int",
@@ -588,7 +586,7 @@ def _r10_assert_rejected(result):
     )
 
 
-def test_r10_parsed_source_input_crosses_class():
+def test_r10_external_ast_attribute_has_no_authoritative_binding():
     source = (
         "@dataclass(frozen=True)\n"
         "class ParsedSourceInput:\n"
@@ -598,47 +596,15 @@ def test_r10_parsed_source_input_crosses_class():
 
     result = _r10_qualified_ast_result(source)
 
-    assert result.outcome == "MODEL_PASS"
+    assert result.outcome == "UNKNOWN"
     assert result.evidence_scope == (
         "CONDITIONAL_EXTERNAL_AND_FROZEN_DATACLASS_"
         "ASSUMPTIONS_NOT_RUNTIME_PROOF"
     )
-
-    assert len(result.assumed_dataclass_decorations) == 1
-
-    decoration = result.assumed_dataclass_decorations[0]
-
-    assert decoration.class_name == "ParsedSourceInput"
-    assert decoration.decorator == (
-        "dataclasses.dataclass(frozen=True)"
-    )
-
-    events = list(result.events)
-
-    decorated = next(
-        index for index, event in enumerate(events)
-        if event.operation
-        == "ASSUMED_FROZEN_DATACLASS_DECORATION"
-        and event.symbol == "ParsedSourceInput"
-    )
-
-    bound = next(
-        index for index, event in enumerate(events)
-        if event.operation == "DEFINE_PASSIVE_CLASS"
-        and event.symbol == "ParsedSourceInput"
-    )
-
-    imported = next(
-        index for index, event in enumerate(events)
-        if event.operation == "START_IMPORT"
-        and event.target == "pkg.child"
-    )
-
-    assert decorated < bound < imported
-    assert result.reached_unmodeled_import is None
+    _r10_assert_rejected(result)
 
 
-def test_r10_both_source_dataclasses_cross():
+def test_r10_external_ast_attribute_stops_before_both_dataclasses():
     source = (
         "@dataclass(frozen=True)\n"
         "class ParsedSourceInput:\n"
@@ -653,15 +619,7 @@ def test_r10_both_source_dataclasses_cross():
 
     result = _r10_qualified_ast_result(source)
 
-    assert result.outcome == "MODEL_PASS"
-
-    assert tuple(
-        record.class_name
-        for record in result.assumed_dataclass_decorations
-    ) == (
-        "ParsedSourceInput",
-        "SourceSnapshot",
-    )
+    _r10_assert_rejected(result)
 
 
 @pytest.mark.parametrize(
@@ -673,7 +631,7 @@ def test_r10_both_source_dataclasses_cross():
         "list[ast.AST]",
     ],
 )
-def test_r10_restricted_qualified_annotations(annotation):
+def test_r10_external_qualified_annotations_unknown(annotation):
     source = (
         "@dataclass(frozen=True)\n"
         "class ParsedSourceInput:\n"
@@ -682,8 +640,7 @@ def test_r10_restricted_qualified_annotations(annotation):
 
     result = _r10_qualified_ast_result(source)
 
-    assert result.outcome == "MODEL_PASS"
-    assert len(result.assumed_dataclass_decorations) == 1
+    _r10_assert_rejected(result)
 
 
 @pytest.mark.parametrize(
@@ -735,7 +692,7 @@ def test_r10_rejects_unproven_ast_binding(prelude):
     _r10_assert_rejected(result)
 
 
-def test_r10_later_ast_rebinding_does_not_retroactively_fail():
+def test_r10_later_ast_rebinding_cannot_certify_earlier_attribute():
     source = (
         "@dataclass(frozen=True)\n"
         "class ParsedSourceInput:\n"
@@ -747,24 +704,11 @@ def test_r10_later_ast_rebinding_does_not_retroactively_fail():
         after_class="ast = 42\n",
     )
 
-    assert result.outcome == "MODEL_PASS"
-    assert len(result.assumed_dataclass_decorations) == 1
-
-    events = list(result.events)
-
-    bound = next(
-        index for index, event in enumerate(events)
-        if event.operation == "DEFINE_PASSIVE_CLASS"
-        and event.symbol == "ParsedSourceInput"
+    _r10_assert_rejected(result)
+    assert not any(
+        event.operation == "BIND" and event.symbol == "ast"
+        for event in result.events
     )
-
-    rebound = next(
-        index for index, event in enumerate(events)
-        if event.operation == "BIND"
-        and event.symbol == "ast"
-    )
-
-    assert bound < rebound
 
 
 def test_r10_requires_explicit_dataclass_assumption():

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 from dataclasses import dataclass
 
 
@@ -15,7 +16,10 @@ class _Step:
     class_local: bool = False
     source_line: int | None = None
     source_column: int | None = None
-    annotation_builtin_names: tuple[str, ...] = ()
+    annotation_fields: tuple[tuple[str, ast.expr], ...] = ()
+    annotation_class_bindings: tuple[
+        tuple[str, ast.expr | None], ...
+    ] = ()
     definition_id: str | None = None
     defines_init_subclass: bool = False
     base_names: tuple[str, ...] = ()
