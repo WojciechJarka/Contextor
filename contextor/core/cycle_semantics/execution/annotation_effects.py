@@ -8,19 +8,25 @@ from typing import Mapping
 from .class_facts import _ClassFact, _BUILTIN_TYPE_ID
 
 
+class _BuiltinUnionOr:
+    """Proven CPython built-in union number slot."""
+
+    __slots__ = ()
+
+
 @dataclass(frozen=True)
 class _Scalar:
     value: object
 
 
 @dataclass(frozen=True)
-class _Type:
+class _Type(_BuiltinUnionOr):
     identity: str
     generic: bool
 
 
 @dataclass(frozen=True)
-class _Class:
+class _Class(_BuiltinUnionOr):
     identity: str
 
 
@@ -36,13 +42,13 @@ class _Seq:
 
 
 @dataclass(frozen=True)
-class _Alias:
+class _Alias(_BuiltinUnionOr):
     origin: _Type
     args: tuple[object, ...]
 
 
 @dataclass(frozen=True)
-class _TypeUnion:
+class _TypeUnion(_BuiltinUnionOr):
     args: tuple[object, ...]
 
 
@@ -109,16 +115,121 @@ def _value(
     return None
 
 
-def _type_operand(v: object) -> bool:
+def _unionable(value: object) -> bool:
     return (
-        isinstance(
-            v, (_Type, _Class, _Alias, _TypeUnion)
-        )
+        isinstance(value, _BuiltinUnionOr)
         or (
-            isinstance(v, _Scalar)
-            and v.value is None
+            type(value) is _Scalar
+            and value.value is None
         )
     )
+
+
+def _proven_key(value: object) -> object | None:
+    if type(value) is _Scalar:
+        return ("scalar", value.value)
+
+    if type(value) is _Type:
+        return ("type", value.identity)
+
+    if type(value) is _Class:
+        return ("class", value.identity)
+
+    if type(value) is _Seq:
+        keys = tuple(
+            _proven_key(item)
+            for item in value.items
+        )
+        if any(key is None for key in keys):
+            return None
+        return ("sequence", value.kind, keys)
+
+    if type(value) is _Alias:
+        origin = _proven_key(value.origin)
+        arguments = tuple(
+            _proven_key(arg)
+            for arg in value.args
+        )
+        if (
+            origin is None
+            or any(arg is None for arg in arguments)
+        ):
+            return None
+        return ("alias", origin, arguments)
+
+    if type(value) is _TypeUnion:
+        keys = tuple(
+            _proven_key(arg)
+            for arg in value.args
+        )
+        if any(key is None for key in keys):
+            return None
+        return ("union", frozenset(keys))
+
+    return None
+
+
+def _construct_union(
+    left: object,
+    right: object,
+) -> object | None:
+    if not (
+        _unionable(left)
+        and _unionable(right)
+    ):
+        return None
+
+    # Dostępny musi być rzeczywisty,
+    # zamodelowany slot operatora po
+    # co najmniej jednej stronie.
+    if not (
+        isinstance(left, _BuiltinUnionOr)
+        or isinstance(right, _BuiltinUnionOr)
+    ):
+        return None
+
+    members: list[object] = []
+    seen: set[object] = set()
+
+    def insert(value: object) -> bool:
+        if type(value) is _TypeUnion:
+            candidates = value.args
+        else:
+            candidates = (value,)
+
+        for candidate in candidates:
+            # Reguła CPython unionbuilder:
+            # None jako element unii jest
+            # normalizowane do typu NoneType.
+            if (
+                type(candidate) is _Scalar
+                and candidate.value is None
+            ):
+                candidate = _Type(
+                    "builtins.NoneType",
+                    False,
+                )
+
+            key = _proven_key(candidate)
+            if key is None:
+                return False
+
+            if key not in seen:
+                seen.add(key)
+                members.append(candidate)
+
+        return True
+
+    if not insert(left):
+        return None
+
+    if not insert(right):
+        return None
+
+    if len(members) == 1:
+        return members[0]
+
+    return _TypeUnion(tuple(members))
 
 
 def _eval(
@@ -238,12 +349,8 @@ def _eval(
             if left is None or right is None:
                 return None
 
-            if (
-                type(n.op) is ast.BitOr
-                and _type_operand(left)
-                and _type_operand(right)
-            ):
-                return _TypeUnion((left, right))
+            if type(n.op) is ast.BitOr:
+                return _construct_union(left, right)
 
             if (
                 isinstance(left, _Scalar)
