@@ -784,6 +784,10 @@ def _r11_module_result(
         _compile_on_first_import=True,
         _assume_passive_external_imports=True,
         _assume_frozen_dataclass_decoration=assume,
+        _assumed_external_callable_effects={
+            ("dataclasses", "field"):
+                "PASSIVE_DEFAULTLESS_DATACLASS_FIELD",
+        },
     )
 
 
@@ -2975,6 +2979,10 @@ def _p8_field_result(class_body, *, import_line=None, prelude=""):
         _compile_on_first_import=True,
         _assume_passive_external_imports=True,
         _assume_frozen_dataclass_decoration=True,
+        _assumed_external_callable_effects={
+            ("dataclasses", "field"):
+                "PASSIVE_DEFAULTLESS_DATACLASS_FIELD",
+        },
     )
 
 
@@ -3241,6 +3249,9 @@ def test_p9_i1_known_builtin_decorator_identity(
         _compile_on_first_import=True,
         _assume_passive_external_imports=True,
         _assume_frozen_dataclass_decoration=True,
+        _assumed_external_callable_effects={
+            ("builtins", "property"): "PASSIVE_PROPERTY",
+        },
     )
 
     assert model.outcome == (
@@ -3249,6 +3260,11 @@ def test_p9_i1_known_builtin_decorator_identity(
     assert model.evidence_scope == (
         "CONDITIONAL_EXTERNAL_AND_FROZEN_DATACLASS_"
         "ASSUMPTIONS_NOT_RUNTIME_PROOF"
+        + (
+            "|EXTERNAL_CALL_EFFECT_ASSUMED_NOT_RUNTIME_ATTESTED"
+            if model.assumed_external_call_effects
+            else ""
+        )
     )
     assert (
         model.builtin_environment_precondition

@@ -60,6 +60,9 @@ def evaluate_source_bound_conditional_namespace_import_order(
     target_python_version: tuple[int, int] | None = None,
     assume_passive_external_imports: bool = False,
     assume_frozen_dataclass_decoration: bool = False,
+    assumed_external_callable_effects: (
+        Mapping[tuple[str, str], str] | None
+    ) = None,
 ) -> SourceBoundConditionalNamespaceAssessment:
     """Parse indexed byte snapshots and conditionally evaluate PEP 420.
 
@@ -224,6 +227,9 @@ def evaluate_source_bound_conditional_namespace_import_order(
         ),
         assume_frozen_dataclass_decoration=(
             assume_frozen_dataclass_decoration
+        ),
+        assumed_external_callable_effects=(
+            assumed_external_callable_effects
         ),
     )
 

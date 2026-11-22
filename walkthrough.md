@@ -1,342 +1,697 @@
-# P10-R4-A2-I2 — tożsamość instancji definicji klasy
+# P10-FINAL-R2-I1-R1 — EVIDENCE SCOPE CONTRACT
 
 ## PREFLIGHT
 
-- DIRECT_EVIDENCE: Contextor MCP `get_project_architecture(repo_path="C:\\Temp\\Contextor_Repo", fields=[])` przed edycją: LIVE revision **1524**, `canonical_state=fresh`. `get_module_context` dla `package_model.py`, `execution/annotation_effects.py`, `execution/steps.py`: każdy `workspace_sync=verified`, revision 1524. `cycle_semantics=stale` jako odrębna rodzina; nie przesądza o obecnym zachowaniu ścieżki.
-- `get_symbol_lineage(mode="preview")` rozwiązał `_compile` i `evaluate_package_import_order` w `package_model.py` przy revision 1524. `get_file_edit_context(mode="minimal")`: właściciel `package_model.py`, 49 bezpośrednich i 396 tranzytywnych modułów konsumenckich; wynik jest statycznym blast radius, nie dowodem wykonania.
-- Literalne anchory przed zmianą: `package_model.py:918-932` kontrola współrzędnych tylko w gałęzi zwykłej klasy, `:1057-1108` kroki definicji, `:2612-2675` wykonanie warunkowej dataclass. `execution/steps.py:definition_id` już zawiera pole `str | None`. `rg -F 'PASSIVE_CLASS:' . -g '*.py' -g '!issues.md'`: dwa użycia w Pythonie, konstrukcja w `package_model.py` i rozpoznanie prefiksu w `execution/annotation_effects.py`. Nie czytano ani nie zmieniano `issues.md`.
-- `git status --short` przed edycją pusty; nie było lokalnego diffa source/tests. Anchory zgodne z aktualnym źródłem. Nie wykonywano restartu, FULL, staging, commit ani push.
+- DIRECT_EVIDENCE: Contextor MCP przed edycją: LIVE revision 1533, canonical_state=fresh, syntax_errors=0; package_model.py, namespace_bound_model.py i oba testy: workspace_sync=verified. Anchory: `tests/test_cycle_semantics_package_model.py:3260-3263` w `test_p9_i1_known_builtin_decorator_identity` oraz `tests/test_cycle_semantics_namespace_bound_model.py:1162-1165` w `test_p9_i1_source_bound_decorator_identity`.
+- DIRECT_EVIDENCE: istniejące zmiany I1 pozostawiono. `git status --short` wykazuje także wcześniej zmieniony `audyt.txt`; nie odczytywano go ani nie zmieniano. Nie użyto `git restore`, staging, commit, push ani restartu.
+- CODE_PATH_PROVED: oba testy przekazują jawny kontrakt `("builtins", "property"): "PASSIVE_PROPERTY"`; wynik może mieć użyte założenie Call, więc asercja scope musi odzwierciedlać `model.assumed_external_call_effects` bez rozróżniania nazw przypadków.
 
-## REPRODUKCJA PRZED ZMIANĄ
+## DOKŁADNIE DWA ZASTĄPIENIA
 
-- Izolowany CPython **3.15.2** z rzeczywistym `dataclasses.dataclass(frozen=True)` dla `T; Old = T; T; C.x: Old | T`: `Old is T` = **False**, `repr(Field.type) = pkg.T | pkg.T`, `typing.get_args` zawiera **2** człony, pierwszy jest `Old`, drugi nim nie jest.
-- CODE_PATH_PROVED: dotychczasowy `evaluate_package_import_order` dla tego źródła zwracał `MODEL_PASS`, trzy założone dekoracje i eventy obydwu definicji T. Stary sentinel obu wiązań miał tę samą wartość `\x00PASSIVE_CLASS:pkg:T`; `_eval(Old | T)` zwracał tylko `_Class(identity='\x00PASSIVE_CLASS:pkg:T')`. To osiągalna kolizja tożsamości symbolicznej mimo odrębnych klas CPython.
+1. `tests/test_cycle_semantics_package_model.py`, `test_p9_i1_known_builtin_decorator_identity`: do dotychczasowej wartości asercji `evidence_scope` dopisano warunkowy suffix `|EXTERNAL_CALL_EFFECT_ASSUMED_NOT_RUNTIME_ATTESTED` wtedy i tylko wtedy, gdy `model.assumed_external_call_effects` jest niepuste.
+2. `tests/test_cycle_semantics_namespace_bound_model.py`, `test_p9_i1_source_bound_decorator_identity`: identyczne zastąpienie. Żadnych innych asercji nie zmieniono w R1. Dodatkowe różnice względem HEAD w diffie poniżej pochodzą z zachowanego I1.
 
-## IMPLEMENTACJA I REPRODUKCJA PO ZMIANIE
+## TARGETED TESTS — CPython 3.15.2
 
-- Zmiana ograniczona do `package_model.py`: istniejąca kontrola `lineno` i `col_offset` została przeniesiona po `_safe_passive_class_definition`, przed rozgałęzienie warunkowe. Jeden `definition_id=f"{logical}:{stmt.lineno}:{stmt.col_offset}"` jest przekazywany do wszystkich trzech kroków definicji klasy. `DEFINE_CONDITIONAL_FROZEN_DATACLASS` wymaga niepustego ID przed publikacją dekoracji i zapisuje `\x00PASSIVE_CLASS:` + `step.definition_id`. Prefiks, anchory eventów dekoratora i klasy, kolejność eventów, założenia i evidence_scope pozostają takie jak przed zmianą. Nie zmieniono operatorów, `_proven_key`, `_BUILTINS`, `_GENERIC`, `annotation_effects.py` ani `steps.py`.
-- Po zmianie kroki dwóch definicji T mają `definition_id='pkg:3:0'` i `'pkg:7:0'`. Ich `source_line` pozostaje linią dekoratora, odpowiednio 2 i 6. `_eval(Old | T)` zwraca `_TypeUnion` z `_Class('\x00PASSIVE_CLASS:pkg:3:0')` i `_Class('\x00PASSIVE_CLASS:pkg:7:0')` w tej kolejności. Pełny model pozostaje `MODEL_PASS` z trzema założonymi dekoracjami. To potwierdza usunięcie kolizji wartości symbolicznej; sam `MODEL_PASS` nie służył za dowód tożsamości.
+Kolejno, bez pełnego pytest i FULL:
 
-## MACIERZ CPYTHON / MODEL A–G
+1. `.venv/Scripts/python.exe -m pytest -q tests/test_cycle_semantics_package_model.py -k "p9_i1_known_builtin_decorator_identity"`: **15 passed, 226 deselected**.
+2. `.venv/Scripts/python.exe -m pytest -q tests/test_cycle_semantics_namespace_bound_model.py -k "p8 or p9"`: **18 passed, 46 deselected**.
+3. `.venv/Scripts/python.exe -m pytest -q tests/test_cycle_semantics_package_model.py -k "p8 or r11 or p9"`: **59 passed, 182 deselected**.
+4. `.venv/Scripts/python.exe -m pytest -q tests/test_cycle_semantics_external_call_effects.py tests/test_cycle_semantics_annotation_effects_i3.py tests/test_cycle_semantics_annotation_union_i1.py tests/test_cycle_semantics_conditional_class_identity_i2.py`: **58 passed**.
 
-Każda próba CPython odbywa się w osobnym podprocesie `.venv\\Scripts\\python.exe` (zweryfikowany CPython 3.15.2) z odrębnym tymczasowym `pkg`, a model czyta wyłącznie AST. Warunkowy `evidence_scope=CONDITIONAL_EXTERNAL_AND_FROZEN_DATACLASS_ASSUMPTIONS_NOT_RUNTIME_PROOF` we wszystkich osiągniętych przypadkach; wyniki modelu są warunkowe, nie atestują runtime builtins ani importów.
+## POST-CHANGE MCP AUDIT
 
-| Przypadek | CPython | Model i tożsamość symboliczna |
-|---|---|---|
-| A. Dwa T, alias Old, `Old | T` | `Old is T=False`, 2 człony, pierwszy Old | `MODEL_PASS`; dwa ID `pkg:3:0`, `pkg:7:0`; `_TypeUnion` z 2 `_Class` |
-| B. `Old | Old` po ponownej definicji T | wynik jest pojedynczą klasą Old, `get_args=()` | `MODEL_PASS`; `_eval` zwraca pojedynczą `_Class` pierwszej definicji |
-| C. T i U w jednym module | `Old is T=True`, `Old | U` ma 2 człony | `MODEL_PASS`; różne ID według pozycji definicji, 2 człony |
-| D. T w `pkg.a` i `pkg.b` | `Old is T=False`, 2 człony | `MODEL_PASS`; różne ID `pkg.a:3:0`, `pkg.b:3:0`, 2 człony |
-| E. Alias pierwszej T, późniejsze `T=1` | `Old is T=False`, `Old | Old` jedna klasa | `MODEL_PASS`; wiązanie Old zachowuje pierwsze ID |
-| F. Przesunięcie definicji o linię | CPython nadal 2 odrębne obiekty i 2 człony | `MODEL_PASS`; obydwa ID przesunięte o linię |
-| G. Zwykłe klasy | zwykłe definicje nadal tworzą odrębne obiekty Pythona | `_compile` nadal daje `pkg:1:0`, `pkg:2:0` w `DEFINE_PASSIVE_CLASS` |
+- DIRECT_EVIDENCE: `get_project_architecture(repo_path="C:\\Temp\\Contextor_Repo", fields=[])`: LIVE revision **1535**, `canonical_state=fresh`, provenance=live, `syntax_errors.count=0` / availability=fresh. Rodzina `cycle_semantics=stale` jest odrębna od świeżej składni i nie stanowi wyniku tego testu.
+- DIRECT_EVIDENCE: `get_module_context(compact=true)` dla `execution/calls.py`, `package_model.py`, `namespace_bound_model.py`, dwóch edytowanych testów i `test_cycle_semantics_external_call_effects.py`: każdy ma `workspace_sync=verified`, `canonical_state=fresh`, revision 1535.
+- DIRECT_EVIDENCE: `get_symbol_lineage` dla `contextor.core.cycle_semantics.execution.calls::_CallableEffectFact`, LIVE 1535: definicja `calls.py:17`, pola `canonical_identity` i `import_origin` przy `calls.py:20-21`, użycia konstrukcji/faktu przy `calls.py:25,35,42`. Ograniczenie lineage: lokalne użycia między modułami sprawdzono również po źródle.
+- CODE_PATH_PROVED: `calls.py:17-29` tworzy fakt standardowego `builtins.property` z `provenance="CONVENTIONAL_BUILTIN"` i canonical identity. `calls.py:63-91` waliduje jawne deklaracje efektu. `package_model.py:1518-1563` odróżnia `CONVENTIONAL_BUILTIN` od `ASSUMED_EXTERNAL_CALL_EFFECT`; ten drugi zapisuje `AssumedExternalCallEffect` tylko przy konsumpcji. `package_model.py:2135-2167` przy zewnętrznym FROM tworzy `_CallableEffectFact` tylko gdy istnieje deklaracja dla pary import module/symbol; bez niej pozostaje sentinel `ASSUMED_EXTERNAL`. `package_model.py:2669,2687` wymaga `accept_callable_effect` przed dopuszczeniem wywołania. `package_model.py:1572-1605` wyprowadza suffix evidence_scope z faktycznie użytych założeń, a nie z samego importu.
+- CONTRACT_PROVED w tym zakresie: pasywny import nie jest automatycznie dowodem efektu późniejszego Call. Tożsamość i pasywność zewnętrznego callable są objęte jawnym, warunkowym kontraktem; suffix mówi wprost `NOT_RUNTIME_ATTESTED`. Zwykłe lokalne `MODEL_PASS` i utrwalony historyczny `cycle_semantics` nie certyfikują wykonania runtime.
 
-- `test_cycle_semantics_conditional_class_identity_i2.py` sprawdza AST bez mutacji, deterministyczność pełnego modelu, dokładne `definition_id` z kroków, liczbę i wartości członów `_eval`, CPython `is` i `typing.get_args`. Dla G test dotyczy zachowania ID w kompilatorze; nie używa podprocesu CPython, ponieważ ID jest wyłącznie faktem modelu.
+## D1 — PONOWNA WERYFIKACJA
 
-## TESTY
+Źródła AST: `pkg.__init__ = "from dataclasses import dataclass, field\\n@dataclass(frozen=True)\\nclass C:\\n x: int = field()\\n"`; `pkg.child = "from pkg import C\\n"`. Model: `annotation_semantics="DEFERRED"`, `_compile_on_first_import=True`, pasywny import zewnętrzny i dekoracja frozen jako założenia. Porównanie na identycznym AST:
 
-- `.venv\\Scripts\\python.exe -m pytest -q tests/test_cycle_semantics_conditional_class_identity_i2.py`: **5 passed**.
-- `.venv\\Scripts\\python.exe -m pytest -q tests/test_cycle_semantics_conditional_class_identity_i2.py tests/test_cycle_semantics_annotation_union_i1.py tests/test_cycle_semantics_annotation_effects_i3.py tests/test_cycle_semantics_passive_classes.py tests/test_cycle_semantics_class_decorator_staging.py tests/test_cycle_semantics_class_decorator_import_admission.py tests/test_cycle_semantics_class_decorator_identity_counterexamples.py tests/test_cycle_semantics_class_decorator_execution.py tests/test_cycle_semantics_class_decorator_baseline.py`: **207 passed**.
-- `.venv\\Scripts\\python.exe -m pytest -q tests/test_cycle_semantics_package_model.py -k 'r8 or r10 or frozen_dataclass'`: **52 passed, 189 deselected**. Bez pełnego pytest i FULL.
-
-## POST-CHANGE LIVE
-
-- `get_live_events(after_revision=1524)`: ciągły dziennik, `resync_required=false`, `desktop_watcher UPDATED` revision **1525** dla `package_model.py`, revisions **1526–1527** dla nowego testu.
-- `get_project_architecture(fields=[])`: LIVE **1527**, `canonical_state=fresh`. `get_module_context`: `package_model.py`, `execution/annotation_effects.py`, `execution/steps.py` i nowy test — `workspace_sync=verified`, revision 1527. `get_file_edit_context(mode="minimal")`: oba zmienione pliki mają `syntax_diagnostics=checked_and_none`, `availability=fresh`, `errors=[]`.
-
-## POBOCZNA OBSERWACJA / GRANICE
-
-- CODE_PATH_PROVED: w istniejącej ścieżce `DEFINE_CONDITIONAL_FROZEN_DATACLASS` `package_model.py` ma dwa kolejno identyczne wywołania `_consume(value, module, namespaces)` przed publikacją (`:2652–2658` po zmianie). To zastany duplikat, niezwiązany z identyfikatorem; nie zmieniano go w tym zadaniu. Nie wykazano na tej podstawie FALSE_PASS ani efektu ubocznego.
-- `definition_id` jest identyfikatorem lokalizacji źródłowej przyjętym przez istniejący model. Dowód obejmuje odrębne definicje AST z odrębnymi lokalizacjami oraz jawne założenia warunkowe; nie certyfikuje dowolnej dynamicznej ewaluacji Pythona.
-- Werdykt: **PASS dla określonego kontraktu A–G**. Nie znaleziono SOURCE_DRIFT, nowego FALSE_PASS ani sprzeczności z CPython w zbadanych próbach.
+- Bez `_assumed_external_callable_effects`: **UNKNOWN**, `assumed_external_call_effects=()`, scope bazowy; eventy: `START_IMPORT`, cztery `ASSUMED_EXTERNAL_IMPORT`; brak publikacji dekoracji.
+- Z `{("dataclasses", "field"): "PASSIVE_DEFAULTLESS_DATACLASS_FIELD"}`: warunkowy **MODEL_PASS**, jeden `AssumedExternalCallEffect(import_module="dataclasses", imported_symbol="field", effect="PASSIVE_DEFAULTLESS_DATACLASS_FIELD")`, scope z `|EXTERNAL_CALL_EFFECT_ASSUMED_NOT_RUNTIME_ATTESTED`; potem `CLASS_LOCAL_BIND`, `ASSUMED_FROZEN_DATACLASS_DECORATION`, `DEFINE_PASSIVE_CLASS`, `READY`.
+- Izolowany CPython 3.15.2, skrypt poza repo `C:\\Temp\\p10_r2_field_counterexample.py`: standardowe `field()` daje `RESULT <class 'int'>`. Podmieniony w `sys.modules['dataclasses']` moduł z `field()` importującym `pkg.child` daje `FIELD_IMPORT_CHILD`, po czym `ImportError: cannot import name 'C' from 'pkg'`. Różnica jest zgodna z jawną granicą założenia; kontrakt nie atestuje realnego callable w danym runtime.
 
 ## FILES_CHANGED
 
-- `contextor/core/cycle_semantics/package_model.py`
-- `tests/test_cycle_semantics_conditional_class_identity_i2.py`
+W R1: `tests/test_cycle_semantics_package_model.py`, `tests/test_cycle_semantics_namespace_bound_model.py`, `walkthrough.md`. Zachowane zmiany I1 względem HEAD: `contextor/core/cycle_semantics/execution/calls.py`, `contextor/core/cycle_semantics/package_model.py`, `contextor/core/cycle_semantics/namespace_bound_model.py`, obydwa wymienione testy oraz nowy `tests/test_cycle_semantics_external_call_effects.py`. `walkthrough.md` jest raportem i nie ma własnego diffu. `audyt.txt` jest zastaną, nietkniętą zmianą użytkownika.
 
-## FULL_DIFFS
-
-Poniżej pełne rzeczywiste diffy dwóch zmienionych plików source/tests. `walkthrough.md` jako raport nie jest liczony jako plik source/test.
+## FULL_DIFFS SOURCE/TESTS WZGLĘDEM HEAD
 
 ```diff
+diff --git a/contextor/core/cycle_semantics/execution/calls.py b/contextor/core/cycle_semantics/execution/calls.py
+index 81e787d..bcf2232 100644
+--- a/contextor/core/cycle_semantics/execution/calls.py
++++ b/contextor/core/cycle_semantics/execution/calls.py
+@@ -1,5 +1,6 @@
+ from __future__ import annotations
+ 
++from collections.abc import Mapping
+ from dataclasses import dataclass
+ 
+ from .steps import _Step
+@@ -13,28 +14,32 @@ class _RestrictedFunction:
+ 
+ 
+ @dataclass(frozen=True)
+-class _KnownBuiltinCallable:
+-    canonical_identity: str
++class _CallableEffectFact:
+     effect: str
++    provenance: str
++    canonical_identity: str | None = None
++    import_origin: tuple[str, str] | None = None
+ 
+ 
+ _KNOWN_BUILTIN_CALLABLES = {
+-    "property": _KnownBuiltinCallable(
+-        "builtins.property", "PASSIVE_PROPERTY",
++    "property": _CallableEffectFact(
++        effect="PASSIVE_PROPERTY",
++        provenance="CONVENTIONAL_BUILTIN",
++        canonical_identity="builtins.property",
+     ),
+ }
+ 
+ 
+ def _known_builtin_callable(
+     name: str | None,
+-) -> _KnownBuiltinCallable | None:
++) -> _CallableEffectFact | None:
+     return _KNOWN_BUILTIN_CALLABLES.get(name)
+ 
+ 
+ def _resolve_known_builtin_callable(
+     name: str | None,
+     namespace: dict[str, object | None],
+-) -> _KnownBuiltinCallable | None:
++) -> _CallableEffectFact | None:
+     if name is None:
+         return None
+     value = (
+@@ -44,11 +49,50 @@ def _resolve_known_builtin_callable(
+     )
+     return (
+         value
+-        if type(value) is _KnownBuiltinCallable
++        if type(value) is _CallableEffectFact
+         else None
+     )
+ 
+ 
++_SUPPORTED_CALL_EFFECTS = frozenset({
++    "PASSIVE_PROPERTY",
++    "PASSIVE_DEFAULTLESS_DATACLASS_FIELD",
++})
++
++
++def _validate_external_callable_effects(
++    declared: Mapping[tuple[str, str], str] | None,
++) -> dict[tuple[str, str], str] | None:
++    if declared is None:
++        return {}
++
++    if not isinstance(declared, Mapping):
++        return None
++
++    validated: dict[tuple[str, str], str] = {}
++
++    for key, effect in declared.items():
++        if (
++            type(key) is not tuple
++            or len(key) != 2
++            or type(key[0]) is not str
++            or type(key[1]) is not str
++            or not key[0]
++            or not all(
++                part.isidentifier()
++                for part in key[0].split(".")
++            )
++            or not key[1].isidentifier()
++            or type(effect) is not str
++            or effect not in _SUPPORTED_CALL_EFFECTS
++        ):
++            return None
++
++        validated[key] = effect
++
++    return validated
++
++
+ @dataclass(frozen=True, eq=False)
+ class _DecoratorSnapshot:
+     names: tuple[str, ...]
+diff --git a/contextor/core/cycle_semantics/namespace_bound_model.py b/contextor/core/cycle_semantics/namespace_bound_model.py
+index d7a88cd..d488948 100644
+--- a/contextor/core/cycle_semantics/namespace_bound_model.py
++++ b/contextor/core/cycle_semantics/namespace_bound_model.py
+@@ -60,6 +60,9 @@ def evaluate_source_bound_conditional_namespace_import_order(
+     target_python_version: tuple[int, int] | None = None,
+     assume_passive_external_imports: bool = False,
+     assume_frozen_dataclass_decoration: bool = False,
++    assumed_external_callable_effects: (
++        Mapping[tuple[str, str], str] | None
++    ) = None,
+ ) -> SourceBoundConditionalNamespaceAssessment:
+     """Parse indexed byte snapshots and conditionally evaluate PEP 420.
+ 
+@@ -225,6 +228,9 @@ def evaluate_source_bound_conditional_namespace_import_order(
+         assume_frozen_dataclass_decoration=(
+             assume_frozen_dataclass_decoration
+         ),
++        assumed_external_callable_effects=(
++            assumed_external_callable_effects
++        ),
+     )
+ 
+     # Never convert CONDITIONAL_MODEL_PASS into MODEL_PASS.
 diff --git a/contextor/core/cycle_semantics/package_model.py b/contextor/core/cycle_semantics/package_model.py
-index 7b64146..6aa45d6 100644
+index 6aa45d6..366609c 100644
 --- a/contextor/core/cycle_semantics/package_model.py
 +++ b/contextor/core/cycle_semantics/package_model.py
-@@ -894,6 +894,18 @@ def _compile(
-             ):
-                 return None
+@@ -67,6 +67,7 @@ from .execution.lifecycle import (
+     _start_module_frame,
+ )
+ from .execution.calls import (
++    _CallableEffectFact,
+     _RestrictedFunction,
+     _execute_restricted_call,
+     _execute_restricted_object_call,
+@@ -74,6 +75,7 @@ from .execution.calls import (
+     _new_restricted_function,
+     _resolve_known_builtin_callable,
+     _snapshot_named_decorators,
++    _validate_external_callable_effects,
+ )
  
-+            if (
-+                type(stmt.lineno) is not int
-+                or stmt.lineno < 1
-+                or type(stmt.col_offset) is not int
-+                or stmt.col_offset < 0
-+            ):
-+                return None
+ 
+@@ -104,6 +106,13 @@ class AssumedFrozenDataclassDecoration:
+     column: int
+ 
+ 
++@dataclass(frozen=True)
++class AssumedExternalCallEffect:
++    import_module: str
++    imported_symbol: str
++    effect: str
 +
-+            definition_id = (
-+                f"{logical}:{stmt.lineno}:{stmt.col_offset}"
++
+ def _safe_class_namespace_value(value: object) -> bool:
+     """Values admitted in a passive class namespace cannot be descriptors."""
+     if isinstance(value, _ClassFact) or value is None:
+@@ -134,6 +143,9 @@ class PackageImportAssessment:
+     assumed_dataclass_decorations: (
+         tuple[AssumedFrozenDataclassDecoration, ...]
+     ) = ()
++    assumed_external_call_effects: (
++        tuple[AssumedExternalCallEffect, ...]
++    ) = ()
+ 
+     @property
+     def builtin_environment_precondition(self) -> str:
+@@ -1483,6 +1495,9 @@ def evaluate_package_import_order(
+     _compile_on_first_import: bool = False,
+     _assume_passive_external_imports: bool = False,
+     _assume_frozen_dataclass_decoration: bool = False,
++    _assumed_external_callable_effects: (
++        Mapping[tuple[str, str], str] | None
++    ) = None,
+ ) -> PackageImportAssessment:
+     """Simulate a restricted closed regular-package source set.
+ 
+@@ -1500,6 +1515,52 @@ def evaluate_package_import_order(
+         AssumedFrozenDataclassDecoration
+     ] = []
+ 
++    validated_call_effects = (
++        _validate_external_callable_effects(
++            _assumed_external_callable_effects
++        )
++    )
++
++    used_external_call_effects: list[
++        AssumedExternalCallEffect
++    ] = []
++
++    def accept_callable_effect(
++        value: object,
++        required_effect: str,
++    ) -> bool:
++        if (
++            type(value) is not _CallableEffectFact
++            or value.effect != required_effect
++        ):
++            return False
++
++        if value.provenance == "CONVENTIONAL_BUILTIN":
++            return (
++                value.canonical_identity is not None
++                and value.import_origin is None
 +            )
 +
-             ordinary_named_decorators = (
-                 bool(stmt.decorator_list)
-                 and not conditional_dataclass
-@@ -916,17 +928,6 @@ def _compile(
-                     return None
- 
-             if not conditional_dataclass:
--                if (
--                    type(stmt.lineno) is not int
--                    or stmt.lineno < 1
--                    or type(stmt.col_offset) is not int
--                    or stmt.col_offset < 0
--                ):
--                    return None
--
--                definition_id = (
--                    f"{logical}:{stmt.lineno}:{stmt.col_offset}"
--                )
-                 if ordinary_named_decorators:
-                     steps.append(
-                         _Step(
-@@ -1059,6 +1060,7 @@ def _compile(
-                     _Step(
-                         "DEFINE_CONDITIONAL_FROZEN_DATACLASS",
-                         binding=stmt.name,
-+                        definition_id=definition_id,
-                         source_line=stmt.decorator_list[0].lineno,
-                         source_column=stmt.decorator_list[0].col_offset,
-                         annotation_fields=tuple(
-@@ -1102,9 +1104,7 @@ def _compile(
-                         binding=stmt.name,
-                         source_line=stmt.lineno,
-                         source_column=stmt.col_offset,
--                        definition_id=(
--                            f"{logical}:{stmt.lineno}:{stmt.col_offset}"
--                        ),
-+                        definition_id=definition_id,
-                         defines_init_subclass=has_init_subclass,
-                         passive_metaclass_body=passive_metaclass_body,
-                     )
-@@ -2655,6 +2655,9 @@ def evaluate_package_import_order(
-                 if not _consume(value, module, namespaces):
-                     return result("UNKNOWN", module, name)
- 
-+            if not step.definition_id:
-+                return result("UNKNOWN", module, step.binding)
++        if (
++            value.provenance
++            != "ASSUMED_EXTERNAL_CALL_EFFECT"
++            or value.import_origin is None
++            or value.canonical_identity is not None
++        ):
++            return False
 +
-             assumed_dataclass_decorations.append(
-                 AssumedFrozenDataclassDecoration(
-                     module=module,
-@@ -2666,9 +2669,7 @@ def evaluate_package_import_order(
++        origin_module, origin_symbol = value.import_origin
++
++        used_external_call_effects.append(
++            AssumedExternalCallEffect(
++                import_module=origin_module,
++                imported_symbol=origin_symbol,
++                effect=value.effect,
++            )
++        )
++
++        return True
++
+     def result(
+         outcome: str,
+         target: str | None = None,
+@@ -1516,13 +1577,20 @@ def evaluate_package_import_order(
+             symbol,
+             tuple(events),
+             evidence_scope=(
+-                "CONDITIONAL_EXTERNAL_AND_FROZEN_DATACLASS_"
+-                "ASSUMPTIONS_NOT_RUNTIME_PROOF"
+-                if _assume_frozen_dataclass_decoration is True
+-                else "CONDITIONAL_PASSIVE_EXTERNAL_IMPORT_"
+-                "ASSUMPTION_NOT_RUNTIME_PROOF"
+-                if _assume_passive_external_imports is True
+-                else "RESTRICTED_REGULAR_PACKAGE_MODEL"
++                (
++                    "CONDITIONAL_EXTERNAL_AND_FROZEN_DATACLASS_"
++                    "ASSUMPTIONS_NOT_RUNTIME_PROOF"
++                    if _assume_frozen_dataclass_decoration is True
++                    else "CONDITIONAL_PASSIVE_EXTERNAL_IMPORT_"
++                    "ASSUMPTION_NOT_RUNTIME_PROOF"
++                    if _assume_passive_external_imports is True
++                    else "RESTRICTED_REGULAR_PACKAGE_MODEL"
++                )
++                + (
++                    "|EXTERNAL_CALL_EFFECT_ASSUMED_NOT_RUNTIME_ATTESTED"
++                    if used_external_call_effects
++                    else ""
++                )
+             ),
+             reached_unmodeled_import=reached_unmodeled_import,
+             assumed_external_imports=tuple(
+@@ -1531,6 +1599,9 @@ def evaluate_package_import_order(
+             assumed_dataclass_decorations=tuple(
+                 assumed_dataclass_decorations
+             ),
++            assumed_external_call_effects=tuple(
++                used_external_call_effects
++            ),
+         )
+ 
+     if (
+@@ -1542,6 +1613,11 @@ def evaluate_package_import_order(
+         or type(_compile_on_first_import) is not bool
+         or type(_assume_passive_external_imports) is not bool
+         or type(_assume_frozen_dataclass_decoration) is not bool
++        or validated_call_effects is None
++        or (
++            bool(validated_call_effects)
++            and not _assume_passive_external_imports
++        )
+         or (
+             _assume_frozen_dataclass_decoration
+             and (
+@@ -2062,18 +2138,24 @@ def evaluate_package_import_order(
+                         and not step.function_local
+                         and not step.class_local
+                     ):
+-                        known_builtin = (
+-                            _known_builtin_callable(step.symbol)
++                        declared_effect = (
++                            validated_call_effects.get(
++                                (target, step.symbol)
++                            )
+                             if (
+-                                _assume_frozen_dataclass_decoration
+-                                and step.op == "FROM"
+-                                and target == "builtins"
++                                step.op == "FROM"
++                                and type(step.symbol) is str
+                             )
+                             else None
+                         )
+                         namespaces[module][step.binding] = (
+-                            known_builtin
+-                            if known_builtin is not None
++                            _CallableEffectFact(
++                                effect=declared_effect,
++                                provenance="ASSUMED_EXTERNAL_CALL_EFFECT",
++                                canonical_identity=None,
++                                import_origin=(target, step.symbol),
++                            )
++                            if declared_effect is not None
+                             else (
+                                 "\x00ASSUMED_EXTERNAL:"
+                                 + target
+@@ -2584,8 +2666,10 @@ def evaluate_package_import_order(
+         elif step.op == "CHECK_DATACLASS_FIELD_FACTORY":
+             if (
+                 not step.target
+-                or namespaces[module].get(step.target)
+-                != "\x00ASSUMED_EXTERNAL:dataclasses:field"
++                or not accept_callable_effect(
++                    namespaces[module].get(step.target),
++                    "PASSIVE_DEFAULTLESS_DATACLASS_FIELD",
++                )
+             ):
+                 return result(
+                     "UNKNOWN",
+@@ -2600,8 +2684,10 @@ def evaluate_package_import_order(
              )
-             namespaces[module][step.binding] = (
-                 "\x00PASSIVE_CLASS:"
--                + module
--                + ":"
--                + step.binding
-+                + step.definition_id
-             )
-             events.append(
-                 PackageModelEvent(
-diff --git a/tests/test_cycle_semantics_conditional_class_identity_i2.py b/tests/test_cycle_semantics_conditional_class_identity_i2.py
+             if (
+                 not step.binding
+-                or callable_fact is None
+-                or callable_fact.effect != "PASSIVE_PROPERTY"
++                or not accept_callable_effect(
++                    callable_fact,
++                    "PASSIVE_PROPERTY",
++                )
+             ):
+                 return result(
+                     "UNKNOWN",
+@@ -3397,6 +3483,9 @@ def evaluate_conditional_namespace_import_order(
+     target_python_version: tuple[int, int] | None = None,
+     assume_passive_external_imports: bool = False,
+     assume_frozen_dataclass_decoration: bool = False,
++    assumed_external_callable_effects: (
++        Mapping[tuple[str, str], str] | None
++    ) = None,
+ ) -> ConditionalNamespaceModelAssessment:
+     """Evaluate a supplied closed PEP 420 inventory conditionally.
+ 
+@@ -3677,6 +3766,9 @@ def evaluate_conditional_namespace_import_order(
+         _assume_frozen_dataclass_decoration=(
+             assume_frozen_dataclass_decoration
+         ),
++        _assumed_external_callable_effects=(
++            assumed_external_callable_effects
++        ),
+     )
+ 
+     conditional_outcomes = {
+diff --git a/tests/test_cycle_semantics_namespace_bound_model.py b/tests/test_cycle_semantics_namespace_bound_model.py
+index 7a0b750..90f2291 100644
+--- a/tests/test_cycle_semantics_namespace_bound_model.py
++++ b/tests/test_cycle_semantics_namespace_bound_model.py
+@@ -126,7 +126,10 @@ _FROZEN_CLASS = (
+ )
+ 
+ 
+-def _dataclass_result(source, *, decorate=False, external=True, child=None):
++def _dataclass_result(
++    source, *, decorate=False, external=True, child=None,
++    assumed_effects=None,
++):
+     return evaluate_source_bound_conditional_namespace_import_order(
+         *_external_case(source, child=child),
+         "pkg.ns.a",
+@@ -134,6 +137,7 @@ def _dataclass_result(source, *, decorate=False, external=True, child=None):
+         target_python_version=(3, 15),
+         assume_passive_external_imports=external,
+         assume_frozen_dataclass_decoration=decorate,
++        assumed_external_callable_effects=assumed_effects,
+     )
+ 
+ 
+@@ -1034,6 +1038,10 @@ def test_p8_public_defaultless_field_order(class_body, expected_outcome):
+         + "import pkg.ns.b\n",
+         decorate=True,
+         child="pass\n",
++        assumed_effects={
++            ("dataclasses", "field"):
++                "PASSIVE_DEFAULTLESS_DATACLASS_FIELD",
++        },
+     )
+ 
+     assert result.outcome == expected_outcome
+@@ -1129,6 +1137,9 @@ def test_p9_i1_source_bound_decorator_identity(
+         decorate=True,
+         external=True,
+         child=child,
++        assumed_effects={
++            ("builtins", "property"): "PASSIVE_PROPERTY",
++        },
+     )
+ 
+     assert result.outcome == (
+@@ -1151,6 +1162,11 @@ def test_p9_i1_source_bound_decorator_identity(
+     assert model.evidence_scope == (
+         "CONDITIONAL_EXTERNAL_AND_FROZEN_DATACLASS_"
+         "ASSUMPTIONS_NOT_RUNTIME_PROOF"
++        + (
++            "|EXTERNAL_CALL_EFFECT_ASSUMED_NOT_RUNTIME_ATTESTED"
++            if model.assumed_external_call_effects
++            else ""
++        )
+     )
+     assert model.builtin_environment_precondition == (
+         "CONVENTIONAL_BUILTINS_ASSUMED_NOT_RUNTIME_ATTESTED"
+diff --git a/tests/test_cycle_semantics_package_model.py b/tests/test_cycle_semantics_package_model.py
+index f8e38eb..4f0a9d2 100644
+--- a/tests/test_cycle_semantics_package_model.py
++++ b/tests/test_cycle_semantics_package_model.py
+@@ -784,6 +784,10 @@ def _r11_module_result(
+         _compile_on_first_import=True,
+         _assume_passive_external_imports=True,
+         _assume_frozen_dataclass_decoration=assume,
++        _assumed_external_callable_effects={
++            ("dataclasses", "field"):
++                "PASSIVE_DEFAULTLESS_DATACLASS_FIELD",
++        },
+     )
+ 
+ 
+@@ -2975,6 +2979,10 @@ def _p8_field_result(class_body, *, import_line=None, prelude=""):
+         _compile_on_first_import=True,
+         _assume_passive_external_imports=True,
+         _assume_frozen_dataclass_decoration=True,
++        _assumed_external_callable_effects={
++            ("dataclasses", "field"):
++                "PASSIVE_DEFAULTLESS_DATACLASS_FIELD",
++        },
+     )
+ 
+ 
+@@ -3241,6 +3249,9 @@ def test_p9_i1_known_builtin_decorator_identity(
+         _compile_on_first_import=True,
+         _assume_passive_external_imports=True,
+         _assume_frozen_dataclass_decoration=True,
++        _assumed_external_callable_effects={
++            ("builtins", "property"): "PASSIVE_PROPERTY",
++        },
+     )
+ 
+     assert model.outcome == (
+@@ -3249,6 +3260,11 @@ def test_p9_i1_known_builtin_decorator_identity(
+     assert model.evidence_scope == (
+         "CONDITIONAL_EXTERNAL_AND_FROZEN_DATACLASS_"
+         "ASSUMPTIONS_NOT_RUNTIME_PROOF"
++        + (
++            "|EXTERNAL_CALL_EFFECT_ASSUMED_NOT_RUNTIME_ATTESTED"
++            if model.assumed_external_call_effects
++            else ""
++        )
+     )
+     assert (
+         model.builtin_environment_precondition
+diff --git a/tests/test_cycle_semantics_external_call_effects.py b/tests/test_cycle_semantics_external_call_effects.py
 new file mode 100644
-index 0000000..54ab964
 --- /dev/null
-+++ b/tests/test_cycle_semantics_conditional_class_identity_i2.py
-@@ -0,0 +1,192 @@
-+"""Definition identity of conditional frozen dataclasses on CPython 3.15."""
-+
++++ b/tests/test_cycle_semantics_external_call_effects.py
+@@ -0,0 +1,176 @@
 +import ast
-+import os
-+import subprocess
-+import sys
 +
-+import pytest
-+
-+from contextor.core.cycle_semantics.execution.annotation_effects import (
-+    _Class,
-+    _TypeUnion,
-+    _eval,
-+)
 +from contextor.core.cycle_semantics.package_model import (
-+    _compile,
 +    evaluate_package_import_order,
 +)
 +
 +
-+pytestmark = pytest.mark.skipif(
-+    sys.version_info[:2] != (3, 15),
-+    reason="CPython 3.15 deferred frozen dataclass contract",
-+)
++FIELD_EFFECT = "PASSIVE_DEFAULTLESS_DATACLASS_FIELD"
++PROPERTY_EFFECT = "PASSIVE_PROPERTY"
 +
 +
-+DECORATOR = "from dataclasses import dataclass\n"
-+T = "@dataclass(frozen=True)\nclass T:\n    x: int\n"
-+C = "@dataclass(frozen=True)\nclass C:\n    x: Old | T\n"
-+
-+
-+def _compile_steps(source, logical="pkg"):
-+    tree = ast.parse(source)
-+    before = ast.dump(tree)
-+    steps = _compile(
-+        tree, logical, True,
-+        annotation_semantics="DEFERRED",
-+        assume_frozen_dataclass=True,
-+    )
-+    assert steps is not None
-+    assert ast.dump(tree) == before
-+    return steps
-+
-+
-+def _definitions(source, name="T", logical="pkg"):
-+    return [
-+        step for step in _compile_steps(source, logical)
-+        if step.op == "DEFINE_CONDITIONAL_FROZEN_DATACLASS"
-+        and step.binding == name
-+    ]
-+
-+
-+def _symbolic(expression, bindings):
-+    namespace = {
-+        name: "\x00PASSIVE_CLASS:" + identity
-+        for name, identity in bindings.items()
-+    }
-+    return _eval(
-+        ast.parse(expression, mode="eval").body,
-+        {}, namespace, {"pkg": namespace},
-+    )
-+
-+
-+def _model(sources):
-+    trees = {name: ast.parse(source) for name, source in sources.items()}
-+    before = {name: ast.dump(tree) for name, tree in trees.items()}
-+    options = dict(
++def _run(source, effects=None):
++    return evaluate_package_import_order(
++        {
++            "pkg.__init__": ast.parse(source),
++            "pkg.child": ast.parse(
++                "from pkg import C\n"
++            ),
++        },
++        "pkg",
 +        annotation_semantics="DEFERRED",
 +        _compile_on_first_import=True,
 +        _assume_passive_external_imports=True,
 +        _assume_frozen_dataclass_decoration=True,
++        _assumed_external_callable_effects=effects,
 +    )
-+    first = evaluate_package_import_order(trees, "pkg", **options)
-+    second = evaluate_package_import_order(trees, "pkg", **options)
-+    assert first == second
-+    assert before == {name: ast.dump(tree) for name, tree in trees.items()}
-+    assert first.evidence_scope == (
-+        "CONDITIONAL_EXTERNAL_AND_FROZEN_DATACLASS_"
-+        "ASSUMPTIONS_NOT_RUNTIME_PROOF"
-+    )
-+    return first
 +
 +
-+def _cpython(tmp_path, sources):
-+    package = tmp_path / "pkg"
-+    package.mkdir(parents=True)
-+    for logical, source in sources.items():
-+        name = "__init__.py" if logical == "pkg.__init__" else logical.removeprefix("pkg.") + ".py"
-+        (package / name).write_text(source, encoding="utf-8")
-+    env = os.environ.copy()
-+    env["PYTHONPATH"] = str(tmp_path)
-+    env["PYTHONDONTWRITEBYTECODE"] = "1"
-+    code = (
-+        "import pkg, typing\n"
-+        "print('SAME', pkg.Old is pkg.T)\n"
-+        "value = pkg.C.__dataclass_fields__['x'].type\n"
-+        "print('ARGS', len(typing.get_args(value)))\n"
-+        "print('MEMBERS', tuple(arg is pkg.Old for arg in typing.get_args(value)))\n"
-+        "print('FIELD', repr(value))\n"
++def _source(import_line, default="field()"):
++    return (
++        import_line
++        + "@dataclass(frozen=True)\n"
++        + "class C:\n"
++        + "    x: int = "
++        + default
++        + "\n"
 +    )
-+    process = subprocess.run(
-+        [sys.executable, "-u", "-c", code],
-+        cwd=tmp_path, env=env,
-+        capture_output=True, text=True,
-+        timeout=15, check=False,
-+    )
-+    assert process.returncode == 0, process.stderr
-+    return process.stdout.splitlines()
 +
 +
-+def test_redefinition_alias_and_union_have_two_identities(tmp_path):
-+    source = DECORATOR + T + "Old = T\n" + T + C
-+    definitions = _definitions(source)
-+    assert len(definitions) == 2
-+    first, second = (step.definition_id for step in definitions)
-+    assert (first, second) == ("pkg:3:0", "pkg:7:0")
-+    assert all(step.source_line == int(step.definition_id.split(":")[1]) - 1 for step in definitions)
-+    value = _symbolic("Old | T", {"Old": first, "T": second})
-+    assert isinstance(value, _TypeUnion)
-+    assert value.args == (
-+        _Class("\x00PASSIVE_CLASS:" + first),
-+        _Class("\x00PASSIVE_CLASS:" + second),
++def test_import_success_is_not_call_effect_proof():
++    result = _run(
++        _source(
++            "from dataclasses import dataclass, field\n"
++        )
 +    )
-+    result = _model({"pkg.__init__": source})
++
++    assert result.outcome == "UNKNOWN"
++    assert result.assumed_external_call_effects == ()
++    assert not any(
++        event.operation
++        == "ASSUMED_FROZEN_DATACLASS_DECORATION"
++        for event in result.events
++    )
++
++
++def test_declared_effect_preserves_field():
++    result = _run(
++        _source(
++            "from dataclasses import dataclass, field\n",
++            "field(hash=False, compare=False)",
++        ),
++        {("dataclasses", "field"): FIELD_EFFECT},
++    )
++
 +    assert result.outcome == "MODEL_PASS"
-+    assert len(result.assumed_dataclass_decorations) == 3
-+    assert _cpython(tmp_path, {"pkg.__init__": source})[:3] == [
-+        "SAME False", "ARGS 2", "MEMBERS (True, False)",
-+    ]
-+
-+
-+def test_same_alias_deduplicates_and_rebinding_preserves_old(tmp_path):
-+    source = DECORATOR + T + "Old = T\n" + T + "T = 1\n" + C.replace("Old | T", "Old | Old")
-+    first, second = (step.definition_id for step in _definitions(source))
-+    assert first != second
-+    assert _symbolic("Old | Old", {"Old": first}) == _Class(
-+        "\x00PASSIVE_CLASS:" + first
++    assert len(result.assumed_external_call_effects) == 1
++    row = result.assumed_external_call_effects[0]
++    assert (
++        row.import_module,
++        row.imported_symbol,
++        row.effect,
++    ) == (
++        "dataclasses",
++        "field",
++        FIELD_EFFECT,
 +    )
-+    assert _model({"pkg.__init__": source}).outcome == "MODEL_PASS"
-+    runtime = _cpython(tmp_path, {"pkg.__init__": source})
-+    assert runtime[:3] == ["SAME False", "ARGS 0", "MEMBERS ()"]
++    assert (
++        "EXTERNAL_CALL_EFFECT_ASSUMED_NOT_RUNTIME_ATTESTED"
++        in result.evidence_scope
++    )
 +
 +
-+def test_two_names_and_two_modules_keep_distinct_identity(tmp_path):
-+    local = DECORATOR + T + "Old = T\n" + T.replace("class T:", "class U:") + C.replace("Old | T", "Old | U")
-+    t_id = _definitions(local)[0].definition_id
-+    u_id = _definitions(local, "U")[0].definition_id
-+    assert t_id != u_id
-+    value = _symbolic("Old | U", {"Old": t_id, "U": u_id})
-+    assert isinstance(value, _TypeUnion) and len(value.args) == 2
-+    assert _model({"pkg.__init__": local}).outcome == "MODEL_PASS"
-+    assert _cpython(tmp_path / "local", {"pkg.__init__": local})[:3] == [
-+        "SAME True", "ARGS 2", "MEMBERS (True, False)",
-+    ]
++def test_declared_effect_is_independent_of_import_name():
++    result = _run(
++        _source(
++            "from dataclasses import dataclass\n"
++            "from some_external_module import factory as field\n"
++        ),
++        {
++            ("some_external_module", "factory"):
++                FIELD_EFFECT,
++        },
++    )
 +
-+    sources = {
-+        "pkg.__init__": DECORATOR + "from .a import T as Old\nfrom .b import T\n" + C,
-+        "pkg.a": DECORATOR + T,
-+        "pkg.b": DECORATOR + T,
-+    }
-+    a_id = _definitions(sources["pkg.a"], logical="pkg.a")[0].definition_id
-+    b_id = _definitions(sources["pkg.b"], logical="pkg.b")[0].definition_id
-+    assert a_id != b_id
-+    assert isinstance(_symbolic("Old | T", {"Old": a_id, "T": b_id}), _TypeUnion)
-+    assert _model(sources).outcome == "MODEL_PASS"
-+    assert _cpython(tmp_path, sources)[:3] == [
-+        "SAME False", "ARGS 2", "MEMBERS (True, False)",
-+    ]
++    assert result.outcome == "MODEL_PASS"
++    assert (
++        result.assumed_external_call_effects[0].import_module
++        == "some_external_module"
++    )
 +
 +
-+def test_shifted_definition_changes_id_not_runtime_semantics(tmp_path):
-+    source = DECORATOR + T + "Old = T\n" + T + C
-+    shifted = DECORATOR + "\n" + T + "Old = T\n" + T + C
-+    original = [step.definition_id for step in _definitions(source)]
-+    moved = [step.definition_id for step in _definitions(shifted)]
-+    assert original != moved
-+    assert [int(value.split(":")[1]) for value in moved] == [
-+        int(value.split(":")[1]) + 1 for value in original
-+    ]
-+    assert _model({"pkg.__init__": shifted}).outcome == "MODEL_PASS"
-+    assert _cpython(tmp_path, {"pkg.__init__": shifted})[:3] == [
-+        "SAME False", "ARGS 2", "MEMBERS (True, False)",
-+    ]
++def test_rebinding_invalidates_callable_fact():
++    result = _run(
++        _source(
++            "from dataclasses import dataclass, field\n"
++            "field = None\n"
++        ),
++        {("dataclasses", "field"): FIELD_EFFECT},
++    )
++
++    assert result.outcome == "UNKNOWN"
++    assert result.assumed_external_call_effects == ()
 +
 +
-+def test_ordinary_class_definition_id_unchanged():
-+    source = "class T: pass\nclass T: pass\n"
-+    steps = _compile_steps(source)
-+    defined = [step for step in steps if step.op == "DEFINE_PASSIVE_CLASS"]
-+    assert [step.definition_id for step in defined] == [
-+        "pkg:1:0", "pkg:2:0",
-+    ]
++def test_wrong_effect_does_not_authorize_call():
++    result = _run(
++        _source(
++            "from dataclasses import dataclass, field\n"
++        ),
++        {("dataclasses", "field"): PROPERTY_EFFECT},
++    )
++
++    assert result.outcome == "UNKNOWN"
++
++
++def test_invalid_effect_contract_is_unknown():
++    result = _run(
++        _source(
++            "from dataclasses import dataclass, field\n"
++        ),
++        {("dataclasses", "field"): "UNKNOWN_EFFECT"},
++    )
++
++    assert result.outcome == "UNKNOWN"
++    assert result.assumed_external_call_effects == ()
++
++
++def test_imported_property_needs_own_effect_proof():
++    source = (
++        "from dataclasses import dataclass\n"
++        "from builtins import property as prop\n"
++        "@dataclass(frozen=True)\n"
++        "class C:\n"
++        "    x: int\n"
++        "    @prop\n"
++        "    def value(self):\n"
++        "        return 1\n"
++    )
++
++    without = _run(source)
++    with_contract = _run(
++        source,
++        {("builtins", "property"): PROPERTY_EFFECT},
++    )
++
++    assert without.outcome == "UNKNOWN"
++    assert with_contract.outcome == "MODEL_PASS"
++    assert (
++        with_contract.assumed_external_call_effects[0].effect
++        == PROPERTY_EFFECT
++    )
++
++
++def test_conventional_builtin_property_remains():
++    result = _run(
++        "from dataclasses import dataclass\n"
++        "@dataclass(frozen=True)\n"
++        "class C:\n"
++        "    x: int\n"
++        "    @property\n"
++        "    def value(self):\n"
++        "        return 1\n"
++    )
++
++    assert result.outcome == "MODEL_PASS"
++    assert result.assumed_external_call_effects == ()
 ```
+
+## WERDYKT
+
+**PASS** — dwa wskazane zastąpienia wykonane, wszystkie cztery ukierunkowane grupy testów przeszły, LIVE źródeł i testów zsynchronizowany, składnia świeża bez błędów. Założony efekt zewnętrznego Call pozostaje warunkowy, niepotwierdzony przez runtime.

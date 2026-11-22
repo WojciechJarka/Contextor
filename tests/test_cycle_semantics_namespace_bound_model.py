@@ -126,7 +126,10 @@ _FROZEN_CLASS = (
 )
 
 
-def _dataclass_result(source, *, decorate=False, external=True, child=None):
+def _dataclass_result(
+    source, *, decorate=False, external=True, child=None,
+    assumed_effects=None,
+):
     return evaluate_source_bound_conditional_namespace_import_order(
         *_external_case(source, child=child),
         "pkg.ns.a",
@@ -134,6 +137,7 @@ def _dataclass_result(source, *, decorate=False, external=True, child=None):
         target_python_version=(3, 15),
         assume_passive_external_imports=external,
         assume_frozen_dataclass_decoration=decorate,
+        assumed_external_callable_effects=assumed_effects,
     )
 
 
@@ -1034,6 +1038,10 @@ def test_p8_public_defaultless_field_order(class_body, expected_outcome):
         + "import pkg.ns.b\n",
         decorate=True,
         child="pass\n",
+        assumed_effects={
+            ("dataclasses", "field"):
+                "PASSIVE_DEFAULTLESS_DATACLASS_FIELD",
+        },
     )
 
     assert result.outcome == expected_outcome
@@ -1129,6 +1137,9 @@ def test_p9_i1_source_bound_decorator_identity(
         decorate=True,
         external=True,
         child=child,
+        assumed_effects={
+            ("builtins", "property"): "PASSIVE_PROPERTY",
+        },
     )
 
     assert result.outcome == (
@@ -1151,6 +1162,11 @@ def test_p9_i1_source_bound_decorator_identity(
     assert model.evidence_scope == (
         "CONDITIONAL_EXTERNAL_AND_FROZEN_DATACLASS_"
         "ASSUMPTIONS_NOT_RUNTIME_PROOF"
+        + (
+            "|EXTERNAL_CALL_EFFECT_ASSUMED_NOT_RUNTIME_ATTESTED"
+            if model.assumed_external_call_effects
+            else ""
+        )
     )
     assert model.builtin_environment_precondition == (
         "CONVENTIONAL_BUILTINS_ASSUMED_NOT_RUNTIME_ATTESTED"

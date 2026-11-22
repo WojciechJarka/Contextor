@@ -67,6 +67,7 @@ from .execution.lifecycle import (
     _start_module_frame,
 )
 from .execution.calls import (
+    _CallableEffectFact,
     _RestrictedFunction,
     _execute_restricted_call,
     _execute_restricted_object_call,
@@ -74,6 +75,7 @@ from .execution.calls import (
     _new_restricted_function,
     _resolve_known_builtin_callable,
     _snapshot_named_decorators,
+    _validate_external_callable_effects,
 )
 
 
@@ -102,6 +104,13 @@ class AssumedFrozenDataclassDecoration:
     decorator: str
     line: int
     column: int
+
+
+@dataclass(frozen=True)
+class AssumedExternalCallEffect:
+    import_module: str
+    imported_symbol: str
+    effect: str
 
 
 def _safe_class_namespace_value(value: object) -> bool:
@@ -133,6 +142,9 @@ class PackageImportAssessment:
     ) = ()
     assumed_dataclass_decorations: (
         tuple[AssumedFrozenDataclassDecoration, ...]
+    ) = ()
+    assumed_external_call_effects: (
+        tuple[AssumedExternalCallEffect, ...]
     ) = ()
 
     @property
@@ -1483,6 +1495,9 @@ def evaluate_package_import_order(
     _compile_on_first_import: bool = False,
     _assume_passive_external_imports: bool = False,
     _assume_frozen_dataclass_decoration: bool = False,
+    _assumed_external_callable_effects: (
+        Mapping[tuple[str, str], str] | None
+    ) = None,
 ) -> PackageImportAssessment:
     """Simulate a restricted closed regular-package source set.
 
@@ -1500,6 +1515,52 @@ def evaluate_package_import_order(
         AssumedFrozenDataclassDecoration
     ] = []
 
+    validated_call_effects = (
+        _validate_external_callable_effects(
+            _assumed_external_callable_effects
+        )
+    )
+
+    used_external_call_effects: list[
+        AssumedExternalCallEffect
+    ] = []
+
+    def accept_callable_effect(
+        value: object,
+        required_effect: str,
+    ) -> bool:
+        if (
+            type(value) is not _CallableEffectFact
+            or value.effect != required_effect
+        ):
+            return False
+
+        if value.provenance == "CONVENTIONAL_BUILTIN":
+            return (
+                value.canonical_identity is not None
+                and value.import_origin is None
+            )
+
+        if (
+            value.provenance
+            != "ASSUMED_EXTERNAL_CALL_EFFECT"
+            or value.import_origin is None
+            or value.canonical_identity is not None
+        ):
+            return False
+
+        origin_module, origin_symbol = value.import_origin
+
+        used_external_call_effects.append(
+            AssumedExternalCallEffect(
+                import_module=origin_module,
+                imported_symbol=origin_symbol,
+                effect=value.effect,
+            )
+        )
+
+        return True
+
     def result(
         outcome: str,
         target: str | None = None,
@@ -1516,13 +1577,20 @@ def evaluate_package_import_order(
             symbol,
             tuple(events),
             evidence_scope=(
-                "CONDITIONAL_EXTERNAL_AND_FROZEN_DATACLASS_"
-                "ASSUMPTIONS_NOT_RUNTIME_PROOF"
-                if _assume_frozen_dataclass_decoration is True
-                else "CONDITIONAL_PASSIVE_EXTERNAL_IMPORT_"
-                "ASSUMPTION_NOT_RUNTIME_PROOF"
-                if _assume_passive_external_imports is True
-                else "RESTRICTED_REGULAR_PACKAGE_MODEL"
+                (
+                    "CONDITIONAL_EXTERNAL_AND_FROZEN_DATACLASS_"
+                    "ASSUMPTIONS_NOT_RUNTIME_PROOF"
+                    if _assume_frozen_dataclass_decoration is True
+                    else "CONDITIONAL_PASSIVE_EXTERNAL_IMPORT_"
+                    "ASSUMPTION_NOT_RUNTIME_PROOF"
+                    if _assume_passive_external_imports is True
+                    else "RESTRICTED_REGULAR_PACKAGE_MODEL"
+                )
+                + (
+                    "|EXTERNAL_CALL_EFFECT_ASSUMED_NOT_RUNTIME_ATTESTED"
+                    if used_external_call_effects
+                    else ""
+                )
             ),
             reached_unmodeled_import=reached_unmodeled_import,
             assumed_external_imports=tuple(
@@ -1530,6 +1598,9 @@ def evaluate_package_import_order(
             ),
             assumed_dataclass_decorations=tuple(
                 assumed_dataclass_decorations
+            ),
+            assumed_external_call_effects=tuple(
+                used_external_call_effects
             ),
         )
 
@@ -1542,6 +1613,11 @@ def evaluate_package_import_order(
         or type(_compile_on_first_import) is not bool
         or type(_assume_passive_external_imports) is not bool
         or type(_assume_frozen_dataclass_decoration) is not bool
+        or validated_call_effects is None
+        or (
+            bool(validated_call_effects)
+            and not _assume_passive_external_imports
+        )
         or (
             _assume_frozen_dataclass_decoration
             and (
@@ -2062,18 +2138,24 @@ def evaluate_package_import_order(
                         and not step.function_local
                         and not step.class_local
                     ):
-                        known_builtin = (
-                            _known_builtin_callable(step.symbol)
+                        declared_effect = (
+                            validated_call_effects.get(
+                                (target, step.symbol)
+                            )
                             if (
-                                _assume_frozen_dataclass_decoration
-                                and step.op == "FROM"
-                                and target == "builtins"
+                                step.op == "FROM"
+                                and type(step.symbol) is str
                             )
                             else None
                         )
                         namespaces[module][step.binding] = (
-                            known_builtin
-                            if known_builtin is not None
+                            _CallableEffectFact(
+                                effect=declared_effect,
+                                provenance="ASSUMED_EXTERNAL_CALL_EFFECT",
+                                canonical_identity=None,
+                                import_origin=(target, step.symbol),
+                            )
+                            if declared_effect is not None
                             else (
                                 "\x00ASSUMED_EXTERNAL:"
                                 + target
@@ -2584,8 +2666,10 @@ def evaluate_package_import_order(
         elif step.op == "CHECK_DATACLASS_FIELD_FACTORY":
             if (
                 not step.target
-                or namespaces[module].get(step.target)
-                != "\x00ASSUMED_EXTERNAL:dataclasses:field"
+                or not accept_callable_effect(
+                    namespaces[module].get(step.target),
+                    "PASSIVE_DEFAULTLESS_DATACLASS_FIELD",
+                )
             ):
                 return result(
                     "UNKNOWN",
@@ -2600,8 +2684,10 @@ def evaluate_package_import_order(
             )
             if (
                 not step.binding
-                or callable_fact is None
-                or callable_fact.effect != "PASSIVE_PROPERTY"
+                or not accept_callable_effect(
+                    callable_fact,
+                    "PASSIVE_PROPERTY",
+                )
             ):
                 return result(
                     "UNKNOWN",
@@ -3397,6 +3483,9 @@ def evaluate_conditional_namespace_import_order(
     target_python_version: tuple[int, int] | None = None,
     assume_passive_external_imports: bool = False,
     assume_frozen_dataclass_decoration: bool = False,
+    assumed_external_callable_effects: (
+        Mapping[tuple[str, str], str] | None
+    ) = None,
 ) -> ConditionalNamespaceModelAssessment:
     """Evaluate a supplied closed PEP 420 inventory conditionally.
 
@@ -3676,6 +3765,9 @@ def evaluate_conditional_namespace_import_order(
         ),
         _assume_frozen_dataclass_decoration=(
             assume_frozen_dataclass_decoration
+        ),
+        _assumed_external_callable_effects=(
+            assumed_external_callable_effects
         ),
     )
 

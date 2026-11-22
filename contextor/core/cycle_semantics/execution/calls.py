@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 from .steps import _Step
@@ -13,28 +14,32 @@ class _RestrictedFunction:
 
 
 @dataclass(frozen=True)
-class _KnownBuiltinCallable:
-    canonical_identity: str
+class _CallableEffectFact:
     effect: str
+    provenance: str
+    canonical_identity: str | None = None
+    import_origin: tuple[str, str] | None = None
 
 
 _KNOWN_BUILTIN_CALLABLES = {
-    "property": _KnownBuiltinCallable(
-        "builtins.property", "PASSIVE_PROPERTY",
+    "property": _CallableEffectFact(
+        effect="PASSIVE_PROPERTY",
+        provenance="CONVENTIONAL_BUILTIN",
+        canonical_identity="builtins.property",
     ),
 }
 
 
 def _known_builtin_callable(
     name: str | None,
-) -> _KnownBuiltinCallable | None:
+) -> _CallableEffectFact | None:
     return _KNOWN_BUILTIN_CALLABLES.get(name)
 
 
 def _resolve_known_builtin_callable(
     name: str | None,
     namespace: dict[str, object | None],
-) -> _KnownBuiltinCallable | None:
+) -> _CallableEffectFact | None:
     if name is None:
         return None
     value = (
@@ -44,9 +49,48 @@ def _resolve_known_builtin_callable(
     )
     return (
         value
-        if type(value) is _KnownBuiltinCallable
+        if type(value) is _CallableEffectFact
         else None
     )
+
+
+_SUPPORTED_CALL_EFFECTS = frozenset({
+    "PASSIVE_PROPERTY",
+    "PASSIVE_DEFAULTLESS_DATACLASS_FIELD",
+})
+
+
+def _validate_external_callable_effects(
+    declared: Mapping[tuple[str, str], str] | None,
+) -> dict[tuple[str, str], str] | None:
+    if declared is None:
+        return {}
+
+    if not isinstance(declared, Mapping):
+        return None
+
+    validated: dict[tuple[str, str], str] = {}
+
+    for key, effect in declared.items():
+        if (
+            type(key) is not tuple
+            or len(key) != 2
+            or type(key[0]) is not str
+            or type(key[1]) is not str
+            or not key[0]
+            or not all(
+                part.isidentifier()
+                for part in key[0].split(".")
+            )
+            or not key[1].isidentifier()
+            or type(effect) is not str
+            or effect not in _SUPPORTED_CALL_EFFECTS
+        ):
+            return None
+
+        validated[key] = effect
+
+    return validated
 
 
 @dataclass(frozen=True, eq=False)
