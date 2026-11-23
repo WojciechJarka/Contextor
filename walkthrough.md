@@ -1,138 +1,73 @@
-# P10-FINAL-R3-I2-R2 — THREE LEGACY TEST HELPERS
+# P10-FINAL-R4-D1 — CONDITIONAL CONTRACT ACCEPTANCE
 
-## PREFLIGHT
+## PREFLIGHT I LIVE
 
-- DIRECT_EVIDENCE: Contextor MCP LIVE revision **1551**, `canonical_state=fresh`, syntax errors **0/fresh**; `workspace_sync=verified` dla trzech wskazanych testów.
-- DIRECT_EVIDENCE: lokalny HEAD `71e0d9ca2eab856585bec9b04f4ea64c4946c299`; preflight `git status --short` i `git diff --stat` puste. Zastane zmiany poprzedniego etapu są już w HEAD.
-- DIRECT_EVIDENCE: dokładne anchory `_model`: `annotation_effects_i3.py:25-39`, `annotation_union_i1.py:47-65`, `conditional_class_identity_i2.py:67-81`. Każdy zawierał wskazaną opcję i wskazaną asercję.
+- DIRECT_EVIDENCE: Contextor MCP LIVE revision **1554**, `canonical_state=fresh`, syntax errors **0/fresh**. `workspace_sync=verified` na revision 1554 dla `execution/calls.py`, `execution/definition_checks.py`, `package_model.py`, `namespace_bound_model.py`, `scenarios.py`, `test_cycle_semantics_external_call_effects.py`, `test_cycle_semantics_annotation_effects_i3.py`, `test_cycle_semantics_annotation_union_i1.py`, `test_cycle_semantics_conditional_class_identity_i2.py`. Osobna rodzina `cycle_semantics=stale` nie jest wynikiem tego audytu.
+- DIRECT_EVIDENCE: HEAD `03eb604a1a0cf2832d30afc1cd9518b69a65896c`, preflight `git status --short` oraz `git diff --stat` puste. Lokalny LIVE jest źródłem aktualności; Git służył weryfikacji literalnej.
+- DIRECT_EVIDENCE: Contextor `get_symbol_lineage(mode=preview)` rozwiązał `evaluate_package_import_order` i `evaluate_conditional_namespace_import_order` na revision 1554; źródłowo powiązany wrapper znajduje się w `namespace_bound_model.py:52`.
 
-## SIX_REPLACEMENTS
+## KOMPLETNA LISTA PRODUCENTÓW I KONSUMENTÓW
 
-W każdym z trzech helperów `_model` wykonano dokładnie dwa zastąpienia: dodano jawny kontrakt `("dataclasses", "dataclass"): "FROZEN_DATACLASS_DECORATOR_FACTORY"` po `_assume_frozen_dataclass_decoration=True`; oczekiwanie `evidence_scope` rozszerzono wyłącznie gdy `first.assumed_external_call_effects` jest niepuste. Zachowano drugą ewaluację, kontrolę `first == second` i `ast.dump`. Pełne diffy są poniżej.
+| Fakt/kontrakt | Producent | Konsument | Ocena |
+|---|---|---|---|
+| `_CallableEffectFact` builtin `property` | `execution/calls.py:112-121`; fallback tylko przy braku lokalnego wiązania `:130-145` | `package_model.py:2767-2783` | MODEL_PROVED przy założeniu konwencjonalnych builtins |
+| `_CallableEffectFact` zewnętrzny | walidacja deklaracji `execution/calls.py:148-183`; modułowy FROM i zgodny wpis `package_model.py:2185-2220` | snapshot factory `:2718-2751`, field `:2753-2765`, property `:2767-2783` | EXPLICITLY_ASSUMED |
+| `_CALL_OUTCOME_CONTRACTS` | `execution/calls.py:72-100` | builtin `:113-119`, `package_model.py:1561-1568,2200-2209` | exact effect + exact kontrakt sprawdzane przez `accept_callable_effect` |
+| `_FROZEN_DATACLASS_DECORATOR_CONTRACT` | `execution/calls.py:36-69`; factory przypisana do słownika `:97-99` | snapshot `package_model.py:2746-2751`, application/binding `:2793-2815,2860-2908` | EXPLICITLY_ASSUMED dla importu zewnętrznego |
+| `conditional_class_decorator_outcomes` | słownik `package_model.py:1921-1927`, zapis `:2746-2751` pod `definition_id` | pojedynczy `pop` `:2793-2805` | MODEL_PROVED dla kolejności modelu |
+| zapis użytych deklaracji | `accept_callable_effect` `package_model.py:1584-1603` | `result` `:1620-1645`: `assumed_external_call_effects` i `evidence_scope` | EXPLICITLY_ASSUMED; brak atestacji runtime |
 
-## TESTY
+Literalne przeszukanie aktualnego `contextor/` nie wykazało innych konstruktorów `_CallableEffectFact`, wywołań `accept_callable_effect`, odczytów `_CALL_OUTCOME_CONTRACTS`, ani zapisów/odczytów `conditional_class_decorator_outcomes`. Nie zakładano autorstwa z nazwy importu.
 
-Wskazany interpreter `.venv/Scripts/python.exe`; grupy uruchomione kolejno:
+## MACIERZ WARUNKÓW PRZYZNANIA PASS
 
-1. `pytest -q tests/test_cycle_semantics_annotation_effects_i3.py` — **25 passed in 5.05s**.
-2. `pytest -q tests/test_cycle_semantics_annotation_union_i1.py` — **20 passed in 3.83s**.
-3. `pytest -q tests/test_cycle_semantics_conditional_class_identity_i2.py` — **5 passed in 1.55s**.
-4. `pytest -q tests/test_cycle_semantics_external_call_effects.py` — **16 passed in 0.77s**.
+Kolejność modelu: `ast.ClassDef` i restricted `@name(frozen=True)` (`package_model.py:893-919`, `execution/definition_checks.py:6-25`) → `SNAPSHOT_CONDITIONAL_CLASS_DECORATOR_FACTORY` przed krokami ciała (`package_model.py:954-963`) → zewnętrzny FROM tworzy fakt tylko przy deklaracji (`:2185-2220`) → snapshot bierze **aktualne** `namespaces[module][step.target]`, żąda efektu factory i origin (`:2718-2744`) → zapis kontraktu pod `definition_id` (`:2746-2751`) → restricted ciało klasy i adnotacje (`:1000-1109,2828-2855`) → pojedynczy `pop`, kontrola `INPUT_CLASS`, publikacja założonej dekoracji i związanie sentinela klasy (`:2785-2815,2860-2908`) → wewnętrzny `MODEL_PASS` dopiero po wyczerpaniu kroków (`:3404`).
 
-## SEMANTIC_BOUNDARY
+| Sytuacja przy snapshot | Warunek i wynik | Klasyfikacja |
+|---|---|---|
+| Brak deklaracji | FROM wiąże sentinel; brak `_CallableEffectFact` w `:2733` → UNKNOWN | CONSERVATIVE_UNKNOWN |
+| Właściwy efekt | zgodny `_CallableEffectFact`, origin i kontrakt `:2733-2738` → możliwy dalszy warunkowy MODEL_PASS | EXPLICITLY_ASSUMED |
+| Niewłaściwy efekt | `accept_callable_effect` porównuje efekt i kontrakt `:1557-1568` → UNKNOWN | CONSERVATIVE_UNKNOWN |
+| Alias przed snapshot | ALIAS kopiuje bieżącą wartość `:3313-3330`; fakt może przejść | MODEL_PROVED dla propagacji faktu |
+| Rebinding przed snapshot | BIND nadpisuje namespace wartością `None` `:3301-3304`; snapshot → UNKNOWN | CONSERVATIVE_UNKNOWN |
+| Rebinding po snapshot | snapshot przechowuje kontrakt i origin pod `definition_id`; późniejszy odczyt namespace nie występuje przy `pop` `:2793-2808`. Odpowiada wcześniejszej ewaluacji wyrażenia dekoratora w Pythonie | MODEL_PROVED dla reprezentowanej kolejności; rzeczywista tożsamość zewnętrznego callable jest EXPLICITLY_ASSUMED |
 
-1. DIRECT_EVIDENCE: jawna deklaracja fabryki jest obecnie przekazana przez `options` wyłącznie w trzech fixture helperach; nie dopisano rozpoznawania nazw do produkcji.
-2. CODE_PATH_PROVED: `execution/calls.py:153` waliduje deklaracje; `package_model.py:2190-2220` tworzy `_CallableEffectFact` dla zewnętrznego FROM tylko przy zgodnym wpisie `validated_call_effects`; inaczej tworzy sentinel importu.
-3. CODE_PATH_PROVED: `package_model.py:2718-2751` snapshot odczytuje bieżące wiązanie w `namespaces[module]`, sprawdza `_CallableEffectFact`, `import_origin` i efekt `FROZEN_DATACLASS_DECORATOR_FACTORY`. Bez tego zwraca UNKNOWN.
-4. CODE_PATH_PROVED: alias propaguje wartość namespace; rebinding zastępuje bieżące wiązanie. Snapshot nie używa pierwotnej nazwy jako stałego dowodu. Poprzedni focused subset import/decorator sprawdzał te granice; R2 nie zmieniał produkcji.
-5. CODE_PATH_PROVED: deklaracja factory nie ingeruje w `_eval`/`_consume` adnotacji (`package_model.py:2840-2855`); nieznana operacja w adnotacji nadal prowadzi do UNKNOWN. Przejście 25 testów `annotation_effects_i3` jest wsparciem regresyjnym, a nie ogólnym dowodem.
-6. CODE_PATH_PROVED: `accept_callable_effect` (`package_model.py:1557-1603`) wymaga dokładnie efektu oczekiwanego przez konkretnego konsumenta. Deklaracja factory sama nie autoryzuje innych `Call`, np. `CHECK_DATACLASS_FIELD_FACTORY` wymaga `PASSIVE_DEFAULTLESS_DATACLASS_FIELD` (`package_model.py:2753-2765`).
-7. CODE_PATH_PROVED: wykorzystany zewnętrzny efekt jest zapisywany w `AssumedExternalCallEffect` i sufiksie `evidence_scope` (`package_model.py:1584-1638`). `MODEL_PASS` zależny od niego jest warunkowy i nie stanowi runtime proof.
-8. CODE_PATH_PROVED: `evaluate_conditional_namespace_import_order` wyklucza MODEL_PASS warning suppression (`package_model.py:3634-3637`) i mapuje wynik na `CONDITIONAL_MODEL_PASS` (`package_model.py:3910-3918`). Nie obserwowano promocji wyniku warunkowego do bezwarunkowego.
+COMPILER_BOUNDARY: `_safe_passive_class_definition` (`package_model.py:291+`) ogranicza ciało; składnia nie daje sama dowodu efektu Call. Każdy dopuszczony zewnętrzny Call przechodzi przez oddzielny `accept_callable_effect`. Nie stwierdzono osiągalnego warunkowego MODEL_PASS dla zewnętrznego Call bez wymaganego jawnego kontraktu na tych trzech konsumentach.
 
-CONTRACT_PROVED: fixture deklaruje semantykę importowanego callable jako założenie wejściowe. Testy nie atestują tożsamości rzeczywistego obiektu runtime. Zamknięty kontrakt factory jest własnością żądaną przez model, a nie wyjątkiem zależnym od Contextora.
+## GRANICA SEMANTYKI RESULT/LIFECYCLE
 
-## POST_CHANGE_MCP
+| Rodzina | Invocation / result / lifecycle | Konsumpcja i brak faktu | Rejestracja |
+|---|---|---|---|
+| Fabryka frozen dataclass | `NO_UNMODELED_FACTORY_EFFECTS_OR_EXCEPTIONS` / `EXACT_STANDARD_FROZEN_DATACLASS_DECORATOR` / `NO_UNKNOWN_EFFECTS_BEFORE_APPLICATION`; aplikacja: `NO_UNMODELED_DECORATION_EFFECTS_OR_EXCEPTIONS` / `EXACT_STANDARD_FROZEN_DATACLASS_TRANSFORMATION` / `NO_UNKNOWN_EFFECTS_BEFORE_CLASS_BINDING`; `INPUT_CLASS` (`calls.py:43-69`) | snapshot `package_model.py:2718-2751`, później `:2785-2908`; brak faktu/kontraktu → UNKNOWN | `accept_callable_effect` przy snapshot; `AssumedFrozenDataclassDecoration` przy aplikacji |
+| `field` | `NO_EFFECTS_OR_EXCEPTIONS_FOR_ADMITTED_ARGUMENTS` / `EXACT_STDLIB_FIELD_NO_DEFAULT_OR_FACTORY_PRESERVE_LITERAL_HASH_COMPARE` / `NO_UNKNOWN_RESULT_HOOKS_BEFORE_CLASS_BINDING` (`calls.py:84-96`) | `CHECK_DATACLASS_FIELD_FACTORY` `package_model.py:2753-2765`; brak faktu/efektu → UNKNOWN | `accept_callable_effect` dopisuje `AssumedExternalCallEffect` dla zewnętrznego pochodzenia |
+| `property` | `NO_EFFECTS_OR_EXCEPTIONS_FOR_ADMITTED_ARGUMENTS` / `EXACT_BUILTINS_PROPERTY_OF_DECORATED_FUNCTION` / `NO_UNKNOWN_RESULT_HOOKS_BEFORE_CLASS_BINDING` (`calls.py:72-83`) | `APPLY_KNOWN_CLASS_DECORATOR` `package_model.py:2767-2783`; brak faktu/efektu → UNKNOWN | zewnętrzny fakt dopisany; konwencjonalny builtin nie jest zewnętrznym założeniem |
 
-- DIRECT_EVIDENCE: watcher opublikował kolejno `update_file UPDATED`: revision **1552** dla `annotation_effects_i3.py`, **1553** dla `annotation_union_i1.py`, **1554** dla `conditional_class_identity_i2.py`; od 1551 `continuity=continuous`, `resync_required=false`.
-- DIRECT_EVIDENCE: LIVE revision **1554**, `canonical_state=fresh`, syntax errors **0/fresh**; wszystkie trzy pliki mają `workspace_sync=verified` na revision 1554. `cycle_semantics=stale` jest odrębną rodziną i nie ocenia tych testów.
-- CODE_PATH_PROVED: producer to walidowany kontrakt z `options` oraz zewnętrzny FROM (`package_model.py:2190-2220`); consumer to snapshot (`package_model.py:2718-2751`) i `accept_callable_effect` (`package_model.py:1557-1603`). Aktualny `evidence_scope` w helperach zależy od zapisanych użytych założeń.
-- DIRECT_EVIDENCE: `git diff --name-only` pokazuje tylko trzy testy; brak zmian kodu produkcyjnego. `git diff --check` bez błędów (Git zgłasza tylko informację o przyszłej konwersji LF/CRLF).
+Granica wiedzy: te właściwości są deklarowanym kontraktem wejściowym dla zewnętrznego obiektu, a nie obserwacją jego runtime. Fałszywa deklaracja nie jest sama w sobie `CONFIRMED_FALSE_PASS` interpretera. Nie znaleziono w badanej ścieżce wymaganej własności rezultatu, której ani nie sprawdzono, ani nie zadeklarowano.
+
+## GRANICA PUBLIKACJI OSTRZEŻEŃ
+
+- `evaluate_package_import_order` przyjmuje opcje prywatne, domyślnie `False/None` (`package_model.py:1512-1524`). Jego wewnętrzne `MODEL_PASS` przy wykorzystanym efekcie ma `assumed_external_call_effects` i sufiks `EXTERNAL_CALL_EFFECT_ASSUMED_NOT_RUNTIME_ATTESTED` (`:1620-1645`).
+- Publiczny wrapper namespace przekazuje jawne opcje (`package_model.py:3894-3908`), a `MODEL_PASS` mapuje na **`CONDITIONAL_MODEL_PASS`** (`:3910-3920`); docstring `:3626-3637` wyklucza warning suppression.
+- Source-bound wrapper przekazuje te same opcje (`namespace_bound_model.py:220-234`) i zachowuje wynik warunkowy bez promocji (`:236-246`).
+- Produkcyjny klasyfikator SCC w `scenarios.py:330-358` wywołuje `evaluate_package_import_order(sources, entry, _session=session)` **bez** opcji zewnętrznych Call ani frozen dataclass. Klasyfikacja `MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS` wymaga wszystkich `MODEL_PASS`; `evidence.py:327-334` ponownie sprawdza wyniki. Warning eligibility czyta tę klasyfikację (`warning_eligibility.py:70-75`, `partial_warning_eligibility.py:89-95`). Nie ma w tym przepływie wejścia dla `assumed_external_callable_effects`.
+
+CODE_PATH_PROVED: nie znaleziono przeniesienia wyniku zależnego od tych założeń do bezwarunkowej klasyfikacji SCC lub suppression. MCP LIVE raportuje obecnie 0 model-pass i 16 aktywnych ścieżek ostrzeżeń; to statyczny stan zainstalowanej generacji, nie dowód runtime.
+
+## POKRYCIE I POZOSTAŁE LUKI
+
+- DIRECT_EVIDENCE z raportów I2/R1/R2, bez ponownego uruchamiania: `package_model` 241 passed, `namespace_bound_model` 64 passed, `class decorator` 33 passed, `annotation_effects_i3` 25 passed, `annotation_union_i1` 20 passed, `conditional_class_identity_i2` 5 passed, `external_call_effects` 16 passed. Są to wyniki poprzednich przebiegów, nie wykonane w D1.
+- DIRECT_EVIDENCE: obecny HEAD obejmuje poprzednie poprawki; preflight czysty i LIVE wszystkie wskazane pliki verified. Między tymi przebiegami a D1 nie stwierdzono dalszej lokalnej zmiany source/tests. `git log` pokazuje auto-commity `21b19b1`, `03eb604` po I2; porównania historycznych commitów z dokładnymi czasami testów nie wykonywano, więc twierdzenie o braku jakiejkolwiek przejściowej zmiany byłoby zbyt silne.
+- Pokryte: brak kontraktu, błędny efekt, alias, rebinding, źródło importu niezależne od nazwy, factory, field, property oraz trzy starsze macierze. Nie pozostał niezweryfikowany produkcyjny konsument **nowego kontraktu** w literalnie przeszukanych ścieżkach. Testy nie stanowią pełnego dowodu semantyki dowolnego programu Python.
+- UNKNOWN: rzeczywista tożsamość importowanego callable, prawdziwość deklaracji caller, niestandardowe import finders/builtins i zachowanie poza restrykcyjnym modelem nie są atestowane. To jawna granica warunkowego wyniku, nie wykazany `UNPROVEN_REACHABLE_PATH` przy prawdziwych założeniach.
+
+## WERDYKT DOWODOWY
+
+**EVIDENCE_COMPLETE** dla zadanego audytu przepływu autoryzacji i publikacji przy jawnych założeniach. Nie jest to FINAL PASS projektu ani certyfikat bezpieczeństwa runtime. W badanych ścieżkach nie potwierdzono `CONFIRMED_FALSE_PASS` ani konkretnego `UNPROVEN_REACHABLE_PATH`.
 
 ## FILES_CHANGED
 
-- `tests/test_cycle_semantics_annotation_effects_i3.py`
-- `tests/test_cycle_semantics_annotation_union_i1.py`
-- `tests/test_cycle_semantics_conditional_class_identity_i2.py`
-- `walkthrough.md` — raport; jego własny diff pominięty.
+- `walkthrough.md` — jedyny nadpisany plik.
 
 ## FULL_DIFFS
 
-Pełne diffy trzech testów względem HEAD `71e0d9ca2eab856585bec9b04f4ea64c4946c299`:
-
-```diff
-diff --git a/tests/test_cycle_semantics_annotation_effects_i3.py b/tests/test_cycle_semantics_annotation_effects_i3.py
-index 648b5b8..4e88567 100644
---- a/tests/test_cycle_semantics_annotation_effects_i3.py
-+++ b/tests/test_cycle_semantics_annotation_effects_i3.py
-@@ -27,6 +27,10 @@ def _model(source, **other_sources):
-         _compile_on_first_import=True,
-         _assume_passive_external_imports=True,
-         _assume_frozen_dataclass_decoration=True,
-+        _assumed_external_callable_effects={
-+            ("dataclasses", "dataclass"):
-+                "FROZEN_DATACLASS_DECORATOR_FACTORY",
-+        },
-     )
-     first = evaluate_package_import_order(trees, "pkg", **options)
-     second = evaluate_package_import_order(trees, "pkg", **options)
-@@ -35,6 +39,11 @@ def _model(source, **other_sources):
-     assert first.evidence_scope == (
-         "CONDITIONAL_EXTERNAL_AND_FROZEN_DATACLASS_"
-         "ASSUMPTIONS_NOT_RUNTIME_PROOF"
-+        + (
-+            "|EXTERNAL_CALL_EFFECT_ASSUMED_NOT_RUNTIME_ATTESTED"
-+            if first.assumed_external_call_effects
-+            else ""
-+        )
-     )
-     return first
-
-diff --git a/tests/test_cycle_semantics_annotation_union_i1.py b/tests/test_cycle_semantics_annotation_union_i1.py
-index c6d5a98..76277e5 100644
---- a/tests/test_cycle_semantics_annotation_union_i1.py
-+++ b/tests/test_cycle_semantics_annotation_union_i1.py
-@@ -49,6 +49,10 @@ def _model(source):
-         _compile_on_first_import=True,
-         _assume_passive_external_imports=True,
-         _assume_frozen_dataclass_decoration=True,
-+        _assumed_external_callable_effects={
-+            ("dataclasses", "dataclass"):
-+                "FROZEN_DATACLASS_DECORATOR_FACTORY",
-+        },
-     )
-     first = evaluate_package_import_order(
-         {"pkg.__init__": tree}, "pkg", **options,
-@@ -61,6 +65,11 @@ def _model(source):
-     assert first.evidence_scope == (
-         "CONDITIONAL_EXTERNAL_AND_FROZEN_DATACLASS_"
-         "ASSUMPTIONS_NOT_RUNTIME_PROOF"
-+        + (
-+            "|EXTERNAL_CALL_EFFECT_ASSUMED_NOT_RUNTIME_ATTESTED"
-+            if first.assumed_external_call_effects
-+            else ""
-+        )
-     )
-     return first
-
-diff --git a/tests/test_cycle_semantics_conditional_class_identity_i2.py b/tests/test_cycle_semantics_conditional_class_identity_i2.py
-index 54ab964..1916625 100644
---- a/tests/test_cycle_semantics_conditional_class_identity_i2.py
-+++ b/tests/test_cycle_semantics_conditional_class_identity_i2.py
-@@ -69,6 +69,10 @@ def _model(sources):
-         _compile_on_first_import=True,
-         _assume_passive_external_imports=True,
-         _assume_frozen_dataclass_decoration=True,
-+        _assumed_external_callable_effects={
-+            ("dataclasses", "dataclass"):
-+                "FROZEN_DATACLASS_DECORATOR_FACTORY",
-+        },
-     )
-     first = evaluate_package_import_order(trees, "pkg", **options)
-     second = evaluate_package_import_order(trees, "pkg", **options)
-@@ -77,6 +81,11 @@ def _model(sources):
-     assert first.evidence_scope == (
-         "CONDITIONAL_EXTERNAL_AND_FROZEN_DATACLASS_"
-         "ASSUMPTIONS_NOT_RUNTIME_PROOF"
-+        + (
-+            "|EXTERNAL_CALL_EFFECT_ASSUMED_NOT_RUNTIME_ATTESTED"
-+            if first.assumed_external_call_effects
-+            else ""
-+        )
-     )
-     return first
-```
-
-## WERDYKT
-
-**PASS** w literalnym zakresie R2: sześć zastąpień w trzech helperach, cztery wymagane grupy testów przechodzą, LIVE jest świeży i zsynchronizowany. PASS nie stanowi atestacji środowiska uruchomieniowego analizowanego pakietu.
+`FULL_DIFFS=NONE` dla source/tests. Nie wykonywano pytest, FULL, restartu, staging, commit ani push.

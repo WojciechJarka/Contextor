@@ -6,6 +6,30 @@ Development history (newest first). Entries retain their original technical clai
 
 ## November 2026
 
+### 2026-11-23
+
+Improved Python Execution Semantics and Conditional Import Analysis
+
+Explicit Callable Contracts: Introduced provenance-aware contracts for externally imported callables, separating import success from the effects of subsequent function calls.
+
+Call Result Semantics: Extended the execution model to account for invocation effects, return-value properties, and object lifecycle behavior during class creation.
+
+Dataclass and Property Support: Strengthened conditional modeling of dataclasses.field(), property, and frozen dataclass decorators, including field configuration, descriptor behavior, and class identity preservation.
+
+Decorator Execution Order: Improved modeling of decorator factory evaluation, class-body execution, decorator application, and final class binding.
+
+Binding and Identity Tracking: Preserved callable contracts across aliases while correctly invalidating assumptions after rebinding. Removed authorization based solely on imported symbol names.
+
+Conservative Analysis Boundaries: Ensured that missing or incompatible contracts produce UNKNOWN rather than unsupported positive conclusions.
+
+Evidence Provenance: Extended assessment metadata to distinguish modeled facts from explicit external assumptions without claiming runtime verification.
+
+Warning Classification Safety: Preserved the separation between conditional model results and authoritative cycle-warning suppression.
+
+Regression Coverage: Updated and expanded targeted tests for callable contracts, class decorators, deferred annotations, union semantics, import ordering, and class identity.
+
+Result: Completed the semantic hardening of conditional Python execution analysis, improving model precision while preserving conservative behavior and explicit boundaries of runtime knowledge.
+
 ### 2026-11-21 — Enhanced Function Definition and Decorator Semantics
 
 - Implemented definition-time evaluation of restricted default-argument expressions, preserving execution order and import side effects.
