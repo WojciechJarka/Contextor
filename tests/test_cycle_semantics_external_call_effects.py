@@ -7,9 +7,19 @@ from contextor.core.cycle_semantics.package_model import (
 
 FIELD_EFFECT = "PASSIVE_DEFAULTLESS_DATACLASS_FIELD"
 PROPERTY_EFFECT = "PASSIVE_PROPERTY"
+FACTORY_EFFECT = (
+    "FROZEN_DATACLASS_DECORATOR_FACTORY"
+)
 
 
 def _run(source, effects=None):
+    declared_effects = {
+        ("dataclasses", "dataclass"): FACTORY_EFFECT,
+    }
+
+    if effects is not None:
+        declared_effects.update(effects)
+
     return evaluate_package_import_order(
         {
             "pkg.__init__": ast.parse(source),
@@ -22,7 +32,9 @@ def _run(source, effects=None):
         _compile_on_first_import=True,
         _assume_passive_external_imports=True,
         _assume_frozen_dataclass_decoration=True,
-        _assumed_external_callable_effects=effects,
+        _assumed_external_callable_effects=(
+            declared_effects
+        ),
     )
 
 
@@ -45,7 +57,10 @@ def test_import_success_is_not_call_effect_proof():
     )
 
     assert result.outcome == "UNKNOWN"
-    assert result.assumed_external_call_effects == ()
+    assert tuple(
+        row.effect
+        for row in result.assumed_external_call_effects
+    ) == (FACTORY_EFFECT,)
     assert not any(
         event.operation
         == "ASSUMED_FROZEN_DATACLASS_DECORATION"
@@ -63,8 +78,13 @@ def test_declared_effect_preserves_field():
     )
 
     assert result.outcome == "MODEL_PASS"
-    assert len(result.assumed_external_call_effects) == 1
-    row = result.assumed_external_call_effects[0]
+    field_rows = tuple(
+        row
+        for row in result.assumed_external_call_effects
+        if row.effect == FIELD_EFFECT
+    )
+    assert len(field_rows) == 1
+    row = field_rows[0]
     assert (
         row.import_module,
         row.imported_symbol,
@@ -93,9 +113,10 @@ def test_declared_effect_is_independent_of_import_name():
     )
 
     assert result.outcome == "MODEL_PASS"
-    assert (
-        result.assumed_external_call_effects[0].import_module
-        == "some_external_module"
+    assert any(
+        row.import_module == "some_external_module"
+        and row.effect == FIELD_EFFECT
+        for row in result.assumed_external_call_effects
     )
 
 
@@ -109,7 +130,10 @@ def test_rebinding_invalidates_callable_fact():
     )
 
     assert result.outcome == "UNKNOWN"
-    assert result.assumed_external_call_effects == ()
+    assert tuple(
+        row.effect
+        for row in result.assumed_external_call_effects
+    ) == (FACTORY_EFFECT,)
 
 
 def test_wrong_effect_does_not_authorize_call():
@@ -155,9 +179,9 @@ def test_imported_property_needs_own_effect_proof():
 
     assert without.outcome == "UNKNOWN"
     assert with_contract.outcome == "MODEL_PASS"
-    assert (
-        with_contract.assumed_external_call_effects[0].effect
-        == PROPERTY_EFFECT
+    assert any(
+        row.effect == PROPERTY_EFFECT
+        for row in with_contract.assumed_external_call_effects
     )
 
 
@@ -173,7 +197,10 @@ def test_conventional_builtin_property_remains():
     )
 
     assert result.outcome == "MODEL_PASS"
-    assert result.assumed_external_call_effects == ()
+    assert tuple(
+        row.effect
+        for row in result.assumed_external_call_effects
+    ) == (FACTORY_EFFECT,)
 
 
 def test_field_contract_includes_result_and_lifecycle():
@@ -186,9 +213,13 @@ def test_field_contract_includes_result_and_lifecycle():
     )
 
     assert result.outcome == "MODEL_PASS"
-    assert len(result.assumed_external_call_effects) == 1
-
-    row = result.assumed_external_call_effects[0]
+    field_rows = tuple(
+        row
+        for row in result.assumed_external_call_effects
+        if row.effect == FIELD_EFFECT
+    )
+    assert len(field_rows) == 1
+    row = field_rows[0]
 
     assert row.invocation_semantics == (
         "NO_EFFECTS_OR_EXCEPTIONS_FOR_ADMITTED_ARGUMENTS"
@@ -220,9 +251,13 @@ def test_property_contract_includes_result_and_lifecycle():
     )
 
     assert result.outcome == "MODEL_PASS"
-    assert len(result.assumed_external_call_effects) == 1
-
-    row = result.assumed_external_call_effects[0]
+    property_rows = tuple(
+        row
+        for row in result.assumed_external_call_effects
+        if row.effect == PROPERTY_EFFECT
+    )
+    assert len(property_rows) == 1
+    row = property_rows[0]
 
     assert row.invocation_semantics == (
         "NO_EFFECTS_OR_EXCEPTIONS_FOR_ADMITTED_ARGUMENTS"
@@ -259,6 +294,9 @@ def test_frozen_class_decorator_outcome_is_explicit():
         _compile_on_first_import=True,
         _assume_passive_external_imports=True,
         _assume_frozen_dataclass_decoration=True,
+        _assumed_external_callable_effects={
+            ("dataclasses", "dataclass"): FACTORY_EFFECT,
+        },
     )
 
     assert result.outcome == "MODEL_PASS"
@@ -288,6 +326,7 @@ def test_frozen_class_decorator_outcome_is_explicit():
     assert result.evidence_scope == (
         "CONDITIONAL_EXTERNAL_AND_FROZEN_DATACLASS_"
         "ASSUMPTIONS_NOT_RUNTIME_PROOF"
+        "|EXTERNAL_CALL_EFFECT_ASSUMED_NOT_RUNTIME_ATTESTED"
     )
 
 
@@ -307,3 +346,114 @@ def test_rebound_class_decorator_has_no_outcome_fact():
         and event.symbol == "C"
         for event in result.events
     )
+
+
+def test_factory_name_is_not_authority():
+    source = (
+        "from dataclasses import dataclass\n"
+        "@dataclass(frozen=True)\n"
+        "class C:\n"
+        "    x: int\n"
+    )
+
+    result = evaluate_package_import_order(
+        {"pkg.__init__": ast.parse(source)},
+        "pkg",
+        annotation_semantics="DEFERRED",
+        _compile_on_first_import=True,
+        _assume_passive_external_imports=True,
+        _assume_frozen_dataclass_decoration=True,
+    )
+
+    assert result.outcome == "UNKNOWN"
+    assert result.assumed_dataclass_decorations == ()
+    assert result.assumed_external_call_effects == ()
+
+
+def test_factory_semantics_independent_of_import_name():
+    source = (
+        "from external_provider import make as decorate\n"
+        "@decorate(frozen=True)\n"
+        "class C:\n"
+        "    x: int\n"
+    )
+
+    result = evaluate_package_import_order(
+        {"pkg.__init__": ast.parse(source)},
+        "pkg",
+        annotation_semantics="DEFERRED",
+        _compile_on_first_import=True,
+        _assume_passive_external_imports=True,
+        _assume_frozen_dataclass_decoration=True,
+        _assumed_external_callable_effects={
+            ("external_provider", "make"):
+                FACTORY_EFFECT,
+        },
+    )
+
+    assert result.outcome == "MODEL_PASS"
+    assert len(result.assumed_dataclass_decorations) == 1
+    assert (
+        result.assumed_dataclass_decorations[0].decorator
+        == "external_provider.make(frozen=True)"
+    )
+    assert (
+        result.assumed_external_call_effects[0].effect
+        == FACTORY_EFFECT
+    )
+
+
+def test_factory_alias_preserves_declared_semantics():
+    source = (
+        "from external_provider import make\n"
+        "alias = make\n"
+        "@alias(frozen=True)\n"
+        "class C:\n"
+        "    x: int\n"
+    )
+
+    result = evaluate_package_import_order(
+        {"pkg.__init__": ast.parse(source)},
+        "pkg",
+        annotation_semantics="DEFERRED",
+        _compile_on_first_import=True,
+        _assume_passive_external_imports=True,
+        _assume_frozen_dataclass_decoration=True,
+        _assumed_external_callable_effects={
+            ("external_provider", "make"):
+                FACTORY_EFFECT,
+        },
+    )
+
+    assert result.outcome == "MODEL_PASS"
+    assert (
+        result.assumed_dataclass_decorations[0].decorator
+        == "external_provider.make(frozen=True)"
+    )
+
+
+def test_factory_rebinding_removes_declared_semantics():
+    source = (
+        "from external_provider import make\n"
+        "make = None\n"
+        "@make(frozen=True)\n"
+        "class C:\n"
+        "    x: int\n"
+    )
+
+    result = evaluate_package_import_order(
+        {"pkg.__init__": ast.parse(source)},
+        "pkg",
+        annotation_semantics="DEFERRED",
+        _compile_on_first_import=True,
+        _assume_passive_external_imports=True,
+        _assume_frozen_dataclass_decoration=True,
+        _assumed_external_callable_effects={
+            ("external_provider", "make"):
+                FACTORY_EFFECT,
+        },
+    )
+
+    assert result.outcome == "UNKNOWN"
+    assert result.assumed_dataclass_decorations == ()
+    assert result.assumed_external_call_effects == ()

@@ -131,11 +131,16 @@ def test_qualified_conditional_frozen_dataclass_unchanged():
         _compile_on_first_import=True,
         _assume_passive_external_imports=True,
         _assume_frozen_dataclass_decoration=True,
+        _assumed_external_callable_effects={
+            ("dataclasses", "dataclass"):
+                "FROZEN_DATACLASS_DECORATOR_FACTORY",
+        },
     )
     assert result.outcome == "MODEL_PASS"
     assert result.evidence_scope == (
         "CONDITIONAL_EXTERNAL_AND_FROZEN_DATACLASS_"
         "ASSUMPTIONS_NOT_RUNTIME_PROOF"
+        "|EXTERNAL_CALL_EFFECT_ASSUMED_NOT_RUNTIME_ATTESTED"
     )
     assert len(result.assumed_dataclass_decorations) == 1
     assert result.assumed_dataclass_decorations[0].class_name == "Graph"

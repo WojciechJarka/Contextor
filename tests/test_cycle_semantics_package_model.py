@@ -14,6 +14,12 @@ from contextor.core.cycle_semantics.model_environment import (
 )
 
 
+FROZEN_FACTORY_EFFECTS = {
+    ("dataclasses", "dataclass"):
+        "FROZEN_DATACLASS_DECORATOR_FACTORY",
+}
+
+
 def _model(source, entry):
     return evaluate_package_import_order(
         {
@@ -74,11 +80,15 @@ def test_builtin_environment_precondition_is_metadata_not_dataclass_field():
         conditional_sources, "pkg", **options,
         _assume_passive_external_imports=True,
         _assume_frozen_dataclass_decoration=True,
+        _assumed_external_callable_effects=(
+            FROZEN_FACTORY_EFFECTS
+        ),
     )
     assert conditional.outcome == "MODEL_PASS"
     assert conditional.evidence_scope == (
         "CONDITIONAL_EXTERNAL_AND_FROZEN_DATACLASS_"
         "ASSUMPTIONS_NOT_RUNTIME_PROOF"
+        "|EXTERNAL_CALL_EFFECT_ASSUMED_NOT_RUNTIME_ATTESTED"
     )
     assert (
         conditional.builtin_environment_precondition
@@ -125,6 +135,9 @@ def test_frozen_dataclass_direct_conditional_record():
         _compile_on_first_import=True,
         _assume_passive_external_imports=True,
         _assume_frozen_dataclass_decoration=True,
+        _assumed_external_callable_effects=(
+            FROZEN_FACTORY_EFFECTS
+        ),
     )
     assert result.outcome == "MODEL_PASS"
     assert result.evidence_scope == (
@@ -147,6 +160,9 @@ def test_frozen_dataclass_rebound_name_does_not_bind_class():
         _compile_on_first_import=True,
         _assume_passive_external_imports=True,
         _assume_frozen_dataclass_decoration=True,
+        _assumed_external_callable_effects=(
+            FROZEN_FACTORY_EFFECTS
+        ),
     )
     assert result.outcome == "UNKNOWN"
     assert result.assumed_dataclass_decorations == ()
@@ -176,6 +192,9 @@ def _r8_frozen_dataclass_result(
         _compile_on_first_import=True,
         _assume_passive_external_imports=True,
         _assume_frozen_dataclass_decoration=assume,
+        _assumed_external_callable_effects=(
+            FROZEN_FACTORY_EFFECTS
+        ),
     )
 
 
@@ -212,6 +231,7 @@ def test_r8_importref_shape_crosses_class_definition():
     assert result.evidence_scope == (
         "CONDITIONAL_EXTERNAL_AND_FROZEN_DATACLASS_"
         "ASSUMPTIONS_NOT_RUNTIME_PROOF"
+        "|EXTERNAL_CALL_EFFECT_ASSUMED_NOT_RUNTIME_ATTESTED"
     )
 
     assert len(result.assumed_dataclass_decorations) == 1
@@ -569,6 +589,9 @@ def _r10_qualified_ast_result(
         _compile_on_first_import=True,
         _assume_passive_external_imports=True,
         _assume_frozen_dataclass_decoration=assume,
+        _assumed_external_callable_effects=(
+            FROZEN_FACTORY_EFFECTS
+        ),
     )
 
 
@@ -600,6 +623,7 @@ def test_r10_external_ast_attribute_has_no_authoritative_binding():
     assert result.evidence_scope == (
         "CONDITIONAL_EXTERNAL_AND_FROZEN_DATACLASS_"
         "ASSUMPTIONS_NOT_RUNTIME_PROOF"
+        "|EXTERNAL_CALL_EFFECT_ASSUMED_NOT_RUNTIME_ATTESTED"
     )
     _r10_assert_rejected(result)
 
@@ -785,6 +809,7 @@ def _r11_module_result(
         _assume_passive_external_imports=True,
         _assume_frozen_dataclass_decoration=assume,
         _assumed_external_callable_effects={
+            **FROZEN_FACTORY_EFFECTS,
             ("dataclasses", "field"):
                 "PASSIVE_DEFAULTLESS_DATACLASS_FIELD",
         },
@@ -906,6 +931,9 @@ def test_r11_named_passive_class_annotation_not_hardcoded():
         _compile_on_first_import=True,
         _assume_passive_external_imports=True,
         _assume_frozen_dataclass_decoration=True,
+        _assumed_external_callable_effects=(
+            FROZEN_FACTORY_EFFECTS
+        ),
     )
 
     assert result.outcome == "MODEL_PASS"
@@ -2980,6 +3008,7 @@ def _p8_field_result(class_body, *, import_line=None, prelude=""):
         _assume_passive_external_imports=True,
         _assume_frozen_dataclass_decoration=True,
         _assumed_external_callable_effects={
+            **FROZEN_FACTORY_EFFECTS,
             ("dataclasses", "field"):
                 "PASSIVE_DEFAULTLESS_DATACLASS_FIELD",
         },
@@ -3250,6 +3279,7 @@ def test_p9_i1_known_builtin_decorator_identity(
         _assume_passive_external_imports=True,
         _assume_frozen_dataclass_decoration=True,
         _assumed_external_callable_effects={
+            **FROZEN_FACTORY_EFFECTS,
             ("builtins", "property"): "PASSIVE_PROPERTY",
         },
     )

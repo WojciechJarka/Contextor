@@ -31,7 +31,7 @@ from .execution.expressions import (
     _safe_annassign,
 )
 from .execution.definition_checks import (
-    _exact_frozen_dataclass_decorator,
+    _restricted_frozen_class_factory_call,
     _restricted_defaultless_dataclass_field_call,
 )
 from .execution.annotation_effects import (
@@ -308,7 +308,7 @@ def _safe_passive_class_definition(
         allow_conditional_frozen_dataclass
         and annotation_semantics == "DEFERRED"
         and len(statement.decorator_list) == 1
-        and _exact_frozen_dataclass_decorator(
+        and _restricted_frozen_class_factory_call(
             statement.decorator_list[0]
         )
     )
@@ -905,7 +905,7 @@ def _compile(
                 assume_frozen_dataclass
                 and annotation_semantics == "DEFERRED"
                 and len(stmt.decorator_list) == 1
-                and _exact_frozen_dataclass_decorator(
+                and _restricted_frozen_class_factory_call(
                     stmt.decorator_list[0]
                 )
             )
@@ -1531,6 +1531,12 @@ def evaluate_package_import_order(
     bindings. The evaluator does not attest the actual contents of
     __builtins__, builtins, or the import environment, and cannot certify
     general Python import safety.
+    The frozen-dataclass option enables a restricted
+    class model; it does not establish imported
+    decorator identity or call outcome. An external
+    decorator factory requires an explicit
+    assumed_external_callable_effects declaration.
+    The declared behavior is not runtime-attested.
     """
     events: list[PackageModelEvent] = []
     assumed_external_imports: list[ReachedUnmodeledImport] = []
@@ -1913,7 +1919,11 @@ def evaluate_package_import_order(
     )
 
     conditional_class_decorator_outcomes: dict[
-        str, _ClassDecoratorOutcomeContract
+        str,
+        tuple[
+            _ClassDecoratorOutcomeContract,
+            tuple[str, str],
+        ],
     ] = {}
 
     bootstrap = "\x00ENTRY"
@@ -2708,14 +2718,24 @@ def evaluate_package_import_order(
         elif step.op == (
             "SNAPSHOT_CONDITIONAL_CLASS_DECORATOR_FACTORY"
         ):
+            callable_value = (
+                namespaces[module].get(step.target)
+                if step.target
+                else None
+            )
+
             if (
                 not _assume_frozen_dataclass_decoration
                 or not step.definition_id
                 or not step.target
                 or step.definition_id
                 in conditional_class_decorator_outcomes
-                or namespaces[module].get(step.target)
-                != "\x00ASSUMED_EXTERNAL:dataclasses:dataclass"
+                or type(callable_value) is not _CallableEffectFact
+                or callable_value.import_origin is None
+                or not accept_callable_effect(
+                    callable_value,
+                    "FROZEN_DATACLASS_DECORATOR_FACTORY",
+                )
             ):
                 return result(
                     "UNKNOWN",
@@ -2725,7 +2745,10 @@ def evaluate_package_import_order(
 
             conditional_class_decorator_outcomes[
                 step.definition_id
-            ] = _FROZEN_DATACLASS_DECORATOR_CONTRACT
+            ] = (
+                _FROZEN_DATACLASS_DECORATOR_CONTRACT,
+                callable_value.import_origin,
+            )
 
         elif step.op == "CHECK_DATACLASS_FIELD_FACTORY":
             if (
@@ -2767,17 +2790,25 @@ def evaluate_package_import_order(
                     step.binding,
                 )
 
-            decorator_contract = (
+            decorator_state = (
                 conditional_class_decorator_outcomes.pop(
                     step.definition_id,
                     None,
                 )
             )
 
-            if (
-                decorator_contract is None
-                or decorator_contract.return_identity != "INPUT_CLASS"
-            ):
+            if decorator_state is None:
+                return result(
+                    "UNKNOWN",
+                    module,
+                    step.binding,
+                )
+
+            decorator_contract, import_origin = (
+                decorator_state
+            )
+
+            if decorator_contract.return_identity != "INPUT_CLASS":
                 return result(
                     "UNKNOWN",
                     module,
@@ -2830,7 +2861,12 @@ def evaluate_package_import_order(
                 AssumedFrozenDataclassDecoration(
                     module=module,
                     class_name=step.binding,
-                    decorator="dataclasses.dataclass(frozen=True)",
+                    decorator=(
+                        import_origin[0]
+                        + "."
+                        + import_origin[1]
+                        + "(frozen=True)"
+                    ),
                     line=step.source_line,
                     column=step.source_column,
                     factory_invocation_semantics=(

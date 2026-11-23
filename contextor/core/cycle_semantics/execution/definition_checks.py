@@ -3,13 +3,14 @@ from __future__ import annotations
 import ast
 
 
-def _exact_frozen_dataclass_decorator(
+def _restricted_frozen_class_factory_call(
     decorator: ast.AST,
 ) -> bool:
     return (
         isinstance(decorator, ast.Call)
         and isinstance(decorator.func, ast.Name)
-        and decorator.func.id == "dataclass"
+        and decorator.func.id.isidentifier()
+        and not decorator.func.id.startswith("__")
         and not decorator.args
         and len(decorator.keywords) == 1
         and decorator.keywords[0].arg == "frozen"

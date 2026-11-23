@@ -20,6 +20,11 @@ from contextor.core.cycle_semantics.namespace_source_binding import (
 )
 
 
+FROZEN_FACTORY_EFFECT = (
+    "FROZEN_DATACLASS_DECORATOR_FACTORY"
+)
+
+
 def _snapshot(text):
     raw = text.encode("utf-8")
     return SourceSnapshot(
@@ -130,6 +135,18 @@ def _dataclass_result(
     source, *, decorate=False, external=True, child=None,
     assumed_effects=None,
 ):
+    declared_effects = (
+        {
+            ("dataclasses", "dataclass"):
+                FROZEN_FACTORY_EFFECT,
+        }
+        if decorate
+        else {}
+    )
+
+    if assumed_effects is not None:
+        declared_effects.update(assumed_effects)
+
     return evaluate_source_bound_conditional_namespace_import_order(
         *_external_case(source, child=child),
         "pkg.ns.a",
@@ -137,7 +154,7 @@ def _dataclass_result(
         target_python_version=(3, 15),
         assume_passive_external_imports=external,
         assume_frozen_dataclass_decoration=decorate,
-        assumed_external_callable_effects=assumed_effects,
+        assumed_external_callable_effects=declared_effects,
     )
 
 
@@ -165,6 +182,7 @@ def test_frozen_dataclass_t02_exact_conditional_pass():
     assert model.evidence_scope == (
         "CONDITIONAL_EXTERNAL_AND_FROZEN_DATACLASS_"
         "ASSUMPTIONS_NOT_RUNTIME_PROOF"
+        "|EXTERNAL_CALL_EFFECT_ASSUMED_NOT_RUNTIME_ATTESTED"
     )
     assert len(model.assumed_external_imports) == 1
     assert model.assumed_external_imports[0].target == "dataclasses"
@@ -351,12 +369,20 @@ def test_frozen_dataclass_t15_deterministic():
         target_python_version=(3, 15),
         assume_passive_external_imports=True,
         assume_frozen_dataclass_decoration=True,
+        assumed_external_callable_effects={
+            ("dataclasses", "dataclass"):
+                FROZEN_FACTORY_EFFECT,
+        },
     )
     second = evaluate_source_bound_conditional_namespace_import_order(
         *args, "pkg.ns.a", standard_finder_assumed=True,
         target_python_version=(3, 15),
         assume_passive_external_imports=True,
         assume_frozen_dataclass_decoration=True,
+        assumed_external_callable_effects={
+            ("dataclasses", "dataclass"):
+                FROZEN_FACTORY_EFFECT,
+        },
     )
     assert first == second
     assert first.conditional_assessment.model_assessment.events == (
