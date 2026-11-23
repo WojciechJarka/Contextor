@@ -69,6 +69,8 @@ from .execution.lifecycle import (
 from .execution.calls import (
     _CALL_OUTCOME_CONTRACTS,
     _CallableEffectFact,
+    _ClassDecoratorOutcomeContract,
+    _FROZEN_DATACLASS_DECORATOR_CONTRACT,
     _RestrictedFunction,
     _execute_restricted_call,
     _execute_restricted_object_call,
@@ -105,6 +107,12 @@ class AssumedFrozenDataclassDecoration:
     decorator: str
     line: int
     column: int
+    factory_invocation_semantics: str
+    factory_result_semantics: str
+    application_invocation_semantics: str
+    application_result_semantics: str
+    application_lifecycle_semantics: str
+    returned_class_identity: str
 
 
 @dataclass(frozen=True)
@@ -942,6 +950,17 @@ def _compile(
                     for decorator_name in decorator_names
                 ):
                     return None
+
+            if conditional_dataclass:
+                steps.append(
+                    _Step(
+                        "SNAPSHOT_CONDITIONAL_CLASS_DECORATOR_FACTORY",
+                        target=stmt.decorator_list[0].func.id,
+                        definition_id=definition_id,
+                        source_line=stmt.decorator_list[0].lineno,
+                        source_column=stmt.decorator_list[0].col_offset,
+                    )
+                )
 
             if not conditional_dataclass:
                 if ordinary_named_decorators:
@@ -1893,6 +1912,10 @@ def evaluate_package_import_order(
         definition_state.definition_decorator_snapshots
     )
 
+    conditional_class_decorator_outcomes: dict[
+        str, _ClassDecoratorOutcomeContract
+    ] = {}
+
     bootstrap = "\x00ENTRY"
     execution_cursor = _new_execution_cursor(bootstrap)
     frames = execution_cursor.frames
@@ -2682,6 +2705,28 @@ def evaluate_package_import_order(
                 )
             )
 
+        elif step.op == (
+            "SNAPSHOT_CONDITIONAL_CLASS_DECORATOR_FACTORY"
+        ):
+            if (
+                not _assume_frozen_dataclass_decoration
+                or not step.definition_id
+                or not step.target
+                or step.definition_id
+                in conditional_class_decorator_outcomes
+                or namespaces[module].get(step.target)
+                != "\x00ASSUMED_EXTERNAL:dataclasses:dataclass"
+            ):
+                return result(
+                    "UNKNOWN",
+                    module,
+                    step.target,
+                )
+
+            conditional_class_decorator_outcomes[
+                step.definition_id
+            ] = _FROZEN_DATACLASS_DECORATOR_CONTRACT
+
         elif step.op == "CHECK_DATACLASS_FIELD_FACTORY":
             if (
                 not step.target
@@ -2715,11 +2760,29 @@ def evaluate_package_import_order(
                 )
 
         elif step.op == "DEFINE_CONDITIONAL_FROZEN_DATACLASS":
+            if not step.definition_id or not step.binding:
+                return result(
+                    "UNKNOWN",
+                    module,
+                    step.binding,
+                )
+
+            decorator_contract = (
+                conditional_class_decorator_outcomes.pop(
+                    step.definition_id,
+                    None,
+                )
+            )
+
             if (
-                namespaces[module].get("dataclass")
-                != "\x00ASSUMED_EXTERNAL:dataclasses:dataclass"
+                decorator_contract is None
+                or decorator_contract.return_identity != "INPUT_CLASS"
             ):
-                return result("UNKNOWN", module, step.binding)
+                return result(
+                    "UNKNOWN",
+                    module,
+                    step.binding,
+                )
 
             class_bindings = {
                 "__module__": _Scalar(module),
@@ -2770,6 +2833,24 @@ def evaluate_package_import_order(
                     decorator="dataclasses.dataclass(frozen=True)",
                     line=step.source_line,
                     column=step.source_column,
+                    factory_invocation_semantics=(
+                        decorator_contract.factory.invocation
+                    ),
+                    factory_result_semantics=(
+                        decorator_contract.factory.result
+                    ),
+                    application_invocation_semantics=(
+                        decorator_contract.application.invocation
+                    ),
+                    application_result_semantics=(
+                        decorator_contract.application.result
+                    ),
+                    application_lifecycle_semantics=(
+                        decorator_contract.application.lifecycle
+                    ),
+                    returned_class_identity=(
+                        decorator_contract.return_identity
+                    ),
                 )
             )
             namespaces[module][step.binding] = (

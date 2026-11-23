@@ -33,6 +33,42 @@ class _CallOutcomeContract:
     lifecycle: str
 
 
+@dataclass(frozen=True)
+class _ClassDecoratorOutcomeContract:
+    factory: _CallOutcomeContract
+    application: _CallOutcomeContract
+    return_identity: str
+
+
+_FROZEN_DATACLASS_DECORATOR_CONTRACT = (
+    _ClassDecoratorOutcomeContract(
+        factory=_CallOutcomeContract(
+            invocation=(
+                "NO_UNMODELED_FACTORY_EFFECTS_OR_EXCEPTIONS"
+            ),
+            result=(
+                "EXACT_STANDARD_FROZEN_DATACLASS_DECORATOR"
+            ),
+            lifecycle=(
+                "NO_UNKNOWN_EFFECTS_BEFORE_APPLICATION"
+            ),
+        ),
+        application=_CallOutcomeContract(
+            invocation=(
+                "NO_UNMODELED_DECORATION_EFFECTS_OR_EXCEPTIONS"
+            ),
+            result=(
+                "EXACT_STANDARD_FROZEN_DATACLASS_TRANSFORMATION"
+            ),
+            lifecycle=(
+                "NO_UNKNOWN_EFFECTS_BEFORE_CLASS_BINDING"
+            ),
+        ),
+        return_identity="INPUT_CLASS",
+    )
+)
+
+
 _CALL_OUTCOME_CONTRACTS = {
     "PASSIVE_PROPERTY": _CallOutcomeContract(
         invocation=(

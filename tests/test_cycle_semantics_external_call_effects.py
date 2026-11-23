@@ -233,3 +233,77 @@ def test_property_contract_includes_result_and_lifecycle():
     assert row.result_lifecycle_semantics == (
         "NO_UNKNOWN_RESULT_HOOKS_BEFORE_CLASS_BINDING"
     )
+
+
+def test_frozen_class_decorator_outcome_is_explicit():
+    source = (
+        "from dataclasses import dataclass\n"
+        "@dataclass(frozen=True)\n"
+        "class C:\n"
+        "    x: int\n"
+        "@dataclass(frozen=True)\n"
+        "class D:\n"
+        "    y: C | None\n"
+        "import pkg.child\n"
+    )
+
+    result = evaluate_package_import_order(
+        {
+            "pkg.__init__": ast.parse(source),
+            "pkg.child": ast.parse(
+                "from pkg import D\n"
+            ),
+        },
+        "pkg",
+        annotation_semantics="DEFERRED",
+        _compile_on_first_import=True,
+        _assume_passive_external_imports=True,
+        _assume_frozen_dataclass_decoration=True,
+    )
+
+    assert result.outcome == "MODEL_PASS"
+    assert tuple(
+        row.class_name
+        for row in result.assumed_dataclass_decorations
+    ) == ("C", "D")
+
+    for row in result.assumed_dataclass_decorations:
+        assert row.factory_invocation_semantics == (
+            "NO_UNMODELED_FACTORY_EFFECTS_OR_EXCEPTIONS"
+        )
+        assert row.factory_result_semantics == (
+            "EXACT_STANDARD_FROZEN_DATACLASS_DECORATOR"
+        )
+        assert row.application_invocation_semantics == (
+            "NO_UNMODELED_DECORATION_EFFECTS_OR_EXCEPTIONS"
+        )
+        assert row.application_result_semantics == (
+            "EXACT_STANDARD_FROZEN_DATACLASS_TRANSFORMATION"
+        )
+        assert row.application_lifecycle_semantics == (
+            "NO_UNKNOWN_EFFECTS_BEFORE_CLASS_BINDING"
+        )
+        assert row.returned_class_identity == "INPUT_CLASS"
+
+    assert result.evidence_scope == (
+        "CONDITIONAL_EXTERNAL_AND_FROZEN_DATACLASS_"
+        "ASSUMPTIONS_NOT_RUNTIME_PROOF"
+    )
+
+
+def test_rebound_class_decorator_has_no_outcome_fact():
+    result = _run(
+        "from dataclasses import dataclass\n"
+        "dataclass = None\n"
+        "@dataclass(frozen=True)\n"
+        "class C:\n"
+        "    x: int\n"
+    )
+
+    assert result.outcome == "UNKNOWN"
+    assert result.assumed_dataclass_decorations == ()
+    assert not any(
+        event.operation == "DEFINE_PASSIVE_CLASS"
+        and event.symbol == "C"
+        for event in result.events
+    )

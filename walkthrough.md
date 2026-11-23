@@ -1,76 +1,316 @@
-# P10-FINAL-R3 — CONDITIONAL SEMANTIC CLOSURE
+# P10-FINAL-R3-I1 — CLASS DECORATOR OUTCOME CONTRACT
 
-## PREFLIGHT I LIVE
+## PREFLIGHT
 
-- **DIRECT_EVIDENCE:** pierwsze źródło: Contextor MCP `get_project_architecture(repo_path="C:\\Temp\\Contextor_Repo", fields=[])`: LIVE revision **1538**, `canonical_state=fresh`, provenance `live`, `syntax_errors=0/fresh`. `cycle_semantics=stale` jest odrębną rodziną historyczną; nie stanowi wyniku aktualnego modelu.
-- **DIRECT_EVIDENCE:** `get_module_context` na revision 1538: `workspace_sync=verified`, `canonical_state=fresh` dla `execution/calls.py`, `execution/definition_checks.py`, `execution/annotation_effects.py`, `execution/steps.py`, `package_model.py`, `namespace_bound_model.py`, `model_environment.py`.
-- **DIRECT_EVIDENCE:** `get_symbol_lineage(mode="preview")` rozwiązał dokładne symbole `_CallableEffectFact`, `_CallOutcomeContract`, `evaluate_package_import_order` i `evaluate_conditional_namespace_import_order` na LIVE 1538. Wewnętrzne przejścia potwierdzono aktualnym źródłem. Git HEAD `607a25b476e3c665e6fa625ceff4579e94089fea`; zastane zmiany I2 w `calls.py`, `package_model.py`, `test_cycle_semantics_external_call_effects.py` oraz poprzedni `walkthrough.md`. Nie przywracano ich. GitHub nie był używany.
-- **DIRECT_EVIDENCE:** interpreter lokalny `.venv/Scripts/python.exe --version` = **CPython 3.15.2**. Nie uruchamiano pytest ani FULL.
-
-## MACIERZ POZYTYWNYCH PRZEJŚĆ AST → MODEL_PASS
-
-| Przejście i wszystkie osiągalne dodatnie gałęzie P10 | Fakt modelu / jawne założenie | Konsument i warunek UNKNOWN | Mechanizm CPython 3.15.2 |
-|---|---|---|---|
-| AST klasy → dopuszczenie | `_exact_frozen_dataclass_decorator` wymaga dokładnego kształtu `@dataclass(frozen=True)`; conditional tylko `DEFERRED`, bez baz/metaclass, z ograniczonym ciałem, różnymi nazwami pól i metod. `package_model.py:283-552,885-911`; `definition_checks.py:6-59`. To dowód składni, nie identity dekoratora. | `_compile`; odrzucenie daje brak programu/UNKNOWN po osiągnięciu, `package_model.py:1917-1933`. | Wykonanie wyrażenia dekoratora, ciała klasy, `type.__new__`, potem wywołanie dekoratora. |
-| Ciało klasy → kolejność kroków | `_compile` zachowuje kolejność AST: `CHECK_DATACLASS_FIELD_FACTORY` → `BIND(class_local)` dla `field(...)`, `APPLY_KNOWN_CLASS_DECORATOR` dla metody, potem `DEFINE_CONDITIONAL_FROZEN_DATACLASS`, `package_model.py:984-1111`. Literalne defaulty oraz ograniczone metody w `283-552`. | Nieobsłużone instrukcje/wyrażenia kończą UNKNOWN. `_Step` przenosi target, binding, adnotacje i definition_id, `steps.py:7-31`. | Call defaultu wykonuje się w ciele klasy; dekorator metody wywoływany jest przy definicji metody; nazwa klasy nadal nie jest związana. |
-| Import zewnętrzny → wiązanie | `ASSUME_PASSIVE_EXTERNAL_SUCCESS` zapewnia warunkowe przejście importu. Przy zewnętrznym FROM deklaracja `(module,symbol) → efekt` tworzy `_CallableEffectFact`; bez niej sentinel. `package_model.py:2120-2188`. | `accept_callable_effect` wymaga faktu; sam import nie wystarcza. Import class-local nie promuje zewnętrznego callable do globalnego faktu. | `IMPORT_NAME`/`IMPORT_FROM` mogą dać dowolny obiekt z faktycznego środowiska; model nie atestuje `sys.modules` ani import hooks. |
-| Builtin/alias/rebinding → callable fact | Konwencjonalny `property`: `calls.py:73-105`, `model_environment.py:3-5`, z jawnym precondition standardowych builtinów. `ALIAS` kopiuje wartość, `package_model.py:3196-3215`; nowe BIND/FROM zastępują stary fakt. | `_resolve_known_builtin_callable` najpierw sprawdza namespace; nieznany/shadowed/rebound wynik daje UNKNOWN w `APPLY...`. | Python wiąże obiekt, nie nazwę; alias zachowuje obiekt, rebinding zmienia późniejszy lookup. |
-| Dwa dopuszczone Call → rezultat | `_CALL_OUTCOME_CONTRACTS`, `calls.py:17-63`: `PASSIVE_PROPERTY` i `PASSIVE_DEFAULTLESS_DATACLASS_FIELD` obejmują invocation, dokładny standardowy result i lifecycle do związania klasy. Zewnętrzny kontrakt jest założeniem caller, standardowy builtin zależy od conventional builtins. | Jedyne konsumenty `_CallableEffectFact` w ścieżce P10: `CHECK_DATACLASS_FIELD_FACTORY` i `APPLY_KNOWN_CLASS_DECORATOR`, `package_model.py:2685-2715`. `accept_callable_effect` sprawdza typ, tag, pełny obiekt kontraktu i provenance, `1532-1578`. Brak/niewłaściwy fakt → UNKNOWN przed publikacją dekoracji. | `dataclasses.field` tworzy Field; `builtins.property` tworzy descriptor. Wynik i jego `__set_name__` mają znaczenie jeszcze przed `@dataclass`. |
-| Class-local rezultat → class creation | `CLASS_LOCAL_BIND` nie przechowuje samego rezultatu; nie-literalne wartości w `annotation_class_bindings` są `None`, `package_model.py:1087-1109,3184-3194,2724-2739`. Dokładne zachowanie Field/property w tym przedziale jest **założone w pełnym kontrakcie Call**, nie odtworzone przez model. | Gdy brak faktu Call, UNKNOWN wcześniej. Natomiast po przyjęciu faktu nie ma dodatkowej kontroli realnego wyniku. | CPython wstawia rzeczywisty rezultat do namespace; `type.__new__` uruchamia `__set_name__`; dokładny standardowy `Field` nie ma własnego dynamicznego haka, a builtin property ma standardową semantykę. |
-| Adnotacje → ewaluacja i konsumpcja | `annotation_fields` zachowuje AST; `_eval` w `annotation_effects.py:235-416` dopuszcza: Constant, Name (class-local → module → konwencjonalny builtin), List/Tuple, atrybut indeksowanego modułu, Subscript sekwencji/standardowego GenericAlias, BitOr z udowodnionym slotem, ograniczoną arytmetykę int, UnaryOp int i IfExp z bool. `_consume` dla str/ścieżki w `446-490`. Tożsamość/symboliczne wartości z `77-232`. | Każde `None` z `_eval` lub false z `_consume` → UNKNOWN w `package_model.py:2741-2761`; ponowne `_consume` nie jest pełną symulacją retry. | CPython odracza ewaluację; `annotationlib.get_annotations(FORWARDREF)` i `call_annotate_function` mogą próbować ponownie przy Exception, `C:\\Python315\\Lib\\annotationlib.py:733-844,943-1019`. `dataclasses._process_class` odczytuje wynik w `C:\\Python315\\Lib\\dataclasses.py:1050-1083`. Znane, pasywne wyrażenia modelu nie wymagają nieudowodnionego dispatchu; inne zatrzymuje UNKNOWN. |
-| Frozen dataclass → nazwa klasy | Model sprawdza sentinel `dataclass`, konsumuje adnotacje, a następnie przy założeniu `ASSUME_PASSIVE_FROZEN_DATACLASS` publikuje `ASSUMED_FROZEN_DATACLASS_DECORATION`, wiąże `\\x00PASSIVE_CLASS:` + definition_id i emituje `DEFINE_PASSIVE_CLASS`, `package_model.py:2717-2792`. | Brak sentinela, zła adnotacja albo brak definition_id → UNKNOWN. **Brak osobnej przesłanki o tożsamości i wartości zwróconej przez sam dekorator `dataclass`** przed wiązaniem jako klasy. | Standardowy `dataclasses._process_class` przetwarza realne Field, generuje metody, wywołuje `abc.update_abstractmethods` i zwraca `cls` dla `slots=False`, `C:\\Python315\\Lib\\dataclasses.py:1050-1250`. `dataclass(frozen=True)` wywołuje ten proces przez `wrap`, `1434-1462`. |
-| Koniec ramek → MODEL_PASS | `package_model.py:3282-3287`; tylko brak UNKNOWN/hazard pozwala na MODEL_PASS. `assumed_external_call_effects` zapisuje pełne invocation/result/lifecycle, `1532-1619`; scope ma suffix `NOT_RUNTIME_ATTESTED` gdy fakt został użyty. | `UNMODELED_STATEMENT` i nieznany krok → UNKNOWN, `3267-3283`. | Jest to rozstrzygnięcie modelu dla dostarczonego AST, nie wykonanie analizowanego pakietu. |
-
-### Granica publikacji ostrzeżeń
-
-**CODE_PATH_PROVED:** `evaluate_conditional_namespace_import_order` mapuje wewnętrzny `MODEL_PASS` na `CONDITIONAL_MODEL_PASS`, `package_model.py:3777-3819`; docstring `3510-3520` wyklucza warning suppression. Source-bound wrapper zachowuje warunkowy outcome i assessment, `namespace_bound_model.py:220-247`. Zwykła ścieżka publikacyjna w `scenarios.py:329-358` wywołuje `evaluate_package_import_order` **bez** flag `_assume_passive_external_imports`, `_assume_frozen_dataclass_decoration` i `_assumed_external_callable_effects`; więc te warunkowe pozytywne ścieżki nie są źródłem `MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS` ani suppression.
-
-## BRAKUJĄCA WŁASNOŚĆ I NOWA PRÓBA RÓŻNICOWA
-
-**UNPROVEN_REACHABLE_PATH:** pełny kontrakt Call zamyka rezultat `field`/metodowego `property`, lecz nie określa rezultatu wywołania samego dekoratora klasy `dataclass(frozen=True)`. Publiczna polityka nazywa się `ASSUME_PASSIVE_FROZEN_DATACLASS`, `package_model.py:3533-3536`. Source sprawdza sentinel i zakłada pasywną dekorację, ale nie ma jawnego kontraktu „dekorator zwraca tę samą klasę” (ani równoważnego dowodu) w `package_model.py:2717-2792`. Tożsamość klasy jest użyta później przez `_value`/`_Class` i importy, `annotation_effects.py:77-115`. Założenie o pasywności działania nie jest samo dowodem wartości zwracanej.
-
-Minimalna, odtwarzalna próba (analizowany kod przekazany modelowi wyłącznie jako AST; CPython w osobnych podprocesach 3.15.2, tymczasowy `PYTHONPATH`, bez zapisu do repo):
-
-```python
-# pkg/__init__.py
-from dataclasses import dataclass
-@dataclass(frozen=True)
-class C:
-    x: int
-@dataclass(frozen=True)
-class D:
-    y: C | None
-import pkg.child
-
-# pkg/child.py
-from pkg import D
-```
-
-Model: `evaluate_package_import_order({"pkg.__init__": ast.parse(source), "pkg.child": ast.parse(child)}, "pkg", annotation_semantics="DEFERRED", _compile_on_first_import=True, _assume_passive_external_imports=True, _assume_frozen_dataclass_decoration=True)` → **MODEL_PASS**, scope `CONDITIONAL_EXTERNAL_AND_FROZEN_DATACLASS_ASSUMPTIONS_NOT_RUNTIME_PROOF`; eventy `START_IMPORT → ASSUMED_EXTERNAL_IMPORT(dataclass) → ASSUMED_FROZEN_DATACLASS_DECORATION(C) → DEFINE_PASSIVE_CLASS(C) → ASSUMED_FROZEN_DATACLASS_DECORATION(D) → DEFINE_PASSIVE_CLASS(D) → START_IMPORT(child) → FROM(D) → READY(child) → BIND_CHILD(child) → IMPORT(pkg) → READY(pkg)`.
-
-CPython kontrolny, standardowe `dataclasses.dataclass`: `RESULT <class 'pkg.C'> <class 'pkg.D'>`. CPython z uprzednio załadowanym rzeczywistym `dataclasses`, ale `sys.modules["dataclasses"]` podmienionym na `types.ModuleType` o skopiowanym słowniku i pasywnym `dataclass(*, frozen): return lambda cls: None`: `RESULT None None`. Dekorator i import nie wywołują dodatkowego kodu poza wskazanym wywołaniem, ale rezultat różni się od symbolicznej klasy modelu. W osobnym wariancie tylko pierwszy dekorator zwracał `None`, drugi był rzeczywistym standardowym dataclass: CPython zwrócił `C=None` i `D.__dataclass_fields__["y"].type = ForwardRef('C | None', ...)`, podczas gdy model zachowuje symbol klasy C. **To nie dowodzi CONFIRMED_FALSE_PASS przy silnym założeniu „dokładny standardowy dataclass”**; taki silny rezultat nie jest jednak jawnie zapisany w istniejącym kontrakcie `ASSUME_PASSIVE_FROZEN_DATACLASS`. Próba jest świadkiem luki między pasywnością a wynikiem wiązania.
-
-## PONOWNA KLASYFIKACJA D1 / F1 / F2 / P1
-
-| Próba z D1/D3 | Prawdziwość pełnych założeń I2 | Naruszony warunek | Ocena |
-|---|---|---|---|
-| D1: podmienione `field()` importuje indeksowany child przed `C` | Fałszywe | `invocation=NO_EFFECTS_OR_EXCEPTIONS_FOR_ADMITTED_ARGUMENTS` | Bez kontraktu model UNKNOWN; z fałszywym kontraktem conditional MODEL_PASS nie jest defektem interpretera przy prawdziwym kontrakcie. |
-| F1: pasywny `field(hash=False, compare=False)` zwraca Field o `hash=True, compare=True` | Fałszywe | `result=...PRESERVE_LITERAL_HASH_COMPARE` | Różnica w metodach i polach CPython wynika z fałszywego kontraktu rezultatu. |
-| F2: pasywny Call zwraca subklasę Field, której `__set_name__` importuje child | Fałszywe | `result=EXACT_STDLIB_FIELD...` i `lifecycle=NO_UNKNOWN_RESULT_HOOKS_BEFORE_CLASS_BINDING` | ImportError CPython jest skutkiem fałszywego kontraktu, nie potwierdzonym defektem przy prawdziwym. |
-| P1: pasywny zamiennik `property` zwraca int 42 | Fałszywe | `result=EXACT_BUILTINS_PROPERTY_OF_DECORATED_FUNCTION` | Zmieniony atrybut klasy nie spełnia pełnego kontraktu. |
-
-**CONTRACT_PROVED w granicy obecnych tagów:** `calls.py:17-63` rozdziela invocation/result/lifecycle, `package_model.py:1532-1578,2167-2186,2685-2715` wymaga tego kontraktu dla obu osiągalnych konsumentów `_CallableEffectFact`; `model_environment.py:3-5` jasno oznacza standardowe builtiny jako założone, nie runtime-attested. F1/F2/P1/D1 nie są kontrprzykładami przy prawdziwym pełnym kontrakcie Call.
-
-## KOŃCOWY WERDYKT
-
-**UNPROVEN_REACHABLE_PATH**
-
-Konkretne przejście: `DEFINE_CONDITIONAL_FROZEN_DATACLASS` → `namespaces[module][step.binding] = "\\x00PASSIVE_CLASS:" + definition_id`, `package_model.py:2717-2792`. Model potrzebuje własności rezultatu dekoratora klasy, której nie dowodzi z AST/importu ani nie wypowiada jawnie polityka `ASSUME_PASSIVE_FROZEN_DATACLASS`. Świadek CPython pokazuje, że sama pasywność dekoratora nie determinuje tożsamości/wartości związanej nazwy. Nie rozstrzygano tu architektury ani nie projektowano naprawy.
+- DIRECT_EVIDENCE — Contextor MCP przed zmianą: LIVE revision **1538**, `canonical_state=fresh`, provenance=live, syntax errors 0/fresh. `execution/calls.py`, `package_model.py` i `tests/test_cycle_semantics_external_call_effects.py`: `workspace_sync=verified`.
+- DIRECT_EVIDENCE — `git rev-parse HEAD=6df29a3f09ae505d12e2d55067120a4f3cbdf7f2`; `git status --short` przed zmianą pusty. Stan I2 obecny w HEAD, bez przywracania plików. Aktualne anchory pasują: `calls.py` po `_CallOutcomeContract`; `package_model.py` import, rekord, `_compile` przed `if not conditional_dataclass`, stan po `definition_decorator_snapshots`, gałęzie `CHECK_DATACLASS_FIELD_FACTORY` i `DEFINE_CONDITIONAL_FROZEN_DATACLASS`; testy na końcu pliku.
+- CODE_PATH_PROVED — kontrakt opisuje oddzielnie wywołanie factory `dataclass(frozen=True)`, zastosowanie do gotowej klasy i tożsamość wyniku. CPython 3.15.2 `C:\\Python315\\Lib\\dataclasses.py:1434-1462` tworzy `wrap`, `1002-1250` przetwarza klasę i przy `slots=False` zwraca `cls`. Podmieniony dekorator zwracający `None` z R3 narusza `EXACT_STANDARD_FROZEN_DATACLASS_TRANSFORMATION` oraz `INPUT_CLASS`; nie jest świadkiem przy prawdziwym pełnym kontrakcie.
 
 ## FILES_CHANGED
 
-Tylko `walkthrough.md`. Zastane zmiany source/tests z I2 pozostawiono nietknięte. Nie czytano ani nie zmieniano `issues.md`; bez pytest, FULL, restartu, staging, commit i push.
+1. `contextor/core/cycle_semantics/execution/calls.py`: dokładny `_ClassDecoratorOutcomeContract` i stały kontrakt standardowej frozen dataclass.
+2. `contextor/core/cycle_semantics/package_model.py`: import kontraktu, sześć pól w rekordzie, snapshot factory przed ciałem klasy, stan indeksowany definition_id, pojedyncza konsumpcja przy dekoracji i zapis jawnego założenia rezultatu.
+3. `tests/test_cycle_semantics_external_call_effects.py`: dokładnie dwa dopisane testy, bez zmiany istniejących asercji.
+4. `walkthrough.md`: raport; jego własny diff pominięty poniżej.
+
+## TARGETED_TESTS
+
+Wymagane komendy, kolejno, CPython 3.15.2:
+
+1. `.venv/Scripts/python.exe -m pytest -q tests/test_cycle_semantics_external_call_effects.py` — **12 passed**.
+2. `.venv/Scripts/python.exe -m pytest -q tests/test_cycle_semantics_package_model.py -k "p8 or p9 or r11 or frozen_dataclass"` — **63 passed, 178 deselected**.
+3. `.venv/Scripts/python.exe -m pytest -q tests/test_cycle_semantics_namespace_bound_model.py -k "dataclass or p8 or p9"` — **39 passed, 25 deselected**.
+4. `.venv/Scripts/python.exe -m pytest -q tests/test_cycle_semantics_annotation_effects_i3.py tests/test_cycle_semantics_annotation_union_i1.py tests/test_cycle_semantics_conditional_class_identity_i2.py` — **50 passed**.
+5. `git diff --check` na trzech plikach — exit 0. Bez pełnego pytest i FULL.
+
+## POST_CHANGE_MCP
+
+- DIRECT_EVIDENCE — Contextor MCP po watcherze: `get_project_architecture(repo_path="C:\\Temp\\Contextor_Repo",fields=[])`: LIVE revision **1541**, `canonical_state=fresh`, syntax errors **0/fresh**, advisory warning null. Rodzina `cycle_semantics=stale` nie jest oceną aktualnego testu ani modelu.
+- DIRECT_EVIDENCE — `get_module_context` dla wszystkich trzech zmienionych plików na finalnym revision 1541: `workspace_sync=verified`, `canonical_state=fresh`. W przejściowym odczycie na revision 1540 test miał `out_of_sync`; sekwencyjny odczyt po zdarzeniu watchera na 1541 potwierdził `verified`.
+- DIRECT_EVIDENCE — `get_symbol_lineage` rozwiązał na LIVE `contextor.core.cycle_semantics.execution.calls::_ClassDecoratorOutcomeContract` (artifact `A9576/1`); definicja i użycie konstruktora są w `calls.py`. Lineage statyczny nie dowodzi kolejności runtime; tę potwierdzono kompilacją AST i ścieżką kodu.
+- CODE_PATH_PROVED + obserwacja modelu — dla źródła `from dataclasses import dataclass, field; @dataclass(frozen=True) class C: x: int = field()`, bez uruchamiania analizowanego pakietu: `_compile(..., annotation_semantics="DEFERRED", assume_frozen_dataclass=True)` zwrócił kolejno `PREPARE_FROM_MEMBER, PREPARE_FROM_MEMBER, FROM(dataclass), FROM(field), SNAPSHOT_CONDITIONAL_CLASS_DECORATOR_FACTORY(definition_id="pkg:3:0"), CHECK_DATACLASS_FIELD_FACTORY(field), BIND(x,class_local), DEFINE_CONDITIONAL_FROZEN_DATACLASS(definition_id="pkg:3:0")`. Snapshot nie emituje eventu nieznanego kodu. To **dowód kolejności kroków modelu**, nie obserwacja importu CPython.
+- CODE_PATH_PROVED — snapshot sprawdza aktualne wiązanie factory przed ciałem klasy i zapisuje kontrakt pod definition_id. `DEFINE_CONDITIONAL_FROZEN_DATACLASS` usuwa go przez `pop(definition_id,None)`, sprawdza `return_identity="INPUT_CLASS"`, następnie konsumuje adnotacje i zapisuje sześć jawnych pól rekordu. Drugi odczyt tego samego ID nie otrzyma już kontraktu. Istniejące eventy `ASSUMED_FROZEN_DATACLASS_DECORATION` i `DEFINE_PASSIVE_CLASS` oraz ich kolejność pozostały.
+- CONTRACT_PROVED — `factory` i `application` są **jawnymi założeniami** dla importowanego dekoratora; model nie atestuje realnego `sys.modules`, obiektu callable ani efektów runtime. Symboliczna tożsamość klasy po dekoracji jest warunkowa względem `INPUT_CLASS`. Zwykły pipeline ostrzeżeń wywołuje model bez tych prywatnych założeń (`scenarios.py:329-358`); namespace wrapper mapuje wewnętrzny `MODEL_PASS` na `CONDITIONAL_MODEL_PASS` (`package_model.py:3793-3819`), source-bound wrapper go nie promuje (`namespace_bound_model.py:220-247`). Brak bezwarunkowego warning suppression.
+- GRANICA: pozytywne targeted tests dowodzą zgodności z określonymi przypadkami i regresjami, nie autorytetu runtime. Faktyczne wykonanie CPython 3.15.2 ze standardowym `dataclass` i podmienionym dekoratorem z R3 jest odrębną obserwacją; ten drugi nie spełnia nowego kontraktu.
 
 ## FULL_DIFFS
 
-`FULL_DIFFS=NONE` dla source/tests w tym zadaniu; raport nie zawiera własnego diffu.
+Pełne rzeczywiste diffy source/tests względem HEAD; `walkthrough.md` jako raport pominięty:
+
+```diff
+diff --git a/contextor/core/cycle_semantics/execution/calls.py b/contextor/core/cycle_semantics/execution/calls.py
+index 1b74406..7a68be3 100644
+--- a/contextor/core/cycle_semantics/execution/calls.py
++++ b/contextor/core/cycle_semantics/execution/calls.py
+@@ -33,6 +33,42 @@ class _CallOutcomeContract:
+     lifecycle: str
+ 
+ 
++@dataclass(frozen=True)
++class _ClassDecoratorOutcomeContract:
++    factory: _CallOutcomeContract
++    application: _CallOutcomeContract
++    return_identity: str
++
++
++_FROZEN_DATACLASS_DECORATOR_CONTRACT = (
++    _ClassDecoratorOutcomeContract(
++        factory=_CallOutcomeContract(
++            invocation=(
++                "NO_UNMODELED_FACTORY_EFFECTS_OR_EXCEPTIONS"
++            ),
++            result=(
++                "EXACT_STANDARD_FROZEN_DATACLASS_DECORATOR"
++            ),
++            lifecycle=(
++                "NO_UNKNOWN_EFFECTS_BEFORE_APPLICATION"
++            ),
++        ),
++        application=_CallOutcomeContract(
++            invocation=(
++                "NO_UNMODELED_DECORATION_EFFECTS_OR_EXCEPTIONS"
++            ),
++            result=(
++                "EXACT_STANDARD_FROZEN_DATACLASS_TRANSFORMATION"
++            ),
++            lifecycle=(
++                "NO_UNKNOWN_EFFECTS_BEFORE_CLASS_BINDING"
++            ),
++        ),
++        return_identity="INPUT_CLASS",
++    )
++)
++
++
+ _CALL_OUTCOME_CONTRACTS = {
+     "PASSIVE_PROPERTY": _CallOutcomeContract(
+         invocation=(
+diff --git a/contextor/core/cycle_semantics/package_model.py b/contextor/core/cycle_semantics/package_model.py
+index 22c7c74..ab365a7 100644
+--- a/contextor/core/cycle_semantics/package_model.py
++++ b/contextor/core/cycle_semantics/package_model.py
+@@ -69,6 +69,8 @@ from .execution.lifecycle import (
+ from .execution.calls import (
+     _CALL_OUTCOME_CONTRACTS,
+     _CallableEffectFact,
++    _ClassDecoratorOutcomeContract,
++    _FROZEN_DATACLASS_DECORATOR_CONTRACT,
+     _RestrictedFunction,
+     _execute_restricted_call,
+     _execute_restricted_object_call,
+@@ -105,6 +107,12 @@ class AssumedFrozenDataclassDecoration:
+     decorator: str
+     line: int
+     column: int
++    factory_invocation_semantics: str
++    factory_result_semantics: str
++    application_invocation_semantics: str
++    application_result_semantics: str
++    application_lifecycle_semantics: str
++    returned_class_identity: str
+ 
+ 
+ @dataclass(frozen=True)
+@@ -943,6 +951,17 @@ def _compile(
+                 ):
+                     return None
+ 
++            if conditional_dataclass:
++                steps.append(
++                    _Step(
++                        "SNAPSHOT_CONDITIONAL_CLASS_DECORATOR_FACTORY",
++                        target=stmt.decorator_list[0].func.id,
++                        definition_id=definition_id,
++                        source_line=stmt.decorator_list[0].lineno,
++                        source_column=stmt.decorator_list[0].col_offset,
++                    )
++                )
++
+             if not conditional_dataclass:
+                 if ordinary_named_decorators:
+                     steps.append(
+@@ -1893,6 +1912,10 @@ def evaluate_package_import_order(
+         definition_state.definition_decorator_snapshots
+     )
+ 
++    conditional_class_decorator_outcomes: dict[
++        str, _ClassDecoratorOutcomeContract
++    ] = {}
++
+     bootstrap = "\x00ENTRY"
+     execution_cursor = _new_execution_cursor(bootstrap)
+     frames = execution_cursor.frames
+@@ -2682,6 +2705,28 @@ def evaluate_package_import_order(
+                 )
+             )
+ 
++        elif step.op == (
++            "SNAPSHOT_CONDITIONAL_CLASS_DECORATOR_FACTORY"
++        ):
++            if (
++                not _assume_frozen_dataclass_decoration
++                or not step.definition_id
++                or not step.target
++                or step.definition_id
++                in conditional_class_decorator_outcomes
++                or namespaces[module].get(step.target)
++                != "\x00ASSUMED_EXTERNAL:dataclasses:dataclass"
++            ):
++                return result(
++                    "UNKNOWN",
++                    module,
++                    step.target,
++                )
++
++            conditional_class_decorator_outcomes[
++                step.definition_id
++            ] = _FROZEN_DATACLASS_DECORATOR_CONTRACT
++
+         elif step.op == "CHECK_DATACLASS_FIELD_FACTORY":
+             if (
+                 not step.target
+@@ -2715,11 +2760,29 @@ def evaluate_package_import_order(
+                 )
+ 
+         elif step.op == "DEFINE_CONDITIONAL_FROZEN_DATACLASS":
++            if not step.definition_id or not step.binding:
++                return result(
++                    "UNKNOWN",
++                    module,
++                    step.binding,
++                )
++
++            decorator_contract = (
++                conditional_class_decorator_outcomes.pop(
++                    step.definition_id,
++                    None,
++                )
++            )
++
+             if (
+-                namespaces[module].get("dataclass")
+-                != "\x00ASSUMED_EXTERNAL:dataclasses:dataclass"
++                decorator_contract is None
++                or decorator_contract.return_identity != "INPUT_CLASS"
+             ):
+-                return result("UNKNOWN", module, step.binding)
++                return result(
++                    "UNKNOWN",
++                    module,
++                    step.binding,
++                )
+ 
+             class_bindings = {
+                 "__module__": _Scalar(module),
+@@ -2770,6 +2833,24 @@ def evaluate_package_import_order(
+                     decorator="dataclasses.dataclass(frozen=True)",
+                     line=step.source_line,
+                     column=step.source_column,
++                    factory_invocation_semantics=(
++                        decorator_contract.factory.invocation
++                    ),
++                    factory_result_semantics=(
++                        decorator_contract.factory.result
++                    ),
++                    application_invocation_semantics=(
++                        decorator_contract.application.invocation
++                    ),
++                    application_result_semantics=(
++                        decorator_contract.application.result
++                    ),
++                    application_lifecycle_semantics=(
++                        decorator_contract.application.lifecycle
++                    ),
++                    returned_class_identity=(
++                        decorator_contract.return_identity
++                    ),
+                 )
+             )
+             namespaces[module][step.binding] = (
+diff --git a/tests/test_cycle_semantics_external_call_effects.py b/tests/test_cycle_semantics_external_call_effects.py
+index 5f950fa..e56e1d1 100644
+--- a/tests/test_cycle_semantics_external_call_effects.py
++++ b/tests/test_cycle_semantics_external_call_effects.py
+@@ -233,3 +233,77 @@ def test_property_contract_includes_result_and_lifecycle():
+     assert row.result_lifecycle_semantics == (
+         "NO_UNKNOWN_RESULT_HOOKS_BEFORE_CLASS_BINDING"
+     )
++
++
++def test_frozen_class_decorator_outcome_is_explicit():
++    source = (
++        "from dataclasses import dataclass\n"
++        "@dataclass(frozen=True)\n"
++        "class C:\n"
++        "    x: int\n"
++        "@dataclass(frozen=True)\n"
++        "class D:\n"
++        "    y: C | None\n"
++        "import pkg.child\n"
++    )
++
++    result = evaluate_package_import_order(
++        {
++            "pkg.__init__": ast.parse(source),
++            "pkg.child": ast.parse(
++                "from pkg import D\n"
++            ),
++        },
++        "pkg",
++        annotation_semantics="DEFERRED",
++        _compile_on_first_import=True,
++        _assume_passive_external_imports=True,
++        _assume_frozen_dataclass_decoration=True,
++    )
++
++    assert result.outcome == "MODEL_PASS"
++    assert tuple(
++        row.class_name
++        for row in result.assumed_dataclass_decorations
++    ) == ("C", "D")
++
++    for row in result.assumed_dataclass_decorations:
++        assert row.factory_invocation_semantics == (
++            "NO_UNMODELED_FACTORY_EFFECTS_OR_EXCEPTIONS"
++        )
++        assert row.factory_result_semantics == (
++            "EXACT_STANDARD_FROZEN_DATACLASS_DECORATOR"
++        )
++        assert row.application_invocation_semantics == (
++            "NO_UNMODELED_DECORATION_EFFECTS_OR_EXCEPTIONS"
++        )
++        assert row.application_result_semantics == (
++            "EXACT_STANDARD_FROZEN_DATACLASS_TRANSFORMATION"
++        )
++        assert row.application_lifecycle_semantics == (
++            "NO_UNKNOWN_EFFECTS_BEFORE_CLASS_BINDING"
++        )
++        assert row.returned_class_identity == "INPUT_CLASS"
++
++    assert result.evidence_scope == (
++        "CONDITIONAL_EXTERNAL_AND_FROZEN_DATACLASS_"
++        "ASSUMPTIONS_NOT_RUNTIME_PROOF"
++    )
++
++
++def test_rebound_class_decorator_has_no_outcome_fact():
++    result = _run(
++        "from dataclasses import dataclass\n"
++        "dataclass = None\n"
++        "@dataclass(frozen=True)\n"
++        "class C:\n"
++        "    x: int\n"
++    )
++
++    assert result.outcome == "UNKNOWN"
++    assert result.assumed_dataclass_decorations == ()
++    assert not any(
++        event.operation == "DEFINE_PASSIVE_CLASS"
++        and event.symbol == "C"
++        for event in result.events
++    )
+```
+
+## WERDYKT
+
+**PASS** dla dosłownego zakresu I1. Zmienione pliki mają świeży LIVE i pełny diff; wynik warunkowy nadal zależy od jawnych, nieatestowanych założeń.
