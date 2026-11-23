@@ -14,9 +14,58 @@ class _RestrictedFunction:
 
 
 @dataclass(frozen=True)
+class _CallOutcomeContract:
+    """Conditional semantics through class-name binding.
+
+    Invocation must have no unmodeled side effects
+    or exceptions for the admitted arguments.
+
+    The result must have the declared exact standard
+    semantics, including its later behavior during
+    class creation.
+
+    For an external import all three properties are
+    caller assumptions, not runtime attestations.
+    """
+
+    invocation: str
+    result: str
+    lifecycle: str
+
+
+_CALL_OUTCOME_CONTRACTS = {
+    "PASSIVE_PROPERTY": _CallOutcomeContract(
+        invocation=(
+            "NO_EFFECTS_OR_EXCEPTIONS_FOR_ADMITTED_ARGUMENTS"
+        ),
+        result=(
+            "EXACT_BUILTINS_PROPERTY_OF_DECORATED_FUNCTION"
+        ),
+        lifecycle=(
+            "NO_UNKNOWN_RESULT_HOOKS_BEFORE_CLASS_BINDING"
+        ),
+    ),
+    "PASSIVE_DEFAULTLESS_DATACLASS_FIELD":
+        _CallOutcomeContract(
+            invocation=(
+                "NO_EFFECTS_OR_EXCEPTIONS_FOR_ADMITTED_ARGUMENTS"
+            ),
+            result=(
+                "EXACT_STDLIB_FIELD_NO_DEFAULT_OR_FACTORY_"
+                "PRESERVE_LITERAL_HASH_COMPARE"
+            ),
+            lifecycle=(
+                "NO_UNKNOWN_RESULT_HOOKS_BEFORE_CLASS_BINDING"
+            ),
+        ),
+}
+
+
+@dataclass(frozen=True)
 class _CallableEffectFact:
     effect: str
     provenance: str
+    outcome_contract: _CallOutcomeContract
     canonical_identity: str | None = None
     import_origin: tuple[str, str] | None = None
 
@@ -25,6 +74,9 @@ _KNOWN_BUILTIN_CALLABLES = {
     "property": _CallableEffectFact(
         effect="PASSIVE_PROPERTY",
         provenance="CONVENTIONAL_BUILTIN",
+        outcome_contract=(
+            _CALL_OUTCOME_CONTRACTS["PASSIVE_PROPERTY"]
+        ),
         canonical_identity="builtins.property",
     ),
 }
@@ -54,10 +106,9 @@ def _resolve_known_builtin_callable(
     )
 
 
-_SUPPORTED_CALL_EFFECTS = frozenset({
-    "PASSIVE_PROPERTY",
-    "PASSIVE_DEFAULTLESS_DATACLASS_FIELD",
-})
+_SUPPORTED_CALL_EFFECTS = frozenset(
+    _CALL_OUTCOME_CONTRACTS
+)
 
 
 def _validate_external_callable_effects(

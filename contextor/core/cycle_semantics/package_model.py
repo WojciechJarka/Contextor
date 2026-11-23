@@ -67,6 +67,7 @@ from .execution.lifecycle import (
     _start_module_frame,
 )
 from .execution.calls import (
+    _CALL_OUTCOME_CONTRACTS,
     _CallableEffectFact,
     _RestrictedFunction,
     _execute_restricted_call,
@@ -111,6 +112,9 @@ class AssumedExternalCallEffect:
     import_module: str
     imported_symbol: str
     effect: str
+    invocation_semantics: str
+    result_semantics: str
+    result_lifecycle_semantics: str
 
 
 def _safe_class_namespace_value(value: object) -> bool:
@@ -1532,6 +1536,9 @@ def evaluate_package_import_order(
         if (
             type(value) is not _CallableEffectFact
             or value.effect != required_effect
+            or value.outcome_contract != (
+                _CALL_OUTCOME_CONTRACTS.get(required_effect)
+            )
         ):
             return False
 
@@ -1556,6 +1563,15 @@ def evaluate_package_import_order(
                 import_module=origin_module,
                 imported_symbol=origin_symbol,
                 effect=value.effect,
+                invocation_semantics=(
+                    value.outcome_contract.invocation
+                ),
+                result_semantics=(
+                    value.outcome_contract.result
+                ),
+                result_lifecycle_semantics=(
+                    value.outcome_contract.lifecycle
+                ),
             )
         )
 
@@ -2152,6 +2168,9 @@ def evaluate_package_import_order(
                             _CallableEffectFact(
                                 effect=declared_effect,
                                 provenance="ASSUMED_EXTERNAL_CALL_EFFECT",
+                                outcome_contract=(
+                                    _CALL_OUTCOME_CONTRACTS[declared_effect]
+                                ),
                                 canonical_identity=None,
                                 import_origin=(target, step.symbol),
                             )

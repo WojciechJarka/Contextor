@@ -174,3 +174,62 @@ def test_conventional_builtin_property_remains():
 
     assert result.outcome == "MODEL_PASS"
     assert result.assumed_external_call_effects == ()
+
+
+def test_field_contract_includes_result_and_lifecycle():
+    result = _run(
+        _source(
+            "from dataclasses import dataclass, field\n",
+            "field(hash=False, compare=False)",
+        ),
+        {("dataclasses", "field"): FIELD_EFFECT},
+    )
+
+    assert result.outcome == "MODEL_PASS"
+    assert len(result.assumed_external_call_effects) == 1
+
+    row = result.assumed_external_call_effects[0]
+
+    assert row.invocation_semantics == (
+        "NO_EFFECTS_OR_EXCEPTIONS_FOR_ADMITTED_ARGUMENTS"
+    )
+    assert row.result_semantics == (
+        "EXACT_STDLIB_FIELD_NO_DEFAULT_OR_FACTORY_"
+        "PRESERVE_LITERAL_HASH_COMPARE"
+    )
+    assert row.result_lifecycle_semantics == (
+        "NO_UNKNOWN_RESULT_HOOKS_BEFORE_CLASS_BINDING"
+    )
+
+
+def test_property_contract_includes_result_and_lifecycle():
+    source = (
+        "from dataclasses import dataclass\n"
+        "from builtins import property as prop\n"
+        "@dataclass(frozen=True)\n"
+        "class C:\n"
+        "    x: int\n"
+        "    @prop\n"
+        "    def value(self):\n"
+        "        return 7\n"
+    )
+
+    result = _run(
+        source,
+        {("builtins", "property"): PROPERTY_EFFECT},
+    )
+
+    assert result.outcome == "MODEL_PASS"
+    assert len(result.assumed_external_call_effects) == 1
+
+    row = result.assumed_external_call_effects[0]
+
+    assert row.invocation_semantics == (
+        "NO_EFFECTS_OR_EXCEPTIONS_FOR_ADMITTED_ARGUMENTS"
+    )
+    assert row.result_semantics == (
+        "EXACT_BUILTINS_PROPERTY_OF_DECORATED_FUNCTION"
+    )
+    assert row.result_lifecycle_semantics == (
+        "NO_UNKNOWN_RESULT_HOOKS_BEFORE_CLASS_BINDING"
+    )
