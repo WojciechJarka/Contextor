@@ -69,6 +69,10 @@ def _model(sources):
         _compile_on_first_import=True,
         _assume_passive_external_imports=True,
         _assume_frozen_dataclass_decoration=True,
+        _assumed_external_callable_effects={
+            ("dataclasses", "dataclass"):
+                "FROZEN_DATACLASS_DECORATOR_FACTORY",
+        },
     )
     first = evaluate_package_import_order(trees, "pkg", **options)
     second = evaluate_package_import_order(trees, "pkg", **options)
@@ -77,6 +81,11 @@ def _model(sources):
     assert first.evidence_scope == (
         "CONDITIONAL_EXTERNAL_AND_FROZEN_DATACLASS_"
         "ASSUMPTIONS_NOT_RUNTIME_PROOF"
+        + (
+            "|EXTERNAL_CALL_EFFECT_ASSUMED_NOT_RUNTIME_ATTESTED"
+            if first.assumed_external_call_effects
+            else ""
+        )
     )
     return first
 
