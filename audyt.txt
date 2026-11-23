@@ -110,6 +110,14 @@ pamiętaj, że nie musza być one nadal aktualne (całkowicie lub częsciowo):
 
 największym zagrożeniem dla Contextora nie jest obecnie zbyt mały zakres interpretowanych konstrukcji, lecz możliwość otrzymania MODEL_PASS na podstawie niepełnego modelu skutków wykonania
 
+20 **Nieprawidłowa agregacja typów zależności w macierzy**
+
+`build_module_dependency_matrix()` agreguje kanały użycia (`direct_calls`, `inheritance`, `api_imports` itd.) na poziomie całego artefaktu, zamiast osobno dla każdego konsumenta. W rezultacie moduł może otrzymać typ zależności (`call`, `inheritance`, `import`), którego faktycznie dla niego nie wykryto.
+
+Problem dotyczy zarówno macierzy FULL, jak i LIVE/incremental, ponieważ korzystają z tego samego mechanizmu. Istniejące testy parytetu nie wykrywają tej niezgodności.
+
+**Status:** Potwierdzony defekt ścieżki agregacji w kodzie; brak zweryfikowanego przykładu w aktualnym LIVE. Wymaga zachowania klasyfikacji `dep_types` osobno dla każdego konsumenta oraz regresyjnej walidacji wyniku.
+
 ****************************************************************************************************************************************************************************************
 
 
@@ -721,3 +729,34 @@ Total end-to-end:  ~3844ms  (odczuwane z zewnątrz: ~5-6s)
 > Contextor MCP to solidne narzędzie architektoniczne z przemyślanym rdzeniem. LIVE state z inkrementalnym updatem i rozróżnieniem `UNCHANGED`/`UPDATED`, blast radius z cross-layer detection, AST-bounded symbol resolution oraz system logowania z pełną oberwowalnością to poziom którego nie powstydziłby się komercyjny produkt. Wynik osiągnięty na FX-4100 solo w 3.5 miesiąca, po 25× optymalizacji pipeline.
 >
 > Punkty odjęte za: niespójność API (aliasowe parametry, brak `similar_candidates` w blast_radius), ubogi schemat v1.0 `query_canonical_projection` oraz ukryty prereq `get_layer_isolation`. Żadna z tych rzeczy nie jest blokerem architektonicznym — to backlog UX.
+
+
+
+
+
+
+
+Proponowana organizacja prac
+1. Etap I — zamknięcie hipotez poprawności
+   
+   Weryfikujemy P11–P15 oraz P19, z pierwszeństwem dla zagrożenia nieuzasadnionym MODEL_PASS. P16 dostarcza niezależnych testów, a nie tylko testów powielających założenia modelu.
+   
+   Każdy punkt kończy się decyzją: potwierdzona usterka, uzasadnione UNKNOWN, świadome ograniczenie lub hipoteza obalona. Nie implementujemy zmian tylko dlatego, że punkt znajduje się na liście.
+2. Etap II — stabilizacja kontraktów LIVE
+   
+   Weryfikujemy P18 i łańcuchy publikacji dotyczące zmienionych rodzin faktów. Ustalamy, które dane można uznać za autorytatywne, kiedy są świeże i jak trafiają do stanu kanonicznego.
+   
+   P17 traktujemy oddzielnie jako zagadnienie bezpieczeństwa, istotne szczególnie przed dystrybucją.
+3. Etap III — jedna zbiorcza integracja analityczna
+   
+   Dopiero tutaj wykonujemy przekrojową pracę nad:
+   - kompletnością materializowanych faktów;
+   - wiernością transformacji i macierzy, w tym P20;
+   - brakującymi połączeniami między już materializowanymi rodzinami;
+   - udostępnieniem dostępnych informacji przez MCP;
+   - spójnością FULL, incremental, LIVE i snapshotów.
+4. Etap IV — jeden końcowy audyt integracyjny
+   
+   Weryfikujemy zgodność całego przepływu od wykrytego faktu do odpowiedzi MCP, testujemy regresje i sprawdzamy zachowanie agenta w rzeczywistych zadaniach.
+   
+   Dopiero na tej podstawie oceniamy, co udało się osiągnąć.

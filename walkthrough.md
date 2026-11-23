@@ -1,73 +1,53 @@
-# P10-FINAL-R4-D1 — CONDITIONAL CONTRACT ACCEPTANCE
+# DEPENDENCY-MATRIX-R1 — audyt kompletności i wierności danych
 
-## PREFLIGHT I LIVE
+Tryb: discovery only. Nie zmieniono kodu ani testów; nie uruchomiono pytest ani FULL. Lokalny HEAD: `a22dd19b157cc6fc981c83d1fd7b164c97d6ee5e`.
 
-- DIRECT_EVIDENCE: Contextor MCP LIVE revision **1554**, `canonical_state=fresh`, syntax errors **0/fresh**. `workspace_sync=verified` na revision 1554 dla `execution/calls.py`, `execution/definition_checks.py`, `package_model.py`, `namespace_bound_model.py`, `scenarios.py`, `test_cycle_semantics_external_call_effects.py`, `test_cycle_semantics_annotation_effects_i3.py`, `test_cycle_semantics_annotation_union_i1.py`, `test_cycle_semantics_conditional_class_identity_i2.py`. Osobna rodzina `cycle_semantics=stale` nie jest wynikiem tego audytu.
-- DIRECT_EVIDENCE: HEAD `03eb604a1a0cf2832d30afc1cd9518b69a65896c`, preflight `git status --short` oraz `git diff --stat` puste. Lokalny LIVE jest źródłem aktualności; Git służył weryfikacji literalnej.
-- DIRECT_EVIDENCE: Contextor `get_symbol_lineage(mode=preview)` rozwiązał `evaluate_package_import_order` i `evaluate_conditional_namespace_import_order` na revision 1554; źródłowo powiązany wrapper znajduje się w `namespace_bound_model.py:52`.
+## A. DIRECT_EVIDENCE
 
-## KOMPLETNA LISTA PRODUCENTÓW I KONSUMENTÓW
+- Contextor MCP `get_project_architecture(fields=[])`: LIVE revision 1554, `provenance=live`, `resync_required=false`; `graph`, `artifact_consumption` i `lineage` są `fresh`, `workspace_sync=unverified`. Odpowiedź nie podaje osobnego stanu `dependency_matrix`. Raport `graph_analytics` jest historycznym raportem FULL z 2026-11-21; ostatni odczytany status FULL wskazuje publikację w revision 1510. Nie utożsamiać raportu z LIVE 1554.
+- `contextor/core/analysis/state_manager.py:630-638`: siedem dozwolonych kanałów kanonicznej konsumpcji. `:654-711` definiuje `artifact_consumption[target]` jako listę konsumentów i `channels[consumer]`; `:833-911` buduje tę strukturę z surowych faktów. Fakty bez konsumentów pozostają kanonicznymi celami z pustymi polami.
+- `contextor/core/reporting_engine/graph_analytics.py:2190-2291`: projekcja bierze `state.artifacts` i `state.artifact_consumption`; zachowuje artefakt tylko przy zewnętrznym konsumencie. Odwraca `channels[consumer]` do `_usage_sidecar[artifact][channel] = [consumers]`.
+- `graph_analytics.py:325-355`: `_usage_dependency_types` mapuje niepuste kanały na `call`, `import`, `inheritance`; nie filtruje ich według aktualnego konsumenta. `:450-469`: builder wylicza typy jeden raz dla artefaktu, następnie przypisuje cały zbiór każdemu jego zewnętrznemu konsumentowi. `weight` rośnie raz na relację konsument–artefakt.
+- `graph_analytics.py:378-408,471-509`: `hard_edges` dodają typ `import`; import-only edge ma wagę zero. Builder nie przyjmuje `soft_edges`, lineage ani `symbol_calls`. Lokalne `consumer == definer` pomija.
+- `state_manager.py:809-830`: warunek świeżości wejść wymaga braku `resync_required`, świeżej kompletnej konsumpcji i grafu z mapą `hard_edges`. `contextor/core/api/facade.py:1356-1367`: FULL oblicza macierz z kanonicznego stanu. `contextor/core/analysis/incremental/plan_executor.py:1703-1733`: incremental używa tej samej funkcji buildera na projekcji i `hard_edges`; przy niespełnionych warunkach oznacza stan `stale`.
+- `graph_analytics.py:1323-1361,1640-1644,1932-1939,1995-2011`: raport filtruje relacje do zakresu, używa tego samego buildera, zapisuje kompaktową macierz. Publiczny `get_project_architecture` zwraca raport historyczny, nie aktualne `state.dependency_matrix`.
+- `tests/test_graph_analytics_regressions.py:27-59` sprawdza fallback `import` i jawne `inheritance`. `tests/test_matrix_clusters_ram_parity.py:220-235` porównuje kanały per consumer i końcowe macierze FULL/projekcja, ale nie sprawdza, czy `dep_types` komórki są ograniczone do kanałów danego konsumenta. Testów nie uruchamiano.
+- MCP `contextor_fact_lineage(artifact_consumption)` potwierdził właściciela stanu, producenta FULL, aktualizację incremental, snapshot oraz publiczne projekcje blast radius. Dokumentacja `query_canonical_projection` v1.1 wystawia konsumentów i twarde/miękkie zależności, ale nie pole kanonicznych `channels[consumer]`.
 
-| Fakt/kontrakt | Producent | Konsument | Ocena |
+## B. MACIERZ POKRYCIA
+
+| Rodzina | Źródło → transformacja | Macierz | Publiczne MCP |
 |---|---|---|---|
-| `_CallableEffectFact` builtin `property` | `execution/calls.py:112-121`; fallback tylko przy braku lokalnego wiązania `:130-145` | `package_model.py:2767-2783` | MODEL_PROVED przy założeniu konwencjonalnych builtins |
-| `_CallableEffectFact` zewnętrzny | walidacja deklaracji `execution/calls.py:148-183`; modułowy FROM i zgodny wpis `package_model.py:2185-2220` | snapshot factory `:2718-2751`, field `:2753-2765`, property `:2767-2783` | EXPLICITLY_ASSUMED |
-| `_CALL_OUTCOME_CONTRACTS` | `execution/calls.py:72-100` | builtin `:113-119`, `package_model.py:1561-1568,2200-2209` | exact effect + exact kontrakt sprawdzane przez `accept_callable_effect` |
-| `_FROZEN_DATACLASS_DECORATOR_CONTRACT` | `execution/calls.py:36-69`; factory przypisana do słownika `:97-99` | snapshot `package_model.py:2746-2751`, application/binding `:2793-2815,2860-2908` | EXPLICITLY_ASSUMED dla importu zewnętrznego |
-| `conditional_class_decorator_outcomes` | słownik `package_model.py:1921-1927`, zapis `:2746-2751` pod `definition_id` | pojedynczy `pop` `:2793-2805` | MODEL_PROVED dla kolejności modelu |
-| zapis użytych deklaracji | `accept_callable_effect` `package_model.py:1584-1603` | `result` `:1620-1645`: `assumed_external_call_effects` i `evidence_scope` | EXPLICITLY_ASSUMED; brak atestacji runtime |
+| Potwierdzeni konsumenci artefaktów | Fakty ekstraktora → `state.artifacts` → `artifact_consumption` → projekcja | Zagregowani do `weight` pary modułów; brak tożsamości artefaktu w komórce | Konsumenci i blast radius dostępni osobno; kanoniczne query daje listę konsumentów |
+| Kanały użycia | `channels[consumer]` → `_usage_sidecar` → trzy typy | Zagregowane; możliwe przypisanie kanału innego konsumenta | Surowe `channels[consumer]` nie są polem sprawdzonego publicznego query ani kontraktu blast radius |
+| Twarde importy | `dependency_graph.hard_edges` → builder | Para modułów i `import`; import-only ma wagę 0, brak miejsca importu | Query zależności `hard` |
+| Miękkie importy | `dependency_graph.soft_edges` | Nieuwzględnione; poza wejściami buildera | Query zależności `soft` |
+| Lineage, `symbol_calls` | Odrębny stan kanoniczny | Nie są bezpośrednimi wejściami i nie zachowują swojej semantyki w macierzy | Osobne `get_symbol_lineage` i `get_symbol_call_context` |
+| Reeksporty, aliasy, nierozstrzygnięte zależności | Rozwiązywanie przed konsumpcją | Tylko rozstrzygnięte relacje docierające do konsumpcji lub `hard_edges`; brak łańcucha i przyczyny braku rozwiązania | Pełnego pokrycia osobnymi MCP nie ustalono |
+| Artefakty bez konsumentów zewnętrznych, relacje lokalne | Kanoniczna konsumpcja i projekcja | Brak komórki między modułami; świadomy filtr | Artefakty dostępne osobnymi zapytaniami |
 
-Literalne przeszukanie aktualnego `contextor/` nie wykazało innych konstruktorów `_CallableEffectFact`, wywołań `accept_callable_effect`, odczytów `_CALL_OUTCOME_CONTRACTS`, ani zapisów/odczytów `conditional_class_decorator_outcomes`. Nie zakładano autorstwa z nazwy importu.
+## C. POTWIERDZONE NIEZGODNOŚCI
 
-## MACIERZ WARUNKÓW PRZYZNANIA PASS
+**CODE_PATH_PROVED:** Jeśli ten sam artefakt ma konsumenta A z `direct_calls` i B z `inheritance`, `_usage_dependency_types` zwraca oba typy dla artefaktu. `build_module_dependency_matrix` przypisuje oba A i B, mimo że stan kanoniczny rozróżnia ich kanały. To kontrprzykład wynikający z kodu, nie zaobserwowana jeszcze komórka LIVE. `hard_edges` może niezależnie dodać `import` konkretnej parze.
 
-Kolejność modelu: `ast.ClassDef` i restricted `@name(frozen=True)` (`package_model.py:893-919`, `execution/definition_checks.py:6-25`) → `SNAPSHOT_CONDITIONAL_CLASS_DECORATOR_FACTORY` przed krokami ciała (`package_model.py:954-963`) → zewnętrzny FROM tworzy fakt tylko przy deklaracji (`:2185-2220`) → snapshot bierze **aktualne** `namespaces[module][step.target]`, żąda efektu factory i origin (`:2718-2744`) → zapis kontraktu pod `definition_id` (`:2746-2751`) → restricted ciało klasy i adnotacje (`:1000-1109,2828-2855`) → pojedynczy `pop`, kontrola `INPUT_CLASS`, publikacja założonej dekoracji i związanie sentinela klasy (`:2785-2815,2860-2908`) → wewnętrzny `MODEL_PASS` dopiero po wyczerpaniu kroków (`:3404`).
+**UNKNOWN LIVE WITNESS:** sprawdzone publiczne projekcje nie udostępniają `artifact_consumption[target]["channels"]`, więc nie potwierdzono rzeczywistego świadka w faktach LIVE 1554. Nie kwalifikuję konkretnej komórki LIVE jako błędnej.
 
-| Sytuacja przy snapshot | Warunek i wynik | Klasyfikacja |
-|---|---|---|
-| Brak deklaracji | FROM wiąże sentinel; brak `_CallableEffectFact` w `:2733` → UNKNOWN | CONSERVATIVE_UNKNOWN |
-| Właściwy efekt | zgodny `_CallableEffectFact`, origin i kontrakt `:2733-2738` → możliwy dalszy warunkowy MODEL_PASS | EXPLICITLY_ASSUMED |
-| Niewłaściwy efekt | `accept_callable_effect` porównuje efekt i kontrakt `:1557-1568` → UNKNOWN | CONSERVATIVE_UNKNOWN |
-| Alias przed snapshot | ALIAS kopiuje bieżącą wartość `:3313-3330`; fakt może przejść | MODEL_PROVED dla propagacji faktu |
-| Rebinding przed snapshot | BIND nadpisuje namespace wartością `None` `:3301-3304`; snapshot → UNKNOWN | CONSERVATIVE_UNKNOWN |
-| Rebinding po snapshot | snapshot przechowuje kontrakt i origin pod `definition_id`; późniejszy odczyt namespace nie występuje przy `pop` `:2793-2808`. Odpowiada wcześniejszej ewaluacji wyrażenia dekoratora w Pythonie | MODEL_PROVED dla reprezentowanej kolejności; rzeczywista tożsamość zewnętrznego callable jest EXPLICITLY_ASSUMED |
+## D. ŚWIADOME OGRANICZENIA KONTRAKTU
 
-COMPILER_BOUNDARY: `_safe_passive_class_definition` (`package_model.py:291+`) ogranicza ciało; składnia nie daje sama dowodu efektu Call. Każdy dopuszczony zewnętrzny Call przechodzi przez oddzielny `accept_callable_effect`. Nie stwierdzono osiągalnego warunkowego MODEL_PASS dla zewnętrznego Call bez wymaganego jawnego kontraktu na tych trzech konsumentach.
+Macierz zawiera `consumer → definer`, `weight` i zbiór trzech typów. Pomija nazwy artefaktów, miejsca i liczbę użyć, siedem oryginalnych kanałów, relacje lokalne i szczegóły importu. Import-only edges są jawnie uwzględnione. Brak `soft_edges`, lineage i `symbol_calls` nie jest sam w sobie defektem kontraktu: nie są bezpośrednimi wejściami buildera. Raport warstwowy filtruje relacje do zakresu; raport globalny może być starszy od LIVE.
 
-## GRANICA SEMANTYKI RESULT/LIFECYCLE
+## E. UNKNOWN
 
-| Rodzina | Invocation / result / lifecycle | Konsumpcja i brak faktu | Rejestracja |
-|---|---|---|---|
-| Fabryka frozen dataclass | `NO_UNMODELED_FACTORY_EFFECTS_OR_EXCEPTIONS` / `EXACT_STANDARD_FROZEN_DATACLASS_DECORATOR` / `NO_UNKNOWN_EFFECTS_BEFORE_APPLICATION`; aplikacja: `NO_UNMODELED_DECORATION_EFFECTS_OR_EXCEPTIONS` / `EXACT_STANDARD_FROZEN_DATACLASS_TRANSFORMATION` / `NO_UNKNOWN_EFFECTS_BEFORE_CLASS_BINDING`; `INPUT_CLASS` (`calls.py:43-69`) | snapshot `package_model.py:2718-2751`, później `:2785-2908`; brak faktu/kontraktu → UNKNOWN | `accept_callable_effect` przy snapshot; `AssumedFrozenDataclassDecoration` przy aplikacji |
-| `field` | `NO_EFFECTS_OR_EXCEPTIONS_FOR_ADMITTED_ARGUMENTS` / `EXACT_STDLIB_FIELD_NO_DEFAULT_OR_FACTORY_PRESERVE_LITERAL_HASH_COMPARE` / `NO_UNKNOWN_RESULT_HOOKS_BEFORE_CLASS_BINDING` (`calls.py:84-96`) | `CHECK_DATACLASS_FIELD_FACTORY` `package_model.py:2753-2765`; brak faktu/efektu → UNKNOWN | `accept_callable_effect` dopisuje `AssumedExternalCallEffect` dla zewnętrznego pochodzenia |
-| `property` | `NO_EFFECTS_OR_EXCEPTIONS_FOR_ADMITTED_ARGUMENTS` / `EXACT_BUILTINS_PROPERTY_OF_DECORATED_FUNCTION` / `NO_UNKNOWN_RESULT_HOOKS_BEFORE_CLASS_BINDING` (`calls.py:72-83`) | `APPLY_KNOWN_CLASS_DECORATOR` `package_model.py:2767-2783`; brak faktu/efektu → UNKNOWN | zewnętrzny fakt dopisany; konwencjonalny builtin nie jest zewnętrznym założeniem |
+Nie potwierdzono osobnej świeżości zmaterializowanej `dependency_matrix` w LIVE 1554, jej równości z bieżącymi wejściami ani kompletności publicznego udostępnienia wszystkich nierozstrzygniętych faktów. `workspace_sync=unverified` ogranicza wnioskowanie o zgodności źródeł na dysku ze stanem LIVE. Nie uruchamiano testów.
 
-Granica wiedzy: te właściwości są deklarowanym kontraktem wejściowym dla zewnętrznego obiektu, a nie obserwacją jego runtime. Fałszywa deklaracja nie jest sama w sobie `CONFIRMED_FALSE_PASS` interpretera. Nie znaleziono w badanej ścieżce wymaganej własności rezultatu, której ani nie sprawdzono, ani nie zadeklarowano.
+## WERDYKT
 
-## GRANICA PUBLIKACJI OSTRZEŻEŃ
-
-- `evaluate_package_import_order` przyjmuje opcje prywatne, domyślnie `False/None` (`package_model.py:1512-1524`). Jego wewnętrzne `MODEL_PASS` przy wykorzystanym efekcie ma `assumed_external_call_effects` i sufiks `EXTERNAL_CALL_EFFECT_ASSUMED_NOT_RUNTIME_ATTESTED` (`:1620-1645`).
-- Publiczny wrapper namespace przekazuje jawne opcje (`package_model.py:3894-3908`), a `MODEL_PASS` mapuje na **`CONDITIONAL_MODEL_PASS`** (`:3910-3920`); docstring `:3626-3637` wyklucza warning suppression.
-- Source-bound wrapper przekazuje te same opcje (`namespace_bound_model.py:220-234`) i zachowuje wynik warunkowy bez promocji (`:236-246`).
-- Produkcyjny klasyfikator SCC w `scenarios.py:330-358` wywołuje `evaluate_package_import_order(sources, entry, _session=session)` **bez** opcji zewnętrznych Call ani frozen dataclass. Klasyfikacja `MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS` wymaga wszystkich `MODEL_PASS`; `evidence.py:327-334` ponownie sprawdza wyniki. Warning eligibility czyta tę klasyfikację (`warning_eligibility.py:70-75`, `partial_warning_eligibility.py:89-95`). Nie ma w tym przepływie wejścia dla `assumed_external_callable_effects`.
-
-CODE_PATH_PROVED: nie znaleziono przeniesienia wyniku zależnego od tych założeń do bezwarunkowej klasyfikacji SCC lub suppression. MCP LIVE raportuje obecnie 0 model-pass i 16 aktywnych ścieżek ostrzeżeń; to statyczny stan zainstalowanej generacji, nie dowód runtime.
-
-## POKRYCIE I POZOSTAŁE LUKI
-
-- DIRECT_EVIDENCE z raportów I2/R1/R2, bez ponownego uruchamiania: `package_model` 241 passed, `namespace_bound_model` 64 passed, `class decorator` 33 passed, `annotation_effects_i3` 25 passed, `annotation_union_i1` 20 passed, `conditional_class_identity_i2` 5 passed, `external_call_effects` 16 passed. Są to wyniki poprzednich przebiegów, nie wykonane w D1.
-- DIRECT_EVIDENCE: obecny HEAD obejmuje poprzednie poprawki; preflight czysty i LIVE wszystkie wskazane pliki verified. Między tymi przebiegami a D1 nie stwierdzono dalszej lokalnej zmiany source/tests. `git log` pokazuje auto-commity `21b19b1`, `03eb604` po I2; porównania historycznych commitów z dokładnymi czasami testów nie wykonywano, więc twierdzenie o braku jakiejkolwiek przejściowej zmiany byłoby zbyt silne.
-- Pokryte: brak kontraktu, błędny efekt, alias, rebinding, źródło importu niezależne od nazwy, factory, field, property oraz trzy starsze macierze. Nie pozostał niezweryfikowany produkcyjny konsument **nowego kontraktu** w literalnie przeszukanych ścieżkach. Testy nie stanowią pełnego dowodu semantyki dowolnego programu Python.
-- UNKNOWN: rzeczywista tożsamość importowanego callable, prawdziwość deklaracji caller, niestandardowe import finders/builtins i zachowanie poza restrykcyjnym modelem nie są atestowane. To jawna granica warunkowego wyniku, nie wykazany `UNPROVEN_REACHABLE_PATH` przy prawdziwych założeniach.
-
-## WERDYKT DOWODOWY
-
-**EVIDENCE_COMPLETE** dla zadanego audytu przepływu autoryzacji i publikacji przy jawnych założeniach. Nie jest to FINAL PASS projektu ani certyfikat bezpieczeństwa runtime. W badanych ścieżkach nie potwierdzono `CONFIRMED_FALSE_PASS` ani konkretnego `UNPROVEN_REACHABLE_PATH`.
+1. **Czy macierz wiernie realizuje kontrakt?** Nie w pełni: realizuje format i agregację modułową, ale typy zależności mogą pochodzić z użycia innego konsumenta tego samego artefaktu. Dowód dotyczy ścieżki kodu; rzeczywistego świadka LIVE nie potwierdzono.
+2. **Czy wykorzystuje wszystkie fakty przeznaczone do budowy?** Tak dla zadeklarowanych wejść buildera: konsumpcji artefaktów i `hard_edges`. Kanały są wykorzystane niewiernie względem konsumenta.
+3. **Czy istnieją fakty silnika niedostępne przez macierz lub inne publiczne MCP?** Surowe `channels[consumer]` są w stanie kanonicznym, ale nie w macierzy ani w sprawdzonym schemacie publicznych zapytań. `soft_edges`, lineage i `symbol_calls` mają osobne odczyty. Negatywnej tezy o każdym istniejącym publicznym narzędziu nie dowiedziono.
 
 ## FILES_CHANGED
 
-- `walkthrough.md` — jedyny nadpisany plik.
+NONE — nie zmieniono source, tests ani docs. Zmieniono wyłącznie `walkthrough.md` jako raport, na żądanie użytkownika.
 
-## FULL_DIFFS
-
-`FULL_DIFFS=NONE` dla source/tests. Nie wykonywano pytest, FULL, restartu, staging, commit ani push.
+ACTUAL_DIFF=DIFFS=NONE
