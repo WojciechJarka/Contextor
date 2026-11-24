@@ -17,7 +17,7 @@ def _assess(sources, entry):
     )
 
 
-def _actual(tmp_path, sources, entry):
+def _actual(tmp_path, sources, entry, *, return_process=False):
     for name, code in sources.items():
         (tmp_path / (name + ".py")).write_text(code, encoding="utf-8")
     result = subprocess.run(
@@ -28,6 +28,8 @@ def _actual(tmp_path, sources, entry):
         ), str(tmp_path), entry],
         capture_output=True, text=True, timeout=10, check=False,
     )
+    if return_process:
+        return result
     return result.returncode == 0
 
 
@@ -155,7 +157,14 @@ def test_nested_attribute_first_segment_hazard(tmp_path):
     assert not any(
         event.operation == "READ_ATTRIBUTE" for event in result.events
     )
-    assert not _actual(tmp_path, sources, "alpha")
+    process = _actual(
+        tmp_path, sources, "alpha", return_process=True
+    )
+    assert process.returncode != 0
+    exception_line = process.stderr.strip().splitlines()[-1]
+    assert exception_line.startswith("AttributeError:")
+    assert "partially initialized module 'alpha'" in exception_line
+    assert "has no attribute 'value'" in exception_line
 
 
 def test_nested_attribute_known_first_segment_stops_unknown():

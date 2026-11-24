@@ -1372,7 +1372,7 @@ def test_indexed_import_has_no_reached_blocker():
     assert result.reached_unmodeled_import is None
 
 
-def _actual(tmp_path, source, entry):
+def _actual(tmp_path, source, entry, *, return_process=False):
     for module_id, code in source.items():
         parts = module_id.split(".")
 
@@ -1416,6 +1416,8 @@ def _actual(tmp_path, source, entry):
         check=False,
     )
 
+    if return_process:
+        return process
     return process.returncode == 0
 
 
@@ -3400,7 +3402,14 @@ def test_nested_attribute_first_segment_initializing_hazard(tmp_path):
         "EARLY_BINDING_HAZARD", "route", "a",
     )
     assert not any(e.operation == "ATTR" for e in result.events)
-    assert not _actual(tmp_path, source, "route")
+    process = _actual(
+        tmp_path, source, "route", return_process=True
+    )
+    assert process.returncode != 0
+    exception_line = process.stderr.strip().splitlines()[-1]
+    assert exception_line.startswith("AttributeError:")
+    assert "partially initialized module 'route'" in exception_line
+    assert "has no attribute 'a'" in exception_line
 
 
 def test_nested_attribute_later_segment_initializing_hazard(tmp_path):
@@ -3416,7 +3425,14 @@ def test_nested_attribute_later_segment_initializing_hazard(tmp_path):
         ("ATTR", "route", "a"),
         ("EARLY_BINDING_HAZARD", "route", "value"),
     ]
-    assert not _actual(tmp_path, source, "route")
+    process = _actual(
+        tmp_path, source, "route", return_process=True
+    )
+    assert process.returncode != 0
+    exception_line = process.stderr.strip().splitlines()[-1]
+    assert exception_line.startswith("AttributeError:")
+    assert "partially initialized module 'route'" in exception_line
+    assert "has no attribute 'value'" in exception_line
 
 
 def test_nested_attribute_unknown_after_ordinary_value(tmp_path):

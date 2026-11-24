@@ -1,427 +1,210 @@
-# P11-I1 — złożone odczyty `ast.Attribute`
+# P11-I2 — przyczyna hazardów CPython
 
 ## PREFLIGHT
 
-- DIRECT_EVIDENCE: HEAD `70153e681c68aca8d464b8afa02c446bb11a3e4d`; przed edycją roboczy `walkthrough.md` był jedyną zmianą. Po edycji `audyt.txt` pojawił się jako zmieniony przez proces zewnętrzny; nie edytowałem go ani nie zaliczam do P11-I1.
-- DIRECT_EVIDENCE: Contextor MCP revision 1555 przed zmianą, `canonical_state=fresh`, `workspace_sync=verified` dla trzech modułów produkcyjnych. Aktualne kotwice `_Step`, obu `_compile` i obu interpreterów odpowiadały promptowi. AST audyt wywołań `_Step` w `contextor/` i `tests/` nie znalazł wywołania z więcej niż czterema argumentami pozycyjnymi.
-- DIRECT_EVIDENCE: dostępny repozytoryjny `.venv` używa CPython 3.15.2. Systemowy `C:\Python315\python.exe` również ma 3.15.2, lecz nie ma `pytest`; testy uruchomiono przez `.venv`.
+- DIRECT_EVIDENCE: HEAD `3e3560702beba90dc880009412a333f0ff9cddd8`; przed edycją tylko `audyt.txt` był zmieniony w drzewie roboczym. Nie edytowano go. Zmiany P11-I1 są już w HEAD.
+- DIRECT_EVIDENCE: Contextor MCP przed zmianą: LIVE revision 1563, `canonical_state=fresh`, `workspace_sync=verified` dla `tests/test_cycle_semantics_package_model.py` i `tests/test_cycle_semantics_initialization_model.py`; `cycle_semantics=stale`. `get_source_range` potwierdził dokładne kotwice obu helperów oraz trzech asercji.
+- DIRECT_EVIDENCE: repozytoryjny `.venv` działa na CPython 3.15.2. `issues.md` odczytano tylko do wyszukiwania; brak trafień dla `P11`, `p.a.value`, złożonych/nested odczytów atrybutów. Nie oznacza to braku innych, niejednoznacznie nazwanych kwestii.
 
 ## FILES_CHANGED
 
-- `contextor/core/cycle_semantics/execution/steps.py`
-- `contextor/core/cycle_semantics/package_model.py`
-- `contextor/core/cycle_semantics/initialization_model.py`
 - `tests/test_cycle_semantics_package_model.py`
 - `tests/test_cycle_semantics_initialization_model.py`
 
-`walkthrough.md` jest wyłącznie raportem. `audyt.txt` ma równoległą zmianę niezwiązaną z tym zadaniem i pozostaje nietknięty.
+`walkthrough.md` jest wyłącznie raportem. Równoległa zmiana `audyt.txt` nie należy do P11-I2 i nie była edytowana.
 
-## IMPLEMENTATION
+## EXACT_CHANGES
 
-- CODE_PATH_PROVED: `_Step` i `ModelStep` dostały `attribute_tail` po czwartym dotychczasowym polu. Kompilatory zbierają segmenty `ast.Attribute` od zewnętrznego węzła do `Name`, odwracają je i tworzą jeden krok bez syntetycznych bindingów.
-- CODE_PATH_PROVED: interpreter pakietowy odczytuje segmenty po kolei. Każdy zakończony odczyt emituje `ATTR`; brak symbolu w znanym module daje istniejącą klasyfikację hazardu lub `MISSING_ATTRIBUTE`, a nierozpoznany odbiorca daje `UNKNOWN`. Binding celu następuje dopiero po całym łańcuchu.
-- CODE_PATH_PROVED: płaski interpreter po potwierdzeniu pierwszego odczytu emituje jego event i dla dalszego segmentu zwraca `UNKNOWN`, bez zapisywania celu. Pierwszy segment nadal może zgłosić hazard.
+- DIRECT_EVIDENCE: oba `_actual` dostały opcjonalny argument keyword-only `return_process=False`. Zachowano zapis plików, `subprocess.run` i domyślną wartość bool. Przy `True` helper zwraca `CompletedProcess`.
+- DIRECT_EVIDENCE: trzy wskazane testy sprawdzają niezerowy `returncode` oraz ostatnią linię `stderr`: `AttributeError`, częściowo zainicjalizowany właściwy moduł i właściwy brakujący atrybut. Pozostałych asercji i testów nie zmieniano.
 
-## SEMANTIC_EVIDENCE
+## CPYTHON_EXCEPTION_EVIDENCE
 
-- DIRECT_EVIDENCE: `execution/state.py:10-27` przechowuje pakietowe namespace jako mapy nazw na wartości; `package_model.py:3313-3339` zachowuje wartość przez `ALIAS`; `:3341-3381` rozpoznaje moduł przez klucz namespace. Płaski `initialization_model.py:137-139,181-195` przechowuje tylko zbiory bindingów i aliasy importowanych modułów, nie wynik odczytanego atrybutu.
-- DIRECT_EVIDENCE: istniejące helpery testowe uruchamiają import w izolowanym procesie CPythona (`tests/test_cycle_semantics_package_model.py:1375-1415`, `tests/test_cycle_semantics_initialization_model.py:17-30`). Nowe przypadki hazardów porównują model z tym uruchomieniem.
-- INFERENCE: `p.a.value` musi odczytać `p.a` przed `.value`; pośredni zwykły obiekt może uruchamiać kod użytkownika przy kolejnym odczycie. Model pakietowy konserwatywnie zwraca `UNKNOWN`, jeśli wartość pośrednia nie identyfikuje znanego modułu. Płaski model nie wnioskuje tożsamości z samej obecności bindingu.
-- UNKNOWN: te testy i statyczny model nie stanowią ogólnego dowodu bezpieczeństwa importów ani atestacji środowiska builtins.
+- DIRECT_EVIDENCE: trzy zmienione testy przeszły na CPython 3.15.2. Osobne kontrolowane wywołanie tych samych helperów z tymi samymi źródłami dało poniższe pełne tracebacki. Tymczasowe katalogi różnią się od katalogów pytest; semantyczne końcowe linie są zgodne z asercjami.
+
+### Pakiet, pierwszy segment `a`
+
+```text
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    import importlib,sys;sys.path.insert(0,sys.argv[1]);importlib.import_module(sys.argv[2])
+                                                        ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "C:\Python315\Lib\importlib\__init__.py", line 88, in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<frozen importlib._bootstrap>", line 1389, in _gcd_import
+  File "<frozen importlib._bootstrap>", line 1353, in _find_and_load
+  File "<frozen importlib._bootstrap>", line 1249, in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 857, in _load_unlocked
+  File "<frozen importlib._bootstrap_external>", line 751, in exec_module
+  File "<frozen importlib._bootstrap>", line 491, in _call_with_frames_removed
+  File "C:\Users\DafoO\AppData\Local\Temp\tmpp5yg8x28\route\__init__.py", line 1, in <module>
+    import route.consumer
+  File "C:\Users\DafoO\AppData\Local\Temp\tmpp5yg8x28\route\consumer.py", line 2, in <module>
+    x=route.a.value
+      ^^^^^^^
+AttributeError: partially initialized module 'route' from 'C:\Users\DafoO\AppData\Local\Temp\tmpp5yg8x28\route\__init__.py' has no attribute 'a' (most likely due to a circular import)
+```
+
+### Pakiet, późniejszy segment `value`
+
+```text
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    import importlib,sys;sys.path.insert(0,sys.argv[1]);importlib.import_module(sys.argv[2])
+                                                        ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "C:\Python315\Lib\importlib\__init__.py", line 88, in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<frozen importlib._bootstrap>", line 1389, in _gcd_import
+  File "<frozen importlib._bootstrap>", line 1353, in _find_and_load
+  File "<frozen importlib._bootstrap>", line 1249, in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 857, in _load_unlocked
+  File "<frozen importlib._bootstrap_external>", line 751, in exec_module
+  File "<frozen importlib._bootstrap>", line 491, in _call_with_frames_removed
+  File "C:\Users\DafoO\AppData\Local\Temp\tmptg8dn3cm\route\__init__.py", line 3, in <module>
+    import route.consumer
+  File "C:\Users\DafoO\AppData\Local\Temp\tmptg8dn3cm\route\consumer.py", line 2, in <module>
+    x=route.a.value
+      ^^^^^^^^^^^^^
+AttributeError: partially initialized module 'route' from 'C:\Users\DafoO\AppData\Local\Temp\tmptg8dn3cm\route\__init__.py' has no attribute 'value' (most likely due to a circular import)
+```
+
+### Moduły płaskie, pierwszy segment `value`
+
+```text
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    import importlib,sys; sys.path.insert(0,sys.argv[1]); importlib.import_module(sys.argv[2])
+                                                          ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "C:\Python315\Lib\importlib\__init__.py", line 88, in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<frozen importlib._bootstrap>", line 1389, in _gcd_import
+  File "<frozen importlib._bootstrap>", line 1353, in _find_and_load
+  File "<frozen importlib._bootstrap>", line 1249, in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 857, in _load_unlocked
+  File "<frozen importlib._bootstrap_external>", line 751, in exec_module
+  File "<frozen importlib._bootstrap>", line 491, in _call_with_frames_removed
+  File "C:\Users\DafoO\AppData\Local\Temp\tmpy7x0wpyx\alpha.py", line 1, in <module>
+    import beta
+  File "C:\Users\DafoO\AppData\Local\Temp\tmpy7x0wpyx\beta.py", line 2, in <module>
+    x=alpha.value.next
+      ^^^^^^^^^^^
+AttributeError: partially initialized module 'alpha' from 'C:\Users\DafoO\AppData\Local\Temp\tmpy7x0wpyx\alpha.py' has no attribute 'value' (most likely due to a circular import)
+```
 
 ## TARGETED_TESTS
 
-- DIRECT_EVIDENCE: nowe testy: 9 passed, 267 deselected na CPython 3.15.2. Pełny zakres dwóch plików modelowych: 276 passed w 17.99 s. Następnie dodatkowy test trzech segmentów: 1 passed w 1.44 s. Nie uruchomiono pełnego pytest suite. `git diff --check` nie zgłosił błędów whitespace.
-- DIRECT_EVIDENCE: przypadki obejmują dwa i trzy rozpoznane moduły, pierwszy i późniejszy hazard z CPython parity, pośrednią zwykłą wartość, alias i nadpisanie oraz regresję pojedynczego odczytu. Płaski model obejmuje hazard pierwszego segmentu, `UNKNOWN` po pierwszym odczycie i regresję pojedynczego odczytu.
+- DIRECT_EVIDENCE: trzy zmienione testy: `3 passed in 3.44s`.
+- DIRECT_EVIDENCE: dwa wskazane pliki testowe: `277 passed in 16.03s`. Nie uruchomiono pełnego pytest suite. `git diff --check` dla dwóch plików testowych nie wykazał błędów.
 
 ## MCP_POST_CHANGE
 
-- DIRECT_EVIDENCE: Desktop watcher opublikował zmiany do LIVE revision 1560; `get_module_context` dla trzech plików produkcyjnych oraz obu plików testowych wskazał `canonical_state=fresh`, `workspace_sync=verified` w revision 1560. Rodzina `cycle_semantics=stale` po zmianach, więc nie jest to świeży dowód globalnej semantyki cykli.
-- DIRECT_EVIDENCE: po dodatkowej edycji testu trzech segmentów `get_live_events(after_revision=1560)` początkowo zwracał brak eventu, a `get_module_context` dla `tests/test_cycle_semantics_package_model.py` wskazywał `workspace_sync=out_of_sync`. Test uruchomiony bezpośrednio użył aktualnego pliku. Końcową świeżość LIVE należy rozpatrywać według późniejszego sprawdzenia poniżej; bez niego nie deklaruję FINAL PASS.
-- UNKNOWN: zmiana kodu repo nie dowodzi, że już działający proces MCP załadował nowy Python. Nie zmieniano kodu serwera MCP i nie wykonywano restartu.
+- DIRECT_EVIDENCE: `get_live_events(after_revision=1563)` zwrócił `desktop_watcher` UPDATED dla testu pakietowego w revision 1564 i płaskiego w revision 1565, `continuity=continuous`.
+- DIRECT_EVIDENCE: `get_module_context` dla obu plików testowych w LIVE revision 1565 zwrócił `canonical_state=fresh`, `workspace_sync=verified`, provenance `live`; `cycle_semantics=stale`. To potwierdza stan kanoniczny plików, a nie wykonanie testów przez MCP czy adopcję kodu runtime.
 
 ## FULL_DIFFS
 
-Poniżej rzeczywisty pełny `git diff` pięciu plików z FILES_CHANGED, względem HEAD. Raport nie jest w nim uwzględniony.
+Poniżej rzeczywisty pełny diff obu plików FILES_CHANGED względem bieżącego HEAD, wygenerowany przez Git. `walkthrough.md` jako raport nie jest do niego włączony.
 
 ```diff
-diff --git a/contextor/core/cycle_semantics/execution/steps.py b/contextor/core/cycle_semantics/execution/steps.py
-index e46a053..f031069 100644
---- a/contextor/core/cycle_semantics/execution/steps.py
-+++ b/contextor/core/cycle_semantics/execution/steps.py
-@@ -10,6 +10,7 @@ class _Step:
-     target: str | None = None
-     symbol: str | None = None
-     binding: str | None = None
-+    attribute_tail: tuple[str, ...] = ()
-     explicit_alias: bool = False
-     function_body: tuple[_Step, ...] = ()
-     function_local: bool = False
-diff --git a/contextor/core/cycle_semantics/initialization_model.py b/contextor/core/cycle_semantics/initialization_model.py
-index 033873a..3bc2117 100644
---- a/contextor/core/cycle_semantics/initialization_model.py
-+++ b/contextor/core/cycle_semantics/initialization_model.py
-@@ -17,6 +17,7 @@ class ModelStep:
-     target: str | None = None
-     symbol: str | None = None
-     binding: str | None = None
-+    attribute_tail: tuple[str, ...] = ()
- 
- 
- @dataclass(frozen=True)
-@@ -81,15 +82,32 @@ def _compile(tree: ast.Module) -> tuple[ModelStep, ...] | None:
-                 type(None), bool, int, float, complex, str, bytes,
-             }:
-                 steps.append(ModelStep("BIND_CONSTANT", binding=name))
--            elif (
--                isinstance(value, ast.Attribute)
--                and isinstance(value.value, ast.Name)
--                and _valid_name(value.value.id)
--                and _valid_name(value.attr)
--            ):
--                steps.append(ModelStep(
--                    "READ_ATTRIBUTE", value.value.id, value.attr, name,
--                ))
-+            elif isinstance(value, ast.Attribute):
-+                attributes: list[str] = []
-+                receiver: ast.expr = value
-+
-+                while isinstance(receiver, ast.Attribute):
-+                    if not _valid_name(receiver.attr):
-+                        return None
-+                    attributes.append(receiver.attr)
-+                    receiver = receiver.value
-+
-+                if (
-+                    not isinstance(receiver, ast.Name)
-+                    or not _valid_name(receiver.id)
-+                ):
-+                    return None
-+
-+                attributes.reverse()
-+                steps.append(
-+                    ModelStep(
-+                        "READ_ATTRIBUTE",
-+                        receiver.id,
-+                        attributes[0],
-+                        name,
-+                        tuple(attributes[1:]),
-+                    )
-+                )
-             else:
-                 return None
-         elif isinstance(statement, ast.Pass):
-@@ -190,6 +208,16 @@ def evaluate_flat_import_order(
-                 )
-                 events.append(ModelEvent(module, outcome, target, step.symbol))
-                 return result(outcome, target, step.symbol)
-+            if step.attribute_tail:
-+                events.append(
-+                    ModelEvent(
-+                        module,
-+                        "READ_ATTRIBUTE",
-+                        target,
-+                        step.symbol,
-+                    )
-+                )
-+                return result("UNKNOWN", target, step.attribute_tail[0])
-             bindings[module].add(step.binding)
-             aliases[module].pop(step.binding, None)
-             events.append(ModelEvent(module, "READ_ATTRIBUTE", target, step.symbol))
-diff --git a/contextor/core/cycle_semantics/package_model.py b/contextor/core/cycle_semantics/package_model.py
-index b1464a9..4f163a4 100644
---- a/contextor/core/cycle_semantics/package_model.py
-+++ b/contextor/core/cycle_semantics/package_model.py
-@@ -832,17 +832,27 @@ def _compile(
-                     )
-                 )
- 
--            elif (
--                isinstance(value, ast.Attribute)
--                and isinstance(value.value, ast.Name)
--                and not value.attr.startswith("__")
--            ):
-+            elif isinstance(value, ast.Attribute):
-+                attributes: list[str] = []
-+                receiver: ast.expr = value
-+
-+                while isinstance(receiver, ast.Attribute):
-+                    if receiver.attr.startswith("__"):
-+                        return None
-+                    attributes.append(receiver.attr)
-+                    receiver = receiver.value
-+
-+                if not isinstance(receiver, ast.Name):
-+                    return None
-+
-+                attributes.reverse()
-                 steps.append(
-                     _Step(
-                         "ATTR",
--                        value.value.id,
--                        value.attr,
-+                        receiver.id,
-+                        attributes[0],
-                         name,
-+                        attribute_tail=tuple(attributes[1:]),
-                     )
-                 )
-             elif (
-@@ -3341,45 +3351,53 @@ def evaluate_package_import_order(
-         elif step.op == "ATTR":
-             reference = namespaces[module].get(step.target)
- 
--            if reference not in namespaces:
--                return result(
--                    "UNKNOWN",
--                    step.target,
--                    step.symbol,
--                )
-+            for attribute in (step.symbol, *step.attribute_tail):
-+                if (
-+                    type(reference) is not str
-+                    or reference not in namespaces
-+                ):
-+                    return result(
-+                        "UNKNOWN",
-+                        step.target,
-+                        attribute,
-+                    )
- 
--            if step.symbol not in namespaces[reference]:
--                outcome = (
--                    "EARLY_BINDING_HAZARD"
--                    if states[reference] == "INITIALIZING"
--                    else "MISSING_ATTRIBUTE"
--                )
-+                if attribute not in namespaces[reference]:
-+                    outcome = (
-+                        "EARLY_BINDING_HAZARD"
-+                        if states[reference] == "INITIALIZING"
-+                        else "MISSING_ATTRIBUTE"
-+                    )
-+
-+                    events.append(
-+                        PackageModelEvent(
-+                            module,
-+                            outcome,
-+                            reference,
-+                            attribute,
-+                        )
-+                    )
-+
-+                    return result(
-+                        outcome,
-+                        reference,
-+                        attribute,
-+                    )
-+
-+                value = namespaces[reference][attribute]
- 
-                 events.append(
-                     PackageModelEvent(
-                         module,
--                        outcome,
-+                        "ATTR",
-                         reference,
--                        step.symbol,
-+                        attribute,
-                     )
-                 )
- 
--                return result(
--                    outcome,
--                    reference,
--                    step.symbol,
--                )
--
--            namespaces[module][step.binding] = namespaces[reference][step.symbol]
-+                reference = value
- 
--            events.append(
--                PackageModelEvent(
--                    module,
--                    "ATTR",
--                    reference,
--                    step.symbol,
--                )
--            )
-+            namespaces[module][step.binding] = reference
- 
-         elif step.op == "UNMODELED_STATEMENT":
-             if _compile_on_first_import:
 diff --git a/tests/test_cycle_semantics_initialization_model.py b/tests/test_cycle_semantics_initialization_model.py
-index 2af1589..a0c5cad 100644
+index a0c5cad..866beab 100644
 --- a/tests/test_cycle_semantics_initialization_model.py
 +++ b/tests/test_cycle_semantics_initialization_model.py
-@@ -141,3 +141,50 @@ def test_iterative_1200_module_chain():
-     }
-     modules["m1200"] = ast.parse("x=1\n")
-     assert evaluate_flat_import_order(modules, "m0").outcome == "MODEL_PASS"
-+
-+
-+def test_nested_attribute_first_segment_hazard(tmp_path):
-+    sources = {
-+        "alpha": "import beta\nvalue=7",
-+        "beta": "import alpha\nx=alpha.value.next",
-+    }
-+    result = _assess(sources, "alpha")
-+    assert (result.outcome, result.target_module, result.symbol) == (
-+        "EARLY_BINDING_HAZARD", "alpha", "value",
+@@ -17,7 +17,7 @@ def _assess(sources, entry):
+     )
+ 
+ 
+-def _actual(tmp_path, sources, entry):
++def _actual(tmp_path, sources, entry, *, return_process=False):
+     for name, code in sources.items():
+         (tmp_path / (name + ".py")).write_text(code, encoding="utf-8")
+     result = subprocess.run(
+@@ -28,6 +28,8 @@ def _actual(tmp_path, sources, entry):
+         ), str(tmp_path), entry],
+         capture_output=True, text=True, timeout=10, check=False,
+     )
++    if return_process:
++        return result
+     return result.returncode == 0
+ 
+ 
+@@ -155,7 +157,14 @@ def test_nested_attribute_first_segment_hazard(tmp_path):
+     assert not any(
+         event.operation == "READ_ATTRIBUTE" for event in result.events
+     )
+-    assert not _actual(tmp_path, sources, "alpha")
++    process = _actual(
++        tmp_path, sources, "alpha", return_process=True
 +    )
-+    assert not any(
-+        event.operation == "READ_ATTRIBUTE" for event in result.events
-+    )
-+    assert not _actual(tmp_path, sources, "alpha")
-+
-+
-+def test_nested_attribute_known_first_segment_stops_unknown():
-+    sources = {
-+        "alpha": "import beta\nx=beta.value.next",
-+        "beta": "value=7",
-+    }
-+    result = _assess(sources, "alpha")
-+    assert (result.outcome, result.target_module, result.symbol) == (
-+        "UNKNOWN", "beta", "next",
-+    )
-+    assert [
-+        (event.target, event.symbol)
-+        for event in result.events
-+        if event.operation == "READ_ATTRIBUTE"
-+    ] == [
-+        ("beta", "value"),
-+    ]
-+
-+
-+def test_single_attribute_flat_model_contract_after_nested_support(tmp_path):
-+    sources = {"alpha": "import beta\nx=beta.value", "beta": "value=7"}
-+    result = _assess(sources, "alpha")
-+    assert result.outcome == "MODEL_PASS"
-+    assert [
-+        (event.target, event.symbol)
-+        for event in result.events
-+        if event.operation == "READ_ATTRIBUTE"
-+    ] == [
-+        ("beta", "value"),
-+    ]
-+    assert _actual(tmp_path, sources, "alpha")
++    assert process.returncode != 0
++    exception_line = process.stderr.strip().splitlines()[-1]
++    assert exception_line.startswith("AttributeError:")
++    assert "partially initialized module 'alpha'" in exception_line
++    assert "has no attribute 'value'" in exception_line
+ 
+ 
+ def test_nested_attribute_known_first_segment_stops_unknown():
 diff --git a/tests/test_cycle_semantics_package_model.py b/tests/test_cycle_semantics_package_model.py
-index 8089fb9..007c9a8 100644
+index 007c9a8..c6863ef 100644
 --- a/tests/test_cycle_semantics_package_model.py
 +++ b/tests/test_cycle_semantics_package_model.py
-@@ -3357,3 +3357,108 @@ def test_p9_i1_known_builtin_decorator_identity(
-             _actual(tmp_path, sources, "pkg")
-             is python_success
-         )
-+
-+
-+def test_nested_attribute_reads_two_known_modules(tmp_path):
-+    source = {
-+        "route.__init__": "pass",
-+        "route.leaf": "value=7",
-+        "entry": "import route.leaf\nx=route.leaf.value",
-+    }
-+    result = _model(source, "entry")
-+    assert result.outcome == "MODEL_PASS"
-+    assert [(e.target, e.symbol) for e in result.events if e.operation == "ATTR"] == [
-+        ("route", "leaf"), ("route.leaf", "value"),
-+    ]
-+    assert _actual(tmp_path, source, "entry")
-+
-+
-+def test_nested_attribute_reads_three_known_modules(tmp_path):
-+    source = {
-+        "tree.__init__": "pass",
-+        "tree.branch.__init__": "pass",
-+        "tree.branch.leaf": "value=9",
-+        "entry": "import tree.branch.leaf\nx=tree.branch.leaf.value",
-+    }
-+    result = _model(source, "entry")
-+    assert result.outcome == "MODEL_PASS"
-+    assert [(e.target, e.symbol) for e in result.events if e.operation == "ATTR"] == [
-+        ("tree", "branch"),
-+        ("tree.branch", "leaf"),
-+        ("tree.branch.leaf", "value"),
-+    ]
-+    assert _actual(tmp_path, source, "entry")
-+
-+
-+def test_nested_attribute_first_segment_initializing_hazard(tmp_path):
-+    source = {
-+        "route.__init__": "import route.consumer\na=1",
-+        "route.consumer": "import route\nx=route.a.value",
-+    }
-+    result = _model(source, "route")
-+    assert (result.outcome, result.target_module, result.symbol) == (
-+        "EARLY_BINDING_HAZARD", "route", "a",
+@@ -1372,7 +1372,7 @@ def test_indexed_import_has_no_reached_blocker():
+     assert result.reached_unmodeled_import is None
+ 
+ 
+-def _actual(tmp_path, source, entry):
++def _actual(tmp_path, source, entry, *, return_process=False):
+     for module_id, code in source.items():
+         parts = module_id.split(".")
+ 
+@@ -1416,6 +1416,8 @@ def _actual(tmp_path, source, entry):
+         check=False,
+     )
+ 
++    if return_process:
++        return process
+     return process.returncode == 0
+ 
+ 
+@@ -3400,7 +3402,14 @@ def test_nested_attribute_first_segment_initializing_hazard(tmp_path):
+         "EARLY_BINDING_HAZARD", "route", "a",
+     )
+     assert not any(e.operation == "ATTR" for e in result.events)
+-    assert not _actual(tmp_path, source, "route")
++    process = _actual(
++        tmp_path, source, "route", return_process=True
 +    )
-+    assert not any(e.operation == "ATTR" for e in result.events)
-+    assert not _actual(tmp_path, source, "route")
-+
-+
-+def test_nested_attribute_later_segment_initializing_hazard(tmp_path):
-+    source = {
-+        "route.__init__": "import route\na=route\nimport route.consumer\nvalue=7",
-+        "route.consumer": "import route\nx=route.a.value",
-+    }
-+    result = _model(source, "route")
-+    assert (result.outcome, result.target_module, result.symbol) == (
-+        "EARLY_BINDING_HAZARD", "route", "value",
++    assert process.returncode != 0
++    exception_line = process.stderr.strip().splitlines()[-1]
++    assert exception_line.startswith("AttributeError:")
++    assert "partially initialized module 'route'" in exception_line
++    assert "has no attribute 'a'" in exception_line
+ 
+ 
+ def test_nested_attribute_later_segment_initializing_hazard(tmp_path):
+@@ -3416,7 +3425,14 @@ def test_nested_attribute_later_segment_initializing_hazard(tmp_path):
+         ("ATTR", "route", "a"),
+         ("EARLY_BINDING_HAZARD", "route", "value"),
+     ]
+-    assert not _actual(tmp_path, source, "route")
++    process = _actual(
++        tmp_path, source, "route", return_process=True
 +    )
-+    assert [(e.operation, e.target, e.symbol) for e in result.events if e.operation in {"ATTR", "EARLY_BINDING_HAZARD"}] == [
-+        ("ATTR", "route", "a"),
-+        ("EARLY_BINDING_HAZARD", "route", "value"),
-+    ]
-+    assert not _actual(tmp_path, source, "route")
-+
-+
-+def test_nested_attribute_unknown_after_ordinary_value(tmp_path):
-+    source = {
-+        "route.__init__": "a=3",
-+        "entry": "import route\nx=route.a.value",
-+    }
-+    result = _model(source, "entry")
-+    assert result.outcome == "UNKNOWN"
-+    assert result.symbol == "value"
-+    assert [(e.target, e.symbol) for e in result.events if e.operation == "ATTR"] == [
-+        ("route", "a"),
-+    ]
-+    assert not _actual(tmp_path, source, "entry")
-+
-+
-+def test_nested_attribute_alias_and_overwrite(tmp_path):
-+    source = {
-+        "route.__init__": "pass",
-+        "route.leaf": "value=7",
-+        "entry": "import route.leaf\nalias=route\nx=alias.leaf.value",
-+    }
-+    result = _model(source, "entry")
-+    assert result.outcome == "MODEL_PASS"
-+    assert [(e.target, e.symbol) for e in result.events if e.operation == "ATTR"] == [
-+        ("route", "leaf"), ("route.leaf", "value"),
-+    ]
-+    assert _actual(tmp_path, source, "entry")
-+
-+    overwritten = dict(source)
-+    overwritten["entry"] = "import route.leaf\ntmp=route.leaf\ntmp=3\nx=tmp.value"
-+    result = _model(overwritten, "entry")
-+    assert result.outcome == "UNKNOWN"
-+    assert not any(e.operation == "ATTR" and e.symbol == "value" for e in result.events)
-+    assert not _actual(tmp_path, overwritten, "entry")
-+
-+
-+def test_single_attribute_event_contract_after_nested_support(tmp_path):
-+    source = {"route.__init__": "value=7", "entry": "import route\nx=route.value"}
-+    result = _model(source, "entry")
-+    assert result.outcome == "MODEL_PASS"
-+    assert [(e.target, e.symbol) for e in result.events if e.operation == "ATTR"] == [
-+        ("route", "value"),
-+    ]
-+    assert _actual(tmp_path, source, "entry")
++    assert process.returncode != 0
++    exception_line = process.stderr.strip().splitlines()[-1]
++    assert exception_line.startswith("AttributeError:")
++    assert "partially initialized module 'route'" in exception_line
++    assert "has no attribute 'value'" in exception_line
+ 
+ 
+ def test_nested_attribute_unknown_after_ordinary_value(tmp_path):
 ```
 
 ## FINAL_STATUS
 
-- DIRECT_EVIDENCE: końcowy Contextor MCP: LIVE revision 1563, canonical_state=fresh i workspace_sync=verified dla obu testów i package_model.py; desktop_watcher revision 1561 potwierdza ostatnią zmianę testu pakietowego. Wcześniejsze odczyty potwierdziły verified pozostałych dwóch modułów produkcyjnych. cycle_semantics=stale ogranicza globalną certyfikację.
-- DIRECT_EVIDENCE: testy dwóch modeli przeszły na aktualnym kodzie dyskowym; nie wykonano commit, push, zmiany indeksu Git ani restartu.
-- UNKNOWN: adopcja kodu przez już działający proces MCP nie jest potwierdzona. Status implementacji i testów celowanych: PASS; globalna semantyka LIVE: STALE.
+- DIRECT_EVIDENCE: CPython 3.15.2 potwierdził dokładny AttributeError i brakujący segment we wszystkich trzech hazardach. Zmiana jest ograniczona do dwóch plików testowych; focused regression 277/277 passed.
+- DIRECT_EVIDENCE: LIVE revision 1565 ma verified sync obu testów; cycle_semantics pozostaje stale. Nie wykonano staging, commit, push ani restartu.
+- UNKNOWN: bieżąca adopcja kodu produkcyjnego przez proces MCP i globalna semantyka LIVE nie są certyfikowane przez ten etap.
