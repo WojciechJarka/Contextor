@@ -42,9 +42,8 @@ wykonywania kodu użytkownika."
 7. Najważniejsze:
 Priorytetem jest poprawność i uniwersalność rozwiązania, nie szybkość, liczba promptów ani liczba zaliczonych testów.
 8. Masz dostęp do repo na github WojciechJarka/contextor, a historia ewolucji projektu znajduje się w changelog.md w root projektu.
-9. Podczas refaktoryzacji modelu pojawiają się dość często poboczne spostrzeżenia do uwzględnienia w późniejszych etapach prac. Wtedy nalezy je polecać zapisywać agentowi pobocznym zadaniem w promptach, w pliku issues.md w root projektu. Ty decydujesz co literalnie ma zapisać agent w issuess.md, on ci tylko potwierdza to diffem jako poboczne info w walkthorugh.md w root projektu.
-10. Każde zadanie agenta kończy się nadpisaniem przez niego walkthorugh.md w root projektu.
-11. Językiem prac nad projektem (w promptach, walkthrough, czatach) jest język polski,
+9. Każde zadanie agenta kończy się nadpisaniem przez niego walkthorugh.md w root projektu.
+10. Językiem prac nad projektem (w promptach, walkthrough, czatach) jest język polski,
 
 **********************************************************************************************
 Priorytet	Etap	Cel
@@ -72,7 +71,7 @@ pamiętaj, że nie musza być one nadal aktualne (całkowicie lub częsciowo):
 
 
 
-
+hipoteza do sprawdzenia i ewentualnej naprawy (moze być częściowo lub całkowicie nieaktualna):
 
 10Adnotacje Python 3.15 i odroczona ewaluacjaWybór specyficzny dla projektu i luka pokryciaD11/D12: specjalne ast.AST, odmowa pathlib.Path oraz różnica między utworzeniem klasy a późniejszym odczytem adnotacji. Dekorator dataclass może zmienić moment konsumpcji. Trzeba rozdzielić te zdarzenia.
 
