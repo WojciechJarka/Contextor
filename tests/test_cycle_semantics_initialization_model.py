@@ -141,3 +141,50 @@ def test_iterative_1200_module_chain():
     }
     modules["m1200"] = ast.parse("x=1\n")
     assert evaluate_flat_import_order(modules, "m0").outcome == "MODEL_PASS"
+
+
+def test_nested_attribute_first_segment_hazard(tmp_path):
+    sources = {
+        "alpha": "import beta\nvalue=7",
+        "beta": "import alpha\nx=alpha.value.next",
+    }
+    result = _assess(sources, "alpha")
+    assert (result.outcome, result.target_module, result.symbol) == (
+        "EARLY_BINDING_HAZARD", "alpha", "value",
+    )
+    assert not any(
+        event.operation == "READ_ATTRIBUTE" for event in result.events
+    )
+    assert not _actual(tmp_path, sources, "alpha")
+
+
+def test_nested_attribute_known_first_segment_stops_unknown():
+    sources = {
+        "alpha": "import beta\nx=beta.value.next",
+        "beta": "value=7",
+    }
+    result = _assess(sources, "alpha")
+    assert (result.outcome, result.target_module, result.symbol) == (
+        "UNKNOWN", "beta", "next",
+    )
+    assert [
+        (event.target, event.symbol)
+        for event in result.events
+        if event.operation == "READ_ATTRIBUTE"
+    ] == [
+        ("beta", "value"),
+    ]
+
+
+def test_single_attribute_flat_model_contract_after_nested_support(tmp_path):
+    sources = {"alpha": "import beta\nx=beta.value", "beta": "value=7"}
+    result = _assess(sources, "alpha")
+    assert result.outcome == "MODEL_PASS"
+    assert [
+        (event.target, event.symbol)
+        for event in result.events
+        if event.operation == "READ_ATTRIBUTE"
+    ] == [
+        ("beta", "value"),
+    ]
+    assert _actual(tmp_path, sources, "alpha")

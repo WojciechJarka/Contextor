@@ -3357,3 +3357,108 @@ def test_p9_i1_known_builtin_decorator_identity(
             _actual(tmp_path, sources, "pkg")
             is python_success
         )
+
+
+def test_nested_attribute_reads_two_known_modules(tmp_path):
+    source = {
+        "route.__init__": "pass",
+        "route.leaf": "value=7",
+        "entry": "import route.leaf\nx=route.leaf.value",
+    }
+    result = _model(source, "entry")
+    assert result.outcome == "MODEL_PASS"
+    assert [(e.target, e.symbol) for e in result.events if e.operation == "ATTR"] == [
+        ("route", "leaf"), ("route.leaf", "value"),
+    ]
+    assert _actual(tmp_path, source, "entry")
+
+
+def test_nested_attribute_reads_three_known_modules(tmp_path):
+    source = {
+        "tree.__init__": "pass",
+        "tree.branch.__init__": "pass",
+        "tree.branch.leaf": "value=9",
+        "entry": "import tree.branch.leaf\nx=tree.branch.leaf.value",
+    }
+    result = _model(source, "entry")
+    assert result.outcome == "MODEL_PASS"
+    assert [(e.target, e.symbol) for e in result.events if e.operation == "ATTR"] == [
+        ("tree", "branch"),
+        ("tree.branch", "leaf"),
+        ("tree.branch.leaf", "value"),
+    ]
+    assert _actual(tmp_path, source, "entry")
+
+
+def test_nested_attribute_first_segment_initializing_hazard(tmp_path):
+    source = {
+        "route.__init__": "import route.consumer\na=1",
+        "route.consumer": "import route\nx=route.a.value",
+    }
+    result = _model(source, "route")
+    assert (result.outcome, result.target_module, result.symbol) == (
+        "EARLY_BINDING_HAZARD", "route", "a",
+    )
+    assert not any(e.operation == "ATTR" for e in result.events)
+    assert not _actual(tmp_path, source, "route")
+
+
+def test_nested_attribute_later_segment_initializing_hazard(tmp_path):
+    source = {
+        "route.__init__": "import route\na=route\nimport route.consumer\nvalue=7",
+        "route.consumer": "import route\nx=route.a.value",
+    }
+    result = _model(source, "route")
+    assert (result.outcome, result.target_module, result.symbol) == (
+        "EARLY_BINDING_HAZARD", "route", "value",
+    )
+    assert [(e.operation, e.target, e.symbol) for e in result.events if e.operation in {"ATTR", "EARLY_BINDING_HAZARD"}] == [
+        ("ATTR", "route", "a"),
+        ("EARLY_BINDING_HAZARD", "route", "value"),
+    ]
+    assert not _actual(tmp_path, source, "route")
+
+
+def test_nested_attribute_unknown_after_ordinary_value(tmp_path):
+    source = {
+        "route.__init__": "a=3",
+        "entry": "import route\nx=route.a.value",
+    }
+    result = _model(source, "entry")
+    assert result.outcome == "UNKNOWN"
+    assert result.symbol == "value"
+    assert [(e.target, e.symbol) for e in result.events if e.operation == "ATTR"] == [
+        ("route", "a"),
+    ]
+    assert not _actual(tmp_path, source, "entry")
+
+
+def test_nested_attribute_alias_and_overwrite(tmp_path):
+    source = {
+        "route.__init__": "pass",
+        "route.leaf": "value=7",
+        "entry": "import route.leaf\nalias=route\nx=alias.leaf.value",
+    }
+    result = _model(source, "entry")
+    assert result.outcome == "MODEL_PASS"
+    assert [(e.target, e.symbol) for e in result.events if e.operation == "ATTR"] == [
+        ("route", "leaf"), ("route.leaf", "value"),
+    ]
+    assert _actual(tmp_path, source, "entry")
+
+    overwritten = dict(source)
+    overwritten["entry"] = "import route.leaf\ntmp=route.leaf\ntmp=3\nx=tmp.value"
+    result = _model(overwritten, "entry")
+    assert result.outcome == "UNKNOWN"
+    assert not any(e.operation == "ATTR" and e.symbol == "value" for e in result.events)
+    assert not _actual(tmp_path, overwritten, "entry")
+
+
+def test_single_attribute_event_contract_after_nested_support(tmp_path):
+    source = {"route.__init__": "value=7", "entry": "import route\nx=route.value"}
+    result = _model(source, "entry")
+    assert result.outcome == "MODEL_PASS"
+    assert [(e.target, e.symbol) for e in result.events if e.operation == "ATTR"] == [
+        ("route", "value"),
+    ]
+    assert _actual(tmp_path, source, "entry")

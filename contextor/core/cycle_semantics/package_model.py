@@ -832,17 +832,27 @@ def _compile(
                     )
                 )
 
-            elif (
-                isinstance(value, ast.Attribute)
-                and isinstance(value.value, ast.Name)
-                and not value.attr.startswith("__")
-            ):
+            elif isinstance(value, ast.Attribute):
+                attributes: list[str] = []
+                receiver: ast.expr = value
+
+                while isinstance(receiver, ast.Attribute):
+                    if receiver.attr.startswith("__"):
+                        return None
+                    attributes.append(receiver.attr)
+                    receiver = receiver.value
+
+                if not isinstance(receiver, ast.Name):
+                    return None
+
+                attributes.reverse()
                 steps.append(
                     _Step(
                         "ATTR",
-                        value.value.id,
-                        value.attr,
+                        receiver.id,
+                        attributes[0],
                         name,
+                        attribute_tail=tuple(attributes[1:]),
                     )
                 )
             elif (
@@ -3341,45 +3351,53 @@ def evaluate_package_import_order(
         elif step.op == "ATTR":
             reference = namespaces[module].get(step.target)
 
-            if reference not in namespaces:
-                return result(
-                    "UNKNOWN",
-                    step.target,
-                    step.symbol,
-                )
+            for attribute in (step.symbol, *step.attribute_tail):
+                if (
+                    type(reference) is not str
+                    or reference not in namespaces
+                ):
+                    return result(
+                        "UNKNOWN",
+                        step.target,
+                        attribute,
+                    )
 
-            if step.symbol not in namespaces[reference]:
-                outcome = (
-                    "EARLY_BINDING_HAZARD"
-                    if states[reference] == "INITIALIZING"
-                    else "MISSING_ATTRIBUTE"
-                )
+                if attribute not in namespaces[reference]:
+                    outcome = (
+                        "EARLY_BINDING_HAZARD"
+                        if states[reference] == "INITIALIZING"
+                        else "MISSING_ATTRIBUTE"
+                    )
+
+                    events.append(
+                        PackageModelEvent(
+                            module,
+                            outcome,
+                            reference,
+                            attribute,
+                        )
+                    )
+
+                    return result(
+                        outcome,
+                        reference,
+                        attribute,
+                    )
+
+                value = namespaces[reference][attribute]
 
                 events.append(
                     PackageModelEvent(
                         module,
-                        outcome,
+                        "ATTR",
                         reference,
-                        step.symbol,
+                        attribute,
                     )
                 )
 
-                return result(
-                    outcome,
-                    reference,
-                    step.symbol,
-                )
+                reference = value
 
-            namespaces[module][step.binding] = namespaces[reference][step.symbol]
-
-            events.append(
-                PackageModelEvent(
-                    module,
-                    "ATTR",
-                    reference,
-                    step.symbol,
-                )
-            )
+            namespaces[module][step.binding] = reference
 
         elif step.op == "UNMODELED_STATEMENT":
             if _compile_on_first_import:

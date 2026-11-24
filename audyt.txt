@@ -73,7 +73,7 @@ pamiętaj, że nie musza być one nadal aktualne (całkowicie lub częsciowo):
 
 hipoteza do sprawdzenia i ewentualnej naprawy (moze być częściowo lub całkowicie nieaktualna):
 
-10Adnotacje Python 3.15 i odroczona ewaluacjaWybór specyficzny dla projektu i luka pokryciaD11/D12: specjalne ast.AST, odmowa pathlib.Path oraz różnica między utworzeniem klasy a późniejszym odczytem adnotacji. Dekorator dataclass może zmienić moment konsumpcji. Trzeba rozdzielić te zdarzenia.
+
 
 
 

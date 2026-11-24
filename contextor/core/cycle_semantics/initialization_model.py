@@ -17,6 +17,7 @@ class ModelStep:
     target: str | None = None
     symbol: str | None = None
     binding: str | None = None
+    attribute_tail: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -81,15 +82,32 @@ def _compile(tree: ast.Module) -> tuple[ModelStep, ...] | None:
                 type(None), bool, int, float, complex, str, bytes,
             }:
                 steps.append(ModelStep("BIND_CONSTANT", binding=name))
-            elif (
-                isinstance(value, ast.Attribute)
-                and isinstance(value.value, ast.Name)
-                and _valid_name(value.value.id)
-                and _valid_name(value.attr)
-            ):
-                steps.append(ModelStep(
-                    "READ_ATTRIBUTE", value.value.id, value.attr, name,
-                ))
+            elif isinstance(value, ast.Attribute):
+                attributes: list[str] = []
+                receiver: ast.expr = value
+
+                while isinstance(receiver, ast.Attribute):
+                    if not _valid_name(receiver.attr):
+                        return None
+                    attributes.append(receiver.attr)
+                    receiver = receiver.value
+
+                if (
+                    not isinstance(receiver, ast.Name)
+                    or not _valid_name(receiver.id)
+                ):
+                    return None
+
+                attributes.reverse()
+                steps.append(
+                    ModelStep(
+                        "READ_ATTRIBUTE",
+                        receiver.id,
+                        attributes[0],
+                        name,
+                        tuple(attributes[1:]),
+                    )
+                )
             else:
                 return None
         elif isinstance(statement, ast.Pass):
@@ -190,6 +208,16 @@ def evaluate_flat_import_order(
                 )
                 events.append(ModelEvent(module, outcome, target, step.symbol))
                 return result(outcome, target, step.symbol)
+            if step.attribute_tail:
+                events.append(
+                    ModelEvent(
+                        module,
+                        "READ_ATTRIBUTE",
+                        target,
+                        step.symbol,
+                    )
+                )
+                return result("UNKNOWN", target, step.attribute_tail[0])
             bindings[module].add(step.binding)
             aliases[module].pop(step.binding, None)
             events.append(ModelEvent(module, "READ_ATTRIBUTE", target, step.symbol))

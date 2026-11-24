@@ -10,6 +10,7 @@ class _Step:
     target: str | None = None
     symbol: str | None = None
     binding: str | None = None
+    attribute_tail: tuple[str, ...] = ()
     explicit_alias: bool = False
     function_body: tuple[_Step, ...] = ()
     function_local: bool = False
