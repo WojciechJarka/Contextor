@@ -3692,7 +3692,11 @@ def test_consistent_renaming_preserves_package_hazard_and_trace(tmp_path):
             module_names.get(event.module, event.module),
             event.operation,
             module_names.get(event.target, event.target),
-            symbol_names.get(event.symbol, event.symbol),
+            (
+                module_names.get(event.symbol, event.symbol)
+                if event.operation == "IMPORT"
+                else symbol_names.get(event.symbol, event.symbol)
+            ),
         )
         for event in first.events
     ] == [
