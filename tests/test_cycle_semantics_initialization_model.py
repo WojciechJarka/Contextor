@@ -259,14 +259,44 @@ def test_from_import_ordinary_binding_does_not_gain_module_identity():
 def test_from_import_module_identity_detects_later_hazard(tmp_path):
     sources = {
         "a": "import b\nvalue = 3\n",
-        "b": "from a import a_ref as x\ny = x.value\n",
+        "b": "from c import root as x\ny = x.value\n",
+        "c": "import a as root\n",
     }
-    # Brak a_ref zatrzymuje import nazwy przed READ_ATTRIBUTE.
+
     result = _assess(sources, "a")
-    assert (result.outcome, result.target_module, result.symbol) == (
-        "EARLY_BINDING_HAZARD", "a", "a_ref"
+
+    assert (
+        result.outcome,
+        result.target_module,
+        result.symbol,
+    ) == (
+        "EARLY_BINDING_HAZARD",
+        "a",
+        "value",
     )
-    assert not any(
-        event.operation == "READ_ATTRIBUTE"
+
+    assert [
+        (event.operation, event.target, event.symbol)
         for event in result.events
+        if event.operation in {
+            "IMPORT_NAME",
+            "READ_ATTRIBUTE",
+            "EARLY_BINDING_HAZARD",
+        }
+    ] == [
+        ("IMPORT_NAME", "c", "root"),
+        ("EARLY_BINDING_HAZARD", "a", "value"),
+    ]
+
+    process = _actual(
+        tmp_path,
+        sources,
+        "a",
+        return_process=True,
     )
+
+    assert process.returncode != 0
+    exception_line = process.stderr.strip().splitlines()[-1]
+    assert exception_line.startswith("AttributeError:")
+    assert "partially initialized module 'a'" in exception_line
+    assert "has no attribute 'value'" in exception_line

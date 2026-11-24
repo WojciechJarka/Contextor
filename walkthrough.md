@@ -1,148 +1,96 @@
-# P14-I1 — zachowanie tożsamości modułu przez IMPORT_NAME
+# P14-I2 — rzeczywisty hazard po IMPORT_NAME
 
 ## PREFLIGHT
 
-- DIRECT_EVIDENCE: HEAD `9e9a6c3d35e2df710862ad6a4747cea1a1d612ef`. Contextor MCP przed zmianą: `initialization_model.py` i `test_cycle_semantics_initialization_model.py` na LIVE revision 1565, `canonical_state=fresh`, `workspace_sync=verified`; `cycle_semantics=stale`. `get_source_range(initialization_model.py:181-226)` potwierdził dokładną kotwicę w gałęzi IMPORT_NAME. `get_symbol_lineage` rozwiązał właściciela `evaluate_flat_import_order` (`A6320/1`), lecz jego narrow path ma `workspace_sync=unverified`; file-scoped stan potwierdza `get_module_context`.
-- DIRECT_EVIDENCE: przed pracą `git status --short` pokazywał `M CHANGELOG.md`, `M audyt.txt`, `D issues.md`, `M walkthrough.md`; tych pierwszych trzech ścieżek nie zmieniano ani nie czytano `issues.md`. Zmiana jest bez operacji zapisu Git, restartów i FULL.
+- DIRECT_EVIDENCE: HEAD `816592a8d9b3c1ed92be8f3c24c2ba1de89393f1`; worktree przed zmianą czysty. Contextor MCP `get_module_context` dla `tests/test_cycle_semantics_initialization_model.py` i `contextor/core/cycle_semantics/initialization_model.py`: LIVE revision 1567, `canonical_state=fresh`, `workspace_sync=verified`, `cycle_semantics=stale`. `get_source_range` potwierdził starą funkcję testową w `tests/test_cycle_semantics_initialization_model.py:259-272`. Pierwsza próba zakresu 255–280 była poza końcem pliku (272 linie); poprawny odczyt wykonałem po sprawdzeniu granicy. Produkcyjny `initialization_model.py:183-198` już zawiera transfer `aliases[target].get(step.symbol)`.
+- Nie czytano `issues.md`. Bez FULL, restartu i operacji zapisu Git.
 
-## FILES_CHANGED
+## EXACT_TEST_CORRECTION
 
-- `contextor/core/cycle_semantics/initialization_model.py`
-- `tests/test_cycle_semantics_initialization_model.py`
-- `walkthrough.md` — raport, nie production/test diff.
-
-## EXACT_IMPLEMENTATION
-
-- CODE_PATH_PROVED: w `initialization_model.py:183-198` zachowano kontrolę brakującego symbolu i klasyfikację EARLY_BINDING_HAZARD/MISSING_EXPORT. Po udanym `IMPORT_NAME`, `:192-197` przenosi wyłącznie `aliases[target].get(step.symbol)`, czyli wcześniej znaną tożsamość modułu, albo usuwa stary alias bindingu. Nie dotknięto IMPORT_MODULE, BIND_CONSTANT, READ_ATTRIBUTE ani dataclasses ModelStep/ImportOrderAssessment. Tożsamość pochodzi z bieżącego stanu modułu źródłowego, nie ze zgodności pisowni (`:191-197`).
-- DIRECT_EVIDENCE: `git diff --` dwóch zmienionych plików odpowiada pełnym diffom poniżej. Oba pliki przechodzą `ast.parse` w pamięci pod CPython 3.15.2. Contextor MCP `get_source_range:183-207` odczytał po zmianie dokładnie nową gałąź.
+- Zastąpiono wyłącznie `test_from_import_module_identity_detects_later_hazard` w `tests/test_cycle_semantics_initialization_model.py:259-302`. Pozostałe testy i kod produkcyjny niezmienione. Nowa próbka sprawdza udane `IMPORT_NAME c.root` przed hazardem `a.value`, a nie brak `a_ref` podczas wcześniejszego from-import.
 
 ## SEMANTIC_EVIDENCE
 
-- DIRECT_EVIDENCE z P14-D1, na dokładnym minimalnym przykładzie `a="from b import c as x\ny=x.value\n"`, `b="import c\n"`, `c="value=3\n"`: CPython 3.15.2 kończy sukcesem, x jest modułem c, y=3, a stary model zwracał UNKNOWN przy `x.value`. To luka dowodowa, którą ogranicza zmiana.
-- CODE_PATH_PROVED + testy: dodatnie przypadki sprawdzają jedno i wiele przekazań tożsamości oraz CPython przez `_actual` (nowe testy `:203-233`). Negatywne sprawdzają, że stała usuwa alias, a zwykły binding nie zdobywa tożsamości tylko przez nazwę (`:236-258`). Piąty test sprawdza niezmieniony hazard brakującego `a_ref` przed READ_ATTRIBUTE (`:261-276`); nie wykonuje nowej gałęzi dla istniejącego symbolu, więc samodzielnie nie dowodzi hazardu późniejszego odczytu. Tę granicę należy zachować w interpretacji wyniku.
-- INFERENCE: ponieważ alias celu jest unieważniany przez istniejące ścieżki BIND_CONSTANT/READ_ATTRIBUTE/IMPORT_NAME, transfer nie powinien zachowywać przestarzałej tożsamości w badanym ograniczonym modelu. Nie jest to dowód pełnej semantyki wszystkich obiektów modułu ani runtime safety.
+- CODE_PATH_PROVED: `a` inicjuje `b` przed związaniem `value`; `b` inicjuje `c`; `c` wykonuje `import a as root` przy stanie INITIALIZING. `initialization_model.py:179-194` nie rozpoczyna drugiej ramki `a` i zapisuje `aliases[c]['root']='a'`. `b` po `from c import root as x` przenosi tę tożsamość przez `:183-198`. `READ_ATTRIBUTE x.value` rozwiązuje `target='a'` (`:203-206`), a brak `value` przy INITIALIZING daje `EARLY_BINDING_HAZARD` (`:207-220`). Wcześniejszy test kończył się na brakującym `a_ref`, więc nie wykonywał transferu tożsamości.
+- DIRECT_EVIDENCE: asercja modelu potwierdziła `(outcome,target_module,symbol)=(EARLY_BINDING_HAZARD,a,value)` oraz istotną kolejność eventów `IMPORT_NAME(c,root) → EARLY_BINDING_HAZARD(a,value)`; bez udanego `READ_ATTRIBUTE`. To jest brak pierwszego atrybutu, więc interpreter nie emituje eventu udanego odczytu.
+
+## CPYTHON_PARITY
+
+- DIRECT_EVIDENCE: `_actual(tmp_path,sources,'a',return_process=True)` uruchamia osobny proces `sys.executable -I -B -c` (`tests/test_cycle_semantics_initialization_model.py:20-33`). Test potwierdził niezerowy returncode i końcowy `AttributeError` zawierający `partially initialized module 'a'` oraz `has no attribute 'value'`. Przedmiotem zgodności jest moduł a i symbol value, nie sam fakt błędu. Test nie porównuje pełnej kolejności wewnętrznych wywołań importlib; modelową kolejność sprawdza jawna asercja eventów.
 
 ## TARGETED_TESTS
 
-- DIRECT_EVIDENCE: pięć nowych testów `-k` — `5 passed, 29 deselected in 0.98s`.
-- DIRECT_EVIDENCE: pełny wskazany plik oraz `test_cycle_semantics_scenarios.py` i `test_cycle_semantics_evidence.py` — `129 passed in 5.65s`. Nie uruchomiono całego suite.
+- Zmieniony test: `1 passed in 0.93s`.
+- `tests/test_cycle_semantics_initialization_model.py`, `tests/test_cycle_semantics_scenarios.py`, `tests/test_cycle_semantics_evidence.py`: `129 passed in 4.27s`. Bez pełnego pytest.
 
 ## MCP_POST_CHANGE
 
-- DIRECT_EVIDENCE: watcher opublikował `initialization_model.py` jako `desktop_watcher UPDATED` na revision 1566 oraz plik testowy na revision 1567; `get_live_events(after_revision=1565)` podał ciągłą historię, `resync_required=false`. Nie użyto `update_file`.
-- DIRECT_EVIDENCE: `get_module_context` obu plików po zmianie: `canonical_state=fresh`, `workspace_sync=verified`, LIVE revision 1567, provenance live. Rodziny module/graph/topology/artifact_consumption/cycles/lineage są fresh, `cycle_semantics=stale`. Świeże źródło/AST/graph nie dowodzi ponownego przeliczenia semantyki cykli ani adopcji zmienionego kodu przez już uruchomiony proces.
-- DIRECT_EVIDENCE: zależności modelu obejmują `scenarios.py`, `evidence.py` oraz testy jako inbound hard dependencies; plik testowy ma outbound hard dependency do `initialization_model.py`. Oba pliki dają `AST_OK` przez izolowany CPython `ast.parse`. Kod runtime servera MCP nie był zmieniany; nie żądano restartu.
+- DIRECT_EVIDENCE: `get_live_events(after_revision=1567)` zwrócił `desktop_watcher UPDATED` dla pliku testowego na revision 1568, ciągłość `continuous`, `resync_required=false`. Nie użyto `update_file`.
+- DIRECT_EVIDENCE: `get_module_context` pliku testowego i niezmienionego produkcyjnego po zmianie: LIVE 1568, `canonical_state=fresh`, `workspace_sync=verified`, provenance live. Rodzina `cycle_semantics=stale`, więc nie jest to dowód przeliczenia semantyki ani runtime safety. Końcowy `git status --short` pokazuje wyłącznie `M tests/test_cycle_semantics_initialization_model.py` przed zapisem tego raportu.
 
 ## FULL_DIFFS
-
-### contextor/core/cycle_semantics/initialization_model.py — pełny ACTUAL_DIFF
-
-```diff
-diff --git a/contextor/core/cycle_semantics/initialization_model.py b/contextor/core/cycle_semantics/initialization_model.py
-index 3bc2117..74242e1 100644
---- a/contextor/core/cycle_semantics/initialization_model.py
-+++ b/contextor/core/cycle_semantics/initialization_model.py
-@@ -190,7 +190,11 @@ def evaluate_flat_import_order(
-                     events.append(ModelEvent(module, outcome, target, step.symbol))
-                     return result(outcome, target, step.symbol)
-                 bindings[module].add(step.binding)
--                aliases[module].pop(step.binding, None)
-+                imported_module = aliases[target].get(step.symbol)
-+                if imported_module is None:
-+                    aliases[module].pop(step.binding, None)
-+                else:
-+                    aliases[module][step.binding] = imported_module
-             events.append(ModelEvent(module, step.operation, target, step.symbol))
-         elif step.operation == "BIND_CONSTANT":
-             bindings[module].add(step.binding)
-```
 
 ### tests/test_cycle_semantics_initialization_model.py — pełny ACTUAL_DIFF
 
 ```diff
 diff --git a/tests/test_cycle_semantics_initialization_model.py b/tests/test_cycle_semantics_initialization_model.py
-index 866beab..ffd0ce9 100644
+index ffd0ce9..00d104f 100644
 --- a/tests/test_cycle_semantics_initialization_model.py
 +++ b/tests/test_cycle_semantics_initialization_model.py
-@@ -197,3 +197,76 @@ def test_single_attribute_flat_model_contract_after_nested_support(tmp_path):
-         ("beta", "value"),
-     ]
-     assert _actual(tmp_path, sources, "alpha")
+@@ -259,14 +259,44 @@ def test_from_import_ordinary_binding_does_not_gain_module_identity():
+ def test_from_import_module_identity_detects_later_hazard(tmp_path):
+     sources = {
+         "a": "import b\nvalue = 3\n",
+-        "b": "from a import a_ref as x\ny = x.value\n",
++        "b": "from c import root as x\ny = x.value\n",
++        "c": "import a as root\n",
+     }
+-    # Brak a_ref zatrzymuje import nazwy przed READ_ATTRIBUTE.
 +
+     result = _assess(sources, "a")
+-    assert (result.outcome, result.target_module, result.symbol) == (
+-        "EARLY_BINDING_HAZARD", "a", "a_ref"
 +
-+def test_from_import_preserves_known_module_identity(tmp_path):
-+    sources = {
-+        "a": "from b import c as x\ny = x.value\n",
-+        "b": "import c\n",
-+        "c": "value = 3\n",
-+    }
-+    result = _assess(sources, "a")
-+    assert result.outcome == "MODEL_PASS"
++    assert (
++        result.outcome,
++        result.target_module,
++        result.symbol,
++    ) == (
++        "EARLY_BINDING_HAZARD",
++        "a",
++        "value",
+     )
+-    assert not any(
+-        event.operation == "READ_ATTRIBUTE"
++
 +    assert [
-+        (event.target, event.symbol)
-+        for event in result.events
-+        if event.operation == "READ_ATTRIBUTE"
-+    ] == [("c", "value")]
-+    assert _actual(tmp_path, sources, "a")
++        (event.operation, event.target, event.symbol)
+         for event in result.events
++        if event.operation in {
++            "IMPORT_NAME",
++            "READ_ATTRIBUTE",
++            "EARLY_BINDING_HAZARD",
++        }
++    ] == [
++        ("IMPORT_NAME", "c", "root"),
++        ("EARLY_BINDING_HAZARD", "a", "value"),
++    ]
 +
-+
-+def test_from_import_identity_survives_multiple_hops(tmp_path):
-+    sources = {
-+        "a": "from b import x as y\nz = y.value\n",
-+        "b": "from c import x\n",
-+        "c": "import d as x\n",
-+        "d": "value = 7\n",
-+    }
-+    result = _assess(sources, "a")
-+    assert result.outcome == "MODEL_PASS"
-+    assert [
-+        (event.target, event.symbol)
-+        for event in result.events
-+        if event.operation == "READ_ATTRIBUTE"
-+    ] == [("d", "value")]
-+    assert _actual(tmp_path, sources, "a")
-+
-+
-+def test_from_import_module_identity_invalidated_by_constant():
-+    sources = {
-+        "a": "from b import c as x\nx = 7\ny = x.value\n",
-+        "b": "import c\n",
-+        "c": "value = 3\n",
-+    }
-+    result = _assess(sources, "a")
-+    assert (result.outcome, result.target_module, result.symbol) == (
-+        "UNKNOWN", "x", "value"
++    process = _actual(
++        tmp_path,
++        sources,
++        "a",
++        return_process=True,
 +    )
 +
-+
-+def test_from_import_ordinary_binding_does_not_gain_module_identity():
-+    sources = {
-+        "a": "from b import c as x\ny = x.value\n",
-+        "b": "c = 3\n",
-+        "c": "value = 7\n",
-+    }
-+    result = _assess(sources, "a")
-+    assert (result.outcome, result.target_module, result.symbol) == (
-+        "UNKNOWN", "x", "value"
-+    )
-+
-+
-+def test_from_import_module_identity_detects_later_hazard(tmp_path):
-+    sources = {
-+        "a": "import b\nvalue = 3\n",
-+        "b": "from a import a_ref as x\ny = x.value\n",
-+    }
-+    # Brak a_ref zatrzymuje import nazwy przed READ_ATTRIBUTE.
-+    result = _assess(sources, "a")
-+    assert (result.outcome, result.target_module, result.symbol) == (
-+        "EARLY_BINDING_HAZARD", "a", "a_ref"
-+    )
-+    assert not any(
-+        event.operation == "READ_ATTRIBUTE"
-+        for event in result.events
-+    )
++    assert process.returncode != 0
++    exception_line = process.stderr.strip().splitlines()[-1]
++    assert exception_line.startswith("AttributeError:")
++    assert "partially initialized module 'a'" in exception_line
++    assert "has no attribute 'value'" in exception_line
 ```
 
 ## FINAL_STATUS
 
-- SOURCE/TEST change zgodne z podaną kotwicą i ograniczonym kontraktem; focused tests przechodzą, MCP potwierdza świeże źródła na rev 1567. Status: IMPLEMENTATION_VERIFIED_WITH_STALE_CYCLE_SEMANTICS. Nie zgłaszam FINAL PASS, ponieważ wymagana rodzina LIVE `cycle_semantics` pozostaje stale; świeżość źródeł nie jest dowodem jej przeliczenia ani runtime safety. Brak commit/push/staging/restart.
+- Test skorygowany zgodnie z rzeczywistym kontraktem i zgodnością CPython; 129 wskazanych testów przechodzi, oba źródła `workspace_sync=verified` na LIVE 1568. Nie zgłaszam globalnego FINAL PASS cycle semantics, gdyż rodzina pozostaje stale. Bez zmian produkcji, commit/push/staging/restart.
+- FILES_CHANGED: `tests/test_cycle_semantics_initialization_model.py` (oraz `walkthrough.md` jako raport); pełny diff pliku testowego powyżej.
