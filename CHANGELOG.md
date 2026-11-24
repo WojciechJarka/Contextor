@@ -19,6 +19,27 @@ Extended Nested Attribute Read Semantics
 - Added targeted regression tests and verified detected initialization hazards against actual CPython 3.15.2 exceptions, including the affected module and missing attribute.
 - **Validation:** 277 targeted tests passed on CPython 3.15.2. Changes verified through Contextor MCP with synchronized LIVE source state.
 
+Extended Import Semantics and Partial Initialization Audit
+
+- Audited absolute, relative, aliased, dotted, and reentrant imports, including re-exports and multi-member `from` imports.
+- Verified module initialization ordering, partially initialized module access, parent-child binding, and import alias resolution against existing model contracts.
+- Confirmed the existing handling of `PREPARE_FROM_MEMBER`, `REENTRANT_CHILD`, `BIND_CHILD`, and attribute access during circular initialization.
+- Compared selected initialization and binding behavior with CPython 3.15.2.
+- Verified that unsupported import environments and unresolved dynamic behavior conservatively retain `UNKNOWN` outcomes.
+- Found no confirmed semantic defects requiring production changes within the audited scope.
+- **Validation:** Audit completed without production modifications. Existing model contracts and targeted regression coverage reviewed; no new false `MODEL_PASS` or incorrect initialization hazards identified in the examined cases.
+
+Guard Evaluation, Deferred Functions, and Call Execution Audit
+
+- Audited conditional guards, deferred function bodies, restricted function calls, and execution frame transitions.
+- Verified correct branch selection for supported literal guards and conservative `UNKNOWN` outcomes for unsupported dynamic conditions and side effects.
+- Confirmed that function definitions do not prematurely execute their bodies and that supported calls preserve execution order.
+- Validated function-local imports, caller continuation, argument binding, and result ownership across execution frames.
+- Verified reentrant import handling and early-binding hazard detection during partial module initialization.
+- Confirmed bottom-up decorator application order, propagation of intermediate results, and final function binding.
+- Compared selected execution traces, import side effects, and initialization failures against CPython 3.15.2.
+- **Validation:** 40 targeted tests passed. No confirmed semantic defects or production changes required within the audited scope.
+
 ### 2026-11-23
 
 Improved Python Execution Semantics and Conditional Import Analysis
@@ -365,7 +386,7 @@ Consolidated the October 10–26 development work covering canonical FULL/LIVE c
 
 - Updated MCP documentation and architectural guidance to describe the expanded cycle evidence, analysis-status behavior and profiling contracts.
 
-#### Verification, acceptance and remaining limitations
+### Verification, acceptance and remaining limitations
 
 - Expanded isolated regression coverage for canonical FULL/incremental parity, file-domain reconciliation, failed-commit rollback, package resolution, collision consistency, source evidence, cycle semantics, canonical publication and LIVE IPC.
 

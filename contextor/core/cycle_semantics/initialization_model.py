@@ -190,7 +190,11 @@ def evaluate_flat_import_order(
                     events.append(ModelEvent(module, outcome, target, step.symbol))
                     return result(outcome, target, step.symbol)
                 bindings[module].add(step.binding)
-                aliases[module].pop(step.binding, None)
+                imported_module = aliases[target].get(step.symbol)
+                if imported_module is None:
+                    aliases[module].pop(step.binding, None)
+                else:
+                    aliases[module][step.binding] = imported_module
             events.append(ModelEvent(module, step.operation, target, step.symbol))
         elif step.operation == "BIND_CONSTANT":
             bindings[module].add(step.binding)

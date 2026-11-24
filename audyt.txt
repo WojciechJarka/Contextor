@@ -76,12 +76,6 @@ hipoteza do sprawdzenia i ewentualnej naprawy (moze być częściowo lub całkow
 
 
 
-
-
-11Złożone odczyty atrybutówLuka pokryciaB03: p.a.value zatrzymuje kompilację ograniczonego modelu, ponieważ AST zawiera zagnieżdżony Attribute. CPython wykazał rzeczywisty błąd cyklicznej inicjalizacji, a model zwraca UNKNOWN zamiast rozpoznania hazardu.
-
-
-
 12Pozostałe formy importów i częściowej inicjalizacjiNiepełna weryfikacja
 
 13Guardy, odroczone funkcje i wywołaniaNiepełna weryfikacjaB04–B06 potwierdzają poprawne zachowanie badanych prostych przypadków, lecz inne warunki, ich efekty i bardziej złożone przejścia wykonania pozostają poza zweryfikowanym zakresem.

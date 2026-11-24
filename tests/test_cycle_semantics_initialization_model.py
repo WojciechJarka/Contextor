@@ -197,3 +197,76 @@ def test_single_attribute_flat_model_contract_after_nested_support(tmp_path):
         ("beta", "value"),
     ]
     assert _actual(tmp_path, sources, "alpha")
+
+
+def test_from_import_preserves_known_module_identity(tmp_path):
+    sources = {
+        "a": "from b import c as x\ny = x.value\n",
+        "b": "import c\n",
+        "c": "value = 3\n",
+    }
+    result = _assess(sources, "a")
+    assert result.outcome == "MODEL_PASS"
+    assert [
+        (event.target, event.symbol)
+        for event in result.events
+        if event.operation == "READ_ATTRIBUTE"
+    ] == [("c", "value")]
+    assert _actual(tmp_path, sources, "a")
+
+
+def test_from_import_identity_survives_multiple_hops(tmp_path):
+    sources = {
+        "a": "from b import x as y\nz = y.value\n",
+        "b": "from c import x\n",
+        "c": "import d as x\n",
+        "d": "value = 7\n",
+    }
+    result = _assess(sources, "a")
+    assert result.outcome == "MODEL_PASS"
+    assert [
+        (event.target, event.symbol)
+        for event in result.events
+        if event.operation == "READ_ATTRIBUTE"
+    ] == [("d", "value")]
+    assert _actual(tmp_path, sources, "a")
+
+
+def test_from_import_module_identity_invalidated_by_constant():
+    sources = {
+        "a": "from b import c as x\nx = 7\ny = x.value\n",
+        "b": "import c\n",
+        "c": "value = 3\n",
+    }
+    result = _assess(sources, "a")
+    assert (result.outcome, result.target_module, result.symbol) == (
+        "UNKNOWN", "x", "value"
+    )
+
+
+def test_from_import_ordinary_binding_does_not_gain_module_identity():
+    sources = {
+        "a": "from b import c as x\ny = x.value\n",
+        "b": "c = 3\n",
+        "c": "value = 7\n",
+    }
+    result = _assess(sources, "a")
+    assert (result.outcome, result.target_module, result.symbol) == (
+        "UNKNOWN", "x", "value"
+    )
+
+
+def test_from_import_module_identity_detects_later_hazard(tmp_path):
+    sources = {
+        "a": "import b\nvalue = 3\n",
+        "b": "from a import a_ref as x\ny = x.value\n",
+    }
+    # Brak a_ref zatrzymuje import nazwy przed READ_ATTRIBUTE.
+    result = _assess(sources, "a")
+    assert (result.outcome, result.target_module, result.symbol) == (
+        "EARLY_BINDING_HAZARD", "a", "a_ref"
+    )
+    assert not any(
+        event.operation == "READ_ATTRIBUTE"
+        for event in result.events
+    )
