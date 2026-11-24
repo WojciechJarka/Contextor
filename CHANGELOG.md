@@ -6,6 +6,19 @@ Development history (newest first). Entries retain their original technical clai
 
 ## November 2026
 
+## 2026-11-24
+
+Extended Nested Attribute Read Semantics
+
+- Added support for nested `ast.Attribute` expressions of arbitrary depth in the restricted package and flat-module initialization models.
+- Implemented left-to-right attribute resolution while preserving intermediate module identity and execution order.
+- Improved circular initialization hazard detection for both initial and subsequent attribute accesses in nested expressions.
+- Prevented intermediate results from leaking into module namespaces through synthetic bindings.
+- Preserved conservative `UNKNOWN` outcomes when intermediate object identities or attribute access semantics cannot be safely modeled.
+- Maintained backward compatibility with existing single-attribute reads, module aliases, and binding behavior.
+- Added targeted regression tests and verified detected initialization hazards against actual CPython 3.15.2 exceptions, including the affected module and missing attribute.
+- **Validation:** 277 targeted tests passed on CPython 3.15.2. Changes verified through Contextor MCP with synchronized LIVE source state.
+
 ### 2026-11-23
 
 Improved Python Execution Semantics and Conditional Import Analysis
