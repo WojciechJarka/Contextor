@@ -40,6 +40,30 @@ Guard Evaluation, Deferred Functions, and Call Execution Audit
 - Compared selected execution traces, import side effects, and initialization failures against CPython 3.15.2.
 - **Validation:** 40 targeted tests passed. No confirmed semantic defects or production changes required within the audited scope.
 
+### Import Environment Authority and Namespace Package Semantics Audit
+
+- Audited PEP 420 namespace package resolution, ordered search portions, regular package precedence, and source inventory consistency.
+- Verified that conditional namespace resolution preserves Python import lookup ordering within caller-supplied inventories.
+- Confirmed that source-bound validation establishes internal inventory consistency without claiming runtime environment attestation.
+- Validated explicit authority boundaries for `sys.path`, `sys.modules`, custom finders, loaders, import hooks, and dynamic environment mutations.
+- Confirmed that unsupported or unverified runtime conditions remain outside the model's authority.
+- Verified that `CONDITIONAL_MODEL_PASS` is never promoted to unconditional `MODEL_PASS` or used to suppress structural cycle warnings in the examined production paths.
+- Compared namespace resolution and preloaded-module behavior against CPython 3.15.2.
+- **Validation:** No confirmed semantic defects or authority leaks identified. Audit completed without production changes.
+
+### Cycle Semantics Publication Integrity Audit
+
+- Audited the end-to-end publication chain from source AST, SCC scenarios, and semantic evidence through manifest preparation, canonical receipts, durable storage, LIVE installation, and MCP warning projections.
+- Verified completeness requirements for SCC member assessments, source fingerprints, AST replay, graph consistency, and evidence tokens.
+- Confirmed independent validation of full, partial, and optional publication claims against canonical state.
+- Verified that receipts are bound to exact repository, revision, state, and source identities, preventing reuse across incompatible generations.
+- Confirmed that source updates, generation changes, invalid receipts, and failed publication attempts preserve appropriate fail-closed behavior.
+- Verified that warning suppression requires validated installed evidence with the exact `MODEL_ALL_FRESH_MEMBER_ENTRIES_PASS` classification.
+- Confirmed that `UNKNOWN`, incomplete evidence, internal hazards, and stale or mismatched receipts cannot authorize warning suppression in the examined production paths.
+- Clarified the distinction between the latest durable generation and the currently installed LIVE generation, including revision-scoped results during pending or failed publication.
+- Identified a remaining cross-query consistency limitation: separately retrieved warning views and diagnostic summaries are not guaranteed to share one atomic revision snapshot.
+- **Validation:** 3 targeted tests passed, supported by a controlled generation-divergence reproducer. No confirmed publication-integrity defects, unsafe `MODEL_PASS` classifications, or authority leaks. No production changes required.
+
 ### 2026-11-23
 
 Improved Python Execution Semantics and Conditional Import Analysis

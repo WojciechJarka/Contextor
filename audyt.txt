@@ -3,6 +3,8 @@ Proceduj:
 2. Albo DOSŁOWNE (!!!) implementacje - a nie ogólniki pod pozorem implementacji.
 3. Albo finalne PASS jeśli zagadnienie jest zakończone.
 3. NIE HARDKODUJ !!!
+
+
 ***********************************************************
 Jesteś zarazem audytorem oraz inżynierem kodu pythona w projekcie contextor na platformie PC z WIN 10
 Współpracujesz z agentem w codex, który jest twoimi oczami i rękami wewnątrz lokalnego repo z kodem Contextora na moim PC
@@ -58,35 +60,17 @@ Priorytet	Etap	Cel
 powrócmy do weryfikacji - i ewentualnej korekty problemów - w kolejnych hipotezach na temat contextora - 
 pamiętaj, że nie musza być one nadal aktualne (całkowicie lub częsciowo):
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 hipoteza do sprawdzenia i ewentualnej naprawy (moze być częściowo lub całkowicie nieaktualna):
 
 
 
-12Pozostałe formy importów i częściowej inicjalizacjiNiepełna weryfikacja
-
-13Guardy, odroczone funkcje i wywołaniaNiepełna weryfikacjaB04–B06 potwierdzają poprawne zachowanie badanych prostych przypadków, lecz inne warunki, ich efekty i bardziej złożone przejścia wykonania pozostają poza zweryfikowanym zakresem.
 
 
 
-14Niezależny audyt evaluate_flat_import_orderNiepełna weryfikacjaR1 szczegółowo badał ścieżkę package, ale nie wszystkie reguły odrębnego modelu flat. Trzeba sprawdzić jego kontrakty i przypadki, w których scenariusz wybiera inny evaluator.
 
 
 
-15Autorytet środowiska importów i namespace packagesGranica założeń warunkowychModel warunkowy korzysta z określonego SearchPortion i inwentarza źródeł, ale nie certyfikuje rzeczywistego sys.path, sys.modules, finderów ani import hooks. Trzeba precyzyjnie określić, co może być dowiedzione statycznie.
+
 
 
 

@@ -2031,6 +2031,72 @@ def test_b0g4c2_existing_attribute_precedes_child(tmp_path):
     assert _actual(tmp_path, source, "entry")
 
 
+def test_from_package_import_child_binds_exact_runtime_object(tmp_path):
+    for initializer, expected_kind in (
+        ("child=3", "ATTRIBUTE"),
+        ("pass", "MODULE"),
+    ):
+        source = {
+            "pkg.__init__": initializer,
+            "pkg.child": "value=7",
+            "entry": "from pkg import child",
+        }
+
+        case_dir = tmp_path / expected_kind.lower()
+        result = _model(source, "entry")
+        assert result.outcome == "MODEL_PASS"
+
+        child_starts = [
+            event
+            for event in result.events
+            if event.operation == "START_IMPORT"
+            and event.target == "pkg.child"
+        ]
+        assert bool(child_starts) == (expected_kind == "MODULE")
+
+        process = _actual(
+            case_dir, source, "entry", return_process=True
+        )
+        assert process.returncode == 0, process.stderr
+
+        script = (
+            "import importlib,json,sys,types;"
+            "sys.path.insert(0,sys.argv[1]);"
+            "entry=importlib.import_module('entry');"
+            "child=entry.child;"
+            "print(json.dumps({"
+            "'kind':'MODULE' if isinstance(child,types.ModuleType) "
+            "else 'ATTRIBUTE',"
+            "'value':child.value if isinstance(child,types.ModuleType) "
+            "else child,"
+            "'child_loaded':'pkg.child' in sys.modules,"
+            "'module_identity':child is sys.modules.get('pkg.child')"
+            "}))"
+        )
+        runtime = subprocess.run(
+            [
+                sys.executable, "-I", "-B", "-c",
+                script, str(case_dir),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=8,
+            check=False,
+        )
+        assert runtime.returncode == 0, runtime.stderr
+        observed = json.loads(runtime.stdout)
+
+        assert observed["kind"] == expected_kind
+        if expected_kind == "ATTRIBUTE":
+            assert observed["value"] == 3
+            assert observed["child_loaded"] is False
+            assert observed["module_identity"] is False
+        else:
+            assert observed["value"] == 7
+            assert observed["child_loaded"] is True
+            assert observed["module_identity"] is True
+
+
 def test_b0g4c2_constant_attribute_is_not_module(tmp_path):
     source = {
         "pkg.__init__": "child=3",
@@ -2138,7 +2204,14 @@ def test_b0g4c3_early_read_from_reentrant_child(tmp_path):
     assert result.outcome == "EARLY_BINDING_HAZARD"
     assert result.target_module == "pkg.child"
     assert result.symbol == "value"
-    assert not _actual(tmp_path, source, "pkg")
+    process = _actual(
+        tmp_path, source, "pkg", return_process=True
+    )
+    assert process.returncode != 0
+    exception_line = process.stderr.strip().splitlines()[-1]
+    assert exception_line.startswith("AttributeError:")
+    assert "partially initialized module 'pkg.child'" in exception_line
+    assert "has no attribute 'value'" in exception_line
 
 
 def test_b0g4c3_bound_attribute_before_reentrant_read(tmp_path):
@@ -2228,7 +2301,14 @@ def test_b0g4c4_preparation_before_local_binding_hazard(tmp_path):
     assert result.outcome == "EARLY_BINDING_HAZARD"
     assert result.target_module == "entry"
     assert result.symbol == "a"
-    assert not _actual(tmp_path, source, "entry")
+    process = _actual(
+        tmp_path, source, "entry", return_process=True
+    )
+    assert process.returncode != 0
+    exception_line = process.stderr.strip().splitlines()[-1]
+    assert exception_line.startswith("AttributeError:")
+    assert "partially initialized module 'entry'" in exception_line
+    assert "has no attribute 'a'" in exception_line
 
 
 def test_b0g4c4_all_prepares_before_from_bindings(tmp_path):
