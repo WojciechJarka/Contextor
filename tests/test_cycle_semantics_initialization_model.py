@@ -167,6 +167,126 @@ def test_nested_attribute_first_segment_hazard(tmp_path):
     assert "has no attribute 'value'" in exception_line
 
 
+def test_consistent_renaming_preserves_flat_hazard_and_trace(tmp_path):
+    original = {
+        "a": "import b\nvalue=1\n",
+        "b": "import a\nobserved=a.value\n",
+    }
+    renamed = {
+        "alpha": "import omega\ntoken=1\n",
+        "omega": "import alpha\nreadback=alpha.token\n",
+    }
+
+    first = _assess(original, "a")
+    second = _assess(renamed, "alpha")
+
+    assert first.outcome == second.outcome == "EARLY_BINDING_HAZARD"
+
+    module_names = {"a": "alpha", "b": "omega"}
+    symbol_names = {"value": "token", "observed": "readback"}
+
+    assert (
+        module_names[first.target_module],
+        symbol_names[first.symbol],
+    ) == (second.target_module, second.symbol)
+
+    def renamed_event(event):
+        return (
+            module_names.get(event.module, event.module),
+            event.operation,
+            module_names.get(event.target, event.target),
+            symbol_names.get(event.symbol, event.symbol),
+        )
+
+    assert [renamed_event(event) for event in first.events] == [
+        (
+            event.module,
+            event.operation,
+            event.target,
+            event.symbol,
+        )
+        for event in second.events
+    ]
+
+    for label, sources, entry, module, symbol in (
+        ("original", original, "a", "a", "value"),
+        ("renamed", renamed, "alpha", "alpha", "token"),
+    ):
+        case_dir = tmp_path / label
+        case_dir.mkdir()
+        process = _actual(
+            case_dir,
+            sources,
+            entry,
+            return_process=True,
+        )
+        assert process.returncode != 0
+        exception = process.stderr.strip().splitlines()[-1]
+        assert exception.startswith("AttributeError:")
+        assert f"partially initialized module '{module}'" in exception
+        assert f"has no attribute '{symbol}'" in exception
+
+
+def test_independent_flat_import_permutation(tmp_path):
+    modules = {
+        "unit_left": "value=11\n",
+        "unit_right": "value=22\n",
+    }
+
+    orders = (
+        ("unit_left", "unit_right"),
+        ("unit_right", "unit_left"),
+    )
+
+    for index, order in enumerate(orders):
+        entry = (
+            f"import {order[0]}\n"
+            f"import {order[1]}\n"
+            "left_value=unit_left.value\n"
+            "right_value=unit_right.value\n"
+        )
+
+        sources = {**modules, "entry": entry}
+        result = _assess(sources, "entry")
+
+        assert result.outcome == "MODEL_PASS"
+        assert [
+            event.target
+            for event in result.events
+            if event.operation == "START_IMPORT"
+        ] == list(order)
+
+        case_dir = tmp_path / str(index)
+        case_dir.mkdir()
+        assert _actual(case_dir, sources, "entry")
+
+        runtime = subprocess.run(
+            [
+                sys.executable, "-I", "-B", "-c",
+                (
+                    "import importlib,json,sys;"
+                    "sys.path.insert(0,sys.argv[1]);"
+                    "entry=importlib.import_module('entry');"
+                    "print(json.dumps({"
+                    "'values':[entry.left_value,entry.right_value],"
+                    "'order':[name for name in sys.modules "
+                    "if name in ('unit_left','unit_right')]"
+                    "}))"
+                ),
+                str(case_dir),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+
+        assert runtime.returncode == 0, runtime.stderr
+        observed = json.loads(runtime.stdout)
+        assert observed["values"] == [11, 22]
+        assert observed["order"] == list(order)
+
+
 def test_nested_attribute_known_first_segment_stops_unknown():
     sources = {
         "alpha": "import beta\nx=beta.value.next",

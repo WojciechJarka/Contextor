@@ -3654,3 +3654,135 @@ def test_single_attribute_event_contract_after_nested_support(tmp_path):
         ("route", "value"),
     ]
     assert _actual(tmp_path, source, "entry")
+
+
+def test_consistent_renaming_preserves_package_hazard_and_trace(tmp_path):
+    original = {
+        "pkg.__init__": "import pkg.child\nvalue=1\n",
+        "pkg.child": "import pkg\nseen=pkg.value\n",
+    }
+    renamed = {
+        "tree.__init__": "import tree.branch\npayload=1\n",
+        "tree.branch": "import tree\nreadback=tree.payload\n",
+    }
+
+    first = _model(original, "pkg")
+    second = _model(renamed, "tree")
+
+    assert first.outcome == second.outcome == "EARLY_BINDING_HAZARD"
+
+    module_names = {
+        "pkg": "tree",
+        "pkg.__init__": "tree.__init__",
+        "pkg.child": "tree.branch",
+    }
+    symbol_names = {
+        "value": "payload",
+        "child": "branch",
+        "seen": "readback",
+    }
+
+    assert (
+        module_names[first.target_module],
+        symbol_names[first.symbol],
+    ) == (second.target_module, second.symbol)
+
+    assert [
+        (
+            module_names.get(event.module, event.module),
+            event.operation,
+            module_names.get(event.target, event.target),
+            symbol_names.get(event.symbol, event.symbol),
+        )
+        for event in first.events
+    ] == [
+        (
+            event.module,
+            event.operation,
+            event.target,
+            event.symbol,
+        )
+        for event in second.events
+    ]
+
+    for label, sources, entry, module, symbol in (
+        ("original", original, "pkg", "pkg", "value"),
+        ("renamed", renamed, "tree", "tree", "payload"),
+    ):
+        process = _actual(
+            tmp_path / label,
+            sources,
+            entry,
+            return_process=True,
+        )
+        assert process.returncode != 0
+        exception = process.stderr.strip().splitlines()[-1]
+        assert exception.startswith("AttributeError:")
+        assert f"partially initialized module '{module}'" in exception
+        assert f"has no attribute '{symbol}'" in exception
+
+
+def test_independent_package_import_permutation(tmp_path):
+    modules = {
+        "pkg.__init__": "pass",
+        "pkg.left": "value=11",
+        "pkg.right": "value=22",
+    }
+
+    orders = (
+        ("pkg.left", "pkg.right"),
+        ("pkg.right", "pkg.left"),
+    )
+
+    for index, order in enumerate(orders):
+        source = {
+            **modules,
+            "entry": (
+                f"import {order[0]} as first\n"
+                f"import {order[1]} as second\n"
+                "import pkg.left as left\n"
+                "import pkg.right as right\n"
+                "left_value=left.value\n"
+                "right_value=right.value\n"
+            ),
+        }
+
+        result = _model(source, "entry")
+        assert result.outcome == "MODEL_PASS"
+
+        started_children = [
+            event.target
+            for event in result.events
+            if event.operation == "START_IMPORT"
+            and event.target in {"pkg.left", "pkg.right"}
+        ]
+        assert started_children == list(order)
+
+        case_dir = tmp_path / str(index)
+        assert _actual(case_dir, source, "entry")
+
+        runtime = subprocess.run(
+            [
+                sys.executable, "-I", "-B", "-c",
+                (
+                    "import importlib,json,sys;"
+                    "sys.path.insert(0,sys.argv[1]);"
+                    "entry=importlib.import_module('entry');"
+                    "print(json.dumps({"
+                    "'values':[entry.left_value,entry.right_value],"
+                    "'order':[name for name in sys.modules "
+                    "if name in ('pkg.left','pkg.right')]"
+                    "}))"
+                ),
+                str(case_dir),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=8,
+            check=False,
+        )
+
+        assert runtime.returncode == 0, runtime.stderr
+        observed = json.loads(runtime.stdout)
+        assert observed["values"] == [11, 22]
+        assert observed["order"] == list(order)
