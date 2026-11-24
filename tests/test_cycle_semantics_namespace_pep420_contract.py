@@ -14,6 +14,10 @@ from pathlib import Path
 from contextor.core.cycle_semantics.package_model import (
     evaluate_package_import_order,
 )
+from contextor.core.cycle_semantics.namespace_path_model import (
+    SearchPortion,
+    resolve_namespace_path,
+)
 
 
 def _write(root: Path, relative: str, source: str) -> None:
@@ -118,6 +122,66 @@ def test_t03_namespace_with_two_portions(tmp_path):
         ),
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_namespace_same_child_order_matches_cpython(tmp_path):
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+
+    _write(first, "nsp/child.py", "value = 'FIRST'\n")
+    _write(second, "nsp/child.py", "value = 'SECOND'\n")
+
+    for ordered_roots, expected_value in (
+        ((first, second), "FIRST"),
+        ((second, first), "SECOND"),
+    ):
+        portions = tuple(
+            SearchPortion(
+                str(root),
+                frozenset({"nsp/child.py"}),
+            )
+            for root in ordered_roots
+        )
+
+        resolution = resolve_namespace_path(
+            portions,
+            "nsp.child",
+            standard_finder_assumed=True,
+        )
+
+        assert resolution.status == "CONDITIONAL"
+        assert resolution.kind == "MODULE_FILE"
+        assert resolution.source == (
+            f"{ordered_roots[0]}:nsp/child.py"
+        )
+        assert resolution.authority == (
+            "CONDITIONAL_ORDERED_PATH_INVENTORY_NOT_RUNTIME_PROOF"
+        )
+
+        runtime = _run(
+            ordered_roots,
+            (
+                "import nsp, nsp.child\n"
+                "print(json.dumps({"
+                "'value': nsp.child.value,"
+                "'origin': nsp.child.__file__,"
+                "'portions': list(nsp.__path__)"
+                "}))\n"
+            ),
+        )
+
+        assert runtime.returncode == 0, runtime.stderr
+
+        observed = json.loads(runtime.stdout)
+
+        assert observed["value"] == expected_value
+        assert Path(observed["origin"]) == (
+            ordered_roots[0] / "nsp" / "child.py"
+        )
+        assert observed["portions"] == [
+            str(root / "nsp")
+            for root in ordered_roots
+        ]
 
 
 def test_t04_later_regular_package_shadows_namespace(

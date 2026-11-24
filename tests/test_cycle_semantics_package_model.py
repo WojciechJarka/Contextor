@@ -3550,6 +3550,102 @@ def test_nested_attribute_alias_and_overwrite(tmp_path):
     assert not _actual(tmp_path, overwritten, "entry")
 
 
+def test_reimport_restores_shadowed_module_identity(tmp_path):
+    base = {
+        "pkg.__init__": "pass",
+        "pkg.sub": "value=7",
+    }
+
+    restored = {
+        **base,
+        "entry": (
+            "import pkg.sub as subject\n"
+            "subject=3\n"
+            "import pkg.sub as subject\n"
+            "observed=subject.value\n"
+        ),
+    }
+
+    lost = {
+        **base,
+        "entry": (
+            "import pkg.sub as subject\n"
+            "subject=3\n"
+            "observed=subject.value\n"
+        ),
+    }
+
+    restored_result = _model(restored, "entry")
+    lost_result = _model(lost, "entry")
+
+    assert restored_result.outcome == "MODEL_PASS"
+    assert lost_result.outcome == "UNKNOWN"
+
+    assert (
+        len([
+            event
+            for event in restored_result.events
+            if event.module == "entry"
+            and event.operation == "ATTR"
+            and event.target == "pkg.sub"
+            and event.symbol == "value"
+        ])
+        == 1
+    )
+
+    assert not any(
+        event.module == "entry"
+        and event.operation == "ATTR"
+        and event.symbol == "value"
+        for event in lost_result.events
+    )
+
+    restored_dir = tmp_path / "restored"
+    lost_dir = tmp_path / "lost"
+
+    assert _actual(restored_dir, restored, "entry")
+
+    runtime = subprocess.run(
+        [
+            sys.executable, "-I", "-B", "-c",
+            (
+                "import importlib,json,sys,types;"
+                "sys.path.insert(0,sys.argv[1]);"
+                "entry=importlib.import_module('entry');"
+                "print(json.dumps({"
+                "'value':entry.observed,"
+                "'module':isinstance(entry.subject,types.ModuleType),"
+                "'identity':entry.subject is sys.modules['pkg.sub']"
+                "}))"
+            ),
+            str(restored_dir),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=8,
+        check=False,
+    )
+
+    assert runtime.returncode == 0, runtime.stderr
+    assert json.loads(runtime.stdout) == {
+        "value": 7,
+        "module": True,
+        "identity": True,
+    }
+
+    failed = _actual(
+        lost_dir,
+        lost,
+        "entry",
+        return_process=True,
+    )
+
+    assert failed.returncode != 0
+    exception_line = failed.stderr.strip().splitlines()[-1]
+    assert exception_line.startswith("AttributeError:")
+    assert "'int' object has no attribute 'value'" in exception_line
+
+
 def test_single_attribute_event_contract_after_nested_support(tmp_path):
     source = {"route.__init__": "value=7", "entry": "import route\nx=route.value"}
     result = _model(source, "entry")

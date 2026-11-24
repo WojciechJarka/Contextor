@@ -1,202 +1,279 @@
-# P16-I1 — wzmocnienie kontraktów CPython dla G2 i G6
+PREFLIGHT
 
-## PREFLIGHT
+DIRECT_EVIDENCE:
+- Attachment P16-I2 specified G1 in tests/test_cycle_semantics_namespace_pep420_contract.py and G3 in tests/test_cycle_semantics_package_model.py. AGENTS.md requires the report to be overwritten in walkthrough.md.
+- Before editing: HEAD 432e0fd8f71e3fe096b932b8715b9b81242b3102, branch main, working tree clean. MCP canonical revision 1569. Both target files had file-level canonical_state=fresh and workspace_sync=verified at that revision; cycle_semantics family was stale.
+- Exact anchors were present: test_t03_namespace_with_two_portions in the namespace test file and test_nested_attribute_alias_and_overwrite in the package model test file. Existing _write and _run helpers were available for G1; _model and _actual were available for G3.
+- Repository interpreter used by the requested commands was Python 3.15.2.
 
-**DIRECT_EVIDENCE**
+INFERENCE:
+- The G1 and G3 insertion anchors matched the requested preflight, so the change proceeded without adapting the requested contracts.
 
-- Contextor MCP sprawdził przed patchem `tests/test_cycle_semantics_package_model.py`: `canonical_state=fresh`, `workspace_sync=verified`, canonical revision `1568`, provenance `live`. Rodzina `cycle_semantics` jest `stale`; to test-only zmiana i nie była traktowana jako źródło semantycznego wyniku.
-- `get_source_range` potwierdził dokładne anchory: `test_b0g4c2_existing_attribute_precedes_child` (2018), `test_b0g4c3_early_read_from_reentrant_child` (2128), `test_b0g4c4_preparation_before_local_binding_hazard` (2220). Każda kotwica i wskazana asercja zgadzały się z promptem.
-- HEAD przed zmianą: `5dbff8c91ca50a8e5e1a9953775428143e684511`. Plik testowy nie miał wcześniejszego diffu. Istniały wcześniejsze modyfikacje `CHANGELOG.md`, `audyt.txt` i `walkthrough.md`; nie zmieniono dwóch pierwszych.
-- Nie zmieniono importów, `_model`, `_actual` ani evaluatorów.
+G1_EXACT_CONTRACT
 
-**INFERENCE**
+DIRECT_EVIDENCE:
+- Added test: tests/test_cycle_semantics_namespace_pep420_contract.py:127-184, immediately after test_t03_namespace_with_two_portions.
+- Added imports at lines 7-10: SearchPortion and resolve_namespace_path from contextor.core.cycle_semantics.namespace_path_model.
+- For the same namespace child in two search roots, the test runs both root orders. For each order, it asserts the resolver's conditional module-file resolution and selected source, then launches CPython through the existing _run helper and checks the loaded child's value, __file__ origin, and full nsp.__path__ portion order.
+- _run starts a distinct process via sys.executable -I -B -c, prepends the supplied roots to sys.path, captures output, and returns the CompletedProcess. The test parses the actual JSON output.
 
-- Brak driftu kotwic; wykonano dokładnie wskazane trzy lokalne zmiany.
+CONTRACT_PROVED:
+- CPython's selected module and namespace search path follow the supplied search-root order for this collision case: first/second yields FIRST from the first root; second/first yields SECOND from the second root.
+- Each CPython execution checks the value, exact origin path, and portions. The resolver assertions are model assertions and do not independently establish CPython behavior.
 
-## G2_EXACT_CONTRACT
+UNKNOWN:
+- This sample does not establish behavior for custom import finders, concurrent filesystem changes, or nonstandard path hooks.
 
-Dodano `test_from_package_import_child_binds_exact_runtime_object` bezpośrednio po `test_b0g4c2_existing_attribute_precedes_child`. Zachowany bez zmian `_model` daje `MODEL_PASS` dla obu fixture; eventy `START_IMPORT` sprawdzają, czy model startuje `pkg.child` wyłącznie w przypadku `MODULE`.
+G3_EXACT_CONTRACT
 
-Każdy przypadek przechodzi przez istniejący `_actual(..., return_process=True)` i dodatkowy CPython subprocess. Drugi proces zapisuje JSON o rodzaju rzeczywistego bindingu, wartości, obecności `pkg.child` w `sys.modules` i tożsamości obiektu względem wpisu w `sys.modules`.
+DIRECT_EVIDENCE:
+- Added test: tests/test_cycle_semantics_package_model.py:3553-3646, immediately after test_nested_attribute_alias_and_overwrite.
+- Positive source imports pkg.sub as subject, shadows subject with integer 3, imports pkg.sub again, then reads subject.value. The model must return MODEL_PASS and record one entry -> pkg.sub ATTR(value) event.
+- The independent CPython process must complete and emit value 7, a module-valued subject, and subject identity equal to sys.modules['pkg.sub'].
+- The paired negative source omits the re-import after shadowing. The model is expected to return UNKNOWN without an ATTR(value) event; CPython is invoked through _actual(return_process=True) and must fail with AttributeError stating that int has no attribute value.
 
-Po przejściu testu zaobserwowane i asertywne runtime wartości to:
+CONTRACT_PROVED:
+- The test compares actual CPython object identity and final value in the restored case and checks the concrete exception in the lost-binding case. A passing model result alone is not treated as the runtime oracle.
 
-- `ATTRIBUTE`: `value=3`, `child_loaded=false`, `module_identity=false`.
-- `MODULE`: `value=7`, `child_loaded=true`, `module_identity=true`.
+INFERENCE:
+- The negative model expectation UNKNOWN is a conservative-model contract; CPython's AttributeError establishes the runtime consequence but cannot by itself prove that UNKNOWN is the only valid evaluator classification.
 
-Źródło: zmieniona funkcja w `tests/test_cycle_semantics_package_model.py:2034-2098`, potwierdzona przez MCP po zmianie.
+CPYTHON_PARITY
 
-## G6_EXACT_CONTRACT
+DIRECT_EVIDENCE:
+- Both added contracts execute real source in subprocesses using the repository interpreter. G1 uses the existing _run helper with isolated mode (-I) and bytecode disabled (-B). G3 launches sys.executable directly with -I -B and reads JSON object facts; the negative branch checks the exception text.
+- The G1 process assertions cover selected value, module origin, and namespace portion order. G3 checks final value, module type, sys.modules identity, and the negative exception class/message. Thus the assertions would reject the opposite child selection, a stale/non-module binding, an incorrect final value, or a different runtime failure.
+- Exact observed values are the values asserted by the passing tests: FIRST/SECOND according to root order for G1; 7, True, True for G3 positive; AttributeError for G3 negative.
 
-W `test_b0g4c3_early_read_from_reentrant_child` zastąpiono tylko booleanową asercję `_actual` pobraniem `CompletedProcess` i kontrolą końcowej linii tracebacku. Test nadal sprawdza evaluator `EARLY_BINDING_HAZARD`, `target_module="pkg.child"`, `symbol="value"`; CPython potwierdza `AttributeError` dotyczący częściowo zainicjalizowanego `pkg.child` bez `value`.
+UNKNOWN:
+- The test runner reports pass/fail rather than persisting raw subprocess stdout/stderr in the report. Assertions and successful process return codes are the direct test evidence for the stated outcomes.
 
-W `test_b0g4c4_preparation_before_local_binding_hazard` zastąpiono tylko booleanową asercję `_actual` pobraniem `CompletedProcess` i kontrolą końcowej linii tracebacku. Test nadal sprawdza evaluator `EARLY_BINDING_HAZARD`, `target_module="entry"`, `symbol="a"`; CPython potwierdza `AttributeError` dotyczący częściowo zainicjalizowanego `entry` bez `a`.
+TARGETED_TESTS
 
-Pozostałe asercje obu funkcji są niezmienione. Źródła po zmianie: `tests/test_cycle_semantics_package_model.py:2194-2214` i `:2293-2311`.
+DIRECT_EVIDENCE:
+- .venv/Scripts/python.exe -m pytest -q tests/test_cycle_semantics_namespace_pep420_contract.py -k "namespace_same_child_order_matches_cpython" — 1 passed, 6 deselected in 2.06s; exit code 0.
+- .venv/Scripts/python.exe -m pytest -q tests/test_cycle_semantics_package_model.py -k "reimport_restores_shadowed_module_identity" — 1 passed, 249 deselected in 1.87s; exit code 0.
+- .venv/Scripts/python.exe -m pytest -q tests/test_cycle_semantics_namespace_pep420_contract.py tests/test_cycle_semantics_package_model.py — 257 passed in 18.12s; exit code 0.
+- git diff --check on the changed test files passed. The final git diff --check, including this report, is recorded after report creation below.
 
-## CPYTHON_PARITY
+MCP_POST_CHANGE
 
-**DIRECT_EVIDENCE**
+DIRECT_EVIDENCE:
+- Desktop watcher reported update_file / UPDATED for tests/test_cycle_semantics_namespace_pep420_contract.py at LIVE revision 1570 and tests/test_cycle_semantics_package_model.py at LIVE revision 1571. Latest LIVE revision at the post-change audit: 1571.
+- File-specific MCP contexts at canonical revision 1571 report canonical_state=fresh, workspace_sync=verified, provenance=live for both changed files. Their syntax_diagnostics are checked_and_none with zero errors.
+- MCP get_source_range returned the changed source from both files: G1 lines 127-184 and G3 lines 3553-3646. These source ranges matched the local source.
+- Project architecture metadata reports canonical_state=fresh at revision 1570 but global workspace_sync=unverified, with an advisory that FileState fingerprint ownership could not be proven for the answered canonical generation. It reports cycle_semantics=stale. File-specific verified sync is limited to the two named files; it does not clear global or cycle-semantics staleness.
+- No MCP update_file call was used.
 
-- G2 używa `sys.executable -I -B -c` i rozpoznaje `types.ModuleType`, wynikową wartość oraz stan `sys.modules`; nie opiera się jedynie na return code.
-- G6 wykorzystuje istniejący `_actual(..., return_process=True)`, który wykonuje fixture w subprocessie CPython `sys.executable -I -B -c`; asercje odnoszą się do końcowej linii rzeczywistego stderr.
-- Wszystkie trzy wskazane testy przeszły. Nie pojawił się traceback porażki.
+INFERENCE:
+- The watcher events and file contexts establish adoption/freshness of these two test files in LIVE. They do not establish freshness of the cycle-semantics analysis family.
 
-## TARGETED_TESTS
+FULL_DIFFS
 
-**Celowany zestaw — exit code 0:**
+FILES_CHANGED:
+- tests/test_cycle_semantics_namespace_pep420_contract.py
+- tests/test_cycle_semantics_package_model.py
 
-```text
-.venv/Scripts/python.exe -m pytest -q tests/test_cycle_semantics_package_model.py -k "from_package_import_child_binds_exact_runtime_object or b0g4c3_early_read_from_reentrant_child or b0g4c4_preparation_before_local_binding_hazard"
-...                                                                      [100%]
-3 passed, 246 deselected in 2.59s
-```
+The following are the complete actual git diffs for both changed test files. walkthrough.md is the required report and is excluded from FILES_CHANGED under the repository reporting rule.
 
-**Cały wskazany plik — exit code 0:**
-
-```text
-.venv/Scripts/python.exe -m pytest -q tests/test_cycle_semantics_package_model.py
-........................................................................ [ 28%]
-........................................................................ [ 57%]
-........................................................................ [ 86%]
-.................................                                        [100%]
-249 passed in 16.58s
-```
-
-Nie uruchomiono pełnego pytest ani FULL.
-
-## MCP_POST_CHANGE
-
-**DIRECT_EVIDENCE**
-
-- `get_live_events(after_revision=1568)` zwrócił revision `1569`, continuous/no-resync, z eventem `desktop_watcher`, operation `update_file`, status `UPDATED`, plik `tests/test_cycle_semantics_package_model.py`.
-- `get_file_edit_context` po zmianie: `canonical_state=fresh`, `workspace_sync=verified`, `canonical_revision=1569`, provenance `live`.
-- AST/syntax z tego samego MCP kontekstu: `status=checked_and_none`, `availability=fresh`, `materialized=true`, `errors=[]`, `total=0`.
-- `get_source_range` na revision 1569 odczytał nowe ciało G2 (`2034-2098`) oraz obie zmienione funkcje G6 (`2194-2214`, `2293-2311`). Treść potwierdza testowe źródło rzeczywistego wyniku i zachowane asercje modelu.
-- `git diff --check -- tests/test_cycle_semantics_package_model.py` nie zgłosił błędów whitespace.
-
-**INFERENCE**
-
-- Lokalny test i odczyt MCP wskazują na tę samą treść pliku po watcher revision 1569; nie opieram się na nieświeżej rodzinie `cycle_semantics`.
-
-## FULL_DIFFS
-
-`FILES_CHANGED: tests/test_cycle_semantics_package_model.py` (walkthrough jest raportem i nie jest liczony jako source/test).
-
-Pełny diff pliku testowego:
-
-```diff
-diff --git a/tests/test_cycle_semantics_package_model.py b/tests/test_cycle_semantics_package_model.py
-index c6863ef..ee42539 100644
---- a/tests/test_cycle_semantics_package_model.py
-+++ b/tests/test_cycle_semantics_package_model.py
-@@ -2031,6 +2031,72 @@ def test_b0g4c2_existing_attribute_precedes_child(tmp_path):
-     assert _actual(tmp_path, source, "entry")
+~~~~diff
+diff --git a/tests/test_cycle_semantics_namespace_pep420_contract.py b/tests/test_cycle_semantics_namespace_pep420_contract.py
+index 3172800..7f7efa2 100644
+--- a/tests/test_cycle_semantics_namespace_pep420_contract.py
++++ b/tests/test_cycle_semantics_namespace_pep420_contract.py
+@@ -14,6 +14,10 @@ from pathlib import Path
+ from contextor.core.cycle_semantics.package_model import (
+     evaluate_package_import_order,
+ )
++from contextor.core.cycle_semantics.namespace_path_model import (
++    SearchPortion,
++    resolve_namespace_path,
++)
+ 
+ 
+ def _write(root: Path, relative: str, source: str) -> None:
+@@ -120,6 +124,66 @@ def test_t03_namespace_with_two_portions(tmp_path):
+     assert result.returncode == 0, result.stderr
+ 
+ 
++def test_namespace_same_child_order_matches_cpython(tmp_path):
++    first = tmp_path / "first"
++    second = tmp_path / "second"
 +
++    _write(first, "nsp/child.py", "value = 'FIRST'\n")
++    _write(second, "nsp/child.py", "value = 'SECOND'\n")
 +
-+def test_from_package_import_child_binds_exact_runtime_object(tmp_path):
-+    for initializer, expected_kind in (
-+        ("child=3", "ATTRIBUTE"),
-+        ("pass", "MODULE"),
++    for ordered_roots, expected_value in (
++        ((first, second), "FIRST"),
++        ((second, first), "SECOND"),
 +    ):
-+        source = {
-+            "pkg.__init__": initializer,
-+            "pkg.child": "value=7",
-+            "entry": "from pkg import child",
-+        }
-+
-+        case_dir = tmp_path / expected_kind.lower()
-+        result = _model(source, "entry")
-+        assert result.outcome == "MODEL_PASS"
-+
-+        child_starts = [
-+            event
-+            for event in result.events
-+            if event.operation == "START_IMPORT"
-+            and event.target == "pkg.child"
-+        ]
-+        assert bool(child_starts) == (expected_kind == "MODULE")
-+
-+        process = _actual(
-+            case_dir, source, "entry", return_process=True
++        portions = tuple(
++            SearchPortion(
++                str(root),
++                frozenset({"nsp/child.py"}),
++            )
++            for root in ordered_roots
 +        )
-+        assert process.returncode == 0, process.stderr
 +
-+        script = (
-+            "import importlib,json,sys,types;"
-+            "sys.path.insert(0,sys.argv[1]);"
-+            "entry=importlib.import_module('entry');"
-+            "child=entry.child;"
-+            "print(json.dumps({"
-+            "'kind':'MODULE' if isinstance(child,types.ModuleType) "
-+            "else 'ATTRIBUTE',"
-+            "'value':child.value if isinstance(child,types.ModuleType) "
-+            "else child,"
-+            "'child_loaded':'pkg.child' in sys.modules,"
-+            "'module_identity':child is sys.modules.get('pkg.child')"
-+            "}))"
++        resolution = resolve_namespace_path(
++            portions,
++            "nsp.child",
++            standard_finder_assumed=True,
 +        )
-+        runtime = subprocess.run(
-+            [
-+                sys.executable, "-I", "-B", "-c",
-+                script, str(case_dir),
-+            ],
-+            capture_output=True,
-+            text=True,
-+            timeout=8,
-+            check=False,
++
++        assert resolution.status == "CONDITIONAL"
++        assert resolution.kind == "MODULE_FILE"
++        assert resolution.source == (
++            f"{ordered_roots[0]}:nsp/child.py"
 +        )
++        assert resolution.authority == (
++            "CONDITIONAL_ORDERED_PATH_INVENTORY_NOT_RUNTIME_PROOF"
++        )
++
++        runtime = _run(
++            ordered_roots,
++            (
++                "import nsp, nsp.child\n"
++                "print(json.dumps({"
++                "'value': nsp.child.value,"
++                "'origin': nsp.child.__file__,"
++                "'portions': list(nsp.__path__)"
++                "}))\n"
++            ),
++        )
++
 +        assert runtime.returncode == 0, runtime.stderr
++
 +        observed = json.loads(runtime.stdout)
 +
-+        assert observed["kind"] == expected_kind
-+        if expected_kind == "ATTRIBUTE":
-+            assert observed["value"] == 3
-+            assert observed["child_loaded"] is False
-+            assert observed["module_identity"] is False
-+        else:
-+            assert observed["value"] == 7
-+            assert observed["child_loaded"] is True
-+            assert observed["module_identity"] is True
- def test_b0g4c2_constant_attribute_is_not_module(tmp_path):
-     source = {
-         "pkg.__init__": "child=3",
-@@ -2138,7 +2204,14 @@ def test_b0g4c3_early_read_from_reentrant_child(tmp_path):
-     assert result.outcome == "EARLY_BINDING_HAZARD"
-     assert result.target_module == "pkg.child"
-     assert result.symbol == "value"
--    assert not _actual(tmp_path, source, "pkg")
-+    process = _actual(
-+        tmp_path, source, "pkg", return_process=True
++        assert observed["value"] == expected_value
++        assert Path(observed["origin"]) == (
++            ordered_roots[0] / "nsp" / "child.py"
++        )
++        assert observed["portions"] == [
++            str(root / "nsp")
++            for root in ordered_roots
++        ]
++
++
+ def test_t04_later_regular_package_shadows_namespace(
+     tmp_path,
+ ):
+diff --git a/tests/test_cycle_semantics_package_model.py b/tests/test_cycle_semantics_package_model.py
+index ee42539..d01ccbc 100644
+--- a/tests/test_cycle_semantics_package_model.py
++++ b/tests/test_cycle_semantics_package_model.py
+@@ -3550,6 +3550,102 @@ def test_nested_attribute_alias_and_overwrite(tmp_path):
+     assert not _actual(tmp_path, overwritten, "entry")
+ 
+ 
++def test_reimport_restores_shadowed_module_identity(tmp_path):
++    base = {
++        "pkg.__init__": "pass",
++        "pkg.sub": "value=7",
++    }
++
++    restored = {
++        **base,
++        "entry": (
++            "import pkg.sub as subject\n"
++            "subject=3\n"
++            "import pkg.sub as subject\n"
++            "observed=subject.value\n"
++        ),
++    }
++
++    lost = {
++        **base,
++        "entry": (
++            "import pkg.sub as subject\n"
++            "subject=3\n"
++            "observed=subject.value\n"
++        ),
++    }
++
++    restored_result = _model(restored, "entry")
++    lost_result = _model(lost, "entry")
++
++    assert restored_result.outcome == "MODEL_PASS"
++    assert lost_result.outcome == "UNKNOWN"
++
++    assert (
++        len([
++            event
++            for event in restored_result.events
++            if event.module == "entry"
++            and event.operation == "ATTR"
++            and event.target == "pkg.sub"
++            and event.symbol == "value"
++        ])
++        == 1
 +    )
-+    assert process.returncode != 0
-+    exception_line = process.stderr.strip().splitlines()[-1]
-+    assert exception_line.startswith("AttributeError:")
-+    assert "partially initialized module 'pkg.child'" in exception_line
-+    assert "has no attribute 'value'" in exception_line
 +
-+
- def test_b0g4c3_bound_attribute_before_reentrant_read(tmp_path):
-@@ -2228,7 +2301,14 @@ def test_b0g4c4_preparation_before_local_binding_hazard(tmp_path):
-     assert result.outcome == "EARLY_BINDING_HAZARD"
-     assert result.target_module == "entry"
-     assert result.symbol == "a"
--    assert not _actual(tmp_path, source, "entry")
-+    process = _actual(
-+        tmp_path, source, "entry", return_process=True
++    assert not any(
++        event.module == "entry"
++        and event.operation == "ATTR"
++        and event.symbol == "value"
++        for event in lost_result.events
 +    )
-+    assert process.returncode != 0
-+    exception_line = process.stderr.strip().splitlines()[-1]
++
++    restored_dir = tmp_path / "restored"
++    lost_dir = tmp_path / "lost"
++
++    assert _actual(restored_dir, restored, "entry")
++
++    runtime = subprocess.run(
++        [
++            sys.executable, "-I", "-B", "-c",
++            (
++                "import importlib,json,sys,types;"
++                "sys.path.insert(0,sys.argv[1]);"
++                "entry=importlib.import_module('entry');"
++                "print(json.dumps({"
++                "'value':entry.observed,"
++                "'module':isinstance(entry.subject,types.ModuleType),"
++                "'identity':entry.subject is sys.modules['pkg.sub']"
++                "}))"
++            ),
++            str(restored_dir),
++        ],
++        capture_output=True,
++        text=True,
++        timeout=8,
++        check=False,
++    )
++
++    assert runtime.returncode == 0, runtime.stderr
++    assert json.loads(runtime.stdout) == {
++        "value": 7,
++        "module": True,
++        "identity": True,
++    }
++
++    failed = _actual(
++        lost_dir,
++        lost,
++        "entry",
++        return_process=True,
++    )
++
++    assert failed.returncode != 0
++    exception_line = failed.stderr.strip().splitlines()[-1]
 +    assert exception_line.startswith("AttributeError:")
-+    assert "partially initialized module 'entry'" in exception_line
-+    assert "has no attribute 'a'" in exception_line
++    assert "'int' object has no attribute 'value'" in exception_line
 +
 +
- def test_b0g4c4_all_prepares_before_from_bindings(tmp_path):
-```
+ def test_single_attribute_event_contract_after_nested_support(tmp_path):
+     source = {"route.__init__": "value=7", "entry": "import route\nx=route.value"}
+     result = _model(source, "entry")
+~~~~
 
-## FINAL_STATUS
+FINAL_STATUS
 
-**PASS** — wskazane zmiany testowe zostały zastosowane, celowane testy i cały `test_cycle_semantics_package_model.py` przeszły, a MCP potwierdził revision 1569, watcher update, świeży kanoniczny plik, `workspace_sync=verified` i AST bez błędów.
+- Requested G1 and G3 regression contracts were added at the exact anchors.
+- Both focused tests and the requested two-file test run passed.
+- No production file, other test file, commit, push, staging operation, FULL run, or restart was performed.
+- FINAL_STATUS: PASS for the requested test changes; project-wide cycle_semantics freshness remains UNKNOWN/stale in MCP and is not represented as verified.
 
-Nie wykonano commit, push, staging, FULL ani restartu. Wcześniejsze zmiany `CHANGELOG.md` i `audyt.txt` pozostały nietknięte.
+
+
