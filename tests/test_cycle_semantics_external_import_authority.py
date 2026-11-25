@@ -202,6 +202,10 @@ def test_conditional_external_side_effect_is_not_runtime_authority(tmp_path):
         target_python_version=sys.version_info[:2],
         assume_passive_external_imports=True,
         assume_frozen_dataclass_decoration=True,
+        assumed_external_callable_effects={
+            ("dataclasses", "dataclass"):
+                "FROZEN_DATACLASS_DECORATOR_FACTORY",
+        },
     )
 
     assert conditional.outcome == "CONDITIONAL_MODEL_PASS"
