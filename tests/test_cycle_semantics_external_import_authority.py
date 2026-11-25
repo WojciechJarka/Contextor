@@ -219,6 +219,7 @@ def test_conditional_external_side_effect_is_not_runtime_authority(tmp_path):
     assert model.evidence_scope == (
         "CONDITIONAL_EXTERNAL_AND_FROZEN_DATACLASS_"
         "ASSUMPTIONS_NOT_RUNTIME_PROOF"
+        "|EXTERNAL_CALL_EFFECT_ASSUMED_NOT_RUNTIME_ATTESTED"
     )
     assert tuple(
         (item.importer, item.operation, item.target, item.symbol,

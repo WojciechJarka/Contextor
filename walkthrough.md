@@ -1,117 +1,93 @@
-# F2-I1 — aktualizacja kontraktu testowego
+# F2-I2 — aktualizacja evidence_scope
 
 ## PREFLIGHT
 
 ### DIRECT_EVIDENCE
 
-- Contextor MCP sprawdził test oraz helper referencyjny przed edycją.
-- Test: tests/test_cycle_semantics_external_import_authority.py (module 628/1), canonical_state=fresh, workspace_sync=verified, canonical_revision=1576, provenance=live, syntax diagnostics checked_and_none (0 błędów).
-- Helper: tests/test_cycle_semantics_external_call_effects.py (module 677/1), canonical_state=fresh, workspace_sync=verified, canonical_revision=1576, syntax diagnostics checked_and_none (0 błędów).
-- Dokładne ciała testu i helpera zostały odczytane przez Contextor. Helper _run (test_cycle_semantics_external_call_effects.py:15-38) podaje mapę {("dataclasses", "dataclass"): FACTORY_EFFECT}, gdzie FACTORY_EFFECT ma wartość "FROZEN_DATACLASS_DECORATOR_FACTORY".
-- HEAD: 97768850d0b91b35affd84d5675a9368146d48ea, branch main, origin/main. Przed zmianą testu jedynym istniejącym lokalnym diffem był raport walkthrough.md z F2-D1.
+- Contextor MCP przed zmianą: tests/test_cycle_semantics_external_import_authority.py (module 628/1), canonical_state=fresh, workspace_sync=verified, canonical_revision=1577, provenance=live; syntax diagnostics checked_and_none, 0 błędów.
+- Odczytano dokładne ciało test_conditional_external_side_effect_is_not_runtime_authority. Zawierało zmianę F2-I1: mapę assumed_external_callable_effects z kluczem ("dataclasses", "dataclass") i wartością "FROZEN_DATACLASS_DECORATOR_FACTORY". Istniejące asercje outcome, authority, model outcome i evidence_scope były zachowane.
+- Helper referencyjny tests/test_cycle_semantics_external_call_effects.py::_run (linie 15-38) używa tej samej reprezentacji klucza i wartości; jego test pozytywny sprawdza suffix EXTERNAL_CALL_EFFECT_ASSUMED_NOT_RUNTIME_ATTESTED (linie 273-331).
 - CPython: 3.15.2, cpython, AMD64, 64bit.
-- Contextor oznacza family cycle_semantics jako stale. Nie używam tego artefaktu do wnioskowania o wyniku testu; źródło pliku jest zweryfikowane, a wynik pochodzi z lokalnego wykonania.
+- Bieżący HEAD na początku F2-I2: 1088a668dea27e5e9636a7ff22d9a29481f38866, branch main zgodny z origin/main, worktree czysty.
+- HEAD 1088a668 jest potomkiem 97768850d0b91b35affd84d5675a9368146d48ea. Commit 1088a668 zawiera już zmianę F2-I1 w teście; potwierdza to git log/show. Nie wykonano żadnej operacji modyfikującej Git.
+- Contextor podaje cycle_semantics=stale, mimo że stan pliku jest świeży i sync zweryfikowany.
 
 ### INFERENCE
 
-- Jawny efekt w helperze referencyjnym jest tym samym kontraktem, którego brak powodował UNKNOWN w F2-D1.
+- Ponieważ F2-I1 znajduje się już w bieżącym HEAD, aktualny diff względem HEAD może zawierać tylko F2-I2. W FULL_DIFFS pokazano zarówno rzeczywisty diff F2-I2 względem HEAD 1088a668, jak i łączny diff F2-I1+F2-I2 względem poprzedniego HEAD 97768850, na którym oparto F2-I1.
 
 ### UNKNOWN
 
-- Nie odczytywano issues.md. Zgodnie z późniejszą instrukcją użytkownika „olej issues”, kontrola tego pliku została pominięta.
+- Nie odczytywano issues.md zgodnie z instrukcją użytkownika.
 
 ## IMPLEMENTATION
 
 ### DIRECT_EVIDENCE
 
-- Zmieniono wyłącznie wywołanie evaluate_conditional_namespace_import_order w funkcji test_conditional_external_side_effect_is_not_runtime_authority.
-- Dodano assumed_external_callable_effects z kluczem tuple ("dataclasses", "dataclass") i wartością "FROZEN_DATACLASS_DECORATOR_FACTORY", zgodnie z reprezentacją helpera _run.
-- Nie był potrzebny import: wartość jest stringowym kontraktem, tak samo jak FACTORY_EFFECT w helperze.
-- Zachowano obie flagi założeń, oczekiwanie CONDITIONAL_MODEL_PASS, wszystkie dotychczasowe asercje, AST programu, mutator builtins.property, kontrolny wariant runtime i dotychczasowe granice autorytetu.
-- Nie zmieniono produkcji, helperów ani innych testów.
+- Zmieniono wyłącznie oczekiwaną wartość istniejącej asercji model.evidence_scope w test_conditional_external_side_effect_is_not_runtime_authority.
+- Zachowano dokładne porównanie i dopisano literalny suffix |EXTERNAL_CALL_EFFECT_ASSUMED_NOT_RUNTIME_ATTESTED do oczekiwanego ciągu.
+- Zachowano mapę F2-I1, wszystkie inne asercje, fixture, helpery, produkcję i pozostałe testy.
+- Nie dodano importów.
 
 ### INFERENCE
 
-- Deklaracja pozwala evaluatorowi utworzyć jawny external callable fact dla dataclasses.dataclass. Nie usuwa to warunkowego evidence scope ani jego ograniczenia względem runtime.
+- Asercja teraz porównuje pełny evidence_scope wytwarzany po przyjęciu jawnego zewnętrznego callable effect, zgodnie z helperem referencyjnym i produkcyjnym kontraktem.
 
 ### UNKNOWN
 
-- Po teście nie zmieniano istniejących asercji; błąd wykryty w TARGETED_TESTS pozostaje nierozwiązany zgodnie z poleceniem stop.
+- Brak nieznanych elementów dotyczących zakresu wprowadzonych zmian.
 
 ## TARGETED_TESTS
 
 ### DIRECT_EVIDENCE
 
-Interpreter zweryfikowany jako CPython 3.15.2 AMD64, 64bit.
+Uruchomiono na CPython 3.15.2 AMD64:
 
-Uruchomiono wskazany test:
-
-.venv/Scripts/python.exe -m pytest -q tests/test_cycle_semantics_external_import_authority.py::test_conditional_external_side_effect_is_not_runtime_authority -vv
-
-Wynik: FAILED, exit code 1. Test przeszedł asercje outcome, reason, authority i model.outcome, po czym zawiódł na istniejącej asercji evidence_scope w tests/test_cycle_semantics_external_import_authority.py:219.
-
-- Oczekiwano: CONDITIONAL_EXTERNAL_AND_FROZEN_DATACLASS_ASSUMPTIONS_NOT_RUNTIME_PROOF
-- Otrzymano: CONDITIONAL_EXTERNAL_AND_FROZEN_DATACLASS_ASSUMPTIONS_NOT_RUNTIME_PROOF|EXTERNAL_CALL_EFFECT_ASSUMED_NOT_RUNTIME_ATTESTED
-
-Produkcja dopisuje suffix, gdy zaakceptowano zewnętrzny callable effect (contextor/core/cycle_semantics/package_model.py:1630-1647). Ten sam suffix jest jawnie wymagany przez pozytywny test referencyjny (tests/test_cycle_semantics_external_call_effects.py:273-331).
-
-Ponieważ wskazany test nie przeszedł, oba pliki z pełnym testami nie zostały uruchomione.
+1. .venv/Scripts/python.exe -m pytest -q tests/test_cycle_semantics_external_import_authority.py::test_conditional_external_side_effect_is_not_runtime_authority -vv
+   Wynik: 1 passed.
+2. Po przejściu testu uruchomiono oba wymagane pliki:
+   .venv/Scripts/python.exe -m pytest -q tests/test_cycle_semantics_external_import_authority.py tests/test_cycle_semantics_external_call_effects.py
+   Wynik: 23 passed in 1.38s.
 
 ### INFERENCE
 
-- Niepowodzenie jest skutkiem zachowania istniejącej asercji evidence_scope przy dodaniu jawnego efektu. Nowy wynik dokładnie odzwierciedla dodatkowe założenie callable-effect i odpowiada kontraktowi referencyjnemu.
-- Dalsza zmiana asercji byłaby kolejną poprawką; nie została wykonana, zgodnie z instrukcją zatrzymania przy błędzie.
+- Wskazany test i oba wskazane pliki przechodzą po zmianie oczekiwanego evidence_scope.
 
 ### UNKNOWN
 
-- Asercje po linii 219, w tym runtime subprocess z mutatorem i wariant kontrolny, nie zostały wykonane w tym pytest.
-- Nie ustalano wyniku całego pliku ani pliku external_call_effects, ponieważ po failu obowiązuje instrukcja stop.
+- Nie uruchamiano FULL ani innych testów poza wskazanym testem i dwoma wymaganymi plikami.
 
 ## POST_CHANGE_MCP_AUDIT
 
 ### DIRECT_EVIDENCE
 
-- Desktop watcher opublikował event revision 1577: operation=update_file, origin=desktop_watcher, status=UPDATED, file_path=tests/test_cycle_semantics_external_import_authority.py.
-- Continuity: continuous; resync_required=false.
-- Contextor po zmianie: canonical_state=fresh, workspace_sync=verified, canonical_revision=1577, provenance=live.
-- Syntax diagnostics: checked_and_none, 0 błędów. Brak ostrzeżeń Contextor dla pliku.
-- cycle_semantics family nadal stale; cycle warning view jest oznaczony fresh dla revision 1577. To nie jest runtime safety evidence.
-- Nie wykonano restartu ani operacji modyfikujących Git.
+- Desktop watcher event: revision 1578, operation=update_file, origin=desktop_watcher, status=UPDATED, file_path=tests/test_cycle_semantics_external_import_authority.py.
+- Event continuity: continuous; resync_required=false.
+- Contextor po zmianie: canonical_state=fresh, workspace_sync=verified, canonical_revision=1578, provenance=live.
+- Syntax diagnostics: checked_and_none, 0 błędów; brak ostrzeżeń dla pliku.
+- Contextor source range potwierdza obecność mapowania F2-I1 i dokładnego nowego evidence_scope.
+- cycle_semantics family pozostaje stale; cycle warning view oznaczony fresh dla revision 1578, jako static-model evidence, nie runtime safety.
 
 ### INFERENCE
 
-- Zmiana testu została zaobserwowana i zsynchronizowana przez desktop watcher. Nie używano update_file.
+- Zmiana została przejęta przez desktop watcher i zweryfikowana w kanonicznym LIVE revision 1578.
 
 ### UNKNOWN
 
-- Blast radius dla zmiany jest deferred; nie interpretowano go jako pełnej analizy wpływu.
-
-## ISSUES_CHECK
-
-### DIRECT_EVIDENCE
-
-- issues.md nie został odczytany.
-
-### INFERENCE
-
-- Kontrolę pominięto na polecenie użytkownika „olej issues”.
-
-### UNKNOWN
-
-- Zawartość issues.md pozostaje nieznana.
+- Blast radius ma stan deferred; nie traktowano go jako pełnej analizy wpływu.
 
 ## FILES_CHANGED
 
-- tests/test_cycle_semantics_external_import_authority.py — jedyna zmiana w kodzie/testach.
-- walkthrough.md — raport F2-I1.
-- Bez zmian w produkcji, helperach, innych testach lub pozostałych plikach.
+- tests/test_cycle_semantics_external_import_authority.py — jedyny zmieniony plik testowy, wyłącznie żądany test.
+- walkthrough.md — raport F2-I2.
+- Bez zmian produkcji, helperów i innych testów.
 
 ## FULL_DIFFS
 
-Pełny diff testu:
+### Łączny diff F2-I1 + F2-I2 względem poprzedniego HEAD 97768850d0b91b35affd84d5675a9368146d48ea
 
     diff --git a/tests/test_cycle_semantics_external_import_authority.py b/tests/test_cycle_semantics_external_import_authority.py
-    index 90723e3..b699c64 100644
+    index 90723e3..e5aa3a2 100644
     --- a/tests/test_cycle_semantics_external_import_authority.py
     +++ b/tests/test_cycle_semantics_external_import_authority.py
     @@ -202,6 +202,10 @@ def test_conditional_external_side_effect_is_not_runtime_authority(tmp_path):
@@ -125,17 +101,38 @@ Pełny diff testu:
          )
  
          assert conditional.outcome == "CONDITIONAL_MODEL_PASS"
+    @@ -215,6 +219,7 @@ def test_conditional_external_side_effect_is_not_runtime_authority(tmp_path):
+         assert model.evidence_scope == (
+             "CONDITIONAL_EXTERNAL_AND_FROZEN_DATACLASS_"
+             "ASSUMPTIONS_NOT_RUNTIME_PROOF"
+    +        "|EXTERNAL_CALL_EFFECT_ASSUMED_NOT_RUNTIME_ATTESTED"
+         )
+         assert tuple(
+             (item.importer, item.operation, item.target, item.symbol,
+
+### Rzeczywisty diff względem bieżącego HEAD 1088a668dea27e5e9636a7ff22d9a29481f38866
+
+    diff --git a/tests/test_cycle_semantics_external_import_authority.py b/tests/test_cycle_semantics_external_import_authority.py
+    index b699c64..e5aa3a2 100644
+    --- a/tests/test_cycle_semantics_external_import_authority.py
+    +++ b/tests/test_cycle_semantics_external_import_authority.py
+    @@ -219,6 +219,7 @@ def test_conditional_external_side_effect_is_not_runtime_authority(tmp_path):
+         assert model.evidence_scope == (
+             "CONDITIONAL_EXTERNAL_AND_FROZEN_DATACLASS_"
+             "ASSUMPTIONS_NOT_RUNTIME_PROOF"
+    +        "|EXTERNAL_CALL_EFFECT_ASSUMED_NOT_RUNTIME_ATTESTED"
+         )
+         assert tuple(
+             (item.importer, item.operation, item.target, item.symbol,
 
 ## REMAINING_UNKNOWNS
 
 ### DIRECT_EVIDENCE
 
-- Test zatrzymał się na asercji evidence_scope; żaden kolejny test poza zakresem nie został uruchomiony.
-- MCP zgłasza stale dla family cycle_semantics, mimo że stan pliku i syntax diagnostics są świeże.
+- Bieżący HEAD zawiera zmianę F2-I1, dlatego sam diff względem bieżącego HEAD pokazuje tylko F2-I2. Łączny diff od bazy sprzed F2-I1 jest pokazany oddzielnie i odpowiada rzeczywistemu diffowi git od revision 97768850.
 
 ### UNKNOWN
 
-- Nieznany jest wynik obu pełnych plików testowych, bo wskazany test nie przeszedł, a użytkownik nakazał w tej sytuacji przerwać.
-- Nieznane są wyniki runtime assertions z końca wskazanej funkcji w tym przebiegu pytest.
-- Nie proponowano ani nie wykonywano kolejnej poprawki.
+- Nie odczytano issues.md zgodnie z prośbą.
+- Nie badano testów poza zakresem wskazanym w tym zadaniu.
 
