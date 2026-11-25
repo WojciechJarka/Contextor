@@ -949,7 +949,7 @@ def test_analysis_status_concurrency__explicit_job_id_bypasses_ambiguity(tmp_pat
     assert res["job_id"] == j1["job_id"]
 
 
-def test_analysis_status_concurrency__single_active_does_not_override_newer_completed_latest(tmp_path):
+def test_analysis_status_concurrency__single_active_is_preferred_over_newer_completed(tmp_path):
     root = tmp_path
     _create_job(
         root,
@@ -963,8 +963,9 @@ def test_analysis_status_concurrency__single_active_does_not_override_newer_comp
     raw = get_analysis_status(str(root), job_id=None)
     res = json.loads(raw)
 
-    assert res["status"] == "completed"
-    assert res["job_id"] == j2["job_id"]
+    assert res["status"] == "interrupted"
+    assert res["job_id"] == "00000000000000000000000000000001"
+    assert res["error"] == "owner_process_changed"
 
 
 def test_analysis_status_concurrency__zero_active_preserves_latest_terminal(tmp_path):
@@ -979,7 +980,7 @@ def test_analysis_status_concurrency__zero_active_preserves_latest_terminal(tmp_
     assert res["job_id"] == j2["job_id"]
 
 
-def test_analysis_status_concurrency__completed_jobs_do_not_count_as_active(tmp_path):
+def test_analysis_status_concurrency__single_queued_job_is_preferred_over_terminal_jobs(tmp_path):
     root = tmp_path
     _create_job(
         root,
@@ -994,9 +995,9 @@ def test_analysis_status_concurrency__completed_jobs_do_not_count_as_active(tmp_
     raw = get_analysis_status(str(root), job_id=None)
     res = json.loads(raw)
 
-    # active_count is 1 (job 1), so no ambiguity; latest mtime is job 3 (completed)
-    assert res["status"] == "completed"
-    assert res["job_id"] == j3["job_id"]
+    assert res["status"] == "interrupted"
+    assert res["job_id"] == "00000000000000000000000000000001"
+    assert res["error"] == "owner_process_changed"
 
 
 def test_analysis_status_concurrency__active_candidates_are_deterministic_newest_first(tmp_path):

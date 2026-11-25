@@ -64,6 +64,17 @@ Guard Evaluation, Deferred Functions, and Call Execution Audit
 - Identified a remaining cross-query consistency limitation: separately retrieved warning views and diagnostic summaries are not guaranteed to share one atomic revision snapshot.
 - **Validation:** 3 targeted tests passed, supported by a controlled generation-divergence reproducer. No confirmed publication-integrity defects, unsafe `MODEL_PASS` classifications, or authority leaks. No production changes required.
 
+### Independent Semantic Test Contracts and CPython Parity
+
+- Audited the independence and coverage of semantic test contracts across flat imports, package initialization, namespace resolution, aliases, binding order, deferred execution, and cycle diagnostics.
+- Identified and closed six test coverage gaps involving namespace search precedence, imported object identity, alias restoration, consistent renaming, independent import ordering, and precise runtime exception verification.
+- Strengthened CPython parity tests to verify actual object types, values, module identity, import origins, initialization order, and exception details rather than relying solely on process exit codes.
+- Added metamorphic tests confirming that consistent renaming preserves semantic classifications, hazard attribution, and execution-event relationships.
+- Verified that reordering independent imports preserves model outcomes and final bindings while reflecting the corresponding initialization order.
+- Confirmed that shadowed module identities are correctly restored by subsequent imports and that namespace resolution respects ordered search portions.
+- Preserved conservative `UNKNOWN` classifications and existing model authority boundaries without introducing implementation-specific exceptions or hardcoded behavior.
+- **Validation:** All six identified test contract gaps closed. Final regression: 288 tests passed on CPython 3.15.2. Contextor MCP confirmed fresh, synchronized modified test sources with no syntax errors. No confirmed production semantic defects; no production changes required.
+
 ### 2026-11-23
 
 Improved Python Execution Semantics and Conditional Import Analysis
