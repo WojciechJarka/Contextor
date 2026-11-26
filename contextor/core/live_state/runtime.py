@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import base64
+import binascii
 import contextlib
 import json
 import os
@@ -20,6 +22,11 @@ from contextor.core.lineage_query.live_query import (
     query_live_symbol_lineage,
 )
 from contextor.core.paths import repo_cache_dir
+from contextor.mcp_backend_secret import (
+    BackendSecretError,
+    _protect_windows,
+    _unprotect_windows,
+)
 from contextor.core.repository_identity import (
     read_repository_identity,
     require_repository_identity,
@@ -262,10 +269,37 @@ def _read_endpoint(repo_path: str | Path, *, strict: bool = False) -> LiveEndpoi
             raise EndpointSchemaError("LIVE endpoint identity fields must be non-empty")
         if not str(payload["service_instance_id"]).strip() or not str(payload["process_start_identity"]).strip():
             raise EndpointSchemaError("LIVE endpoint service identity fields must be non-empty")
+        authkey_hex = payload["authkey_hex"]
+        if os.name == "nt":
+            if (
+                not isinstance(authkey_hex, str)
+                or not authkey_hex.startswith("dpapi:")
+            ):
+                raise EndpointSchemaError(
+                    "LIVE endpoint authkey is not DPAPI-protected"
+                )
+            try:
+                protected = base64.b64decode(
+                    authkey_hex[len("dpapi:"):],
+                    validate=True,
+                )
+                authkey_hex = _unprotect_windows(
+                    protected
+                ).hex()
+            except (
+                BackendSecretError,
+                ValueError,
+                binascii.Error,
+                OSError,
+            ) as exc:
+                raise EndpointSchemaError(
+                    "LIVE endpoint DPAPI authkey is invalid"
+                ) from exc
+
         endpoint = LiveEndpoint(
             str(payload["host"]),
             port,
-            str(payload["authkey_hex"]),
+            str(authkey_hex),
             pid=pid,
             service_pid=service_pid,
             owner_pid=owner_pid,
@@ -895,6 +929,13 @@ def _write_endpoint_atomic(endpoint: LiveEndpoint, root: Path) -> None:
     target.parent.mkdir(parents=True, exist_ok=True)
     temporary = target.with_name(f".{target.name}.{os.getpid()}.tmp")
     payload = endpoint.to_dict()
+    if os.name == "nt":
+        payload["authkey_hex"] = (
+            "dpapi:"
+            + base64.b64encode(
+                _protect_windows(endpoint.authkey)
+            ).decode("ascii")
+        )
     try:
         with temporary.open("w", encoding="utf-8", newline="\n") as stream:
             json.dump(payload, stream, sort_keys=True, separators=(",", ":"))

@@ -1,150 +1,254 @@
-# P17-F1-I1 — izolacja AuthenticationError w LIVE IPC
-
-FILES_CHANGED=2: contextor/core/live_state/ipc.py; tests/test_live_state_ipc.py
-ACTUAL_DIFF=patrz FULL_DIFFS poniżej
-
-walkthrough.md jest raportem i nie jest liczony jako production/test changed file. Nie wykonano commit, push, staging ani restartu. Nie połączono się z produkcyjnym LIVE i nie odczytano authkey.
+# P17-F2-I1 — ochrona LIVE IPC authkey przez Windows DPAPI CurrentUser
 
 ## PREFLIGHT
 
-- **DIRECT_EVIDENCE — HEAD/Git:** HEAD 23d4dcf4546d15fa81e18dfbed65af7184c6a132, branch main. Przed patchem git status miał wyłącznie wcześniej zmieniony walkthrough.md; oba pliki zlecone do edycji miały pusty diff.
-- **DIRECT_EVIDENCE — Contextor, revision przed zmianą:** canonical_revision=1579, canonical_state=fresh, provenance=live, resync_required=false.
-- **DIRECT_EVIDENCE — ipc.py przed zmianą:** target/module contextor.core.live_state.ipc, workspace_sync=verified, syntax_diagnostics.status=checked_and_none, availability=fresh, errors=[], total=0.
-- **DIRECT_EVIDENCE — test przed zmianą:** target/module tests.test_live_state_ipc, workspace_sync=verified, syntax_diagnostics.status=checked_and_none, availability=fresh, errors=[], total=0.
-- **DIRECT_EVIDENCE — literalne kotwice:** ipc.py:15-16 zawierało parę dataclass/Client, Listener; _serve_requests accept block był w :1323-1326 z except OSError bezpośrednio po Listener.accept; test OSError kończył się w tests/test_live_state_ipc.py:488, a test stopped accept zaczynał się w :490. Wszystkie kotwice pasowały; SOURCE_DRIFT nie wystąpił.
-- **DIRECT_EVIDENCE — watcher baseline:** get_live_events(after_revision=1579) przed edycją zwrócił latest_revision=1579, events=[], continuity=continuous, resync_required=false.
-- **DIRECT_EVIDENCE:** zachowano zakres dokładnie dwóch source/test plików; nie wykonano połączeń do produkcyjnego portu.
-
-## CONFIRMED_ROOT_CAUSE
-
-- **DIRECT_EVIDENCE; CONTRACT_PROVED:** w CPython 3.15.2 AuthenticationError jest multiprocessing.context.AuthenticationError, pochodzi z ProcessError/Exception i nie jest OSError. Lokalna introspekcja zwróciła issubclass(AuthenticationError, OSError)=False.
-- **DIRECT_EVIDENCE; CODE_PATH_PROVED:** Listener.accept wykonuje HMAC challenge przez deliver_challenge; mismatch w _verify_challenge podnosi AuthenticationError, deliver_challenge wysyła failure i re-raise. Wyjątek wychodzi bezpośrednio z Listener.accept.
-- **DIRECT_EVIDENCE; CODE_PATH_PROVED:** przed zmianą _serve_requests obejmował Listener.accept tylko except OSError. Obsługa Exception dla dispatch znajduje się później, więc nie obejmowała handshake. serve_forever wykonywał finally i propagował ten wyjątek do produkcyjnego _serve_service, który zapisywał failure i oznaczał service thread jako terminated; po join run_service wchodził w fail-closed cleanup.
-- **INFERENCE:** jedna niepoprawna lokalna próba handshake mogła zakończyć usługę LIVE przez fatalną ścieżkę obsługi wątku. Potwierdzono kodem i kontraktem CPythona; nie testowano produkcyjnego portu.
+- DIRECT_EVIDENCE — ponowny preflight przez Contextor MCP przed edycją: contextor.core.live_state.runtime i tests.test_live_authority_bootstrap miały canonical_revision=1581, canonical_state=fresh, workspace_sync=verified, provenance=live. Zakresy źródła zgłaszały syntax_errors=0.
+- DIRECT_EVIDENCE — HEAD przed edycją: 6d77d43ebda9f67fbdb711f27bc4eecdea014c18. Git status: ## main...origin/main, M walkthrough.md; żaden z dwóch docelowych plików nie miał lokalnych zmian.
+- DIRECT_EVIDENCE — wszystkie kotwice z promptu zgadzały się: runtime.py import argparse w linii 5; import repo_cache_dir w linii 22; payload/try w _write_endpoint_atomic w liniach 897-898; LiveEndpoint i authkey_hex w _read_endpoint w liniach 265-269; test publikacji endpointu kończy się w linii 187, a następna funkcja zaczyna się w linii 190.
+- DIRECT_EVIDENCE — helpery DPAPI odpowiadały P17-F2-D2: BackendSecretError jest klasą wyjątku RuntimeError w mcp_backend_secret.py:39-40; _protect_windows i _unprotect_windows istnieją z sygnaturą bytes -> bytes w mcp_backend_secret.py:255-363.
+- DIRECT_EVIDENCE — przed zmianą sprawdzony import chain: mcp_backend_secret → mcp_backend_state → core.paths i mcp_process_registry; repository_identity zależy od repository_storage. runtime już importuje core.paths i mcp_process_registry. Package initializers nie wprowadzają ścieżki z tych helperów z powrotem do runtime.
+- INFERENCE — planowany import runtime → mcp_backend_secret nie tworzył cyklu w sprawdzonym grafie ani importach źródłowych. Późniejszy import runtime i testy Windows potwierdziły wykonanie tej ścieżki w CPython.
+- DIRECT_EVIDENCE — brak SOURCE_DRIFT; patch zastosowano wyłącznie w contextor/core/live_state/runtime.py i tests/test_live_authority_bootstrap.py. Nie zmieniano ipc.py, mcp_backend_secret.py ani paths.py.
+- DIRECT_EVIDENCE — nie wykonano FULL, commit, push, staging, restartu ani połączenia z produkcyjnym LIVE.
 
 ## EXACT_IMPLEMENTATION
 
-- **DIRECT_EVIDENCE:** dodano import multiprocessing.AuthenticationError pomiędzy dataclasses i multiprocessing.connection.
-- **DIRECT_EVIDENCE:** _serve_requests łapie konkretnie AuthenticationError bez logowania jako OSError i kontynuuje pętlę. Istniejący except OSError i jego treść pozostają bez zmian.
-- **DIRECT_EVIDENCE:** nie zmieniono recv, dispatch, finally/connection.close, serve_forever ani żadnej operacji IPC.
-- **DIRECT_EVIDENCE:** nowy test jest dokładnie w kotwicy po test_server_accept_failure_emits_once_and_reraises i przed test_server_stopped_accept_path_emits_no_incident. Korzysta wyłącznie z fixture live_server, flipuje jeden bit key w pamięci, sprawdza AuthenticationError, następnie ping i stan stop. Żadna wartość klucza nie jest wypisywana.
+DIRECT_EVIDENCE — do runtime.py dodano importy base64 i binascii po argparse oraz BackendSecretError, _protect_windows, _unprotect_windows po imporcie repo_cache_dir (linie 5-29).
 
-## NEGATIVE_AUTHENTICATION_TEST
+DIRECT_EVIDENCE — _write_endpoint_atomic (runtime.py:927-949) tworzy świeży payload z endpoint.to_dict(); wyłącznie na Windows zastępuje pole authkey_hex prefiksem dpapi: i base64 z DPAPI ciphertext. Istniejące temporary file, flush/fsync, os.replace i cleanup pozostały niezmienione.
 
-**DIRECT_EVIDENCE — dodany test, tests/test_live_state_ipc.py:490-506 po zmianie:**
+DIRECT_EVIDENCE — _read_endpoint (runtime.py:231-330) na Windows wymaga wartości str z prefiksem dpapi:, dekoduje base64 z validate=True, odszyfrowuje DPAPI bytes i dopiero potem tworzy LiveEndpoint z plaintextowym hex w pamięci. Nie ma ścieżki fallback do plaintext endpointu na Windows. Pozostała walidacja endpoint.authkey i pierwotny except zostały zachowane.
 
-    def test_server_rejects_invalid_authkey_without_stopping_listener(live_server):
-        server, client = live_server
-        valid_key = server.endpoint.authkey
-        invalid_key = bytes([valid_key[0] ^ 1]) + valid_key[1:]
+DIRECT_EVIDENCE — poza Windows zapis nadal serializuje pole authkey_hex bez transformacji, a odczyt przekazuje istniejącą wartość do LiveEndpoint. Nie dodano formatu dyskowego dla innych systemów.
 
-        with pytest.raises(multiprocessing.AuthenticationError):
-            mpc.Client(
-                server.endpoint.address,
-                family="AF_INET",
-                authkey=invalid_key,
-            )
+DIRECT_EVIDENCE — tests/test_live_authority_bootstrap.py:191-262 zawiera dokładnie dwie żądane funkcje Windows-only; wstawiono je po teście publikacji endpointu i przed testem attach/second Desktop.
 
-        assert not server._stop.is_set()
-        assert client.request("ping")["status"] == "ok"
-        assert not server._stop.is_set()
+## DPAPI_DISK_CONTRACT
 
-- **DIRECT_EVIDENCE:** test używa lokalnego ephemeral listenera fixture; nie używa endpointu produkcyjnego. Klient z błędnym key otrzymuje AuthenticationError, a poprawny fixture client wykonuje ping po odmowie.
+- DIRECT_EVIDENCE — źródłowy obiekt LiveEndpoint nie jest modyfikowany przez writer: endpoint.to_dict() zwraca nowy słownik; transformacja przypisuje wyłącznie payload["authkey_hex"]. DPAPI otrzymuje endpoint.authkey, a nie tekstowe pole bezpośrednio.
+- DIRECT_EVIDENCE — fingerprint zdefiniowany w niezmienionym ipc.py nadal liczy SHA-256 nad JSON LiveEndpoint.identity_payload(), zawierającym oryginalne authkey_hex. Nie zmieniono ipc.py ani kodu lease; produkcyjna weryfikacja endpoint/lease w runtime.py pozostała poza diffem.
+- CODE_PATH_PROVED — parser odszyfrowuje pole przed konstrukcją LiveEndpoint. Zatem w pamięci klient i usługa nadal otrzymują ten sam authkey_hex i tę samą bajtową właściwość authkey; prefiks dpapi: istnieje tylko w słowniku serializowanym na dysk.
+- DIRECT_EVIDENCE — test test_live_endpoint_authkey_is_protected_on_disk sprawdza prefiks dpapi:, brak syntetycznego tekstu testowego authkey w JSON i równość odczytanego endpointu z wejściowym obiektem.
+- DIRECT_EVIDENCE — test test_bootstrap_publishes_exact_lease_endpoint_identity, uruchomiony w pełnym pliku testowym na Windows, nadal sprawdza zgodność fingerprint endpointu z lease i generation record.
+- DIRECT_EVIDENCE — nie loguje się authkey ani ciphertext; nie dodano osobnego plaintext pliku.
 
-## OSERROR_REGRESSION
+## PLAINTEXT_REJECTION
 
-- **DIRECT_EVIDENCE:** except OSError as exc oraz cały dotychczasowy tracing/re-raise pozostają bez zmian; diff dodaje tylko except AuthenticationError przed OSError.
-- **DIRECT_EVIDENCE:** tests/test_live_state_ipc.py:test_server_accept_failure_emits_once_and_reraises nadal istnieje bez zmian w :466-488. test_server_stopped_accept_path_emits_no_incident również nie został zmieniony.
-- **DIRECT_EVIDENCE:** oba testy przeszły w celowanej selekcji oraz w pełnym pliku testowym.
+- DIRECT_EVIDENCE — na Windows brak pola tekstowego z prefiksem dpapi: powoduje EndpointSchemaError z komunikatem LIVE endpoint authkey is not DPAPI-protected. W strict mode wyjątek jest propagowany; w zwykłym trybie istniejący except zamienia go na None.
+- DIRECT_EVIDENCE — wadliwe base64, DPAPI BackendSecretError, ValueError lub OSError są opakowywane jako EndpointSchemaError z komunikatem LIVE endpoint DPAPI authkey is invalid.
+- DIRECT_EVIDENCE — test test_live_endpoint_rejects_plaintext_authkey_on_windows zapisuje testowy endpoint bez szyfrowania i sprawdza odmowę w strict mode oraz None w zwykłym trybie.
+- DIRECT_EVIDENCE — oba nowe testy wykonały się na platform win32 / CPython 3.15.2; nie zostały pominięte.
 
 ## TARGETED_TESTS
 
-1. **DIRECT_EVIDENCE — celowany zestaw:** wykonano:
-   
-       .venv/Scripts/python.exe -m pytest -q tests/test_live_state_ipc.py -k "rejects_invalid_authkey_without_stopping_listener or accept_failure_emits_once_and_reraises or stopped_accept_path_emits_no_incident" -vv
-
-   Wynik: 3 passed, 97 deselected, 2.46s.
-2. **DIRECT_EVIDENCE — cały wskazany plik:** wykonano:
-   
-       .venv/Scripts/python.exe -m pytest -q tests/test_live_state_ipc.py
-
-   Pierwsze wywołanie zwróciło częściowy output do 72% bez końcowego statusu shell; powtórzono ten sam zlecony command, aby odebrać exit status. Wynik końcowy: 100 passed, 2 warnings, 42.11s.
-3. **DIRECT_EVIDENCE:** dwa ostrzeżenia to AuthlibDeprecationWarning z zależności przy teście test_endpoint_before_authority_replay_exposes_valid_pending_live_feed (authlib.jose oraz httpx assertion client). Nie dotyczyły zmienionego kodu. Nie uruchomiono FULL suite ani innych testów.
+- DIRECT_EVIDENCE — interpreter: Python 3.15.2, platform win32; pytest 9.1.1.
+- DIRECT_EVIDENCE — polecenie celowane:
+  .venv/Scripts/python.exe -m pytest -q tests/test_live_authority_bootstrap.py -k "live_endpoint_authkey_is_protected_on_disk or live_endpoint_rejects_plaintext_authkey_on_windows" -vv
+  Wynik: 2 passed, 17 deselected.
+- DIRECT_EVIDENCE — pełny wskazany plik:
+  .venv/Scripts/python.exe -m pytest -q tests/test_live_authority_bootstrap.py
+  Wynik odebranego końcowego uruchomienia: 19 passed in 55.99s.
+- DIRECT_EVIDENCE — pierwsze uruchomienie całego pliku przekroczyło 30-sekundowe oczekiwanie narzędzia i zwróciło wyłącznie częściowy postęp; po zakończeniu procesu ponowiono dokładnie to polecenie, aby uzyskać wynik końcowy. Rozstrzygający, odebrany wynik powtórzenia to 19 passed.
+- DIRECT_EVIDENCE — nie uruchamiano FULL ani testów na produkcyjnym endpointcie. Testy korzystają z tmp_path i testowych endpointów.
 
 ## MCP_POST_CHANGE
 
-- **DIRECT_EVIDENCE — ipc.py:** Contextor canonical_revision=1581, canonical_state=fresh, workspace_sync=verified, provenance=live; syntax_diagnostics=checked_and_none, errors=[], total=0.
-- **DIRECT_EVIDENCE — test file:** Contextor canonical_revision=1581, canonical_state=fresh, workspace_sync=verified, provenance=live; syntax_diagnostics=checked_and_none, errors=[], total=0.
-- **DIRECT_EVIDENCE — watcher event 1:** po bazowej revision 1579, revision 1580, operation=update_file, origin=desktop_watcher, status=UPDATED, file_path=contextor/core/live_state/ipc.py, blast_radius_state=fresh.
-- **DIRECT_EVIDENCE — watcher event 2:** revision 1581, operation=update_file, origin=desktop_watcher, status=UPDATED, file_path=tests/test_live_state_ipc.py, blast_radius_state=deferred.
-- **DIRECT_EVIDENCE — continuity:** oba zapytania get_live_events miały continuity=continuous i resync_required=false; revision wzrosła kolejno 1579→1580→1581. Pierwszy feed z limitem 20 wymagał confirmation_required ze względu na rozmiar widoku warningów; powtórzono odczyt z limit=1, bez zmiany stanu.
-- **DIRECT_EVIDENCE:** nie wywołano MCP update_file; zmiany zostały przyjęte przez desktop_watcher. Nie wykonano restartu.
-- **DIRECT_EVIDENCE:** rodzina cycle_semantics jest oznaczona stale po revision 1581; canonical_state modułów pozostaje fresh, a target syntax diagnostics są materialized/fresh. Nie używam tej niezwiązanej rodziny jako dowodu semantyki patcha.
-- **DIRECT_EVIDENCE:** ponowny diff zawiera wyłącznie import AuthenticationError, jego except/continue oraz wskazany test. OSError block jest zachowany, a dispatcher i pozostałe operation names nie mają hunks w diff.
+- DIRECT_EVIDENCE — Contextor MCP dla obu plików zwrócił canonical_revision=1584, canonical_state=fresh, workspace_sync=verified, provenance=live. Syntax diagnostics dla runtime.py i tests/test_live_authority_bootstrap.py: syntax_errors.count=0, availability=fresh.
+- DIRECT_EVIDENCE — watcher po revision 1581:
+  - revision 1582: update_file, origin=desktop_watcher, status=UPDATED, runtime.py;
+  - revision 1583: update_file, origin=desktop_watcher, status=UNCHANGED, runtime.py;
+  - revision 1584: update_file, origin=desktop_watcher, status=UPDATED, tests/test_live_authority_bootstrap.py.
+  Odczyt z kursorem 1581/1582/1583 zgłosił continuity=continuous i resync_required=false; latest_revision=1584.
+- DIRECT_EVIDENCE — pierwszy odczyt wydarzeń z limitem 5 przekroczył limit odpowiedzi narzędzia i zwrócił confirmation_required; powtórzenia z limit=1 dostarczyły powyższe trzy rewizje oraz metadane ciągłości.
+- DIRECT_EVIDENCE — lokalny git diff zawiera zmiany wyłącznie w runtime.py i tests/test_live_authority_bootstrap.py poza wymaganym raportem walkthrough.md. Nie zmieniono ipc.py, runtime_lease.py ani dispatcherów. W runtime.py zmieniono tylko importy oraz disk write/read endpointu; kod lease i run_service nie został edytowany.
+- DIRECT_EVIDENCE — aktualny Contextor source range zawiera nowy import i obie funkcje testowe; obie nowe testy oraz test istniejącej zgodności lease/fingerprint przeszły na Windows.
+- UNKNOWN — po zmianie projekcja zależności get_module_context dla runtime nadal wymienia 17 modułów i nie pokazuje mcp_backend_secret, mimo że zsynchronizowany source range zawiera bezpośredni import. Testy CPython importują runtime bez błędu, ale przyczyna braku nowej krawędzi w projekcji dependency pozostaje nierozstrzygnięta.
 
 ## FULL_DIFFS
 
-Każdy diff poniżej jest pełnym bieżącym unified diff dla wskazanego source/test pliku.
+FILES_CHANGED:
+- contextor/core/live_state/runtime.py
+- tests/test_live_authority_bootstrap.py
 
-### contextor/core/live_state/ipc.py
+walkthrough.md jest raportem wymaganym przez workflow i nie jest liczony jako production/test file. Poniżej kompletne rzeczywiste diffy obu plików:
 
-    diff --git a/contextor/core/live_state/ipc.py b/contextor/core/live_state/ipc.py
-    index 710a016..2185db1 100644
-    --- a/contextor/core/live_state/ipc.py
-    +++ b/contextor/core/live_state/ipc.py
-    @@ -13,6 +13,7 @@ import threading
-     import time
-     import uuid
-     from dataclasses import dataclass
-    +from multiprocessing import AuthenticationError
-     from multiprocessing.connection import Client, Listener
-     from pathlib import Path
-     from types import SimpleNamespace
-    @@ -1323,6 +1324,8 @@ class CanonicalLiveServer:
-                 accept_started = time.monotonic()
-                 try:
-                     connection = self._listener.accept()
-    +            except AuthenticationError:
-    +                continue
-                 except OSError as exc:
-                     if self._stop.is_set():
-                         break
+~~~diff
+diff --git a/contextor/core/live_state/runtime.py b/contextor/core/live_state/runtime.py
+index 0276375..be41bbf 100644
+--- a/contextor/core/live_state/runtime.py
++++ b/contextor/core/live_state/runtime.py
+@@ -3,6 +3,8 @@
+ from __future__ import annotations
+ 
+ import argparse
++import base64
++import binascii
+ import contextlib
+ import json
+ import os
+@@ -20,6 +22,11 @@ from contextor.core.lineage_query.live_query import (
+     query_live_symbol_lineage,
+ )
+ from contextor.core.paths import repo_cache_dir
++from contextor.mcp_backend_secret import (
++    BackendSecretError,
++    _protect_windows,
++    _unprotect_windows,
++)
+ from contextor.core.repository_identity import (
+     read_repository_identity,
+     require_repository_identity,
+@@ -262,10 +269,37 @@ def _read_endpoint(repo_path: str | Path, *, strict: bool = False) -> LiveEndpoi
+             raise EndpointSchemaError("LIVE endpoint identity fields must be non-empty")
+         if not str(payload["service_instance_id"]).strip() or not str(payload["process_start_identity"]).strip():
+             raise EndpointSchemaError("LIVE endpoint service identity fields must be non-empty")
++        authkey_hex = payload["authkey_hex"]
++        if os.name == "nt":
++            if (
++                not isinstance(authkey_hex, str)
++                or not authkey_hex.startswith("dpapi:")
++            ):
++                raise EndpointSchemaError(
++                    "LIVE endpoint authkey is not DPAPI-protected"
++                )
++            try:
++                protected = base64.b64decode(
++                    authkey_hex[len("dpapi:"):],
++                    validate=True,
++                )
++                authkey_hex = _unprotect_windows(
++                    protected
++                ).hex()
++            except (
++                BackendSecretError,
++                ValueError,
++                binascii.Error,
++                OSError,
++            ) as exc:
++                raise EndpointSchemaError(
++                    "LIVE endpoint DPAPI authkey is invalid"
++                ) from exc
++
+         endpoint = LiveEndpoint(
+             str(payload["host"]),
+             port,
+-            str(payload["authkey_hex"]),
++            str(authkey_hex),
+             pid=pid,
+             service_pid=service_pid,
+             owner_pid=owner_pid,
+@@ -895,6 +929,13 @@ def _write_endpoint_atomic(endpoint: LiveEndpoint, root: Path) -> None:
+     target.parent.mkdir(parents=True, exist_ok=True)
+     temporary = target.with_name(f".{target.name}.{os.getpid()}.tmp")
+     payload = endpoint.to_dict()
++    if os.name == "nt":
++        payload["authkey_hex"] = (
++            "dpapi:"
++            + base64.b64encode(
++                _protect_windows(endpoint.authkey)
++            ).decode("ascii")
++        )
+     try:
+         with temporary.open("w", encoding="utf-8", newline="\n") as stream:
+             json.dump(payload, stream, sort_keys=True, separators=(",", ":"))
+diff --git a/tests/test_live_authority_bootstrap.py b/tests/test_live_authority_bootstrap.py
+index 767a505..887bffc 100644
+--- a/tests/test_live_authority_bootstrap.py
++++ b/tests/test_live_authority_bootstrap.py
+@@ -187,6 +187,81 @@ def test_bootstrap_publishes_exact_lease_endpoint_identity(tmp_path: Path, monke
+         _stop(client)
+ 
+ 
++@pytest.mark.skipif(os.name != "nt", reason="Windows DPAPI only")
++def test_live_endpoint_authkey_is_protected_on_disk(tmp_path, monkeypatch):
++    from contextor.core.live_state.ipc import LiveEndpoint
++    from contextor.core.live_state.runtime import (
++        _read_endpoint,
++        _write_endpoint_atomic,
++        endpoint_file,
++    )
++
++    repo = _repo(tmp_path, monkeypatch)
++    endpoint = LiveEndpoint(
++        host="127.0.0.1",
++        port=12345,
++        authkey_hex="a1" * 32,
++        pid=123,
++        service_pid=123,
++        repo_id="ctx_test",
++        root_path=str(repo),
++        runtime_domain_id="test-domain",
++        service_instance_id="test-service",
++        lease_generation=1,
++        process_start_identity="test-process",
++    )
++
++    _write_endpoint_atomic(endpoint, repo)
++    raw = endpoint_file(repo).read_text(encoding="utf-8")
++    stored = json.loads(raw)
++
++    assert stored["authkey_hex"].startswith("dpapi:")
++    assert endpoint.authkey_hex not in raw
++    assert _read_endpoint(repo, strict=True) == endpoint
++
++
++@pytest.mark.skipif(os.name != "nt", reason="Windows DPAPI only")
++def test_live_endpoint_rejects_plaintext_authkey_on_windows(
++    tmp_path, monkeypatch
++):
++    from contextor.core.live_state.ipc import LiveEndpoint
++    from contextor.core.live_state.runtime import (
++        EndpointSchemaError,
++        _read_endpoint,
++        endpoint_file,
++    )
++
++    repo = _repo(tmp_path, monkeypatch)
++    endpoint = LiveEndpoint(
++        host="127.0.0.1",
++        port=12345,
++        authkey_hex="a1" * 32,
++        pid=123,
++        service_pid=123,
++        repo_id="ctx_test",
++        root_path=str(repo),
++        runtime_domain_id="test-domain",
++        service_instance_id="test-service",
++        lease_generation=1,
++        process_start_identity="test-process",
++    )
++
++    target = endpoint_file(repo)
++    target.parent.mkdir(parents=True, exist_ok=True)
++    target.write_text(
++        json.dumps(endpoint.to_dict()),
++        encoding="utf-8",
++    )
++
++    with pytest.raises(
++        EndpointSchemaError,
++        match="not DPAPI-protected",
++    ):
++        _read_endpoint(repo, strict=True)
++
++    assert _read_endpoint(repo) is None
++
++
+ def test_verified_existing_authority_attaches_and_second_desktop_is_rejected(
+     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+ ):
+~~~
 
-### tests/test_live_state_ipc.py
+## RUNTIME_ADOPTION_STATUS
 
-    diff --git a/tests/test_live_state_ipc.py b/tests/test_live_state_ipc.py
-    index 7f4b660..cbb73a8 100644
-    --- a/tests/test_live_state_ipc.py
-    +++ b/tests/test_live_state_ipc.py
-    @@ -487,6 +487,23 @@ def test_server_accept_failure_emits_once_and_reraises(monkeypatch):
-         assert events[0]["operation_or_request_type"] == "accept"
-     
-     
-    +def test_server_rejects_invalid_authkey_without_stopping_listener(live_server):
-    +    server, client = live_server
-    +    valid_key = server.endpoint.authkey
-    +    invalid_key = bytes([valid_key[0] ^ 1]) + valid_key[1:]
-    +
-    +    with pytest.raises(multiprocessing.AuthenticationError):
-    +        mpc.Client(
-    +            server.endpoint.address,
-    +            family="AF_INET",
-    +            authkey=invalid_key,
-    +        )
-    +
-    +    assert not server._stop.is_set()
-    +    assert client.request("ping")["status"] == "ok"
-    +    assert not server._stop.is_set()
-    +
-    +
-     def test_server_stopped_accept_path_emits_no_incident(monkeypatch):
-         events = []
-         server = CanonicalLiveServer(SimpleNamespace(files=[]))
+- DIRECT_EVIDENCE — źródło i testy są widoczne w Contextor revision 1584, workspace_sync=verified; watcher dostarczył aktualizacje obu plików.
+- UNKNOWN — nie restartowano działającego backendu ani LIVE zgodnie z poleceniem. Świeżość workspace/Contextor nie dowodzi, że istniejący proces usługi załadował zmieniony runtime.py. Produkcyjna adopcja kodu pozostaje niepotwierdzona.
 
 ## FINAL_STATUS
 
-- **DIRECT_EVIDENCE:** implementacja i test regresyjny są zgodne z dokładnymi hunks zlecenia; celowane testy i tests/test_live_state_ipc.py przechodzą; oba pliki mają fresh canonical state, verified workspace_sync i świeże, puste syntax diagnostics.
-- **DIRECT_EVIDENCE:** zmieniono source/test wyłącznie w dwóch wskazanych plikach. walkthrough.md nadpisano raportem. Brak commit/push/staging/FULL/restartu.
-- **UNKNOWN:** nie twierdzę, że już uruchomiony proces LIVE załadował zmieniony kod; restart był wykluczony, a testy używały wyłącznie izolowanego fixture.
-- **FINAL_STATUS=PASS — zakres source/test i watcher verification.**
-
+- DIRECT_EVIDENCE — implementacja zgodna z podanym kontraktem i dokładnym zakresem dwóch plików.
+- DIRECT_EVIDENCE — testy celowane: 2 passed; tests/test_live_authority_bootstrap.py: 19 passed.
+- DIRECT_EVIDENCE — Contextor post-change revision 1584, canonical_state=fresh, workspace_sync=verified, syntax_errors=0; watcher continuity continuous bez resync.
+- UNKNOWN — runtime adoption niezweryfikowane bez restartu; projekcja zależności runtime nie wykazała nowego importu mcp_backend_secret, mimo świeżego zsynchronizowanego źródła i poprawnego importu potwierdzonego testami.
+- DIRECT_EVIDENCE — git status po zmianach: M contextor/core/live_state/runtime.py; M tests/test_live_authority_bootstrap.py; M walkthrough.md. Nie zmieniono innych plików.
+- FINAL_STATUS=IMPLEMENTATION_AND_TESTS_PASS; LIVE_RUNTIME_ADOPTION=UNKNOWN; DEPENDENCY_PROJECTION_EDGE=UNKNOWN.

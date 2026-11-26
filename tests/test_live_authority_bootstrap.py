@@ -187,6 +187,81 @@ def test_bootstrap_publishes_exact_lease_endpoint_identity(tmp_path: Path, monke
         _stop(client)
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows DPAPI only")
+def test_live_endpoint_authkey_is_protected_on_disk(tmp_path, monkeypatch):
+    from contextor.core.live_state.ipc import LiveEndpoint
+    from contextor.core.live_state.runtime import (
+        _read_endpoint,
+        _write_endpoint_atomic,
+        endpoint_file,
+    )
+
+    repo = _repo(tmp_path, monkeypatch)
+    endpoint = LiveEndpoint(
+        host="127.0.0.1",
+        port=12345,
+        authkey_hex="a1" * 32,
+        pid=123,
+        service_pid=123,
+        repo_id="ctx_test",
+        root_path=str(repo),
+        runtime_domain_id="test-domain",
+        service_instance_id="test-service",
+        lease_generation=1,
+        process_start_identity="test-process",
+    )
+
+    _write_endpoint_atomic(endpoint, repo)
+    raw = endpoint_file(repo).read_text(encoding="utf-8")
+    stored = json.loads(raw)
+
+    assert stored["authkey_hex"].startswith("dpapi:")
+    assert endpoint.authkey_hex not in raw
+    assert _read_endpoint(repo, strict=True) == endpoint
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows DPAPI only")
+def test_live_endpoint_rejects_plaintext_authkey_on_windows(
+    tmp_path, monkeypatch
+):
+    from contextor.core.live_state.ipc import LiveEndpoint
+    from contextor.core.live_state.runtime import (
+        EndpointSchemaError,
+        _read_endpoint,
+        endpoint_file,
+    )
+
+    repo = _repo(tmp_path, monkeypatch)
+    endpoint = LiveEndpoint(
+        host="127.0.0.1",
+        port=12345,
+        authkey_hex="a1" * 32,
+        pid=123,
+        service_pid=123,
+        repo_id="ctx_test",
+        root_path=str(repo),
+        runtime_domain_id="test-domain",
+        service_instance_id="test-service",
+        lease_generation=1,
+        process_start_identity="test-process",
+    )
+
+    target = endpoint_file(repo)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(
+        json.dumps(endpoint.to_dict()),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        EndpointSchemaError,
+        match="not DPAPI-protected",
+    ):
+        _read_endpoint(repo, strict=True)
+
+    assert _read_endpoint(repo) is None
+
+
 def test_verified_existing_authority_attaches_and_second_desktop_is_rejected(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
