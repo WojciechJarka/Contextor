@@ -487,6 +487,23 @@ def test_server_accept_failure_emits_once_and_reraises(monkeypatch):
     assert events[0]["operation_or_request_type"] == "accept"
 
 
+def test_server_rejects_invalid_authkey_without_stopping_listener(live_server):
+    server, client = live_server
+    valid_key = server.endpoint.authkey
+    invalid_key = bytes([valid_key[0] ^ 1]) + valid_key[1:]
+
+    with pytest.raises(multiprocessing.AuthenticationError):
+        mpc.Client(
+            server.endpoint.address,
+            family="AF_INET",
+            authkey=invalid_key,
+        )
+
+    assert not server._stop.is_set()
+    assert client.request("ping")["status"] == "ok"
+    assert not server._stop.is_set()
+
+
 def test_server_stopped_accept_path_emits_no_incident(monkeypatch):
     events = []
     server = CanonicalLiveServer(SimpleNamespace(files=[]))

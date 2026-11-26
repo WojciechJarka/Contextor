@@ -13,6 +13,7 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass
+from multiprocessing import AuthenticationError
 from multiprocessing.connection import Client, Listener
 from pathlib import Path
 from types import SimpleNamespace
@@ -1323,6 +1324,8 @@ class CanonicalLiveServer:
             accept_started = time.monotonic()
             try:
                 connection = self._listener.accept()
+            except AuthenticationError:
+                continue
             except OSError as exc:
                 if self._stop.is_set():
                     break

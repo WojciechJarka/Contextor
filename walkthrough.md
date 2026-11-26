@@ -1,138 +1,150 @@
-# F2-I2 — aktualizacja evidence_scope
+# P17-F1-I1 — izolacja AuthenticationError w LIVE IPC
+
+FILES_CHANGED=2: contextor/core/live_state/ipc.py; tests/test_live_state_ipc.py
+ACTUAL_DIFF=patrz FULL_DIFFS poniżej
+
+walkthrough.md jest raportem i nie jest liczony jako production/test changed file. Nie wykonano commit, push, staging ani restartu. Nie połączono się z produkcyjnym LIVE i nie odczytano authkey.
 
 ## PREFLIGHT
 
-### DIRECT_EVIDENCE
+- **DIRECT_EVIDENCE — HEAD/Git:** HEAD 23d4dcf4546d15fa81e18dfbed65af7184c6a132, branch main. Przed patchem git status miał wyłącznie wcześniej zmieniony walkthrough.md; oba pliki zlecone do edycji miały pusty diff.
+- **DIRECT_EVIDENCE — Contextor, revision przed zmianą:** canonical_revision=1579, canonical_state=fresh, provenance=live, resync_required=false.
+- **DIRECT_EVIDENCE — ipc.py przed zmianą:** target/module contextor.core.live_state.ipc, workspace_sync=verified, syntax_diagnostics.status=checked_and_none, availability=fresh, errors=[], total=0.
+- **DIRECT_EVIDENCE — test przed zmianą:** target/module tests.test_live_state_ipc, workspace_sync=verified, syntax_diagnostics.status=checked_and_none, availability=fresh, errors=[], total=0.
+- **DIRECT_EVIDENCE — literalne kotwice:** ipc.py:15-16 zawierało parę dataclass/Client, Listener; _serve_requests accept block był w :1323-1326 z except OSError bezpośrednio po Listener.accept; test OSError kończył się w tests/test_live_state_ipc.py:488, a test stopped accept zaczynał się w :490. Wszystkie kotwice pasowały; SOURCE_DRIFT nie wystąpił.
+- **DIRECT_EVIDENCE — watcher baseline:** get_live_events(after_revision=1579) przed edycją zwrócił latest_revision=1579, events=[], continuity=continuous, resync_required=false.
+- **DIRECT_EVIDENCE:** zachowano zakres dokładnie dwóch source/test plików; nie wykonano połączeń do produkcyjnego portu.
 
-- Contextor MCP przed zmianą: tests/test_cycle_semantics_external_import_authority.py (module 628/1), canonical_state=fresh, workspace_sync=verified, canonical_revision=1577, provenance=live; syntax diagnostics checked_and_none, 0 błędów.
-- Odczytano dokładne ciało test_conditional_external_side_effect_is_not_runtime_authority. Zawierało zmianę F2-I1: mapę assumed_external_callable_effects z kluczem ("dataclasses", "dataclass") i wartością "FROZEN_DATACLASS_DECORATOR_FACTORY". Istniejące asercje outcome, authority, model outcome i evidence_scope były zachowane.
-- Helper referencyjny tests/test_cycle_semantics_external_call_effects.py::_run (linie 15-38) używa tej samej reprezentacji klucza i wartości; jego test pozytywny sprawdza suffix EXTERNAL_CALL_EFFECT_ASSUMED_NOT_RUNTIME_ATTESTED (linie 273-331).
-- CPython: 3.15.2, cpython, AMD64, 64bit.
-- Bieżący HEAD na początku F2-I2: 1088a668dea27e5e9636a7ff22d9a29481f38866, branch main zgodny z origin/main, worktree czysty.
-- HEAD 1088a668 jest potomkiem 97768850d0b91b35affd84d5675a9368146d48ea. Commit 1088a668 zawiera już zmianę F2-I1 w teście; potwierdza to git log/show. Nie wykonano żadnej operacji modyfikującej Git.
-- Contextor podaje cycle_semantics=stale, mimo że stan pliku jest świeży i sync zweryfikowany.
+## CONFIRMED_ROOT_CAUSE
 
-### INFERENCE
+- **DIRECT_EVIDENCE; CONTRACT_PROVED:** w CPython 3.15.2 AuthenticationError jest multiprocessing.context.AuthenticationError, pochodzi z ProcessError/Exception i nie jest OSError. Lokalna introspekcja zwróciła issubclass(AuthenticationError, OSError)=False.
+- **DIRECT_EVIDENCE; CODE_PATH_PROVED:** Listener.accept wykonuje HMAC challenge przez deliver_challenge; mismatch w _verify_challenge podnosi AuthenticationError, deliver_challenge wysyła failure i re-raise. Wyjątek wychodzi bezpośrednio z Listener.accept.
+- **DIRECT_EVIDENCE; CODE_PATH_PROVED:** przed zmianą _serve_requests obejmował Listener.accept tylko except OSError. Obsługa Exception dla dispatch znajduje się później, więc nie obejmowała handshake. serve_forever wykonywał finally i propagował ten wyjątek do produkcyjnego _serve_service, który zapisywał failure i oznaczał service thread jako terminated; po join run_service wchodził w fail-closed cleanup.
+- **INFERENCE:** jedna niepoprawna lokalna próba handshake mogła zakończyć usługę LIVE przez fatalną ścieżkę obsługi wątku. Potwierdzono kodem i kontraktem CPythona; nie testowano produkcyjnego portu.
 
-- Ponieważ F2-I1 znajduje się już w bieżącym HEAD, aktualny diff względem HEAD może zawierać tylko F2-I2. W FULL_DIFFS pokazano zarówno rzeczywisty diff F2-I2 względem HEAD 1088a668, jak i łączny diff F2-I1+F2-I2 względem poprzedniego HEAD 97768850, na którym oparto F2-I1.
+## EXACT_IMPLEMENTATION
 
-### UNKNOWN
+- **DIRECT_EVIDENCE:** dodano import multiprocessing.AuthenticationError pomiędzy dataclasses i multiprocessing.connection.
+- **DIRECT_EVIDENCE:** _serve_requests łapie konkretnie AuthenticationError bez logowania jako OSError i kontynuuje pętlę. Istniejący except OSError i jego treść pozostają bez zmian.
+- **DIRECT_EVIDENCE:** nie zmieniono recv, dispatch, finally/connection.close, serve_forever ani żadnej operacji IPC.
+- **DIRECT_EVIDENCE:** nowy test jest dokładnie w kotwicy po test_server_accept_failure_emits_once_and_reraises i przed test_server_stopped_accept_path_emits_no_incident. Korzysta wyłącznie z fixture live_server, flipuje jeden bit key w pamięci, sprawdza AuthenticationError, następnie ping i stan stop. Żadna wartość klucza nie jest wypisywana.
 
-- Nie odczytywano issues.md zgodnie z instrukcją użytkownika.
+## NEGATIVE_AUTHENTICATION_TEST
 
-## IMPLEMENTATION
+**DIRECT_EVIDENCE — dodany test, tests/test_live_state_ipc.py:490-506 po zmianie:**
 
-### DIRECT_EVIDENCE
+    def test_server_rejects_invalid_authkey_without_stopping_listener(live_server):
+        server, client = live_server
+        valid_key = server.endpoint.authkey
+        invalid_key = bytes([valid_key[0] ^ 1]) + valid_key[1:]
 
-- Zmieniono wyłącznie oczekiwaną wartość istniejącej asercji model.evidence_scope w test_conditional_external_side_effect_is_not_runtime_authority.
-- Zachowano dokładne porównanie i dopisano literalny suffix |EXTERNAL_CALL_EFFECT_ASSUMED_NOT_RUNTIME_ATTESTED do oczekiwanego ciągu.
-- Zachowano mapę F2-I1, wszystkie inne asercje, fixture, helpery, produkcję i pozostałe testy.
-- Nie dodano importów.
+        with pytest.raises(multiprocessing.AuthenticationError):
+            mpc.Client(
+                server.endpoint.address,
+                family="AF_INET",
+                authkey=invalid_key,
+            )
 
-### INFERENCE
+        assert not server._stop.is_set()
+        assert client.request("ping")["status"] == "ok"
+        assert not server._stop.is_set()
 
-- Asercja teraz porównuje pełny evidence_scope wytwarzany po przyjęciu jawnego zewnętrznego callable effect, zgodnie z helperem referencyjnym i produkcyjnym kontraktem.
+- **DIRECT_EVIDENCE:** test używa lokalnego ephemeral listenera fixture; nie używa endpointu produkcyjnego. Klient z błędnym key otrzymuje AuthenticationError, a poprawny fixture client wykonuje ping po odmowie.
 
-### UNKNOWN
+## OSERROR_REGRESSION
 
-- Brak nieznanych elementów dotyczących zakresu wprowadzonych zmian.
+- **DIRECT_EVIDENCE:** except OSError as exc oraz cały dotychczasowy tracing/re-raise pozostają bez zmian; diff dodaje tylko except AuthenticationError przed OSError.
+- **DIRECT_EVIDENCE:** tests/test_live_state_ipc.py:test_server_accept_failure_emits_once_and_reraises nadal istnieje bez zmian w :466-488. test_server_stopped_accept_path_emits_no_incident również nie został zmieniony.
+- **DIRECT_EVIDENCE:** oba testy przeszły w celowanej selekcji oraz w pełnym pliku testowym.
 
 ## TARGETED_TESTS
 
-### DIRECT_EVIDENCE
+1. **DIRECT_EVIDENCE — celowany zestaw:** wykonano:
+   
+       .venv/Scripts/python.exe -m pytest -q tests/test_live_state_ipc.py -k "rejects_invalid_authkey_without_stopping_listener or accept_failure_emits_once_and_reraises or stopped_accept_path_emits_no_incident" -vv
 
-Uruchomiono na CPython 3.15.2 AMD64:
+   Wynik: 3 passed, 97 deselected, 2.46s.
+2. **DIRECT_EVIDENCE — cały wskazany plik:** wykonano:
+   
+       .venv/Scripts/python.exe -m pytest -q tests/test_live_state_ipc.py
 
-1. .venv/Scripts/python.exe -m pytest -q tests/test_cycle_semantics_external_import_authority.py::test_conditional_external_side_effect_is_not_runtime_authority -vv
-   Wynik: 1 passed.
-2. Po przejściu testu uruchomiono oba wymagane pliki:
-   .venv/Scripts/python.exe -m pytest -q tests/test_cycle_semantics_external_import_authority.py tests/test_cycle_semantics_external_call_effects.py
-   Wynik: 23 passed in 1.38s.
+   Pierwsze wywołanie zwróciło częściowy output do 72% bez końcowego statusu shell; powtórzono ten sam zlecony command, aby odebrać exit status. Wynik końcowy: 100 passed, 2 warnings, 42.11s.
+3. **DIRECT_EVIDENCE:** dwa ostrzeżenia to AuthlibDeprecationWarning z zależności przy teście test_endpoint_before_authority_replay_exposes_valid_pending_live_feed (authlib.jose oraz httpx assertion client). Nie dotyczyły zmienionego kodu. Nie uruchomiono FULL suite ani innych testów.
 
-### INFERENCE
+## MCP_POST_CHANGE
 
-- Wskazany test i oba wskazane pliki przechodzą po zmianie oczekiwanego evidence_scope.
-
-### UNKNOWN
-
-- Nie uruchamiano FULL ani innych testów poza wskazanym testem i dwoma wymaganymi plikami.
-
-## POST_CHANGE_MCP_AUDIT
-
-### DIRECT_EVIDENCE
-
-- Desktop watcher event: revision 1578, operation=update_file, origin=desktop_watcher, status=UPDATED, file_path=tests/test_cycle_semantics_external_import_authority.py.
-- Event continuity: continuous; resync_required=false.
-- Contextor po zmianie: canonical_state=fresh, workspace_sync=verified, canonical_revision=1578, provenance=live.
-- Syntax diagnostics: checked_and_none, 0 błędów; brak ostrzeżeń dla pliku.
-- Contextor source range potwierdza obecność mapowania F2-I1 i dokładnego nowego evidence_scope.
-- cycle_semantics family pozostaje stale; cycle warning view oznaczony fresh dla revision 1578, jako static-model evidence, nie runtime safety.
-
-### INFERENCE
-
-- Zmiana została przejęta przez desktop watcher i zweryfikowana w kanonicznym LIVE revision 1578.
-
-### UNKNOWN
-
-- Blast radius ma stan deferred; nie traktowano go jako pełnej analizy wpływu.
-
-## FILES_CHANGED
-
-- tests/test_cycle_semantics_external_import_authority.py — jedyny zmieniony plik testowy, wyłącznie żądany test.
-- walkthrough.md — raport F2-I2.
-- Bez zmian produkcji, helperów i innych testów.
+- **DIRECT_EVIDENCE — ipc.py:** Contextor canonical_revision=1581, canonical_state=fresh, workspace_sync=verified, provenance=live; syntax_diagnostics=checked_and_none, errors=[], total=0.
+- **DIRECT_EVIDENCE — test file:** Contextor canonical_revision=1581, canonical_state=fresh, workspace_sync=verified, provenance=live; syntax_diagnostics=checked_and_none, errors=[], total=0.
+- **DIRECT_EVIDENCE — watcher event 1:** po bazowej revision 1579, revision 1580, operation=update_file, origin=desktop_watcher, status=UPDATED, file_path=contextor/core/live_state/ipc.py, blast_radius_state=fresh.
+- **DIRECT_EVIDENCE — watcher event 2:** revision 1581, operation=update_file, origin=desktop_watcher, status=UPDATED, file_path=tests/test_live_state_ipc.py, blast_radius_state=deferred.
+- **DIRECT_EVIDENCE — continuity:** oba zapytania get_live_events miały continuity=continuous i resync_required=false; revision wzrosła kolejno 1579→1580→1581. Pierwszy feed z limitem 20 wymagał confirmation_required ze względu na rozmiar widoku warningów; powtórzono odczyt z limit=1, bez zmiany stanu.
+- **DIRECT_EVIDENCE:** nie wywołano MCP update_file; zmiany zostały przyjęte przez desktop_watcher. Nie wykonano restartu.
+- **DIRECT_EVIDENCE:** rodzina cycle_semantics jest oznaczona stale po revision 1581; canonical_state modułów pozostaje fresh, a target syntax diagnostics są materialized/fresh. Nie używam tej niezwiązanej rodziny jako dowodu semantyki patcha.
+- **DIRECT_EVIDENCE:** ponowny diff zawiera wyłącznie import AuthenticationError, jego except/continue oraz wskazany test. OSError block jest zachowany, a dispatcher i pozostałe operation names nie mają hunks w diff.
 
 ## FULL_DIFFS
 
-### Łączny diff F2-I1 + F2-I2 względem poprzedniego HEAD 97768850d0b91b35affd84d5675a9368146d48ea
+Każdy diff poniżej jest pełnym bieżącym unified diff dla wskazanego source/test pliku.
 
-    diff --git a/tests/test_cycle_semantics_external_import_authority.py b/tests/test_cycle_semantics_external_import_authority.py
-    index 90723e3..e5aa3a2 100644
-    --- a/tests/test_cycle_semantics_external_import_authority.py
-    +++ b/tests/test_cycle_semantics_external_import_authority.py
-    @@ -202,6 +202,10 @@ def test_conditional_external_side_effect_is_not_runtime_authority(tmp_path):
-             target_python_version=sys.version_info[:2],
-             assume_passive_external_imports=True,
-             assume_frozen_dataclass_decoration=True,
-    +        assumed_external_callable_effects={
-    +            ("dataclasses", "dataclass"):
-    +                "FROZEN_DATACLASS_DECORATOR_FACTORY",
-    +        },
-         )
- 
-         assert conditional.outcome == "CONDITIONAL_MODEL_PASS"
-    @@ -215,6 +219,7 @@ def test_conditional_external_side_effect_is_not_runtime_authority(tmp_path):
-         assert model.evidence_scope == (
-             "CONDITIONAL_EXTERNAL_AND_FROZEN_DATACLASS_"
-             "ASSUMPTIONS_NOT_RUNTIME_PROOF"
-    +        "|EXTERNAL_CALL_EFFECT_ASSUMED_NOT_RUNTIME_ATTESTED"
-         )
-         assert tuple(
-             (item.importer, item.operation, item.target, item.symbol,
+### contextor/core/live_state/ipc.py
 
-### Rzeczywisty diff względem bieżącego HEAD 1088a668dea27e5e9636a7ff22d9a29481f38866
+    diff --git a/contextor/core/live_state/ipc.py b/contextor/core/live_state/ipc.py
+    index 710a016..2185db1 100644
+    --- a/contextor/core/live_state/ipc.py
+    +++ b/contextor/core/live_state/ipc.py
+    @@ -13,6 +13,7 @@ import threading
+     import time
+     import uuid
+     from dataclasses import dataclass
+    +from multiprocessing import AuthenticationError
+     from multiprocessing.connection import Client, Listener
+     from pathlib import Path
+     from types import SimpleNamespace
+    @@ -1323,6 +1324,8 @@ class CanonicalLiveServer:
+                 accept_started = time.monotonic()
+                 try:
+                     connection = self._listener.accept()
+    +            except AuthenticationError:
+    +                continue
+                 except OSError as exc:
+                     if self._stop.is_set():
+                         break
 
-    diff --git a/tests/test_cycle_semantics_external_import_authority.py b/tests/test_cycle_semantics_external_import_authority.py
-    index b699c64..e5aa3a2 100644
-    --- a/tests/test_cycle_semantics_external_import_authority.py
-    +++ b/tests/test_cycle_semantics_external_import_authority.py
-    @@ -219,6 +219,7 @@ def test_conditional_external_side_effect_is_not_runtime_authority(tmp_path):
-         assert model.evidence_scope == (
-             "CONDITIONAL_EXTERNAL_AND_FROZEN_DATACLASS_"
-             "ASSUMPTIONS_NOT_RUNTIME_PROOF"
-    +        "|EXTERNAL_CALL_EFFECT_ASSUMED_NOT_RUNTIME_ATTESTED"
-         )
-         assert tuple(
-             (item.importer, item.operation, item.target, item.symbol,
+### tests/test_live_state_ipc.py
 
-## REMAINING_UNKNOWNS
+    diff --git a/tests/test_live_state_ipc.py b/tests/test_live_state_ipc.py
+    index 7f4b660..cbb73a8 100644
+    --- a/tests/test_live_state_ipc.py
+    +++ b/tests/test_live_state_ipc.py
+    @@ -487,6 +487,23 @@ def test_server_accept_failure_emits_once_and_reraises(monkeypatch):
+         assert events[0]["operation_or_request_type"] == "accept"
+     
+     
+    +def test_server_rejects_invalid_authkey_without_stopping_listener(live_server):
+    +    server, client = live_server
+    +    valid_key = server.endpoint.authkey
+    +    invalid_key = bytes([valid_key[0] ^ 1]) + valid_key[1:]
+    +
+    +    with pytest.raises(multiprocessing.AuthenticationError):
+    +        mpc.Client(
+    +            server.endpoint.address,
+    +            family="AF_INET",
+    +            authkey=invalid_key,
+    +        )
+    +
+    +    assert not server._stop.is_set()
+    +    assert client.request("ping")["status"] == "ok"
+    +    assert not server._stop.is_set()
+    +
+    +
+     def test_server_stopped_accept_path_emits_no_incident(monkeypatch):
+         events = []
+         server = CanonicalLiveServer(SimpleNamespace(files=[]))
 
-### DIRECT_EVIDENCE
+## FINAL_STATUS
 
-- Bieżący HEAD zawiera zmianę F2-I1, dlatego sam diff względem bieżącego HEAD pokazuje tylko F2-I2. Łączny diff od bazy sprzed F2-I1 jest pokazany oddzielnie i odpowiada rzeczywistemu diffowi git od revision 97768850.
-
-### UNKNOWN
-
-- Nie odczytano issues.md zgodnie z prośbą.
-- Nie badano testów poza zakresem wskazanym w tym zadaniu.
+- **DIRECT_EVIDENCE:** implementacja i test regresyjny są zgodne z dokładnymi hunks zlecenia; celowane testy i tests/test_live_state_ipc.py przechodzą; oba pliki mają fresh canonical state, verified workspace_sync i świeże, puste syntax diagnostics.
+- **DIRECT_EVIDENCE:** zmieniono source/test wyłącznie w dwóch wskazanych plikach. walkthrough.md nadpisano raportem. Brak commit/push/staging/FULL/restartu.
+- **UNKNOWN:** nie twierdzę, że już uruchomiony proces LIVE załadował zmieniony kod; restart był wykluczony, a testy używały wyłącznie izolowanego fixture.
+- **FINAL_STATUS=PASS — zakres source/test i watcher verification.**
 
