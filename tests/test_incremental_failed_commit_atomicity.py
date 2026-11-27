@@ -214,3 +214,111 @@ def test_failed_candidate_report_before_publication_is_atomic(tmp_path, monkeypa
     assert report_calls, "The candidate derived-report boundary was not reached"
     assert not acknowledgements, "FileState acknowledgement preceded candidate report failure"
     _assert_failed_update_atomic(baseline, "CASE_D", len(acknowledgements))
+
+def test_source_change_after_prepare_rejects_updated_commit(
+    tmp_path, monkeypatch
+):
+    baseline = _real_baseline(
+        tmp_path,
+        {
+            "provider.py": "PROVIDER_VALUE = 1\n",
+            "consumer.py": "from provider import PROVIDER_VALUE\n",
+        },
+    )
+    source = baseline.root / "provider.py"
+    source.write_text(
+        "PROVIDER_VALUE = 1\nNEW_OWN_SYMBOL = 2\n",
+        encoding="utf-8",
+    )
+
+    from contextor.core.analysis.incremental import engine as engine_module
+
+    original_prepare = engine_module.prepare_source_update
+    preparation_calls = []
+
+    def change_source_after_prepare(*args, **kwargs):
+        prepared = original_prepare(*args, **kwargs)
+        preparation_calls.append(prepared)
+        assert not prepared.has_error
+        source.write_text(
+            "import consumer\nPROVIDER_VALUE = 3\n",
+            encoding="utf-8",
+        )
+        return prepared
+
+    monkeypatch.setattr(
+        engine_module,
+        "prepare_source_update",
+        change_source_after_prepare,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="Source changed during incremental analysis",
+    ):
+        baseline.engine.update_file(str(source))
+
+    assert len(preparation_calls) == 1
+    _assert_failed_update_atomic(
+        baseline,
+        "SOURCE_CHANGED_AFTER_PREPARE_UPDATED",
+        1,
+    )
+    assert baseline.engine.state_manager.has_changed(
+        str(source)
+    )
+
+
+def test_source_change_after_prepare_rejects_semantic_noop(
+    tmp_path, monkeypatch
+):
+    baseline = _real_baseline(
+        tmp_path,
+        {
+            "provider.py": "PROVIDER_VALUE = 1\n",
+            "consumer.py": "from provider import PROVIDER_VALUE\n",
+        },
+    )
+    source = baseline.root / "provider.py"
+    source.write_text(
+        "PROVIDER_VALUE = 1\n# semantic no-op\n",
+        encoding="utf-8",
+    )
+
+    from contextor.core.analysis.incremental import engine as engine_module
+
+    original_prepare = engine_module.prepare_source_update
+    preparation_calls = []
+
+    def change_source_after_prepare(*args, **kwargs):
+        prepared = original_prepare(*args, **kwargs)
+        preparation_calls.append(prepared)
+        assert not prepared.has_error
+        source.write_text(
+            "import consumer\nPROVIDER_VALUE = 3\n",
+            encoding="utf-8",
+        )
+        return prepared
+
+    monkeypatch.setattr(
+        engine_module,
+        "prepare_source_update",
+        change_source_after_prepare,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="Source changed during incremental analysis",
+    ):
+        baseline.engine.update_file(str(source))
+
+    assert len(preparation_calls) == 1
+    assert preparation_calls[0].delta.imports_added == []
+    _assert_failed_update_atomic(
+        baseline,
+        "SOURCE_CHANGED_AFTER_PREPARE_NOOP",
+        1,
+    )
+    assert baseline.engine.state_manager.has_changed(
+        str(source)
+    )
