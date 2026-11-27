@@ -1591,6 +1591,38 @@ class ContextorFacade:
                         "prepared_optional_scc_preparation"
                     ] = cycle_source_preparation
 
+            indexed_fingerprints = index.source_fingerprints_by_module
+            committed_files = (
+                file_state_payload.get("files")
+                if isinstance(file_state_payload, dict)
+                else None
+            )
+            if not isinstance(committed_files, dict):
+                raise RuntimeError(
+                    "Full analysis FileState payload is unavailable"
+                )
+
+            for module_id, module in state.modules.items():
+                expected_sha256 = indexed_fingerprints.get(module_id)
+                file_record = committed_files.get(module.absolute_path)
+                actual_sha256 = (
+                    file_record.get("sha256")
+                    if isinstance(file_record, dict)
+                    else None
+                )
+
+                if not expected_sha256 or not actual_sha256:
+                    raise RuntimeError(
+                        "Missing trusted source SHA-256 for "
+                        f"module {module_id}"
+                    )
+
+                if actual_sha256 != expected_sha256:
+                    raise RuntimeError(
+                        "Source changed during full analysis: "
+                        f"{module_id}"
+                    )
+
             component_started = time.monotonic()
             meta = save_engine_state(
                 state,
