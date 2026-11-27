@@ -784,6 +784,9 @@ class IncrementalAnalysisEngine:
             )
             checked_and_none = {"status": "checked_and_none", "errors": []}
 
+            expected_source_fingerprint = (
+                prep.typing_guard_source_evidence["source_fingerprint"]
+            )
             delta = prep.delta
             usage_delta = prep.usage_delta
             new_imports = prep.new_imports
@@ -849,6 +852,16 @@ class IncrementalAnalysisEngine:
                     )
                     self.state.typing_guard_evidence = updated_evidence
                     self.state_manager.update_state(file_path)
+                    tracked_sha256 = self.state_manager.get_tracked_sha256(
+                        file_path
+                    )
+                    if (
+                        tracked_sha256
+                        and tracked_sha256 != expected_source_fingerprint
+                    ):
+                        raise RuntimeError(
+                            "Source changed during incremental analysis"
+                        )
                     self.state.module_usages_manifest = _updated_module_usage_manifest(
                         self.state.module_usages_manifest,
                         module_path,
@@ -901,6 +914,7 @@ class IncrementalAnalysisEngine:
                 force_full_graph=force_full_graph,
                 classified_modules=classified_modules,
                 updated_typing_guard_evidence=updated_evidence,
+                expected_source_fingerprint=expected_source_fingerprint,
             )
 
             if plan.refresh_completeness == "requires_resync":
@@ -996,6 +1010,7 @@ class IncrementalAnalysisEngine:
         force_full_graph: bool = False,
         classified_modules: dict[str, Module] | None = None,
         updated_typing_guard_evidence: dict[str, object] | None = None,
+        expected_source_fingerprint: str | None = None,
     ) -> tuple[Set[str], bool, dict]:
         """
         Executes planned RefreshPlan phases and performs atomic persistent & RAM commit.
@@ -1273,6 +1288,17 @@ class IncrementalAnalysisEngine:
             "INCREMENTAL_FILE_STATE_START",
         )
         self.state_manager.update_state(file_path)
+        tracked_sha256 = self.state_manager.get_tracked_sha256(
+            file_path
+        )
+        if (
+            expected_source_fingerprint is not None
+            and tracked_sha256
+            and tracked_sha256 != expected_source_fingerprint
+        ):
+            raise RuntimeError(
+                "Source changed during incremental analysis"
+            )
         self.state.module_usages_manifest = _updated_module_usage_manifest(
             self.state.module_usages_manifest,
             delta.module_path,
