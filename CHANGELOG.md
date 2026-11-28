@@ -1,3 +1,27 @@
+## 2026-11-27
+
+Canonical State and Dependency Graph Integrity
+
+Fixed source snapshot consistency in incremental analysis by verifying that the acknowledged FileState SHA-256 matches the exact source bytes used to extract module facts and dependencies.
+
+Prevented both regular updates and semantic no-op updates from committing inconsistent canonical state when source files change during analysis.
+
+Added equivalent integrity validation to full repository analysis, rejecting inconsistent generations before committed snapshot publication.
+
+Preserved transactional rollback behavior, trusted fingerprint validation, and existing error contracts.
+
+Added deterministic regression tests covering source changes during incremental and full analysis, including rollback and committed generation preservation.
+
+Rebuilt the canonical repository state, restoring a previously missing import and dependency graph edge.
+
+Verified consistency between source imports, canonical module facts, dependency graphs, and persisted FileState fingerprints.
+
+Confirmed successful committed snapshot publication and LIVE adoption through an exact-generation publication receipt.
+
+Verified semantic parity between Desktop and MCP full-analysis entry points using the existing integration test.
+
+Validation: All targeted regression tests passed. The rebuilt canonical state contains all 49 expected imports and 18 outbound dependencies for the affected module, with no remaining mismatches. Final audit: PASS.
+
 # Contextor — Changelog
 
 Development history (newest first). Entries retain their original technical claims, validation results and stated limitations.

@@ -7,46 +7,44 @@ Proceduj:
 
 ***********************************************************
 Jesteś zarazem audytorem oraz inżynierem kodu pythona w projekcie contextor na platformie PC z WIN 10
-Współpracujesz z agentem w codex, który jest twoimi oczami i rękami wewnątrz lokalnego repo z kodem Contextora na moim PC
-Pushe zmian w lokalnym repo na git hub robię ja, więc nie skupiamy się przesadnie na zgodności komitów w kazdej iteracji
-Przeczytaj wcześniejsze czaty w projekcie contextor, żeby nie wypaść z kontekstu pracy
+Współpracujesz z agentem w Codex, który jest twoimi oczami i rękami wewnątrz lokalnego repo z kodem Contextora na moim PC
+Pushe zmian w lokalnym repo na git hub robię ja, więc nie skupiamy się  na zgodności komitów w kazdej iteracji, bo stan repo lokalnego i na git jest tożsamy.
+Przeczytaj wcześniejsze czaty w projekcie contextor, żeby nie wypaść z kontekstu pracy.
 W przypadku braku kontekstu uwzględnij, że codex ma dostęp do pewnej archiwalnej wiedzy o pracach nad projektem.
 
-Zasady pracy
+Zasady pracy:
 
 1. Agent wykonuje discovery przez Contextor MCP, kiedy brakuje mi dowodów potrzebnych do podjęcia bezpiecznej decyzji. Może badać kod, zależności, przepływy danych, historię i zachowanie mechanizmów. Ma dostarczać fakty, nie projektować rozwiązania.
 2. Ty podejmujesz decyzje projektowe. Na podstawie dostępnego kodu i wyników discovery ustalasz przyczynę błędu, właściwą semantykę, zakres zmian i kryteria poprawności.
 3. Agent implementuje dokładnie zatwierdzone rozwiązanie. Nie wybiera własnej architektury, nie wymyśla alternatywnych mechanizmów i nie rozszerza implementacji bez twojego polecenia.
 4. Ty adytujesz rezultat. Nie wystarczą zielone testy ani brak znalezionego błędu. Wymagam dowodów poprawności właściwego mechanizmu, bez hardkodowania pod Contextora i bez encyklopedycznych testów.
 5. Discovery nie jest ani zabronione, ani obowiązkowe. Jest narzędziem do uzupełniania konkretnej luki w wiedzy. Jeśli masz wystarczający kontekst, projektuj zmianę bez kolejnego discovery. Jeśli go nie masz, zlecasz agentowi precyzyjne discovery i dopiero po otrzymaniu wyników decydujesz o implementacji.
-6. Ogranicz szum do zera w promptach dla agenta - metainstrukcje wystarczą jeden raz w pierwszym prompcie nowego czatu; po co przecież pisać powtórnie rzeczy typu - język instrukcji, data, nazwa projektu,  środowisko - to wszystko wystarczy tylko raz w pierwszym prompcie, bez powótrek w kolejnych promptach - mam na mysli coś takiego jak tu, np.:
-"Contextor to lokalny serwer MCP i narzędzie
-statycznej analizy projektów Python.
-Repozytorium:
-WojciechJarka/Contextor
-Środowisko:
-- Windows
-- CPython 3.15.2
-- lokalny backend HTTP MCP
-- kanoniczny stan LIVE
-- przyrostowa analiza AST i grafu zależności
-Contextor analizuje:
-- importy i zależności modułów;
-- symbole i referencje;
-- graf architektury;
-- SCC i cykle;
-- wpływ zmian;
-- warstwy i zależności;
-- inicjalizację pakietów Pythona;
-- ograniczoną semantykę wykonania kodu.
-Nie jest to pełny interpreter CPython.
-Nie należy dążyć do nieograniczonego
-wykonywania kodu użytkownika."
+6. Ogranicz szum do zera w promptach dla agenta - metainstrukcje wystarczą jeden raz w pierwszym prompcie nowego czatu; po co przecież pisać powtórnie rzeczy typu - język instrukcji, data, nazwa projektu,  środowisko - to wszystko wystarczy tylko raz w pierwszym prompcie.
 7. Najważniejsze:
 Priorytetem jest poprawność i uniwersalność rozwiązania, nie szybkość, liczba promptów ani liczba zaliczonych testów.
 8. Masz dostęp do repo na github WojciechJarka/contextor, a historia ewolucji projektu znajduje się w changelog.md w root projektu.
 9. Każde zadanie agenta kończy się nadpisaniem przez niego walkthorugh.md w root projektu.
-10. Językiem prac nad projektem (w promptach, walkthrough, czatach) jest język polski,
+10. Językiem prac nad projektem (w promptach, walkthrough, czatach) jest język polski.
+11. Od teraz przyjmujesz taki podział odpowiedzialności:
+11.1. GitHub — samodzielnie czytasz aktualne implementacje, zależności, testy i historię zmian. Na tej podstawie projektujesz konkretne poprawki.
+11.2. Contextor MCP — dostarcza informacji, których nie uzyskasz równie bezpośrednio z samego kodu: modelu semantycznego, rozwiązywania zależności, lineage, stanu kanonicznego i innych wyników analizy.
+11.3. Codex — uzupełnia twoją wiedzę o tych mechanizmach poprzez ukierunkowane eksperymenty i raporty, a następnie wykonuje twoje dosłowne instrukcje implementacyjne. Nie projektuje rozwiązań.
+11.4. Ty — odpowiadasz za architekturę, poprawność proponowanego kodu, dobór testów i ocenę wyników.
+12. Contextor MCP służy do pozyskiwania brakującej wiedzy o kodzie, a nie do rytualnego potwierdzania wszystkiego, co agent już wie. To nie oznacza rezygnacji z MCP-first. Oznacza, że MCP-first dotyczy wyboru źródła wiedzy, a nie obowiązku wykonania zapytania przed każdą czynnością. Zasady pracy agenturalnej z Contextorem:
+12.1. Jedno discovery na zagadnienie. Agent nie powtarza analizy architektury, zależności i symboli, które zostały już ustalone i pozostają aktualne.
+12.2. Każde wywołanie MCP musi mieć cel. Przed zapytaniem agent powinien wiedzieć, jakiej konkretnej informacji potrzebuje i jak wynik wpłynie na dalszą pracę.
+12.3. Najwęższe możliwe zapytanie. Pobieramy konkretne symbole, zależności lub zakresy. Nie pobieramy pełnej architektury projektu, gdy interesuje nas jeden moduł.
+12.4. Nie pobieramy ponownie tego samego wyniku. Jeżeli wcześniejszy rezultat pozostaje aktualny, agent z niego korzysta. Ponowny odczyt wymaga konkretnej przyczyny.
+12.5. Truncation i limity odpowiedzi są częścią kontraktu narzędzia. Agent korzysta z dostępnych filtrów, projekcji pól i limitów. Nie wymusza ogromnych odpowiedzi, jeżeli wystarczy mniejszy zakres.
+12.6. Nie zgadujemy nazw symboli. Jeśli nazwa nie jest znana, najpierw używamy właściwego mechanizmu wyszukiwania. get_symbol_implementation służy do pobrania ustalonego symbolu, nie do zgadywania.
+12.7. Lineage tylko wtedy, gdy jest potrzebne. Przy analizie pochodzenia faktów lub wpływu zmian jest wartościowe. Nie musi towarzyszyć każdemu odczytowi funkcji.
+12.8. Kontrola freshness tylko w odpowiednim momencie. Nie trzeba sprawdzać rewizji po każdym wywołaniu. Należy ją sprawdzić, gdy aktualność modelu ma znaczenie dla decyzji albo po zmianie, która mogła go unieważnić.
+12.9. MCP nie zastępuje zwykłych narzędzi. Odczyt pliku, diff, Git, grep i testy są właściwe dla swoich zadań. Nie należy pośredniczyć przez MCP w operacjach, dla których nie wnosi dodatkowej wartości.
+12.10. Nie czytamy dokumentacji wielokrotnie. Agent wraca do dokumentacji, gdy pojawia się nowe narzędzie, nieznany parametr, zmiana kontraktu albo rzeczywisty błąd użycia.
+12.11. Raport zawiera wyniki, nie kronikę wywołań. Interesują nas odkryte zależności, dowody, ograniczenia i wyniki testów. Nie potrzebujemy przepisywania wszystkich odpowiedzi MCP.
+12.12 Po implementacji wykonujemy celowaną kontrolę. Weryfikujemy zmienione moduły, istotne zależności i testy. Nie uruchamiamy pełnego audytu architektury bez konkretnego powodu.
+12.13 Ważne rozróżnienie: nie chcę wprowadzać sztucznego limitu, np. pięciu wywołań MCP na zadanie. To byłoby kolejne hardkodowane ograniczenie. Agent może wykonać 30 zapytań, jeśli każde dostarcza potrzebnej informacji. Może też wykonać zero, jeśli wszystkie niezbędne fakty są już znane. Optymalizujemy ilość zbędnej pracy, a nie sam licznik wywołań.
+12.14 Reguła do przyszłych promptów: korzystaj z Contextor MCP selektywnie, do uzyskania brakującej wiedzy semantycznej i architektonicznej. Wykorzystuj ustalenia wcześniejszego discovery. Nie powtarzaj znanych odczytów, rutynowych preflightów, dokumentacji ani kontroli freshness bez uzasadnienia. Preferuj wąskie projekcje i minimalne odpowiedzi. Git, odczyt źródeł i testy stosuj bezpośrednio tam, gdzie MCP nie daje dodatkowej wartości. Ta reguła powinna zastąpić rozbudowane instrukcje proceduralne, które dotąd umieszczałem w niemal każdym prompcie. I najważniejsze: agent ma używać Contextora, żeby lepiej rozumieć kod, a nie wykonywać pracę polegającą głównie na obsługiwaniu samego Contextora.
 
 **********************************************************************************************
 Priorytet	Etap	Cel
@@ -68,23 +66,13 @@ hipoteza do sprawdzenia i ewentualnej naprawy (moze być częściowo lub całkow
 
 
 
-
-
-
-
-
-
-16Niezależność kontraktów testowychBrak pełnego pokrycia dowodowegoR1/R2 wykazały testy wzorowane na konstrukcjach Contextora. Należy uzupełnić mechanizmowe testy pozytywne i negatywne, przypadki przesłonięć, zmienionej kolejności, różnych nazw i testy rozbieżności z CPython.
-
-
-
 17Lokalna autoryzacja IPC i uprawnienia środowiskaGranica zaufania do oceny przed dystrybucjąR6 wykazał brak osobnego per-operation owner check dla uwierzytelnionego publish. Standardowy committed reader chroni instalację arbitralnego request.state, ale ACL pliku authkey i zapisu committed store nie zostały zbadane. To nie jest potwierdzona podatność.
 
 
 
 18Pozostałe kontrole optional/legacy i adopcji kodu LIVEResztkowe luki weryfikacji, nie potwierdzone defektyOddzielne API optional/legacy nie zasilają sprawdzonej projekcji ostrzeżeń, ale dynamiczni konsumenci poza nią nie zostali zinwentaryzowani globalnie. Po restarcie LIVE brak bezpośredniego fingerprintu klasy w RAM, choć nowy PID i czas startu mocno wskazują na adopcję aktualnego kodu.
 
-19 czy nadal istnieją problemy z lukami w łańcuchach publikacji?
+
 
 największym zagrożeniem dla Contextora nie jest obecnie zbyt mały zakres interpretowanych konstrukcji, lecz możliwość otrzymania MODEL_PASS na podstawie niepełnego modelu skutków wykonania
 
@@ -501,219 +489,6 @@ Po wykonaniu czekaj na komendę: proceduj.
 
 *****
 
-Po pierwsze, bindings = 32 KB jest na tyle duże, że prawdopodobnie w przyszłości przyda mu się drugi poziom progressive disclosure. Nie robiłbym tego teraz na zapas, ale jeśli w praktyce często będę potrzebował tylko np. bindings konkretnego parametru/callee/owner, warto później umożliwić zawężenie wewnątrz sekcji.
-
-Po drugie, calls_interfaces i unresolved_dynamic_boundaries mają dokładnie po 14 522 B. To może być całkowicie poprawne, ale podczas kolejnych dogfoodów sprawdziłbym, czy nie ma tam dużej duplikacji tych samych faktów. Jeżeli jeden fakt jest świadomie eksponowany w dwóch semantycznych widokach, okej; jeśli to niezamierzona duplikacja payloadu, byłby potencjał do zmniejszenia kosztu.
-
-# Ocena Contextor MCP
-
-> Testowano na: `C:\Temp\Contextor_Repo` | Data: 2026-08-31  
-> **Sprzęt:** AMD FX-4100 (4C/4T, Bulldozer 2011, brak HT), 8 GB RAM, brak GPU (CPU-only)  
-> **Kontekst:** Amatorski projekt solo, ~3.5 miesiąca pracy
-
----
-
-## Podsumowanie wyników
-
-| Kategoria | Ocena |
-|---|---|
-| **Analiza projektu** | ✅ Działa poprawnie |
-| **Nawigacja architektoniczna** | ✅ Bardzo dobra |
-| **Blast radius / konsumenci** | ✅ Działa, bogaty output |
-| **Implementacja symboli** | ✅ Precyzyjna, AST-bounded |
-| **Wyszukiwanie źródła** | ✅ Działa (uwagi poniżej) |
-| **Canonical query** | ⚠️ Pola v1.0 są bardzo ograniczone |
-| **Izolacja warstw** | ⚠️ Wymaga analyze_layer przed użyciem |
-| **Spójność API (nazwy parametrów)** | ⚠️ Niespójności symbol vs artifact_name |
-| **Single-file report** | 🚧 W trakcie prac (pominięto) |
-
----
-
-## Profil wydajnościowy (FX-4100 / 8 GB RAM / CPU-only)
-
-| Operacja | Czas | Ocena |
-|---|---|---|
-| `analyze_project` (325 modułów) | ~13 s | ✅ Bardzo dobry |
-| `get_project_architecture` | ~15 s | ⚠️ Zauważalny |
-| `get_artifact_blast_radius` | ~2 s | ✅ Dobry |
-| `get_symbol_implementation` | ~2 s | ✅ Dobry |
-| `get_file_edit_context` | ~6 s | ✅ Akceptowalny |
-| `search_source` | ~12 s | ⚠️ Zauważalny |
-| `get_artifacts_for_module` | ~2 s | ✅ Dobry |
-
-**Wnioski dot. wydajności:**
-
-- FX-4100 to Bulldozer — słaba wydajność single-core i pamięci podręcznej. **13 s analizy na tym CPU to naprawdę dobry wynik** — sugeruje że analiza jest dobrze zrównoleglona lub I/O-bounded (nie saturuje jednego rdzenia)
-- `get_project_architecture` (~15 s) i `search_source` (~12 s) są wolniejsze niż można by oczekiwać — prawdopodobnie deserializują duże struktury danych po analizie; na nowoczesnym CPU byłoby to 2–4×  szybsze
-- Brak GPU nie ma znaczenia — Contextor jest czysto CPU/IO-based, żadnych embeddingów ani inference po stronie klienta
-- 8 GB RAM jest wystarczające — przy 325 modułach footprint powinien być poniżej 1–2 GB
-
-### ⚡ Test LIVE state (desktop watcher)
-
-| Operacja | Czas reakcji | Status zwrócony |
-|---|---|---|
-| Zmiana docstringa | ~4-5 s | `UNCHANGED` — poprawnie, brak wpływu na graf |
-| Dodanie `import os` | ~6 s | `UPDATED` — wykrył zmianę grafu |
-| Ciągłość rewizji | 131 → 132 → 133 → 134 | `continuity: continuous`, brak luk |
-
-**Kluczowe obserwacje:**
-- System **poprawnie rozróżnia** `UNCHANGED` (tylko tekst) od `UPDATED` (zmiana grafu) — brak niepotrzebnych invalidacji
-- ~5–6 s na FX-4100 to bardzo dobry wynik; na nowoczesnym CPU (Ryzen 5/7) to prawdopodobnie 1–2 s
-- `canonical_revision` jest monotonicznie rosnącym licznikiem — agent może bezpiecznie używać go do wykrywania zmian bez dodatkowego stanu
-- `activity_epoch` pozwala wykryć restart watchera bez gubienia rewizji
-
-
-
-
----
-
-## Wyniki testów narzędzi
-
-### ✅ `analyze_project` + `get_analysis_status`
-- **Czas analizy:** ~13 sekund dla całego repo (325 modułów)
-- **Feedback postępu:** Tak — krokowy `[PROGRESS] Step N/8`
-- **0 syntax errors, 0 cykli, 0 kolizji** — diagnostics działają
-- **Uwaga:** `live_publish_status: not_attempted` — oznacza że desktop watcher nie był uruchomiony; dane trafiły do stanu raportowego, nie LIVE. Nieoczywiste dla nowego użytkownika.
-
-### ✅ `get_project_architecture`
-- Zwraca rozkład warstw (7 warstw, 325 modułów)
-- Kilka rodzin analitycznych ma `state: deferred` (`action_items`, `top_global_hotspots`, `debt_summary`)  
-- To uczciwe zachowanie — nie fabrykuje danych, ale może dezorientować
-
-### ✅ `search_artifacts`
-- Wyszukiwanie `"analyzer"` → 27 trafień (20 zwrócono, truncated)
-- Zwraca pełne ścieżki modułów, kind, consumer count
-- Dwa aliasowe parametry: `search_term` i `query` — oba działają, ale to redundancja w API
-
-### ⚠️ `get_module_context` — problem z rozumieniem granularności
-- `module_name: "contextor"` → `not_found` (sugeruje `contextor.cli`)
-- Root package nie jest modułem — to poprawne zachowanie, **ale komunikat mógłby być wyraźniejszy**
-- Po poprawce (`contextor.cli`) — bogaty output: fan_in, fan_out, pagerank, betweenness, bridge_score, risk_score, warstwy
-
-### ✅ `get_artifacts_for_module`
-- Dla `contextor.core.analysis.full_analysis_coordinator` → 18 artefaktów (10 zwrócono)
-- Pełne sygnatury funkcji z consumer evidence
-- Dobry punkt startowy przed edycją
-
-### ✅ `get_artifact_blast_radius`
-- `run_full_analysis_exclusive` → 6 bezpośrednich konsumentów, 66 downstream modułów (25 prod + 41 tests)
-- Rozkład po warstwach: adapter, cli, tests, ui
-- Bardzo przydatne przed refaktoryzacją krytycznych funkcji
-- **Uwaga:** `artifact_name: "FullAnalysisCoordinator"` → `not_found` bez żadnych sugestii (blast radius nie ma `similar_candidates` jak `get_module_context`)
-
-### ✅ `get_symbol_implementation`
-- Zwraca kompletny kod z linią startową/końcową (AST-bounded)
-- `implementation_is_complete: true`, `implementation_includes_docstring: true`
-- Szybkie i precyzyjne
-
-### ✅ `get_file_edit_context`
-- Zwraca: public_api, imports, consumers, risk_score, layer, entrypoint
-- Doskonałe narzędzie przed modyfikacją pliku — agreguje wszystko czego agent potrzebuje
-- `risk_score: 0.0978` dla koordynatora analizy — sensowna wartość
-
-### ✅ `get_symbol_call_context`
-- **Wymaga w pełni kwalifikowanego symbolu:** `module::symbol` (nie samo `symbol`)
-- Po podaniu poprawnej formy: zwraca callees z numerami linii i call_kind
-- Zakres: **tylko intra-module** — granica jest wyraźnie zaznaczona
-- To ważne ograniczenie: nie pokaże kto *wywołuje* tę funkcję z zewnętrznych modułów (do tego `get_artifact_blast_radius`)
-
-### ⚠️ `get_layer_isolation`
-- Wymaga `layer_name`, nie `layer`
-- `runtime` → `"Layer 'runtime' has no dedicated report"` → trzeba najpierw wywołać `analyze_layer`
-- **Niezgodność przepływu:** `get_project_architecture` zgłasza `layer: "runtime"` ale `get_layer_isolation` nie działa bez wcześniejszego analyze_layer dla tej warstwy
-
-### ⚠️ `query_canonical_projection`
-- API wymaga `request: {root, filters, select}` jako zagnieżdżony obiekt — nie flat params
-- Schemat v1.0 jest bardzo ograniczony: tylko 5 pól (`module_name`, `module_id`, `path`, `import_count`, `imports`)
-- **Brak `layer`, `fan_in`, `fan_out`, `risk_score`** — co sprawia że narzędzie jest mało użyteczne dla typowych zapytań architektonicznych
-- Trzeba użyć `describe_canonical_state` żeby odkryć dostępne pola — to dobry wzorzec, ale dokumentacja powinna to mocniej podkreślać
-
-### ✅ `search_source`
-- Wyszukuje tekst w source code (case-insensitive domyślnie)
-- Zwraca `span_start/end`, `matched_lines`, podgląd kontekstu — `line_map` format
-- **Aliasowe parametry:** `search_term` i `query` — tak jak w `search_artifacts`
-- Działa, choć format `line_map` z kompresją jest mniej czytelny niż surowy kod
-
-### ✅ `describe_canonical_state`
-- Zwraca pełny schemat dostępnych pól z operatorami
-- Działa bez `repo_path` — pasywne, read-only
-- Przydatne do odkrywania możliwości query API
-
----
-
-## Zidentyfikowane problemy
-
-### 🔴 Krytyczne
-
-*(brak w testowanych narzędziach poza pominięty single-file report)*
-
-### 🟡 Umiarkowane
-
-| # | Problem | Narzędzie | Opis |
-|---|---|---|---|
-| 1 | **Aliasowe parametry** | `search_artifacts`, `search_source` | Oba `search_term` i `query` robią to samo. Zbędna redundancja w API. |
-| 2 | **get_artifact_blast_radius bez sugestii** | `get_artifact_blast_radius` | Gdy artifact nie istnieje, brak `similar_candidates` (w przeciwieństwie do `get_module_context`) |
-| 3 | **query_canonical_projection — ubogi schemat v1.0** | `query_canonical_projection` | Brak `layer`, `fan_in`, `fan_out` w v1.0; trzeba wiedzieć że istnieje v1.1 przez `describe_canonical_state` |
-| 4 | **get_layer_isolation — ukryty prereq** | `get_layer_isolation` | Nie informuje z góry że wymaga wcześniejszego `analyze_layer` |
-| 5 | **live_publish_status: not_attempted** | `get_analysis_status` | Nieintuicyjne dla agenta bez kontekstu desktop watcher |
-
-### 🟢 Drobne / UX
-
-| # | Problem | Opis |
-|---|---|---|
-| 6 | **get_symbol_call_context — wymagany qualified symbol** | Zrozumiałe, ale agent może podać tylko plain name i dostać błąd bez sugestii |
-| 7 | **Brak `similar_candidates` dla not_found w blast_radius** | Drobna niespójność z `get_module_context` |
-| 8 | **Root package (np. `contextor`) nie jest modułem** | Zachowanie poprawne, ale komunikat błędu mógłby wskazywać wprost na przyczynę |
-
----
-
-## System logowania (bonus)
-
-Logi w `logs/*.jsonl` powstały jako narzędzie pomiarowe podczas optymalizacji runtime — i zostały, bo były zbyt wartościowe żeby wyrzucić. Efekt tej optymalizacji: **5 minut → 12 sekund** (~25×) przez eliminację redundantnych wywołań pipeline.
-
-Co wnosi ten log do oceny:
-- **Format JSONL** z `op` jako correlation ID przez procesy/wątki — podłączalny pod dowolny aggregator bez zmian
-- **`mono_ms` + `elapsed_ms`** na każdym etapie — precyzyjne pomiary bez zegara ściennego
-- **4 domeny** (`DESKTOP`, `LIVE`, `MCP`, `GUI`) — pełna obserwowalność całego systemu
-- **Samoudokumentujący się** — linia `fields` i `events` opisuje schemat na początku każdej sesji
-
-Z logów wynika dokładny breakdown latency na FX-4100:
-```
-FS poll interval:  ~938ms   ← filesystem watcher
-AST re-parse:     ~1156ms   ← ENGINE_READY
-Graph diff:          ~94ms  ← INCREMENTAL_END (serce systemu, bardzo szybkie)
-Snapshot save:      ~359ms  ← PERSIST_END
-─────────────────────────
-Total end-to-end:  ~3844ms  (odczuwane z zewnątrz: ~5-6s)
-```
-`INCREMENTAL_END: 94ms` to dowód że optymalizacja pipeline trafiła w sedno.
-
----
-
-## Co działa naprawdę dobrze
-
-1. **Szybkość analizy** — 13s dla 325 modułów to bardzo dobry wynik na FX-4100
-2. **LIVE state z inkrementalnym updatem** — `UNCHANGED` vs `UPDATED` distinction, ~5s latency, `canonical_revision` jako bezstanowy znacznik dla agenta
-3. **`get_artifact_blast_radius`** — warstwy, downstream count, cross-layer detection — dokładnie to czego agent potrzebuje przed refaktoryzacją
-4. **`get_symbol_implementation`** — AST-bounded, kompletny kod z gwarancją `implementation_is_complete`
-5. **`get_file_edit_context`** — agreguje risk_score, public API, importy, consumers — idealna "pre-edit checklist"
-6. **Spójność diagnostyki** — każdy response niesie `diagnostics_summary` i `state_freshness` — agent zawsze wie na jak świeżych danych pracuje
-7. **System logowania** — profesjonalna obserwowalność, powstała pragmatycznie jako narzędzie pomiarowe
-
----
-
-## Ocena końcowa: **8.7 / 10**
-
-> Contextor MCP to solidne narzędzie architektoniczne z przemyślanym rdzeniem. LIVE state z inkrementalnym updatem i rozróżnieniem `UNCHANGED`/`UPDATED`, blast radius z cross-layer detection, AST-bounded symbol resolution oraz system logowania z pełną oberwowalnością to poziom którego nie powstydziłby się komercyjny produkt. Wynik osiągnięty na FX-4100 solo w 3.5 miesiąca, po 25× optymalizacji pipeline.
->
-> Punkty odjęte za: niespójność API (aliasowe parametry, brak `similar_candidates` w blast_radius), ubogi schemat v1.0 `query_canonical_projection` oraz ukryty prereq `get_layer_isolation`. Żadna z tych rzeczy nie jest blokerem architektonicznym — to backlog UX.
-
-
-
-
-
-
-
 Proponowana organizacja prac
 1. Etap I — zamknięcie hipotez poprawności
    
@@ -738,3 +513,20 @@ Proponowana organizacja prac
    Weryfikujemy zgodność całego przepływu od wykrytego faktu do odpowiedzi MCP, testujemy regresje i sprawdzamy zachowanie agenta w rzeczywistych zadaniach.
    
    Dopiero na tej podstawie oceniamy, co udało się osiągnąć.
+   
+  *****************************************************************
+  
+  ## MCP_TOOL_NOISE
+
+DIRECT_EVIDENCE
+- The no-fields get_project_architecture request returned confirmation_required and estimated 1,463,901 bytes for its default six report sections: summary, structure, name_collisions, artifacts_compact, graph_analytics and report_diff. Its LIVE summary was useful, but the full default report selection was broader than this task needed. This was an avoidable broad request by the agent, amplified by the tool's large default selection.
+- Each query_canonical_projection result included diagnostics_summary in addition to its requested module-import or dependency-edge data. The module and dependency queries repeated the same syntax, collision, cycle and soft-cycle summary. Those duplicate diagnostics were unrelated to comparing this one module and added response content.
+- The post-test verification repeated the module and dependency projections. Rechecking revision and receipt was useful; repeating both complete payloads after a test using isolated fixtures was defensive and likely unnecessary. The unchanged revision/event cursor confirmed that the test did not publish to production LIVE.
+- get_symbol_implementation was called with the guessed exact symbol read_imports in import_analysis.py. It returned not_found and searched_files, with no fuzzy suggestions. This was agent-caused noise: the name should have been discovered through symbol lookup or source search before requesting an exact implementation.
+- The first local reader attempt treated the context-manager object as the loaded snapshot and stopped before reading state. The corrected call succeeded. This was also agent-caused overhead, not MCP output.
+- The complete 49 ImportRef records and 18 graph edges were required by the requested parity check and are not classified as avoidable noise. The 682-file temporary snapshot copy was required to validate committed data safely and was not an MCP call.
+
+INFERENCE
+- The avoidable MCP-output overhead in this run came mainly from broad default report selection and repeated diagnostics attached to narrow projection results. The avoidable interaction overhead came from one guessed exact symbol and one incorrect reader invocation.
+- Mandatory MCP-first and pre/post verification rules also increased the number of calls, but those are workflow requirements, not evidence that the Contextor analysis engine itself is defective.
+- No tokenizer or no-MCP control run was performed. These observations identify redundant content and calls, but do not quantify token savings or prove a general engine-level context cost.

@@ -74,10 +74,11 @@ def test_full_analysis_rejects_source_change_after_indexing(
     def change_source_after_index(*args, **kwargs):
         indexed = original_index(*args, **kwargs)
         indexed_results.append(indexed)
+        assert source.read_text(encoding="utf-8") == source_a
         assert indexed.source_fingerprints_by_module[
             "consumer"
         ] == hashlib.sha256(
-            source_a.encode("utf-8")
+            source.read_bytes()
         ).hexdigest()
         source.write_text(source_b, encoding="utf-8")
         return indexed
