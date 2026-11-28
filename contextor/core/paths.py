@@ -205,31 +205,16 @@ def legacy_repo_cache_dir(root_path: str | Path) -> Path:
 
 
 def prune_orphaned_repository_caches() -> dict[str, list[str]]:
-    """Remove repo-ID caches that no longer have a central identity record."""
+    """Preserve repo-ID caches when registry authority is uncertain.
 
-    from contextor.core.repository_identity import registered_repository_ids
+    Absence of an identity entry does not establish that its cache
+    is disposable. Registry migration, unavailable storage or a
+    temporarily incomplete registry can all produce missing IDs.
 
-    cache_root = app_cache_dir() / "repositories"
-    result = {"removed": [], "errors": []}
-    if not cache_root.is_dir():
-        return result
-    registered = registered_repository_ids()
-    resolved_root = cache_root.resolve()
-    for candidate in cache_root.iterdir():
-        if not candidate.is_dir() or not candidate.name.startswith("ctx_"):
-            continue
-        if candidate.name in registered:
-            continue
-        resolved_candidate = candidate.resolve()
-        if resolved_candidate.parent != resolved_root:
-            result["errors"].append(f"unsafe cache path: {resolved_candidate}")
-            continue
-        try:
-            shutil.rmtree(resolved_candidate)
-            result["removed"].append(candidate.name)
-        except OSError as exc:
-            result["errors"].append(f"{candidate.name}: {exc}")
-    return result
+    Destructive cleanup requires a separate, explicit authority
+    contract and must not run as an automatic startup operation.
+    """
+    return {"removed": [], "errors": []}
 
 
 _TEST_CACHE_DIRECTORY = re.compile(

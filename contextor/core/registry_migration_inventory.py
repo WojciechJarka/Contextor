@@ -10,7 +10,7 @@ from pathlib import Path
 from contextor.core.repository_identity import (
     RepositoryIdentity,
     RepositoryIdentityError,
-    _identity_from_meta,
+    _identity_from_payload,
 )
 
 
@@ -229,7 +229,8 @@ def inspect_registry_for_migration(
             )
 
         try:
-            identity = _identity_from_meta(
+            identity = _identity_from_payload(
+                payloads["repo.meta.json"],
                 directory / "repo.meta.json",
                 root,
             )

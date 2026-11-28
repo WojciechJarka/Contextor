@@ -55,28 +55,67 @@ def test_registered_repo_cache_is_keyed_by_durable_repo_id(tmp_path, monkeypatch
     assert repo_cache_dir(repo) != legacy
 
 
-def test_orphaned_repo_id_cache_is_removed_but_registered_and_unrelated_remain(
+def test_repository_caches_are_preserved_without_deletion_authority(
     tmp_path, monkeypatch
 ):
     cache_root = tmp_path / "cache"
     monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(cache_root))
+
     repo = tmp_path / "repo"
     repo.mkdir()
     registry = PersistentIdentityRegistry(str(repo))
+
     repositories = cache_root / "repositories"
     valid = repositories / registry.repo_id
     orphan = repositories / "ctx_orphaned"
     unrelated = repositories / "legacy-path-cache"
+
     for directory in (valid, orphan, unrelated):
         directory.mkdir(parents=True)
-        (directory / "marker.txt").write_text("keep?", encoding="utf-8")
+        (directory / "marker.txt").write_text(
+            "preserve", encoding="utf-8"
+        )
 
     result = prune_orphaned_repository_caches()
 
-    assert result == {"removed": ["ctx_orphaned"], "errors": []}
-    assert valid.is_dir()
-    assert unrelated.is_dir()
-    assert not orphan.exists()
+    assert result == {"removed": [], "errors": []}
+    assert all(
+        (directory / "marker.txt").read_text(
+            encoding="utf-8"
+        ) == "preserve"
+        for directory in (valid, orphan, unrelated)
+    )
+
+
+def test_startup_preserves_repo_id_cache_when_registry_is_empty(
+    tmp_path, monkeypatch
+):
+    cache_root = tmp_path / "cache"
+    monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(cache_root))
+    monkeypatch.setenv(
+        "CONTEXTOR_REGISTRY_DIR",
+        str(tmp_path / "empty-registry"),
+    )
+
+    repositories = cache_root / "repositories"
+    committed = repositories / "ctx_existing"
+    committed.mkdir(parents=True)
+
+    metadata = committed / "engine_state.meta.json"
+    metadata.write_text(
+        '{"state_id":"existing"}',
+        encoding="utf-8",
+    )
+
+    result = prune_startup_caches()
+
+    assert result["orphaned_repository_caches"] == {
+        "removed": [],
+        "errors": [],
+    }
+    assert metadata.read_text(encoding="utf-8") == (
+        '{"state_id":"existing"}'
+    )
 
 
 def test_startup_cleanup_removes_only_pytest_cache_directories(tmp_path, monkeypatch):

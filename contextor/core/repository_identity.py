@@ -29,31 +29,60 @@ def _central_root() -> Path:
     return repository_registry_root()
 
 
-def _identity_from_meta(meta_path: Path, expected_root: Path) -> RepositoryIdentity:
+def _identity_from_payload(
+    payload: dict,
+    meta_path: Path,
+    expected_root: Path,
+) -> RepositoryIdentity:
     try:
-        payload = json.loads(meta_path.read_text(encoding="utf-8"))
         repo_id = str(payload["repo_id"])
         stored_root = Path(payload["root_path"]).expanduser().resolve()
         repo_name = str(payload["repo_name"])
     except (OSError, ValueError, TypeError, KeyError) as exc:
-        raise RepositoryIdentityError(f"Malformed repository identity: {meta_path}") from exc
+        raise RepositoryIdentityError(
+            f"Malformed repository identity: {meta_path}"
+        ) from exc
 
     if not repo_id.startswith("ctx_") or len(repo_id) <= 4:
-        raise RepositoryIdentityError(f"Invalid repository ID in {meta_path}")
+        raise RepositoryIdentityError(
+            f"Invalid repository ID in {meta_path}"
+        )
     if stored_root != expected_root:
         raise RepositoryIdentityError(
-            f"Repository identity root mismatch: stored={stored_root}, selected={expected_root}"
+            f"Repository identity root mismatch: "
+            f"stored={stored_root}, selected={expected_root}"
         )
     if repo_name != expected_root.name:
         raise RepositoryIdentityError(
-            f"Repository identity name mismatch: stored={repo_name}, selected={expected_root.name}"
+            f"Repository identity name mismatch: "
+            f"stored={repo_name}, selected={expected_root.name}"
         )
     expected_directory = f"{repo_name}__{repo_id}"
     if meta_path.parent.name != expected_directory:
         raise RepositoryIdentityError(
-            f"Repository identity directory must be named {expected_directory}"
+            f"Repository identity directory must be named "
+            f"{expected_directory}"
         )
+
     return RepositoryIdentity(repo_id, str(expected_root), repo_name)
+
+
+def _identity_from_meta(
+    meta_path: Path,
+    expected_root: Path,
+) -> RepositoryIdentity:
+    try:
+        payload = json.loads(meta_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError, KeyError) as exc:
+        raise RepositoryIdentityError(
+            f"Malformed repository identity: {meta_path}"
+        ) from exc
+
+    return _identity_from_payload(
+        payload,
+        meta_path,
+        expected_root,
+    )
 
 
 def _find_identity(repo_root: Path) -> tuple[RepositoryIdentity, Path] | None:

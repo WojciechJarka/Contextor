@@ -61,6 +61,37 @@ def test_inventory_preserves_identity(tmp_path):
     assert all(len(item.sha256) == 64 for item in result.files)
 
 
+def test_inventory_validates_identity_without_second_json_read(
+    tmp_path,
+    monkeypatch,
+):
+    root, directory = _registry(tmp_path)
+    meta_path = directory / "repo.meta.json"
+
+    original_read_text = type(meta_path).read_text
+
+    def guarded_read_text(self, *args, **kwargs):
+        if self == meta_path:
+            raise AssertionError(
+                "Identity metadata must not be reopened as text"
+            )
+        return original_read_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(
+        type(meta_path),
+        "read_text",
+        guarded_read_text,
+    )
+
+    result = inspect_registry_for_migration(
+        root,
+        directory,
+    )
+
+    assert result.identity.root_path == str(root.resolve())
+    assert result.identity.repo_id == "ctx_test"
+
+
 def test_missing_file_rejected(tmp_path):
     root, directory = _registry(tmp_path)
     (directory / "module_registry.json").unlink()
